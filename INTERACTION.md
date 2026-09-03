@@ -84,7 +84,7 @@ arrives — nothing is decided in advance.
 | `P1` | The element is an `<img>`, or has a CSS background image and contains no `<img>` of its own | — |
 | `P2` | Displayed at least `minDisplayed` on screen | 48 px |
 | `P3` | Displayed no larger than `maxDisplayed` | 0 = no cap |
-| `P4` | Not a video: not a media/plugin tag, not sitting inside a **video surface** (a laid-out `<video>`'s rectangle, or the player box derived from it), no `<video>` in it or within three ancestors, and not inside a link matching the video-URL shapes | `skipVideos` on |
+| `P4` | Not a video: not a media/plugin tag, not sitting inside a **video surface** (a laid-out **player**'s rectangle, or the player box derived from it), no **player** in it or within three ancestors, and not inside a link matching the video-URL shapes. A `<video>` that is muted, controls-less, looping or autoplaying, and under a minute long is an animated picture rather than a player — it is none of those things (`E12`) | `skipVideos` on |
 | `P5` | The site passes the blacklist / whitelist test | blacklist, empty |
 | `P6` | In modifier mode, the modifier key is held | activation = hover |
 | `P7` | Not wallpaper: not the `<body>`/`<html>` background, and not a background that both repeats and has an `auto` size | `skipPageBackgrounds` on |
@@ -384,6 +384,28 @@ stops with a margin all round and the picture starts spilling from there. Measur
 notches to 1162 × 720, and stops — 91.9 % and 91.8 % of the viewport. If you want it to reach the
 edges, both settings go to 100; nothing else is capping it.
 
+#### E12 · A wall of playing clips is a picture page, not a video site
+`P4` asks which of two kinds a `<video>` is. A **player** — a play button, a volume slider, a
+quality menu, one per page — suppresses previews over it and around it, because a preview there
+covers the thing being clicked. A **gif** — Imgur's gallery, gifwow's grid: short, muted, already
+playing, no controls — suppresses nothing, and the page it sits on previews like any other.
+
+All four properties are required together: no `controls`, `muted`, `loop` or `autoplay`, and a
+duration of a minute or less. Each alone has a false positive (a site drawing its own chrome has
+`controls` false; any player started under an autoplay policy is muted), and an **unknown**
+duration — a cued player that has never been started — counts as a player, which is the safe way
+to be wrong. What this cannot judge is the destination: a muted, playing, controls-less clip on a
+video site's listing page is pixel-for-pixel the Imgur shape, and only the ancestor link
+separates them. Test-page cases 21 and 22 are the same card twice, differing only in `controls`.
+
+#### E13 · The frame stops short of the bottom of the window
+The browser paints its own status text — the address of the link under the pointer, "Waiting
+for…" — along the bottom edge of the content area, over everything the page draws. `bottomReserve`
+(30 px) is taken off the usable height before any other geometry, so the size cap, the opening
+position and the clamp all stay above that strip. Measured on an 885 px viewport: the frame closes
+at 851 px, 34 px clear (the reserve plus the ordinary 4 px gutter), against 881 px with the reserve
+set to 0. Raising it shrinks the preview rather than pushing it off the bottom.
+
 #### E8 · An upgrade is almost never visible
 `S06` / `S08` / `S15` work, but the candidate list is ordered best-first, so the first hit is
 usually already the largest and there is nothing to upgrade to. On top of that the docked ring
@@ -464,6 +486,7 @@ Function names are used rather than line numbers, which rot.
 
 | Date | Change |
 |---|---|
+| 2026-09-03 | v0.17.0. New `E12` — `P4` now asks whether a `<video>` is a *player* or a *gif*: a short, muted, controls-less clip that is already playing is an animated picture, suppresses nothing, and no player box is derived from it, so Imgur's gallery and gifwow's grid preview normally while video sites stay refused. New `E13` — `bottomReserve`, a 30 px strip kept clear at the bottom of the window where the browser paints link addresses over the picture. |
 | 2026-09-03 | Written against v0.9.0. Initial IDs `R1`, `P1`–`P6`, `S01`–`S17`, `T01`–`T19`, `K1`–`K8`, `B1`–`B2`, `E1`–`E6`. |
 | 2026-09-03 | v0.10.0. New: `T20` (wheel zooms a detached window), `E7` (the 92 % frame cap), `E8` (why upgrades are never seen). Changed: `S05` — the old text said clicks pass through the window, which contradicted `E1`; they do not, and only hover and the wheel do. `S07` — accepts the wheel. `S10`/`S11`/`S13`/`S14` — a drag now pans only while the picture is spilling and moves the frame otherwise, so a pinned frame at its opening scale can be dragged from anywhere; the status bar still always moves it. `P4` — a third video signal, the element sitting inside a laid-out `<video>`'s rectangle, because the ancestor walk's "still one card" bound was ending the search before the video test on a watch-page player. Also fixed, and not visible in this document: the closed window used to stay hit-testable, leaving an invisible rectangle that ate clicks and blocked hover where the window had been. |
 | 2026-09-03 | v0.11.0. New: `T21`, `E9` — right-click on a *placed* window now raises the browser's own context menu instead of dismissing, which is the only way `Save image as…` and `Copy image` work. `S05` keeps right-click-to-dismiss. `B1` changed accordingly; `B2` was already behaving this way and is unchanged. |

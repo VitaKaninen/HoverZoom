@@ -8,6 +8,8 @@ a full-size original plus thumbnails using the WordPress -WxH suffix and a
 """
 
 import os
+import shutil
+import subprocess
 import sys
 from PIL import Image, ImageDraw
 
@@ -49,6 +51,29 @@ def save(img, *parts):
     print("  %-42s %dx%d" % (os.path.relpath(path, ROOT), img.width, img.height))
 
 
+def make_clip():
+    """A 2-second silent clip for the gif-vs-player cases (21 and 22).
+
+    The video gate reads the element's duration, so this fixture has to be a real
+    file rather than an empty <video>: two seconds is a gif, and case 22 turns the
+    same file into a player purely by adding `controls`.
+
+    ffmpeg is the only non-Python dependency in this repo, and the output is
+    committed, so a clone without ffmpeg still has the fixture and this step is
+    skipped rather than failed.
+    """
+    out = os.path.join(ROOT, "clip-2s.mp4")
+    if not shutil.which("ffmpeg"):
+        print("  skip clip-2s.mp4 (no ffmpeg on PATH; the committed copy still works)")
+        return
+    subprocess.run([
+        "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+        "-f", "lavfi", "-i", "testsrc=size=160x120:rate=12:duration=2",
+        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-movflags", "+faststart", out,
+    ], check=True)
+    print("  clip-2s.mp4")
+
+
 def main():
     os.makedirs(ROOT, exist_ok=True)
     print("writing fixtures to %s" % ROOT)
@@ -68,6 +93,8 @@ def main():
     save(scene.resize((200, 150)), "thumbs", "scene.jpg")
 
     save(make(24, 18, "i", 4), "icon.png")
+
+    make_clip()
 
     print("done")
 

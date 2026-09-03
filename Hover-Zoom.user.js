@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.16.0
+// @version     0.17.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -66,6 +66,8 @@
         // how to display
         maxWidthPct: 92,            // % of viewport — 100 fills it, less EDGE_GAP
         maxHeightPct: 92,
+        bottomReserve: 30,          // px of the window's bottom edge kept clear — the browser
+                                    // paints its link/status text there, over the picture
         zoomFactor: 1.0,            // scale applied to natural size before clamping
         position: 'cursor',         // 'cursor' | 'center'
         cursorGap: 24,              // px between pointer and frame edge
@@ -814,12 +816,26 @@
     // window" and not "be 8px wider than clampPosition will allow you to sit".
     const EDGE_GAP = 4;
 
+    // The browser paints its own status text — the target of the link under the pointer,
+    // "Waiting for…", the download bar — along the BOTTOM edge of the content area, on top
+    // of the page and on top of anything we draw there. A frame clamped to the true bottom
+    // therefore has its last rows of pixels covered by browser chrome we cannot see from
+    // here. `bottomReserve` is taken off the height ONCE, at the top of viewportBox(), so
+    // the size cap, the opening position, clampPosition() and the floating spinner all
+    // inherit it from this single place and cannot disagree about where the bottom is.
+    function usableHeight() {
+        const vh = document.documentElement.clientHeight;
+        return Math.max(64, vh - Math.max(0, cfg.bottomReserve || 0));
+    }
+
     function viewportBox() {
         const vw = document.documentElement.clientWidth;
-        const vh = document.documentElement.clientHeight;
+        const vh = usableHeight();
         // The percentage is of the OUTER frame, borders included, so the number in the panel
         // is the fraction of the window the preview visibly occupies. Below 100 the cap is
-        // the percentage; at 100 the gutter is what stops it, not the percentage.
+        // the percentage; at 100 the gutter is what stops it, not the percentage. It is a
+        // percentage of the USABLE height, so raising bottomReserve shrinks the preview
+        // rather than pushing it off the bottom.
         const outerW = Math.min(vw * (cfg.maxWidthPct / 100), vw - EDGE_GAP * 2);
         const outerH = Math.min(vh * (cfg.maxHeightPct / 100), vh - EDGE_GAP * 2);
         return {
@@ -1545,12 +1561,61 @@
     const PLAYER_UP = 3;
     const PLAYER_FILL = 0.5;
 
+    // A <video> on the page is not by itself a reason to suppress anything — it depends
+    // entirely on which of two kinds it is, and they behave nothing alike.
+    //
+    //   A PLAYER. A site dedicated to video: a listing page, and behind each entry a page
+    //   holding one player with a play button, a volume slider, a quality menu. A preview
+    //   opening over that covers the thing you are trying to click, which is the reported
+    //   bug every gate below exists to stop.
+    //
+    //   A GIF. Imgur's gallery, gifwow's grid: a wall of short muted clips ALREADY PLAYING,
+    //   no controls, nothing to click but the link underneath — they are animated pictures
+    //   that happen to be encoded as video, and the page they sit on is an ordinary picture
+    //   page where previews belong. (Clicking one leads to a player page; that page is the
+    //   first kind and is still refused.)
+    //
+    // Four properties are required together, because every one of them alone has a false
+    // positive: `controls` is false on YouTube too (it draws its own chrome), `muted` is
+    // true of any player started under an autoplay policy, and `autoplay`/`loop` say
+    // nothing about length. The DURATION is what carries the argument — a clip that loops
+    // in under a minute is not something you sit and watch — and an UNKNOWN duration
+    // (metadata not in yet, a cued player that has never been started) reads as PLAYER,
+    // which is the safe direction to be wrong in: it costs one preview that does not open,
+    // where the other direction covers the video you were reaching for.
+    //
+    // What this deliberately does NOT try to do is judge the destination. A muted, playing,
+    // controls-less clip on a video site's listing page is pixel-for-pixel the imgur shape
+    // and nothing in the DOM separates them; the ancestor-link gate below is the only
+    // signal left for that case, and it stays.
+    const GIF_MAX_SECS = 60;
+
+    function gifLike(v) {
+        if (v.controls || v.hasAttribute('controls')) return false;
+        if (!v.muted) return false;
+        if (!(v.loop || v.autoplay)) return false;
+        const d = v.duration;
+        return isFinite(d) && d > 0 && d <= GIF_MAX_SECS;
+    }
+
+    // The first non-gif <video> inside `n`, or null. Used instead of querySelector('video')
+    // wherever "is there a player here" is the question being asked.
+    function playerIn(n) {
+        if (!n || !n.querySelectorAll) return null;
+        const vs = n.querySelectorAll('video');
+        for (let i = 0; i < vs.length; i++) if (!gifLike(vs[i])) return vs[i];
+        return null;
+    }
+
     function videoSurfaces() {
         const out = [];
         const vids = document.getElementsByTagName('video');
         for (let i = 0; i < vids.length; i++) {
             const v = vids[i].getBoundingClientRect();
             if (v.width < 2 || v.height < 2) continue;   // not laid out; contains nothing
+            // Listed, so the debug log still accounts for every video on the page, but
+            // flagged: a gif suppresses nothing and gets no player box derived from it.
+            if (gifLike(vids[i])) { out.push({ what: 'gif (not a player)', rect: v, gif: true }); continue; }
             out.push({ what: 'video', rect: v });
             const area = v.width * v.height;
             let n = vids[i].parentElement;
@@ -1582,6 +1647,7 @@
         const cx = r.left + r.width / 2;
         const cy = r.top + r.height / 2;
         for (let i = 0; i < surfaces.length; i++) {
+            if (surfaces[i].gif) continue;
             if (holds(surfaces[i].rect, cx, cy)) return true;
         }
         return false;
@@ -1619,7 +1685,7 @@
         let n = el;
         for (let up = 0; n && up < 4; up++, n = n.parentElement) {
             if (up > 0 && n.querySelectorAll && n.querySelectorAll('img').length > 1) break;
-            if (n.querySelector && n.querySelector('video')) return '<video> in ancestor #' + up;
+            if (playerIn(n)) return '<video> in ancestor #' + up;
         }
         const a = closestAcross(el, 'a[href]');
         const href = a ? (a.getAttribute('href') || '') : '';
@@ -1679,7 +1745,9 @@
         // page had exactly the right size, so nothing in the log looked wrong.
         const sizes = videoSurfaces().map(function (s) {
             return s.what + ' ' + rectStr(s.rect) +
-                (holds(s.rect, cx, cy) ? ' [CONTAINS the pointer target]' : ' [does not contain it]');
+                (s.gif ? ' [ignored: muted, no controls, short loop — suppresses nothing]'
+                    : holds(s.rect, cx, cy) ? ' [CONTAINS the pointer target]'
+                        : ' [does not contain it]');
         });
         const cls = typeof t.className === 'string' ? t.className.trim() : '';
         return {
@@ -2253,7 +2321,9 @@
         check('skipVideos', 'Never preview videos',
             'skips media elements, anything with a player next to it, and images inside a ' +
             'link that plainly points at a video (/watch?, /shorts/, /embed/, /video/, ' +
-            'youtu.be, .mp4 and friends) — turn off if it is skipping stills you want');
+            'youtu.be, .mp4 and friends) — turn off if it is skipping stills you want. ' +
+            'A short muted clip already playing with no controls counts as an animated ' +
+            'picture, not a player, so pages like Imgur’s gallery still preview normally');
         check('skipPageBackgrounds', 'Never preview page backgrounds',
             'the page\'s own background, and any background tiled end to end — wallpaper ' +
             'rather than a picture, and on a tiled page there is blank space everywhere to ' +
@@ -2311,6 +2381,9 @@
         num('zoomFactor', 'Zoom factor', 'scale applied before fitting to the window', 0.1, 8, 0.1);
         num('maxWidthPct', 'Max width', '% of window', 10, 100, 1);
         num('maxHeightPct', 'Max height', '% of window', 10, 100, 1);
+        num('bottomReserve', 'Keep clear at the bottom',
+            'px — the browser draws link addresses and its status text over the bottom of ' +
+            'the window, so the preview stays above that strip', 0, 300, 5);
         pick('position', 'Position', null, [
             ['cursor', 'Beside the cursor'], ['center', 'Centred in the window']]);
         num('cursorGap', 'Gap from cursor', 'px — the frame is still nudged to stay reachable',

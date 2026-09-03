@@ -133,6 +133,28 @@
     <video id="v18" width="1" height="1" muted></video>
   </div>
 
+  <!--
+    21 and 22 are the same card twice, and the ONLY difference is the `controls` attribute
+    on the video. That is the whole of the gif-versus-player rule: a short, muted, looping,
+    controls-less clip that is already playing is an animated picture (Imgur's gallery,
+    gifwow's grid) and suppresses nothing; give it controls and it is a player, and the
+    image beside it is refused. The clip is a real 2-second file because the gate reads
+    `duration` — an empty <video> reports NaN, which counts as a player (case 18).
+  -->
+  <div class="case" data-expect="1600">
+    <h2>21. thumbnail beside a playing gif-style clip</h2>
+    <p class="hz good">must preview: muted, looping, no controls — an animated picture, not a player</p>
+    <img id="c21" width="200" src="test-images/photo-200x150.jpg" data-src="test-images/photo.jpg">
+    <video id="v21" width="80" height="60" src="test-images/clip-2s.mp4" muted autoplay loop playsinline></video>
+  </div>
+
+  <div class="case" data-expect="none">
+    <h2>22. the same card, but the clip has controls</h2>
+    <p class="hz good">must NOT preview: controls make it a player (skipVideos)</p>
+    <img id="c22" width="200" src="test-images/photo-200x150.jpg" data-src="test-images/photo.jpg">
+    <video id="v22" width="80" height="60" src="test-images/clip-2s.mp4" muted loop controls></video>
+  </div>
+
   <div class="case" data-expect="1600">
     <h2>19. control for 17/18 — an ordinary link</h2>
     <p class="hz good">must still preview: /gallery/ is not a video shape</p>
