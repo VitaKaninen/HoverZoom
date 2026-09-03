@@ -1,0 +1,103 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Hover Zoom test cases</title>
+<style>
+  body { background:#181825; color:#cdd6f4; font:13px system-ui,sans-serif; margin:0; padding:20px; }
+  h1 { font-size:15px; font-weight:600; margin:0 0 3px; }
+  p.note { color:#a6adc8; margin:0 0 16px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:16px; }
+  .case { background:#1e1e2e; border:1px solid #313244; border-radius:8px; padding:10px; }
+  .case h2 { font-size:12px; margin:0 0 2px; color:#89b4fa; font-weight:600; }
+  .case .hz { font-size:11px; margin:0 0 8px; }
+  .bad { color:#f38ba8; } .good { color:#a6e3a1; }
+  .bg { width:200px; height:150px; background-size:cover; border-radius:3px; }
+  img { display:block; border-radius:3px; }
+</style>
+
+<h1>Hover Zoom — test cases</h1>
+<p class="note">Red = Hover Zoom+ rejects this outright. Every thumbnail here has a 1600&times;1200 original.</p>
+
+<div class="grid">
+
+  <div class="case" data-expect="1600">
+    <h2>1. plain .jpg thumbnail</h2>
+    <p class="hz good">HZ+: works — the control case</p>
+    <img id="c1" width="200" src="test-images/photo-200x150.jpg">
+  </div>
+
+  <div class="case" data-expect="1600">
+    <h2>2. .png thumbnail</h2>
+    <p class="hz bad">HZ+: rejected, src is not .jpg</p>
+    <img id="c2" width="200" src="test-images/photo-200x150.png">
+  </div>
+
+  <div class="case" data-expect="1600">
+    <h2>3. .webp thumbnail</h2>
+    <p class="hz bad">HZ+: rejected, src is not .jpg</p>
+    <img id="c3" width="200" src="test-images/photo-200x150.webp">
+  </div>
+
+  <div class="case" data-expect="1600">
+    <h2>4. .jpg with a query string</h2>
+    <p class="hz bad">HZ+: rejected, .jpg not the last 4 chars (issue #395)</p>
+    <img id="c4" width="200" src="test-images/photo-200x150.jpg?cachebust=1">
+  </div>
+
+  <div class="case" data-expect="1600">
+    <h2>5. displayed at 420px</h2>
+    <p class="hz bad">HZ+: rejected, over the hardcoded 300&times;300 cap</p>
+    <img id="c5" width="420" src="test-images/photo-420x315.jpg">
+  </div>
+
+  <div class="case" data-expect="1600">
+    <h2>6. src is only 1.33&times; the displayed size</h2>
+    <p class="hz bad">HZ+: rejected, needs natural &ge; 1.8&times; displayed</p>
+    <img id="c6" width="600" src="test-images/photo-800x600.jpg" style="width:600px">
+  </div>
+
+  <div class="case" data-expect="800">
+    <h2>7. srcset, widest wins</h2>
+    <p class="hz bad">HZ+: never reads srcset in the generic path</p>
+    <img id="c7" width="200" src="test-images/photo-200x150.jpg"
+         srcset="test-images/photo-200x150.jpg 200w, test-images/photo-800x600.jpg 800w">
+  </div>
+
+  <div class="case" data-expect="1600">
+    <h2>8. lazy-loaded via data-src</h2>
+    <p class="hz bad">HZ+: reads only src in the generic path</p>
+    <img id="c8" width="200" src="test-images/photo-200x150.jpg" data-src="test-images/photo.jpg">
+  </div>
+
+  <div class="case" data-expect="1600">
+    <h2>9. CSS background-image</h2>
+    <p class="hz bad">HZ+: generic path only looks at &lt;img&gt;</p>
+    <div id="c9" class="bg" style="background-image:url(test-images/photo-200x150.jpg)"></div>
+  </div>
+
+  <div class="case" data-expect="1600">
+    <h2>10. /thumbs/ path segment</h2>
+    <p class="hz bad">HZ+: no generic path rewriting at all</p>
+    <img id="c10" width="200" src="test-images/thumbs/scene.jpg">
+  </div>
+
+  <div class="case" data-expect="1600">
+    <h2>11. wrapped in a link to a page</h2>
+    <p class="hz bad">HZ+ default.js: href carries no media extension</p>
+    <a href="/some/article"><img id="c11" width="200" src="test-images/photo-200x150.jpg"></a>
+  </div>
+
+  <div class="case" data-expect="none">
+    <h2>12. tiny icon</h2>
+    <p class="hz good">both skip: below the minimum size</p>
+    <img id="c12" width="24" src="test-images/icon.png">
+  </div>
+
+  <div class="case" data-expect="none">
+    <h2>13. already the original</h2>
+    <p class="hz good">both skip: nothing larger exists</p>
+    <img id="c13" width="1600" src="test-images/photo.jpg" style="width:1600px;max-width:none">
+  </div>
+
+</div>
+
+<script src="./Hover-Zoom.user.js"></script>
