@@ -10,6 +10,8 @@
 // @grant        GM_registerMenuCommand
 // @run-at       document-idle
 // @noframes     false
+// @updateURL    https://raw.githubusercontent.com/VitaKaninen/HoverZoom/master/Hover-Zoom.user.js
+// @downloadURL  https://raw.githubusercontent.com/VitaKaninen/HoverZoom/master/Hover-Zoom.user.js
 // ==/UserScript==
 
 /*
