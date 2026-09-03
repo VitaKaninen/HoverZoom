@@ -35,10 +35,15 @@ path has been touched twice ever, both times in 2021.
 
 ## Design invariants — do not regress these
 
-- **No DOM scanning, ever.** Two delegated listeners on `document`; everything resolves at hover
-  time. This is the whole architectural difference from HZ+ and it removes an entire bug class
-  (lazy-loaded src, SPA navigation, images added after load, scan races). Do not add a
-  MutationObserver or a pre-pass "for performance".
+- **Nothing is decided before hover time.** Two delegated listeners on `document`; everything
+  resolves when the pointer arrives. This is the whole architectural difference from HZ+ and it
+  removes an entire bug class (lazy-loaded src, SPA navigation, images added after load, scan
+  races). Do not add a MutationObserver or a pre-pass "for performance", and never bind state to
+  an element that might change under it.
+  *(Previously worded "no DOM scanning, ever", which reads as a ban on ever querying the document
+  and is broader than the thing being protected — a read performed AT hover time, binding
+  nothing, has none of those failure modes. See the Google Images section for where the
+  distinction actually bites.)*
 - **No format allowlist.** Extension never decides eligibility. The only gate is
   "is the candidate actually bigger than what's displayed", measured by loading it.
 - **No hardcoded size caps.** `minDisplayed` / `maxDisplayed` / `minRatio` are settings; the
@@ -264,14 +269,49 @@ Natural sizes of those thumbnails measured 678×452, 245×205, 503×397 — whic
 500–700px. So nothing is malfunctioning: the thumbnail is the only candidate that exists, it
 clears the ratio gate against a 240px display, and it gets shown.
 
-The original URL is present only inside ~1 MB of inline script JSON across 273 `<script>` tags,
-keyed by the `tbn:` token. Reaching it means parsing that, which is HZ+'s third mechanism and
-squarely against the no-DOM-scanning invariant. **Note HZ+'s own `a[href*="imgurl="]` selector is
-now stale for this layout** — its Google support must be riding on the script-JSON path.
-
-Conclusion: this needs a site plugin or it does not work. Do not keep trying to solve it in
-`UPGRADES`. Keep HZ+ installed alongside if Google Images matters, or make an explicit decision
-to break the invariant for this one host.
+The original URL is present only inside ~0.94 MB of inline script JSON, as `["<url>",h,w]` triples
+sitting a few hundred bytes after the thumbnail's `tbn:` token. **Note HZ+'s own
+`a[href*="imgurl="]` selector is now stale for this layout** — its Google support must be riding
+on the script-JSON path.
 
 What v0.5.0 added is still worth having, just not for this: `linkParamCandidates()` (the generic
 `?imgurl=`-style rule) and the `/s0/` path-segment form of the googleusercontent size token.
+
+#### If it is ever revisited, these are the measured numbers (2026-09-03)
+
+A prototype extractor — find the token in any `<script>`, take the next 1200 chars, first
+`["url",h,w]` triple whose host is not Google — run against the live page:
+
+| | Initial page | After "More results" |
+|---|---|---|
+| thumbnails rendered | 15 | 226 |
+| resolved to an original | **15 (100%)** | **39 (17%)** |
+| cost per lookup | 0.3 ms | 0.19 ms |
+| gain | median 1.9×, max 13× | max 15.8× |
+
+The initial payload carries 200 external image entries, 152 of them ≥800px — enough to cover the
+lazy placeholders in that batch too. Everything past "More results" arrives by XHR and its
+originals are **not** in the DOM at all, which is exactly why HZ+ needs its fourth mechanism.
+
+#### The invariant question, stated properly
+
+"No DOM scanning" is worded more broadly than the thing it protects. Every bug it exists to
+prevent — lazy-loaded src, images added after load, SPA navigation, scan races, HZ+'s
+`.one('mouseover')` — comes from **deciding eligibility ahead of time and binding to elements**.
+A hover-time `querySelectorAll('script')` + `indexOf` binds nothing, caches nothing against an
+element, and re-reads live every time, so it has none of those failure modes. Do not reject it by
+quoting the rule; the rule is about pre-passes.
+
+The real objections are different, and they are the ones to weigh:
+
+1. **It is the first site-specific rule.** It reads Google's private JSON shape, which can change
+   with no warning and no error — the preview would just quietly go back to thumbnails.
+2. **`UPGRADES` cannot host it.** Every rule there is a pure URL→URL function, which is the only
+   reason `test-resolver.js` can test them offline with no DOM. This needs a new extension point
+   taking the element, and a saved-page fixture to test against.
+3. **It is a partial fix** — the 17% above. Completing it means hooking XHR on Google, which is a
+   permanent network interception plus a cache, and is a site plugin in everything but name.
+
+So: (a) do nothing and keep HZ+ for Google; (b) hover-time lookup, host-gated, accepting first-
+batch-only coverage and silent breakage; (c) (b) plus XHR hooking, which is the thing this
+project exists not to be. Not decided as of v0.6.0 — ask before building any of it.
