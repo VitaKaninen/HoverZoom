@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.15.0
+// @version     0.16.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -64,7 +64,7 @@
         maxZoom: 32,                // hard ceiling, multiples of natural size
 
         // how to display
-        maxWidthPct: 92,            // % of viewport
+        maxWidthPct: 92,            // % of viewport — 100 fills it, less EDGE_GAP
         maxHeightPct: 92,
         zoomFactor: 1.0,            // scale applied to natural size before clamping
         position: 'cursor',         // 'cursor' | 'center'
@@ -246,6 +246,54 @@
     // Site-agnostic rewrites that turn a thumbnail URL into its original.
     // Each returns a new URL string, or null when it doesn't apply.
     const UPGRADES = [
+        // Imgur: reduce a thumbnail URL to the stored original. First in the list because it
+        // is host-checked and high-confidence, and because the generic query-strip rule below
+        // actively goes the WRONG WAY here. All measured 2026-09-03 against i.imgur.com:
+        //
+        //   T22ZUhZ_d.jpg?maxwidth=520&shape=thumb   15.9 KB   435×244   (what the grid shows)
+        //   T22ZUhZ_d.jpg   (query stripped)          1.9 KB   145× 81   SMALLER than displayed
+        //   T22ZUhZ.jpg     (suffix stripped)         3.1 MB   800×450   image/gif — the original
+        //
+        // That third row is the whole reason for this rule. A GIF post's grid thumbnail is a
+        // STATIC frame, and with no suffix rule the only candidate that ever cleared the ratio
+        // gate was that still — reported as "it is not working for gifs".
+        //
+        // TWO facts about imgur, both worth stating because neither is guessable:
+        //
+        // 1. The extension you ask for is IGNORED, except `.webp`. `.jpg`, `.png` and `.gif`
+        //    all return the stored original bytes with its real content-type — T22ZUhZ.jpg
+        //    comes back as image/gif and animates in an <img>, KlprxXs.jpg comes back as
+        //    image/png. So there is no need to guess the true extension; ask for anything.
+        // 2. `.webp` is a TRANSCODE at the same pixel size, and for an animated post it is a
+        //    STILL. zFAj8eD.webp?tb is 240×210 animated, zFAj8eD.webp is 412×360 and static,
+        //    zFAj8eD.jpg is 412×360 and animated. So a `.webp` source is rewritten to `.jpg`,
+        //    which is the difference between a moving preview and a frozen one.
+        //
+        // The suffix has two forms, both unambiguous, and the ambiguous one is excluded:
+        //   `_d`  — imgur ids never contain an underscore, so this is always a suffix.
+        //   a single trailing [sbtmlhg] on a 6- or 8-character basename — imgur issues 5- and
+        //   7-character ids, so those lengths can only be id+suffix. Verified: KlprxXsb.jpg
+        //   (7 KB), KlprxXsm.webp (20 KB) and KlprxXsh.jpg (150 KB) are all thumbnails of
+        //   KlprxXs (1080×1080).
+        //
+        // A BARE 5- or 7-character id keeps its id, and that restraint is the load-bearing
+        // part: T22ZUh.jpg — T22ZUhZ.jpg with its last character taken off — is a real 90 KB
+        // image of something else entirely. Over-matching here would silently show the WRONG
+        // PICTURE, which is far worse than showing none. See the negative tests.
+        function (u) {
+            if (!/(^|\.)imgur\.com$/.test(u.hostname)) return null;
+            const m = u.pathname.match(/^\/([A-Za-z0-9]+(?:_d)?)(\.[a-z0-9]+)$/);
+            if (!m) return null;
+            const was = u.href;
+            let id = m[1];
+            if (/_d$/.test(id)) id = id.slice(0, -2);
+            else if ((id.length === 6 || id.length === 8) && /[sbtmlhg]$/.test(id)) id = id.slice(0, -1);
+            // .webp is the de-animating transcode; anything else gives the stored original.
+            const ext = /^\.webp$/i.test(m[2]) ? '.jpg' : m[2];
+            u.pathname = '/' + id + ext;
+            u.search = '';      // ?maxwidth= and ?tb both just ask for a smaller picture
+            return u.href === was ? null : u.href;
+        },
         // strip common resize/quality query parameters
         function (u) {
             const drop = ['w', 'h', 'width', 'height', 'size', 's', 'fit', 'resize', 'crop',
@@ -665,8 +713,12 @@
             // after BAR_IDLE_MS of pointer stillness and comes back the moment the pointer
             // moves over the window. pointer-events go with the opacity, so a faded bar is not
             // an invisible move handle waiting to be pressed by mistake.
-            '.cap{transition:opacity 220ms ease}',
-            '.cap.idle{opacity:0;pointer-events:none}',
+            //
+            // The fade itself takes BAR_FADE_MS, kept deliberately long: the whole of it is
+            // reaction time, and the bar carries the ⊘ button. It comes BACK instantly
+            // (BAR_SHOW_MS) — a slow return would read as lag on a control you just asked for.
+            '.cap{transition:opacity ' + BAR_SHOW_MS + 'ms ease}',
+            '.cap.idle{opacity:0;pointer-events:none;transition:opacity ' + BAR_FADE_MS + 'ms ease}',
             // Resolve progress: an INDETERMINATE ring — a fixed arc sweeping a full track.
             // It says "still working" and nothing else. The determinate version it replaces
             // could not be honest: the denominator was the candidate count, most runs stop
@@ -757,14 +809,24 @@
 
     // ----------------------------------------------------------------- geometry
 
+    // The one gutter between the frame and the edge of the window. clampPosition() uses it
+    // too, and it is subtracted from the cap here so that maxWidthPct:100 means "fill the
+    // window" and not "be 8px wider than clampPosition will allow you to sit".
+    const EDGE_GAP = 4;
+
     function viewportBox() {
         const vw = document.documentElement.clientWidth;
         const vh = document.documentElement.clientHeight;
+        // The percentage is of the OUTER frame, borders included, so the number in the panel
+        // is the fraction of the window the preview visibly occupies. Below 100 the cap is
+        // the percentage; at 100 the gutter is what stops it, not the percentage.
+        const outerW = Math.min(vw * (cfg.maxWidthPct / 100), vw - EDGE_GAP * 2);
+        const outerH = Math.min(vh * (cfg.maxHeightPct / 100), vh - EDGE_GAP * 2);
         return {
             vw: vw,
             vh: vh,
-            w: Math.max(32, vw * (cfg.maxWidthPct / 100) - cfg.borderWidth * 2),
-            h: Math.max(32, vh * (cfg.maxHeightPct / 100) - cfg.borderWidth * 2),
+            w: Math.max(32, outerW - cfg.borderWidth * 2),
+            h: Math.max(32, outerH - cfg.borderWidth * 2),
         };
     }
 
@@ -810,8 +872,8 @@
         const m = viewportBox();
         const ow = view.frameW + cfg.borderWidth * 2;
         const oh = view.frameH + cfg.borderWidth * 2;
-        view.left = Math.max(4, Math.min(view.left, m.vw - ow - 4));
-        view.top = Math.max(4, Math.min(view.top, m.vh - oh - 4));
+        view.left = Math.max(EDGE_GAP, Math.min(view.left, m.vw - ow - EDGE_GAP));
+        view.top = Math.max(EDGE_GAP, Math.min(view.top, m.vh - oh - EDGE_GAP));
     }
 
     // ------------------------------------------------------------- status bar
@@ -891,9 +953,30 @@
     // right-click to the BROWSER instead, whose own menu has no such limit — see the
     // image-actions section of CLAUDE.md.
 
+    // BAR_IDLE_MS is how long the pointer must be still before the fade STARTS;
+    // BAR_FADE_MS is how long the fade itself takes. They are separate on purpose — the
+    // second one is pure reaction time, so it is generous, while the first stays short
+    // enough that the bar gets out of the way of the picture.
     const BAR_IDLE_MS = 1000;
+    const BAR_FADE_MS = 1200;
+    const BAR_SHOW_MS = 120;
 
     let barTimer = 0;
+
+    // The bar must not fade while the pointer is ON it: it holds the ⊘ button and the
+    // filename, and a control that disappears under a resting cursor is unusable. A still
+    // pointer fires no mousemove, so showBar()'s own timer is the only thing that can
+    // notice — it re-arms instead of fading. Geometry, not hit-testing, for the same reason
+    // pinning is: on a hover preview the bar is pointer-transparent and `e.target` is the
+    // page beneath.
+    function pointerOverBar() {
+        if (!capEl || !view || !box || !box.classList.contains('on')) return false;
+        if (capEl.style.display === 'none') return false;
+        const r = capEl.getBoundingClientRect();
+        if (!r.width || !r.height) return false;
+        return pointer.x >= r.left && pointer.x <= r.right &&
+               pointer.y >= r.top && pointer.y <= r.bottom;
+    }
 
     function showBar() {
         if (!capEl) return;
@@ -901,7 +984,9 @@
         clearTimeout(barTimer);
         barTimer = setTimeout(function () {
             barTimer = 0;
-            if (capEl && view) capEl.classList.add('idle');
+            if (!capEl || !view) return;
+            if (pointerOverBar()) { showBar(); return; }   // parked on the bar: keep it
+            capEl.classList.add('idle');
         }, BAR_IDLE_MS);
     }
 
@@ -1171,6 +1256,39 @@
     // page or to a sibling userscript (the capture path reaches window first).
     const CAP_TARGET = window;
     const WHEEL_OPTS = { capture: true, passive: false };
+
+    // ---------------------------------------------- the cross-userscript click claim
+    //
+    // Binding on window/capture beats every DOCUMENT-level listener, but two userscripts
+    // both on window/capture are settled by registration order — which is the manager's
+    // to decide and not ours. Open Links in New Tab moved its own click handling to
+    // window/capture in v1.19.0 for exactly the same reason, and on a site it early-captures
+    // it was taking the click that pins a preview: the press landed on the transparent
+    // preview, OLINT saw a link under the pointer, and the page navigated instead.
+    //
+    // The order-independent fact is that MOUSEDOWN always precedes CLICK. So the press —
+    // which every script sees, because nobody stops mousedown — is where ownership is
+    // declared, and the click handler that runs first can read it. The channel is an
+    // attribute on <html>: `document` is the one object two sandboxed userscripts reliably
+    // share, needing no @grant and no unsafeWindow.
+    //
+    // The value is a timestamp and consumers check freshness (OLINT allows 1500 ms), because
+    // there is no reliable "last" event to clear it on: mouseup fires BEFORE click, so
+    // clearing there would clear it too early. It is cleared on the next press we do not
+    // claim, and a stale one expires on its own.
+    const CLAIM_ATTR = 'data-userscript-click-claim';
+
+    function claimClick() {
+        try {
+            document.documentElement.setAttribute(CLAIM_ATTR, String(Date.now()));
+        } catch (e) { /* no document element yet */ }
+    }
+
+    function releaseClick() {
+        try {
+            document.documentElement.removeAttribute(CLAIM_ATTR);
+        } catch (e) { /* no document element yet */ }
+    }
 
     // Wheel-to-zoom belongs to any PLACED window — pinned or merely detached. Having gone to
     // the trouble of dragging a preview somewhere, a wheel over it means "make this bigger",
@@ -1755,32 +1873,40 @@
     document.addEventListener('mousemove', onMove, true);
     document.addEventListener('mouseover', onOver, true);
     document.addEventListener('mouseout', onOut, true);
-    document.addEventListener('mousedown', function (e) {
-        if (ours(e.target)) return;     // onBoxDown / the backdrop own this one
+
+    // A press on the preview is a MODAL gesture — pinning or dragging a window that is
+    // floating over the page — so per ../CLAUDE.md it binds on CAP_TARGET (= window) in
+    // capture, ahead of every document-level listener on the page and in sibling
+    // userscripts. On a pointer-transparent hover preview the press really does land on the
+    // page beneath, and a link there would otherwise be followed.
+    CAP_TARGET.addEventListener('mousedown', function (e) {
+        if (ours(e.target)) { claimClick(); return; }   // onBoxDown / the backdrop own this one
         // An unpinned preview is pointer-transparent, so a press ON it lands on the page
         // beneath and never reaches onBoxDown. Geometry decides ownership instead, and
         // hands the press to that same handler so there is still only one state machine.
         if (!pinned && view && box && box.classList.contains('on') &&
             (e.button === 0 || e.button === 2) && pointInPreview(e.clientX, e.clientY)) {
+            claimClick();
             onBoxDown(e);
             return;
         }
         // The right button has to be claimed here, not on contextmenu: mousedown fires
         // first, and letting it fall through to cancel() would clear `active` before the
         // menu event could see what to dismiss.
-        if (e.button === 2 && overOurs(e) && altButton(e)) return;
+        if (e.button === 2 && overOurs(e) && altButton(e)) { claimClick(); return; }
+        releaseClick();
         mouseDown = true;
         cancel();
     }, true);
     // The click half of the same handoff. Without it a press on a pointer-transparent
     // preview would move or pin nothing and the page beneath would take the click.
-    document.addEventListener('click', function (e) {
+    CAP_TARGET.addEventListener('click', function (e) {
         if (ours(e.target)) return;             // onBoxClick owns it
         if (pinned || !view || !box || !box.classList.contains('on')) return;
         if (!pointInPreview(e.clientX, e.clientY)) return;
         onBoxClick(e);
     }, true);
-    document.addEventListener('contextmenu', function (e) {
+    CAP_TARGET.addEventListener('contextmenu', function (e) {
         if (!swallowMenu) return;
         swallowMenu = false;
         e.preventDefault();
@@ -1865,6 +1991,29 @@
             'button.add{background:' + C.green + ';color:' + C.base + ';border-color:' + C.green + ';font-weight:600}',
             'button.danger{color:' + C.red + '}',
             '.listbtns{display:flex;gap:8px;justify-content:flex-end;margin-top:6px}',
+            // The list widget, matched to the one in Open Links in New Tab: a description,
+            // an italic examples line, then input + Add + "+ This site" on one row, then the
+            // entries as removable rows. Same shape, same colours, same button order — these
+            // panels are read side by side, so a second dialect of the same control is a
+            // cost with no benefit.
+            '.listwrap{margin-top:4px}',
+            '.listdesc{font-size:12px;color:#9399b2;line-height:1.45}',
+            '.listex{margin-top:4px;color:#6c7086;font-style:italic}',
+            '.addrow{display:flex;gap:6px;margin-top:8px}',
+            '.addrow input[type=text]{flex:1;padding:6px 10px;border-radius:6px;font-size:13px}',
+            '.addrow button{padding:6px 12px;border-radius:6px;border:none;font-weight:700;',
+            'font-size:13px;white-space:nowrap}',
+            '.addrow button.primary{background:' + C.blue + ';color:' + C.base + '}',
+            '.addrow button.add{background:' + C.green + ';color:' + C.base + '}',
+            '.entries{display:flex;flex-direction:column;gap:5px;margin-top:8px;',
+            'max-height:150px;overflow-y:auto;padding-right:4px}',
+            '.entry{display:flex;align-items:center;justify-content:space-between;gap:8px;',
+            'background:' + C.surface + ';border-radius:6px;padding:6px 10px}',
+            '.entry span{font-size:13px;word-break:break-all}',
+            '.entry button{background:none;border:none;color:' + C.red + ';cursor:pointer;',
+            'font-size:14px;padding:0 4px;flex:none}',
+            '.entry button:hover{background:none;color:' + C.text + '}',
+            '.empty{color:#6c7086;font-size:13px;text-align:center;padding:12px 0}',
         ].join('');
         sr.appendChild(st);
 
@@ -1956,27 +2105,112 @@
             row(labelText, hintText, el);
         }
 
-        // A labelled textarea backed by one of the array settings, plus a row of buttons
-        // under it. Both lists behave the same way, so they are built the same way.
-        function list(key, labelText, hintText) {
-            const ta = document.createElement('textarea');
-            ta.value = cfg[key].join('\n');
-            ta.spellcheck = false;
-            controls.push(function () {
-                cfg[key] = ta.value.split('\n').map(function (s) { return s.trim(); })
-                    .filter(function (s) { return s.length > 0; });
-            });
+        // A list editor for one of the array settings, laid out the same way as the one in
+        // Open Links in New Tab: description, examples, an add row (text field, Add, and an
+        // optional "+ This site"), then the entries as rows you can remove one at a time.
+        // It replaced a raw textarea in v0.16.0 — the two panels sit side by side in daily
+        // use and were asking the user to learn the same list twice.
+        //
+        // Staging, not saving: entries live in a local array until Save, exactly like every
+        // other control on this panel. That is the one deliberate difference from OLINT,
+        // whose lists write straight through; changing it here would make Cancel a lie.
+        function list(key, opts) {
+            const items = cfg[key].slice();
+            controls.push(function () { cfg[key] = items.slice(); });
+
             const wrap = document.createElement('div');
-            const l = document.createElement('label');
-            l.textContent = labelText;
-            const hint = document.createElement('span');
-            hint.className = 'hint';
-            hint.textContent = hintText;
-            l.appendChild(hint);
-            wrap.appendChild(l);
-            wrap.appendChild(ta);
+            wrap.className = 'listwrap';
+
+            const desc = document.createElement('div');
+            desc.className = 'listdesc';
+            const descMain = document.createElement('div');
+            descMain.textContent = opts.description;
+            desc.appendChild(descMain);
+            if (opts.examples) {
+                const ex = document.createElement('div');
+                ex.className = 'listex';
+                ex.textContent = opts.examples;
+                desc.appendChild(ex);
+            }
+            wrap.appendChild(desc);
+
+            const addRow = document.createElement('div');
+            addRow.className = 'addrow';
+
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.spellcheck = false;
+            input.placeholder = opts.placeholder || '';
+
+            const addBtn = document.createElement('button');
+            addBtn.className = 'primary';
+            addBtn.textContent = 'Add';
+
+            addRow.appendChild(input);
+            addRow.appendChild(addBtn);
+
+            const entries = document.createElement('div');
+            entries.className = 'entries';
+
+            function render() {
+                while (entries.firstChild) entries.removeChild(entries.firstChild);
+                if (!items.length) {
+                    const empty = document.createElement('div');
+                    empty.className = 'empty';
+                    empty.textContent = 'No entries yet.';
+                    entries.appendChild(empty);
+                    return;
+                }
+                items.forEach(function (item) {
+                    const r = document.createElement('div');
+                    r.className = 'entry';
+                    const label = document.createElement('span');
+                    label.textContent = item;
+                    const rm = document.createElement('button');
+                    rm.textContent = '✕';
+                    rm.title = 'Remove ' + item;
+                    rm.addEventListener('click', function () {
+                        // Remove by VALUE, not by index: the rendered order and the stored
+                        // order need not agree, and entries are unique because add() dedupes.
+                        const at = items.indexOf(item);
+                        if (at !== -1) items.splice(at, 1);
+                        render();
+                    });
+                    r.appendChild(label);
+                    r.appendChild(rm);
+                    entries.appendChild(r);
+                });
+            }
+
+            function add(raw) {
+                const value = String(raw || '').trim();
+                if (!value) return;
+                if (items.indexOf(value) === -1) items.push(value);
+                input.value = '';
+                render();
+                entries.scrollTop = entries.scrollHeight;
+            }
+
+            addBtn.addEventListener('click', function () { add(input.value); });
+            input.addEventListener('keydown', function (e) {
+                if (e.key === 'Enter') { e.preventDefault(); add(input.value); }
+            });
+
+            if (opts.addCurrentLabel) {
+                const cur = document.createElement('button');
+                cur.className = 'add';
+                cur.textContent = opts.addCurrentLabel;
+                cur.title = opts.addCurrentTitle || '';
+                cur.addEventListener('click', function () { add(opts.currentValue()); });
+                addRow.appendChild(cur);
+            }
+
+            wrap.appendChild(addRow);
+            wrap.appendChild(entries);
             panel.appendChild(wrap);
-            return ta;
+            render();
+
+            return { items: items, clear: function () { items.length = 0; render(); } };
         }
 
         function listButtons(buttons) {
@@ -1991,17 +2225,6 @@
                 r.appendChild(el);
             });
             panel.appendChild(r);
-        }
-
-        // Append a line unless it is already there, and scroll it into view. Nothing reaches
-        // storage until Save, exactly like every other control on this panel — the textarea
-        // visibly changing is the feedback that the button did something.
-        function addLine(ta, value) {
-            const lines = ta.value.split('\n').map(function (s) { return s.trim(); })
-                .filter(function (s) { return s.length > 0; });
-            if (lines.indexOf(value) === -1) lines.push(value);
-            ta.value = lines.join('\n');
-            ta.scrollTop = ta.scrollHeight;
         }
 
         function color(key, labelText) {
@@ -2039,22 +2262,29 @@
         pick('siteMode', 'Site list mode', null, [
             ['blacklist', 'Disable on listed sites'], ['whitelist', 'Enable only on listed sites']]);
 
-        const sites = list('siteList', 'Sites', 'one hostname per line; subdomains included');
-        listButtons([
-            { label: '+ This site', cls: 'add', title: location.hostname,
-                onClick: function () { addLine(sites, location.hostname); } },
-        ]);
+        list('siteList', {
+            description: 'Sites the Site list mode above applies to. Subdomains are included, ' +
+                'so adding example.com also covers www.example.com.',
+            examples: 'Examples: example.com, news.ycombinator.com',
+            placeholder: 'e.g. example.com',
+            addCurrentLabel: '+ This Site',
+            addCurrentTitle: location.hostname,
+            currentValue: function () { return location.hostname; },
+        });
 
         section('Never preview these images');
         note('Add one with the ⊘ button on a placed preview',
             'Hover the image, click the preview to pin it, then press ⊘ in its status bar: ' +
             'the image goes into this list and the preview closes. For a page whose tiled ' +
             'background or watermark previews everywhere, that is one click and done.');
-        const blocks = list('blockList', 'Image URLs',
-            'one per line; * matches anything, so …/tile.png?* covers a cache-busted background');
+        const blocks = list('blockList', {
+            description: 'Exact image URLs that never open a preview. A * matches anything, ' +
+                'so …/tile.png?* covers a background carrying a cache-busting query.',
+            examples: 'Examples: https://example.com/tile.png, https://cdn.example.com/wm/*',
+            placeholder: 'e.g. https://example.com/watermark.png',
+        });
         listButtons([
-            { label: 'Clear all', cls: 'danger',
-                onClick: function () { blocks.value = ''; } },
+            { label: 'Clear all', cls: 'danger', onClick: function () { blocks.clear(); } },
         ]);
 
         section('Pinned mode');

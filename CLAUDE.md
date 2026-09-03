@@ -99,11 +99,21 @@ The consequences, all of which have to be handled together:
   the preview before it vanished. There is nothing to travel to now, so leaving the image is
   unambiguous and `onOut` calls `cancel()` directly. Re-adding a delay re-breaks scanning.
 - **Pinning and dragging are decided by GEOMETRY, not hit-testing.** A press on a transparent
-  preview lands on the page beneath, so the document-level `mousedown`/`click` capture
-  listeners test `pointInPreview(e.clientX, e.clientY)` against `view` and hand the event to
-  the same `onBoxDown`/`onBoxClick` the hit-testable states use — one state machine, two ways
-  in. Those handlers must keep their `preventDefault()` + `stopPropagation()`: the press is
-  really on the page, and without them a link beneath would follow.
+  preview lands on the page beneath, so the `mousedown`/`click` capture listeners test
+  `pointInPreview(e.clientX, e.clientY)` against `view` and hand the event to the same
+  `onBoxDown`/`onBoxClick` the hit-testable states use — one state machine, two ways in. Those
+  handlers must keep their `preventDefault()` + `stopPropagation()`: the press is really on the
+  page, and without them a link beneath would follow.
+- **Those two listeners live on `CAP_TARGET` (= window), in capture** — moved off `document` in
+  v0.16.0, along with `contextmenu`. Per `../CLAUDE.md` that is where a modal "this click is
+  mine" mode belongs, ahead of the page and of every sibling userscript on `document`. It is not
+  enough on its own: Open Links in New Tab is on window/capture too since its v1.19.0, and two
+  listeners on the same node are settled by registration order that the manager owns. So the
+  press *also* stamps `<html>` with `data-userscript-click-claim` (`claimClick()`, cleared by
+  `releaseClick()` on any press we do not claim), which OLINT v1.24.0 reads during the click.
+  `mousedown` always precedes `click`, which is what makes the handshake order-independent — the
+  full contract is in `../CLAUDE.md`. Symptom it fixes, reported on imgur: the preview did not
+  pin and the link was followed, and it went away if OLINT was disabled.
 - **`ours(e.target)` is only ever true once `hot` is set.** Both `onOver` and `onOut` rely on
   that: `ours()` now means "on a placed preview", which is exactly the detached hold rule.
 - **Nothing inside the frame is clickable on a plain hover preview**, by design — it dies the
@@ -241,6 +251,20 @@ being read. `.cap.idle` sets `opacity:0` **and** `pointer-events:none`, `showBar
 arms a `BAR_IDLE_MS` (1000 ms since v0.13.0, 2000 before) timer, and `onMove` calls `showBar()` only when the pointer is over
 the window — moving anywhere else lets it fade, which is the point. `resetBar()` in `cancel()`
 keeps a closed preview from reopening with a stale class.
+
+**Three timings, and they are deliberately different numbers** (v0.16.0): `BAR_IDLE_MS` (1000) is
+how long the pointer must be still before the fade starts, `BAR_FADE_MS` (1200, was 220) is how
+long the fade itself takes, and `BAR_SHOW_MS` (120) is the return. The fade is slow because the
+whole of it is reaction time and the bar carries the ⊘; the return is fast because it is a control
+the user has just asked for and a slow one reads as lag. `.cap` carries the show duration and
+`.cap.idle` overrides it with the fade duration, which is what makes the two directions differ.
+
+**A pointer resting ON the bar holds it open indefinitely** (v0.16.0). A still pointer fires no
+`mousemove`, so `onMove` cannot notice, and the fade timer is the only thing that can — it calls
+`pointerOverBar()` and re-arms itself instead of fading. The test is **geometric** (`pointer`
+against `capEl.getBoundingClientRect()`), not a hover state, for the same reason pinning is: on a
+hover preview the bar is pointer-transparent and `e.target` is the page underneath. Reported as
+the ⊘ disappearing before it could be clicked.
 
 The `pointer-events` half is not decoration: the bar is the move handle, and an invisible move
 handle is a trap. Faded, a press where it was pans or moves by the ordinary rule, and moving the
@@ -400,6 +424,23 @@ explains the controls without offering a switch.
   false, so a pinned frame at `fitScale` could not be dragged at all. `pannable()` is read per
   press, so zooming in and back out restores dragging with no state to keep in step.
 
+## The list editor matches the sibling scripts (v0.16.0)
+
+`siteList` and `blockList` were raw textareas with a button row underneath. They are now the same
+widget Open Links in New Tab uses — description, an italic examples line, `input` + blue **Add** +
+green **+ This Site**, then the entries as rows with a `✕` — because these panels are read side by
+side and a second dialect of the same control is a cost with no benefit. Colours come from the
+shared palette (`#89b4fa` Add, `#a6e3a1` add-current, `#313244` rows, `#f38ba8` remove).
+
+**One deliberate difference from OLINT: entries stage in a local array and reach storage only on
+Save**, like every other control on this panel. OLINT's lists write straight through, which is
+right there because it has no Save button; copying that here would make Cancel a lie.
+
+`list(key, opts)` returns `{ items, clear }` rather than the old textarea element, so *Clear all*
+calls `blocks.clear()`. `addLine()` is gone. Removal is **by value, not index** — entries are
+unique because `add()` dedupes, and an index would be wrong the moment display and storage order
+disagree.
+
 ## Settings are per-tab snapshots — always re-read before rendering the panel
 
 `cfg` is read once at load, so every tab holds its own copy. A tab open for a while is editing a
@@ -434,7 +475,7 @@ static catches it — `node --check` passes and the markup is fine.
 
 ```bash
 node --check Hover-Zoom.user.js     # syntax
-node test-resolver.js               # 67 assertions on the pure URL and video-link logic
+node test-resolver.js               # 92 assertions on the pure URL and video-link logic
 python make-test-images.py          # regenerate fixtures into test-images/
 ```
 
@@ -483,6 +524,15 @@ Browser test: `python test-server.py`, then open `http://localhost:8899/test-pag
 - **Clear `blockList` between browser test runs.** It persists in `localStorage`, and the fixtures
   share image files — blocking case 1 also silences cases 16 and 19, which then look like
   regressions. Cost 10 minutes chasing exactly that on 2026-09-03.
+- **A synthetic sweep of all 20 cases needs a wait longer than the first COLD probe, or the
+  early cases read as failures that are not there.** A 700 ms-per-case loop on a fresh load
+  reported cases 1–4 and 10 as showing nothing; each of those resolves to a 1600×1200 original
+  that had never been fetched, and every later case reusing `photo.jpg` passed off the warm
+  `probeCache`. Re-hovering any of them alone at 2 s showed the full-size image. The tell is that
+  the failures are exactly the cases that are FIRST to want a given file — if a "regression" set
+  looks like that, lengthen the wait before believing it. Two or three cases per
+  `javascript_tool` call: the pane's timers run slow when it is hidden and a 20-case sweep hits
+  the 45 s tool timeout.
 - **A `computer{action:"hover"}` to a coordinate the pointer is already at fires no `mouseover`,**
   so a second test against the same element silently does nothing and reads as a script bug. Move
   the pointer somewhere else first, and re-derive coordinates from a fresh screenshot after any
@@ -567,6 +617,49 @@ ring still turning after the search stopped is a lie.
   hung script, so the animation must not depend on frames being offered. Anything else here
   that must animate has the same constraint, and no screenshot will catch it — verify by
   reading the attribute over time (`svg.style.transform` advances 24° every 60 ms).
+
+## Imgur — measured, and why `.webp` is the trap (v0.16.0)
+
+Reported: "it is not working for gifs". Measured live on `i.imgur.com`, 2026-09-03:
+
+| URL | bytes | pixels | content-type |
+|---|---|---|---|
+| `T22ZUhZ_d.jpg?maxwidth=520&shape=thumb` — what the grid shows | 15.9 KB | 435×244 | image/jpeg |
+| `T22ZUhZ_d.jpg` — the generic query-strip rule's candidate | 1.9 KB | **145×81** | image/jpeg |
+| `T22ZUhZ.jpg` — the suffix stripped | 3.1 MB | 800×450 | **image/gif** |
+
+The middle row is the finding that matters: **the generic query-strip rule goes the wrong way on
+imgur**, producing something smaller than what is displayed. It is correctly rejected by the ratio
+gate, so nothing was ever visibly broken — there was simply no candidate left, and a GIF post's
+thumbnail is a **static frame**. Hence a host-checked rule, placed **first** in `UPGRADES` so the
+high-confidence candidate is probed before the generic one.
+
+Two imgur facts, neither guessable:
+
+- **The extension you ask for is ignored, except `.webp`.** `T22ZUhZ.jpg` returns `image/gif` and
+  animates in an `<img>`; `KlprxXs.jpg` returns `image/png`. So the rule never has to guess the
+  original's real format — asking for anything but webp returns the stored bytes.
+- **`.webp` is a transcode at the same pixel size, and for an animated post it is a STILL.**
+  `zFAj8eD.webp?tb` is 240×210 animated, `zFAj8eD.webp` is 412×360 and frozen, `zFAj8eD.jpg` is
+  412×360 and moving. That is why the rule rewrites `.webp` → `.jpg` even when the id is already
+  bare — the size is unchanged and the picture starts moving.
+
+**The restraint is the load-bearing part.** Imgur ids are 5 or 7 characters, so `_d` and a single
+trailing `[sbtmlhg]` on a 6- or 8-character basename are unambiguous suffixes, but a **bare** 5- or
+7-character id must be left alone: `T22ZUh.jpg` — `T22ZUhZ.jpg` with its last character removed —
+is a real 90 KB image of something else, and it *loads*. Over-matching here shows the wrong
+picture, which is worse than showing none. Negative tests are in `test-resolver.js`.
+
+Verified against the live grid: 8 of 8 thumbnails resolved to their originals. **One caveat worth
+knowing before chasing it as a bug:** an imgur original is sometimes barely larger than the
+thumbnail (measured `UnCz83E`, 314×228 against a 300px display = ratio 1.05), and the default
+`minRatio` of 1.2 then rejects it — so that post stays a still. There is no way to know a candidate
+is animated without fetching it, so this is a settings answer (`minRatio` ≈ 1.0, or
+`showEvenIfNotLarger`), not a code one.
+
+**On an imgur post page there is nothing to fix**: an animated post renders as `<video>` with an
+`.mp4` src (`DIV.PostVideo-video-wrapper`), and `P4`/`NEVER` refuse it correctly. "Images only" is
+the design; the grid thumbnail is the only place a gif is an `<img>` at all.
 
 ## Known limits
 

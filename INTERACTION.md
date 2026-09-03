@@ -3,7 +3,7 @@
 What the preview **window** does, as a state machine. Menus, buttons, the status bar contents and
 the loading ring are out of scope except where they change what the window itself accepts.
 
-Describes `Hover-Zoom.user.js` **v0.12.0**.
+Describes `Hover-Zoom.user.js` **v0.16.0**.
 
 ---
 
@@ -343,9 +343,17 @@ change if you want them changed.
 
 #### E1 · A click on a hovered image usually pins instead of following the link
 The window is invisible to the pointer, but a click inside its rectangle is still claimed by
-geometry at document level. With `position: cursor` the window is nudged to touch your cursor, so
-your cursor is nearly always inside it. This is the price of click-to-pin. `position: center` does
-not have this problem, because the window opens away from the pointer.
+geometry — at **window** level, in capture (v0.16.0; it was document level before). With
+`position: cursor` the window is nudged to touch your cursor, so your cursor is nearly always
+inside it. This is the price of click-to-pin. `position: center` does not have this problem,
+because the window opens away from the pointer.
+
+Window/capture is what keeps the claim ahead of the page's own click handling and of sibling
+userscripts on `document`. Against a sibling that also sits on window/capture, ordering is the
+userscript manager's to decide, so the press additionally stamps `<html>` with
+`data-userscript-click-claim`; a cooperating script reads that during the click and stands aside.
+Reported as a preview that pinned *and* followed the link on imgur, alongside Open Links in New
+Tab v1.19.0+.
 
 #### E2 · Escape is not the same as a right-click dismiss
 Escape (`K5`) hides the window but does not enter `S16`, so crossing into a child element of the
@@ -403,10 +411,19 @@ one click away when you want the menu.
 
 #### E10 · The status bar fades itself out
 It is drawn *on* the picture, so on a meme, a screenshot or a comic panel it covers the text at
-the bottom. It fades after one second of a still pointer and returns the moment the pointer moves
-over the window. A faded bar also drops its `pointer-events`, so it stops being an invisible move
-handle — a press where it was pans or moves by the ordinary rule (`S13`/`S14`), and moving the
-pointer first brings the real handle back. `showStatusBar` still turns it off entirely.
+the bottom. It fades after one second of a still pointer, and the fade itself then takes 1.2 s;
+it returns the moment the pointer moves over the window, in 120 ms. The two halves are different
+numbers on purpose — the fade is the whole of your reaction time, while the return is a control
+you have just asked for and must not feel laggy.
+
+**A pointer resting on the bar itself never lets it fade**, however long it sits there: the bar
+carries the `⊘` (`E11`) and the filename, and a control that vanishes under a resting cursor
+cannot be used. The test is geometric, not a hover state, because on `S05` the bar is
+pointer-transparent.
+
+A faded bar also drops its `pointer-events`, so it stops being an invisible move handle — a press
+where it was pans or moves by the ordinary rule (`S13`/`S14`), and moving the pointer first brings
+the real handle back. `showStatusBar` still turns it off entirely.
 
 #### E11 · The ⊘ button, and why it is not on a hover preview
 The status bar of a **placed** window (`S07` or `S10`) carries a `⊘` beside the metadata: it adds
@@ -450,6 +467,7 @@ Function names are used rather than line numbers, which rot.
 | 2026-09-03 | Written against v0.9.0. Initial IDs `R1`, `P1`–`P6`, `S01`–`S17`, `T01`–`T19`, `K1`–`K8`, `B1`–`B2`, `E1`–`E6`. |
 | 2026-09-03 | v0.10.0. New: `T20` (wheel zooms a detached window), `E7` (the 92 % frame cap), `E8` (why upgrades are never seen). Changed: `S05` — the old text said clicks pass through the window, which contradicted `E1`; they do not, and only hover and the wheel do. `S07` — accepts the wheel. `S10`/`S11`/`S13`/`S14` — a drag now pans only while the picture is spilling and moves the frame otherwise, so a pinned frame at its opening scale can be dragged from anywhere; the status bar still always moves it. `P4` — a third video signal, the element sitting inside a laid-out `<video>`'s rectangle, because the ancestor walk's "still one card" bound was ending the search before the video test on a watch-page player. Also fixed, and not visible in this document: the closed window used to stay hit-testable, leaving an invisible rectangle that ate clicks and blocked hover where the window had been. |
 | 2026-09-03 | v0.11.0. New: `T21`, `E9` — right-click on a *placed* window now raises the browser's own context menu instead of dismissing, which is the only way `Save image as…` and `Copy image` work. `S05` keeps right-click-to-dismiss. `B1` changed accordingly; `B2` was already behaving this way and is unchanged. |
+| 2026-09-03 | v0.16.0. `E10` — the fade now takes 1.2 s rather than 220 ms, and a pointer resting **on** the bar holds it open indefinitely; a control that disappears under a still cursor cannot be used. `E1` — the pin claim moved from document to window capture and now stamps `data-userscript-click-claim` on `<html>` during the press, because Open Links in New Tab v1.19.0+ also sits on window capture and was taking the click that pins a preview. Not visible here: an imgur `UPGRADES` rule (a GIF post's thumbnail is a static frame, and `.webp` is imgur's de-animating transcode), and the settings panel's site and never-preview lists rebuilt as add/remove rows matching the sibling scripts. |
 | 2026-09-03 | v0.15.0. `P4` widened: the geometry gate now tests the **player box** derived from each `<video>`, not only the video's own rectangle. Measured on a LibreWolf watch page, the cued player lays its `<video>` out exactly its own height above the poster, so the two never overlap and the poster previewed. |
 | 2026-09-03 | v0.13.0. New `P7` (page and tiled backgrounds are never previewed) and `P8` (a user-maintained never-preview list), and `E11` for the `⊘` button that fills it from a placed window. `E10`'s fade is now one second rather than two. Not visible here: a `debug` setting that logs which gate decided each hover, and a video-link gate that now finds an ancestor `<a>` across a shadow-root boundary, which plain `closest()` cannot do. |
 | 2026-09-03 | v0.12.0. `T21` narrowed to `S10`: only a **pinned** window gives right-click to the browser, and `S07` goes back to dismissing. The ⋮ image-actions menu is removed, so `E9` is now about the browser's menu alone. New `E10`: the status bar fades after two seconds of a still pointer and returns on movement over the window, because it was covering the text on memes and screenshots. |

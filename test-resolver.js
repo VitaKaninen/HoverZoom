@@ -97,6 +97,41 @@ has('generic _thumb filename suffix',
     upgradeCandidates('https://site.com/images/pic_thumb.png'),
     'https://site.com/images/pic.png');
 
+// ---- imgur thumbnail suffixes. The positive cases are all measured against the live host
+// (2026-09-03); the negative ones are the point of the rule, because a bare id with its last
+// character removed is a REAL image of something else and would load without complaint.
+has('imgur _d thumbnail suffix, query dropped with it',
+    upgradeCandidates('https://i.imgur.com/T22ZUhZ_d.jpg?maxwidth=520&shape=thumb&fidelity=high'),
+    'https://i.imgur.com/T22ZUhZ.jpg');
+
+// .webp is imgur's transcode and is STILL for an animated post, so it is rewritten to .jpg,
+// which returns the stored original bytes whatever the real format is.
+has('imgur _d on a webp thumbnail, rewritten away from webp',
+    upgradeCandidates('https://i.imgur.com/KlprxXs_d.webp'),
+    'https://i.imgur.com/KlprxXs.jpg');
+
+has('imgur single-letter suffix on an 8-char basename',
+    upgradeCandidates('https://i.imgur.com/KlprxXsm.webp'),
+    'https://i.imgur.com/KlprxXs.jpg');
+
+has('imgur single-letter suffix on a 6-char basename (5-char id)',
+    upgradeCandidates('https://i.imgur.com/T22ZUh.jpg'),
+    'https://i.imgur.com/T22ZU.jpg');
+
+has('imgur ?tb animated thumbnail on a bare id',
+    upgradeCandidates('https://i.imgur.com/zFAj8eD.webp?tb'),
+    'https://i.imgur.com/zFAj8eD.jpg');
+
+has('imgur bare webp is still worth rewriting — it is the de-animated transcode',
+    upgradeCandidates('https://i.imgur.com/zFAj8eD.webp'),
+    'https://i.imgur.com/zFAj8eD.jpg');
+
+none('imgur bare 7-char id is left alone', 'https://i.imgur.com/T22ZUhZ.jpg');
+none('imgur bare 5-char id is left alone', 'https://i.imgur.com/T22ZU.jpg');
+none('imgur bare 7-char png id is left alone', 'https://i.imgur.com/KlprxXs.png');
+none('the imgur rule is host-checked', 'https://notimgur.com/T22ZUhZ_d.jpg');
+none('imgur nested paths are not ids', 'https://i.imgur.com/a/b/T22ZUhZ_d.jpg');
+
 // ---- the transform-segment rule must not eat ordinary path segments
 function none(label, url) {
     const out = upgradeCandidates(url);
