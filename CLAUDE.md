@@ -289,6 +289,21 @@ this script is a DOM read, so only the DOM in front of the user can say which on
 - `videoReason()` returns a *string* rather than a boolean for exactly this — `inVideoContext()`
   is now a `!!` wrapper over it. Keep it that way; a boolean cannot be reported.
 
+Two lessons from reading the first real report back (2026-09-03, v0.14.0 fixed both):
+
+- **Every path that paints a preview must log.** `resolve()`'s `showEvenIfNotLarger` fallback
+  called `onHit` with no `dbg('hit', …)`, so a hover that *did* show something produced no `hit`
+  line at all. A log with a silent success path is worse than no log: it reads as positive
+  evidence that nothing was shown. The boot line now also prints `showEvenIfNotLarger`,
+  `minRatio` and `minDisplayed`, because "no hit line" means nothing without them.
+- **Print positions, not just sizes.** The first `hoverReport` logged `1903×798` for the page's
+  video and left the actual question unanswerable — gate 0 tests the element's centre against the
+  video's *rectangle*, so a video of exactly the right size sitting somewhere else looks identical
+  in the log to one directly under the pointer. Each video now prints `x,y w×h` plus its own
+  verdict (`[CONTAINS the pointer target]` / `[does not contain it]` / `[too small, skipped]`), so
+  the gate's decision is readable rather than inferred. General rule: **log the operands of the
+  comparison, not a summary of one of them.**
+
 **`closestAcross()` — `closest()` does not cross a shadow boundary.** Neither does
 `parentElement`. A site that builds its cards from custom elements can put the `<img>` inside a
 shadow root and the `<a>` that wraps it outside, and the video-**link** gate then sees no link at

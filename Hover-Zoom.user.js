@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.13.0
+// @version     0.14.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -145,6 +145,11 @@
             }
         } catch (e) { /* not every manager exposes GM_info */ }
         return 'v?';
+    }
+
+    function rectStr(r) {
+        return Math.round(r.left) + ',' + Math.round(r.top) + ' ' +
+            Math.round(r.width) + '×' + Math.round(r.height);
     }
 
     function dbg(label, data) {
@@ -505,6 +510,11 @@
             const dim = await probe(shown);
             if (dim) {
                 best = { url: shown, w: dim.w, h: dim.h };
+                // This branch paints a preview too, so it MUST log one. Without it a hover
+                // that showed something produced no 'hit' line at all, and a debug log with
+                // a silent success path is worse than none — it reads as proof that nothing
+                // was shown. Found while reading a real report, 2026-09-03.
+                dbg('hit (not larger — shown anyway)', best);
                 if (onHit && !token.cancelled) onHit(best);
             }
         }
@@ -1489,16 +1499,28 @@
     // shadow root, and how many laid-out <video> elements the page is offering.
     function hoverReport(t, el) {
         const a = closestAcross(t, 'a[href]');
+        const rect = t.getBoundingClientRect();
+        const cx = rect.left + rect.width / 2;
+        const cy = rect.top + rect.height / 2;
+        // POSITIONS, not just sizes. The first version of this printed `1903×798` for the
+        // page's video and left the real question unanswerable: gate 0 compares the
+        // element's centre against the video's RECTANGLE, so a video of exactly the right
+        // size sitting somewhere else entirely looks identical in the log to one sitting
+        // under the pointer. Each entry now says whether it contains the centre, so the
+        // gate's own verdict is readable rather than inferred.
         const vids = document.getElementsByTagName('video');
         const sizes = [];
         for (let i = 0; i < vids.length; i++) {
-            const r = vids[i].getBoundingClientRect();
-            sizes.push(Math.round(r.width) + '×' + Math.round(r.height));
+            const v = vids[i].getBoundingClientRect();
+            const holds = cx >= v.left && cx <= v.right && cy >= v.top && cy <= v.bottom;
+            sizes.push(rectStr(v) + (v.width < 2 || v.height < 2 ? ' [too small, skipped]'
+                : holds ? ' [CONTAINS the pointer target]' : ' [does not contain it]'));
         }
         const cls = typeof t.className === 'string' ? t.className.trim() : '';
         return {
             target: t.tagName + (t.id ? '#' + t.id : '') +
                 (cls ? '.' + cls.split(/\s+/).slice(0, 2).join('.') : ''),
+            targetRect: rectStr(rect),
             showing: (shownUrl(t) || '(nothing)').slice(0, 160),
             eligible: !!el,
             skipVideos: cfg.skipVideos,
@@ -2087,5 +2109,11 @@
         skipVideos: cfg.skipVideos,
         skipPageBackgrounds: cfg.skipPageBackgrounds,
         blockList: cfg.blockList.length,
+        // These three decide whether a probed candidate becomes a preview, so a log without
+        // them cannot be read: 'no hit line' means "nothing was big enough" under the
+        // defaults, but showEvenIfNotLarger turns the ratio gate off entirely.
+        showEvenIfNotLarger: cfg.showEvenIfNotLarger,
+        minRatio: cfg.minRatio,
+        minDisplayed: cfg.minDisplayed,
     });
 })();
