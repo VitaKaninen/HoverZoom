@@ -1,0 +1,660 @@
+<title>Hover Zoom Preview States</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@600;700&family=IBM+Plex+Serif:ital,wght@0,400;0,600;1,400&display=swap">
+
+<style>
+  :root {
+    --base:#eff1f5; --mantle:#e6e9ef; --card:#ffffff;
+    --surface:#ccd0da; --rule:#d7dbe4;
+    --text:#4c4f69; --subtext:#6c6f85; --faint:#8c8fa1;
+    --blue:#1e66f5; --green:#40a02b; --peach:#fe640b; --red:#d20f39; --mauve:#8839ef;
+    --chip-ink:#ffffff;
+    --shadow:0 1px 2px rgba(76,79,105,.07), 0 10px 28px rgba(76,79,105,.06);
+    --stripe-w:3px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --base:#1e1e2e; --mantle:#181825; --card:#232335;
+      --surface:#313244; --rule:#313244;
+      --text:#cdd6f4; --subtext:#a6adc8; --faint:#7f849c;
+      --blue:#89b4fa; --green:#a6e3a1; --peach:#fab387; --red:#f38ba8; --mauve:#cba6f7;
+      --chip-ink:#181825;
+      --shadow:0 1px 2px rgba(0,0,0,.45), 0 10px 28px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="dark"] {
+    --base:#1e1e2e; --mantle:#181825; --card:#232335;
+    --surface:#313244; --rule:#313244;
+    --text:#cdd6f4; --subtext:#a6adc8; --faint:#7f849c;
+    --blue:#89b4fa; --green:#a6e3a1; --peach:#fab387; --red:#f38ba8; --mauve:#cba6f7;
+    --chip-ink:#181825;
+    --shadow:0 1px 2px rgba(0,0,0,.45), 0 10px 28px rgba(0,0,0,.35);
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--base);
+    color: var(--text);
+    font: 400 16px/1.65 "IBM Plex Serif", Georgia, "Times New Roman", serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 40px 24px 96px;
+    display: flex;
+    flex-direction: column;
+    gap: 52px;
+  }
+  .prose { max-width: 68ch; }
+
+  h1, h2, h3 {
+    font-family: "IBM Plex Sans Condensed", "Arial Narrow", Arial, sans-serif;
+    font-weight: 700;
+    text-wrap: balance;
+    margin: 0;
+    letter-spacing: -0.005em;
+  }
+  h1 { font-size: clamp(34px, 5.2vw, 50px); line-height: 1.06; }
+  h2 { font-size: clamp(23px, 3vw, 29px); line-height: 1.15; }
+  h3 { font-size: 18px; font-weight: 600; line-height: 1.25; }
+  p { margin: 0 0 14px; }
+  p:last-child { margin-bottom: 0; }
+
+  code, .mono { font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Consolas, monospace; }
+  code {
+    font-size: .855em;
+    background: var(--mantle);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    padding: .06em .34em;
+  }
+
+  .eyebrow {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--faint);
+  }
+
+  /* ---- masthead ---- */
+  header { display: flex; flex-direction: column; gap: 14px; }
+  header .lede {
+    font-size: 18px;
+    color: var(--subtext);
+    max-width: 62ch;
+    font-style: italic;
+  }
+  .meta {
+    display: flex; flex-wrap: wrap; gap: 8px 20px;
+    padding-top: 14px; border-top: 1px solid var(--rule);
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 12px; color: var(--faint);
+  }
+
+  /* ---- the one rule ---- */
+  .rulebox {
+    border-left: var(--stripe-w) solid var(--blue);
+    padding: 4px 0 4px 20px;
+    max-width: 68ch;
+  }
+  .rulebox strong { font-weight: 600; }
+
+  /* ---- ladder ---- */
+  .ladder-scroll { overflow-x: auto; padding-bottom: 6px; }
+  .ladder {
+    display: flex; align-items: stretch; gap: 0;
+    min-width: 660px;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+  }
+  .rung {
+    flex: 1 1 0;
+    display: flex; flex-direction: column; gap: 5px;
+    padding: 13px 15px;
+    background: var(--card);
+    border: 1px solid var(--rule);
+    border-left-width: var(--stripe-w);
+    border-left-style: solid;
+  }
+  .rung + .rung { border-left-width: var(--stripe-w); }
+  .rung .n { font-size: 11px; letter-spacing: .12em; color: var(--faint); text-transform: uppercase; }
+  .rung .t { font-size: 14px; font-weight: 600; color: var(--text); }
+  .rung .h { font-size: 12px; line-height: 1.45; color: var(--subtext); }
+  .rung.wait  { border-left-color: var(--faint); }
+  .rung.work  { border-left-color: var(--mauve); }
+  .rung.open  { border-left-color: var(--green); }
+  .rung.place { border-left-color: var(--peach); }
+  .rung.pin   { border-left-color: var(--blue); }
+
+  /* ---- state cards ---- */
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 16px;
+  }
+  .state {
+    background: var(--card);
+    border: 1px solid var(--rule);
+    border-left: var(--stripe-w) solid var(--fam, var(--faint));
+    padding: 16px 18px 17px;
+    display: flex; flex-direction: column; gap: 11px;
+    box-shadow: var(--shadow);
+  }
+  .state.wait  { --fam: var(--faint); }
+  .state.work  { --fam: var(--mauve); }
+  .state.open  { --fam: var(--green); }
+  .state.place { --fam: var(--peach); }
+  .state.pin   { --fam: var(--blue); }
+  .state.gone  { --fam: var(--red); }
+
+  .state header { display: flex; flex-direction: column; gap: 3px; }
+  .state .fam {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 10px; font-weight: 500; letter-spacing: .15em; text-transform: uppercase;
+    color: var(--fam);
+  }
+  .state h3 { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 15px; font-weight: 600; }
+  .state .fam { display: flex; align-items: baseline; gap: 8px; }
+  .id {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 10.5px; font-weight: 600; letter-spacing: .06em;
+    color: var(--chip-ink); background: var(--fam, var(--faint));
+    padding: 1px 6px; border-radius: 2px; flex: none;
+  }
+  .idk {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 11.5px; font-weight: 600; color: var(--faint);
+    white-space: nowrap;
+  }
+  th.idcol, td.idcol { width: 1%; white-space: nowrap; }
+  .citebox {
+    border: 1px solid var(--rule); background: var(--mantle);
+    padding: 14px 18px; max-width: 68ch;
+    font-size: 14.5px; color: var(--subtext);
+  }
+  .citebox b { color: var(--text); font-weight: 600; }
+  .state .say { font-size: 14.5px; line-height: 1.5; color: var(--subtext); }
+
+  dl { margin: 0; display: grid; grid-template-columns: 74px 1fr; gap: 6px 12px; align-items: baseline; }
+  dt {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 10px; font-weight: 500; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--faint); padding-top: 2px;
+  }
+  dd { margin: 0; font-size: 13.5px; line-height: 1.5; }
+  dd code { font-size: .8em; }
+
+  /* ---- tables ---- */
+  .tablewrap { overflow-x: auto; border: 1px solid var(--rule); background: var(--card); }
+  table { border-collapse: collapse; width: 100%; min-width: 620px; font-size: 14px; }
+  th, td { text-align: left; padding: 10px 16px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  thead th {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 10.5px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--faint); background: var(--mantle); white-space: nowrap;
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  td.k { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 12.5px; white-space: nowrap; }
+  td.to { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 12.5px; font-weight: 500; }
+  .tag {
+    display: inline-block; padding: 1px 7px; border-radius: 2px;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 11px; font-weight: 500; letter-spacing: .04em;
+    background: var(--fg, var(--faint)); color: var(--chip-ink);
+  }
+  .tag.open  { --fg: var(--green); }
+  .tag.place { --fg: var(--peach); }
+  .tag.pin   { --fg: var(--blue); }
+  .tag.gone  { --fg: var(--red); }
+  .tag.work  { --fg: var(--mauve); }
+  .tag.wait  { --fg: var(--faint); }
+
+  /* ---- terminators ---- */
+  .kills { display: grid; grid-template-columns: repeat(auto-fill, minmax(258px, 1fr)); gap: 2px 26px; }
+  .kill { display: flex; gap: 11px; padding: 8px 0; border-bottom: 1px solid var(--rule); align-items: baseline; }
+  .kill .w { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 12.5px; color: var(--red); flex: none; min-width: 96px; }
+  .kill .d { font-size: 13.5px; color: var(--subtext); line-height: 1.45; }
+
+  /* ---- edges ---- */
+  ol.edges { margin: 0; padding: 0; list-style: none; counter-reset: edge; display: flex; flex-direction: column; gap: 16px; }
+  ol.edges li { counter-increment: edge; display: flex; gap: 16px; max-width: 74ch; }
+  ol.edges li::before {
+    content: "E" counter(edge);
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 12px; font-weight: 600; color: var(--peach);
+    flex: none; padding-top: 4px; min-width: 22px;
+  }
+  ol.edges b { font-weight: 600; }
+
+  section { display: flex; flex-direction: column; gap: 18px; }
+  .sechead { display: flex; flex-direction: column; gap: 7px; }
+
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+
+<div class="wrap">
+
+  <header>
+    <span class="eyebrow">Hover Zoom · v0.9.0 · interaction spec</span>
+    <h1>How the preview window behaves</h1>
+    <p class="lede">Every state the window itself can be in, what holds each one open, what it accepts,
+      and what ends it. Menus, buttons and the loading ring are out of scope.</p>
+    <div class="meta">
+      <span>17 states</span>
+      <span>19 transitions</span>
+      <span>8 terminators</span>
+      <span>6 known edges</span>
+    </div>
+  </header>
+
+  <section>
+    <div class="citebox">
+      <p style="margin-bottom:10px"><b>Every item here has a permanent ID</b> — states
+        <code>S01</code>–<code>S17</code>, transitions <code>T01</code>–<code>T19</code>,
+        terminators <code>K1</code>–<code>K8</code>, button-map rows <code>B1</code>–<code>B2</code>,
+        known edges <code>E1</code>–<code>E6</code>, and the governing rule <code>R1</code>.
+        Cite the ID rather than quoting.</p>
+      <p style="margin-bottom:0">IDs are permanent: new items get new numbers, and a removed item's
+        ID is retired rather than reused. The canonical copy is <code>INTERACTION.md</code> in the
+        repository — if the two ever disagree, that one is right.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="rulebox">
+      <p><span class="idk" style="color:var(--blue)">R1</span><br><strong>One rule underneath all of it: exactly one thing holds the window open at a time,
+        and leaving that one thing ends the window.</strong></p>
+      <p>While it is a hover preview, that thing is <em>the source image</em> — never the window,
+        which is invisible to the pointer. Once you drag it, that thing becomes <em>the window</em> —
+        the image stops mattering entirely. Once you pin it, nothing holds it but your explicit
+        dismissal. Every hover bug this script has had came from two things holding it at once.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="sechead">
+      <span class="eyebrow">The escalation ladder</span>
+      <h2>Three held states, each one gesture apart</h2>
+    </div>
+    <div class="ladder-scroll">
+      <div class="ladder">
+        <div class="rung wait">
+          <span class="n">Precondition</span>
+          <span class="t">hover</span>
+          <span class="h">Pointer lands on an eligible image</span>
+        </div>
+        <div class="rung work">
+          <span class="n">then</span>
+          <span class="t">resolve</span>
+          <span class="h">Probe candidates for a bigger original</span>
+        </div>
+        <div class="rung open">
+          <span class="n">held by image</span>
+          <span class="t">open</span>
+          <span class="h">Transient. Pointer-transparent.</span>
+        </div>
+        <div class="rung place">
+          <span class="n">drag &gt; 3px</span>
+          <span class="t">detached</span>
+          <span class="h">Held by the window. Hit-testable.</span>
+        </div>
+        <div class="rung pin">
+          <span class="n">click</span>
+          <span class="t">pinned</span>
+          <span class="h">Modal. Zoom and pan surface.</span>
+        </div>
+      </div>
+    </div>
+    <p class="prose">The ladder only goes one way. You can jump straight from <span class="tag open">open</span>
+      to <span class="tag pin">pinned</span> with a click, or step through
+      <span class="tag place">detached</span> first with a drag — but nothing demotes a window
+      except closing it and starting again.</p>
+  </section>
+
+  <section>
+    <div class="sechead">
+      <span class="eyebrow">Before anything can open</span>
+      <h2>What has to be true first</h2>
+    </div>
+    <p class="prose">None of the states below are reachable unless the pointer is over an
+      <em>eligible</em> element. That means: an <code>&lt;img&gt;</code> or an element with a CSS
+      background image; displayed at least <code>minDisplayed</code> (48px) and no larger than
+      <code>maxDisplayed</code> (off by default); not a video, a player, or a thumbnail inside a
+      link that plainly points at one; the site not blacklisted; and, in modifier mode, the
+      modifier key held. Nothing is decided in advance — all of it is evaluated the moment the
+      pointer arrives.</p>
+  </section>
+
+  <section>
+    <div class="sechead">
+      <span class="eyebrow">Enumeration</span>
+      <h2>The states</h2>
+    </div>
+
+    <div class="grid">
+
+      <article class="state wait">
+        <header><span class="fam"><span class="id">S01</span>Waiting</span><h3>idle</h3></header>
+        <p class="say">No window, no timer, no memory of anything. The resting state.</p>
+        <dl>
+          <dt>On screen</dt><dd>Nothing.</dd>
+          <dt>Ends on</dt><dd>Pointer entering an eligible image.</dd>
+        </dl>
+      </article>
+
+      <article class="state wait">
+        <header><span class="fam"><span class="id">S02</span>Waiting</span><h3>armed</h3></header>
+        <p class="say">The pointer is on an eligible image and the <code>hoverDelay</code> timer
+          (120&nbsp;ms) is running. Nothing has been requested yet.</p>
+        <dl>
+          <dt>On screen</dt><dd>Nothing.</dd>
+          <dt>Held by</dt><dd>The pointer being on the image.</dd>
+          <dt>Ends on</dt><dd>Leaving the image — silently, with no trace.</dd>
+        </dl>
+      </article>
+
+      <article class="state work">
+        <header><span class="fam"><span class="id">S03</span>Working</span><h3>resolving, silent</h3></header>
+        <p class="say">Probes are in flight. For the first 150&nbsp;ms nothing appears at all, so a
+          cached or instant hit never flashes a ring at you.</p>
+        <dl>
+          <dt>On screen</dt><dd>Nothing.</dd>
+          <dt>Held by</dt><dd>The pointer being on the image.</dd>
+          <dt>Ends on</dt><dd>A result, exhaustion, or leaving the image.</dd>
+        </dl>
+      </article>
+
+      <article class="state work">
+        <header><span class="fam"><span class="id">S04</span>Working</span><h3>resolving, visible</h3></header>
+        <p class="say">Still searching past 150&nbsp;ms. The ring appears near the cursor and trails
+          it. There is still no window.</p>
+        <dl>
+          <dt>On screen</dt><dd>The ring, following the pointer.</dd>
+          <dt>Held by</dt><dd>The pointer being on the image.</dd>
+          <dt>Ends on</dt><dd>The first hit (opens a window), no hit at all, or leaving the image.</dd>
+        </dl>
+      </article>
+
+      <article class="state open">
+        <header><span class="fam"><span class="id">S05</span>Open · held by the image</span><h3>hover-held</h3></header>
+        <p class="say">The window is up. It is placed <em>once</em>, beside the pointer and nudged
+          just far enough that the pointer sits ~10px inside its edge. It never moves again on its
+          own and never follows the pointer.</p>
+        <dl>
+          <dt>On screen</dt><dd>The window. Pointer-transparent — clicks, hovers and scrolls pass
+            straight through it to the page beneath.</dd>
+          <dt>Held by</dt><dd><strong>The pointer being on the source image.</strong> Nothing else.</dd>
+          <dt>Accepts</dt><dd>Left press+release → pin. Left press+drag → detach. Right press →
+            dismiss. (Default button map.)</dd>
+          <dt>Ends on</dt><dd>Leaving the image, <em>immediately</em> — no grace period, even though
+            the window is sitting under your cursor.</dd>
+        </dl>
+      </article>
+
+      <article class="state open">
+        <header><span class="fam"><span class="id">S06</span>Open · held by the image</span><h3>hover-held, upgrading</h3></header>
+        <p class="say">Same as above, but the search is still running because a bigger original may
+          exist. The picture can be swapped in place beneath you.</p>
+        <dl>
+          <dt>On screen</dt><dd>The window, plus the ring docked into its lower-right corner — the
+            only signal that what you are looking at is not final.</dd>
+          <dt>On upgrade</dt><dd>The frame keeps its centre; only the pixels change.</dd>
+          <dt>Ends on</dt><dd>Same as hover-held. Leaving mid-search does not abort the loads
+            already in flight — they finish and warm the cache.</dd>
+        </dl>
+      </article>
+
+      <article class="state place">
+        <header><span class="fam"><span class="id">S07</span>Placed · held by the window</span><h3>detached</h3></header>
+        <p class="say">You dragged it more than 3px. It has been deliberately positioned, so it stops
+          tracking the image and starts answering to the pointer directly.</p>
+        <dl>
+          <dt>On screen</dt><dd>The window, now hit-testable — it intercepts the pointer instead of
+            passing it through.</dd>
+          <dt>Held by</dt><dd><strong>The pointer being on the window.</strong> The source image is
+            now irrelevant to it.</dd>
+          <dt>Accepts</dt><dd>Click → pin. Drag → move it again.</dd>
+          <dt>Ends on</dt><dd>The pointer leaving the window — <em>and</em> the source image is
+            suppressed, so moving back onto it does not re-open anything.</dd>
+        </dl>
+      </article>
+
+      <article class="state place">
+        <header><span class="fam"><span class="id">S08</span>Placed · held by the window</span><h3>detached, upgrading</h3></header>
+        <p class="say">A detached window whose search has not finished. Dragging never stops the
+          search.</p>
+        <dl>
+          <dt>On screen</dt><dd>The window plus the docked ring.</dd>
+          <dt>On upgrade</dt><dd>Frame centre held; the window does not jump under your hand.</dd>
+          <dt>Ends on</dt><dd>Same as detached.</dd>
+        </dl>
+      </article>
+
+      <article class="state place">
+        <header><span class="fam"><span class="id">S09</span>Transient</span><h3>dragging (move), unpinned</h3></header>
+        <p class="say">The button is down and the window is following the pointer 1:1. All hover
+          logic is suspended for the duration — a fast drag can outrun the frame, and the page
+          elements sliding underneath must not be allowed to cancel it.</p>
+        <dl>
+          <dt>On screen</dt><dd>The window, moving. Clamped to stay 4px inside the viewport.</dd>
+          <dt>Ends on</dt><dd>Release. Past 3px of travel it lands in <span class="tag place">detached</span>
+            and the release does <em>not</em> pin.</dd>
+        </dl>
+      </article>
+
+      <article class="state pin">
+        <header><span class="fam"><span class="id">S10</span>Pinned · modal</span><h3>pinned</h3></header>
+        <p class="say">A click promoted it. The backdrop now swallows clicks meant for the page, an X
+          appears, and the keyboard and wheel belong to the window.</p>
+        <dl>
+          <dt>On screen</dt><dd>The window, the X, and the backdrop (dimmed only if
+            <code>dimOpacity</code> is above 0).</dd>
+          <dt>Held by</dt><dd>Nothing. It outlives hover, scrolling and focus loss entirely.</dd>
+          <dt>Accepts</dt><dd>Wheel → zoom about the pointer. <code>+</code>&nbsp;/&nbsp;<code>−</code>
+            → zoom about the centre. <code>0</code> → back to the opening scale. Arrows → pan
+            (Shift for 3×). Drag the status bar → move the frame.</dd>
+          <dt>Ends on</dt><dd>The X, a click on the backdrop, Escape — or a right-click, under the
+            default button map.</dd>
+        </dl>
+      </article>
+
+      <article class="state pin">
+        <header><span class="fam"><span class="id">S11</span>Pinned · geometry</span><h3>pinned, frame growing</h3></header>
+        <p class="say">The image at the current scale is still smaller than the viewport cap, so
+          zooming in enlarges <em>the frame</em>. The picture always fits; there is nothing to pan.</p>
+        <dl>
+          <dt>Cursor</dt><dd>Default. Dragging the image does nothing.</dd>
+          <dt>Floor</dt><dd>Zooming out stops at the scale the window opened at.</dd>
+          <dt>Ends on</dt><dd>The frame reaching <code>maxWidthPct</code>&nbsp;/&nbsp;<code>maxHeightPct</code>
+            (92%), which promotes it to the state below.</dd>
+        </dl>
+      </article>
+
+      <article class="state pin">
+        <header><span class="fam"><span class="id">S12</span>Pinned · geometry</span><h3>pinned, image spilling</h3></header>
+        <p class="say">The frame has hit the viewport cap and is now fixed. Further zoom pushes the
+          image out past the frame's edges, which is the moment panning starts to mean something.</p>
+        <dl>
+          <dt>Cursor</dt><dd><code>grab</code> over the image.</dd>
+          <dt>Accepts</dt><dd>Drag the image to pan; arrows to pan; wheel keeps the pixel under the
+            pointer where it is.</dd>
+          <dt>Ceiling</dt><dd><code>maxZoom</code> (32×), hard-capped at 64×.</dd>
+        </dl>
+      </article>
+
+      <article class="state pin">
+        <header><span class="fam"><span class="id">S13</span>Pinned · transient</span><h3>dragging (pan)</h3></header>
+        <p class="say">Press on the image while it is spilling. The picture moves inside a frame that
+          stays put.</p>
+        <dl>
+          <dt>Cursor</dt><dd><code>grabbing</code>.</dd>
+          <dt>Bounds</dt><dd>Clamped so the frame never shows past the edges of the picture.</dd>
+          <dt>Ends on</dt><dd>Release.</dd>
+        </dl>
+      </article>
+
+      <article class="state pin">
+        <header><span class="fam"><span class="id">S14</span>Pinned · transient</span><h3>dragging (move)</h3></header>
+        <p class="say">Press on the <em>status bar</em>. The whole frame moves; the picture stays put
+          inside it. This is the only way to move a pinned window — which is why hiding the status
+          bar also removes it.</p>
+        <dl>
+          <dt>Cursor</dt><dd><code>move</code> over the bar.</dd>
+          <dt>Ends on</dt><dd>Release.</dd>
+        </dl>
+      </article>
+
+      <article class="state pin">
+        <header><span class="fam"><span class="id">S15</span>Pinned · working</span><h3>pinned, upgrading</h3></header>
+        <p class="say">Pinning is a reason to keep looking, not to stop, so the search runs on. The
+          swap is engineered to be invisible.</p>
+        <dl>
+          <dt>On upgrade</dt><dd>Three things are held constant: the frame's centre, its on-screen
+            size, and the fraction of the picture sitting at the frame's middle. Only the pixels
+            improve.</dd>
+        </dl>
+      </article>
+
+      <article class="state gone">
+        <header><span class="fam"><span class="id">S16</span>Gone</span><h3>suppressed</h3></header>
+        <p class="say">No window — and the image it came from is blocked from opening another one.
+          Entered by dismissing with a right-click, or by a detached window losing the pointer.</p>
+        <dl>
+          <dt>On screen</dt><dd>Nothing.</dd>
+          <dt>Why</dt><dd>Without it, the very next mouse movement over the same image would just
+            re-open what you had deliberately got rid of.</dd>
+          <dt>Ends on</dt><dd>The pointer leaving that image and coming back. Other images are
+            unaffected.</dd>
+        </dl>
+      </article>
+
+      <article class="state gone">
+        <header><span class="fam"><span class="id">S17</span>Gone</span><h3>fading out</h3></header>
+        <p class="say">The window has been ended and is running out its <code>fadeMs</code> (90&nbsp;ms)
+          opacity transition. It is already inert.</p>
+        <dl>
+          <dt>Accepts</dt><dd>Nothing. It is not hit-testable and holds no state.</dd>
+          <dt>Then</dt><dd>~60&nbsp;ms later the decoded image is released, so a long session does not
+            accumulate bitmaps.</dd>
+        </dl>
+      </article>
+
+    </div>
+  </section>
+
+  <section>
+    <div class="sechead">
+      <span class="eyebrow">Transitions</span>
+      <h2>What each gesture does, from where</h2>
+    </div>
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr><th class="idcol">ID</th><th>From</th><th>You do</th><th>It becomes</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="idcol idk">T01</td><td class="k"><span class="tag wait">idle</span></td><td>Point at an eligible image</td><td class="to">armed</td></tr>
+          <tr><td class="idcol idk">T02</td><td class="k"><span class="tag wait">armed</span></td><td>Wait 120 ms</td><td class="to">resolving</td></tr>
+          <tr><td class="idcol idk">T03</td><td class="k"><span class="tag work">resolving</span></td><td>Wait for the first hit</td><td class="to">hover-held</td></tr>
+          <tr><td class="idcol idk">T04</td><td class="k"><span class="tag work">resolving</span></td><td>Nothing bigger exists</td><td class="to">idle — no window ever appears</td></tr>
+          <tr><td class="idcol idk">T05</td><td class="k"><span class="tag open">hover-held</span></td><td>Move onto the next image</td><td class="to">that image's own window</td></tr>
+          <tr><td class="idcol idk">T06</td><td class="k"><span class="tag open">hover-held</span></td><td>Move onto blank page</td><td class="to">idle</td></tr>
+          <tr><td class="idcol idk">T07</td><td class="k"><span class="tag open">hover-held</span></td><td>Click</td><td class="to">pinned</td></tr>
+          <tr><td class="idcol idk">T08</td><td class="k"><span class="tag open">hover-held</span></td><td>Drag &gt; 3px</td><td class="to">detached</td></tr>
+          <tr><td class="idcol idk">T09</td><td class="k"><span class="tag open">hover-held</span></td><td>Drag &lt; 3px, then release</td><td class="to">pinned — a wobble is still a click</td></tr>
+          <tr><td class="idcol idk">T10</td><td class="k"><span class="tag open">hover-held</span></td><td>Right-click</td><td class="to">suppressed</td></tr>
+          <tr><td class="idcol idk">T11</td><td class="k"><span class="tag place">detached</span></td><td>Move off the window</td><td class="to">suppressed</td></tr>
+          <tr><td class="idcol idk">T12</td><td class="k"><span class="tag place">detached</span></td><td>Move off the window onto a different image</td><td class="to">that image's own window</td></tr>
+          <tr><td class="idcol idk">T13</td><td class="k"><span class="tag place">detached</span></td><td>Move back onto the source image</td><td class="to">suppressed — nothing re-opens</td></tr>
+          <tr><td class="idcol idk">T14</td><td class="k"><span class="tag place">detached</span></td><td>Click</td><td class="to">pinned</td></tr>
+          <tr><td class="idcol idk">T15</td><td class="k"><span class="tag gone">suppressed</span></td><td>Leave that image, come back</td><td class="to">armed</td></tr>
+          <tr><td class="idcol idk">T16</td><td class="k"><span class="tag pin">pinned</span></td><td>Escape, the X, or click the backdrop</td><td class="to">idle</td></tr>
+          <tr><td class="idcol idk">T17</td><td class="k"><span class="tag pin">pinned</span></td><td>Wheel or <code>+</code> <code>−</code></td><td class="to">pinned, growing → spilling</td></tr>
+          <tr><td class="idcol idk">T18</td><td class="k"><span class="tag pin">pinned</span></td><td>Press <code>0</code></td><td class="to">pinned, back at the opening scale</td></tr>
+          <tr><td class="idcol idk">T19</td><td class="k"><span class="tag pin">pinned</span></td><td>Resize the browser window</td><td class="to">pinned, re-fitted — it does not close</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <div class="sechead">
+      <span class="eyebrow">Terminators</span>
+      <h2>Everything that closes an unpinned window</h2>
+    </div>
+    <div class="kills">
+      <div class="kill"><span class="idk" style="min-width:26px;flex:none">K1</span><span class="w">leave</span><span class="d">The pointer leaves whatever is holding it — the image, or the window once detached.</span></div>
+      <div class="kill"><span class="idk" style="min-width:26px;flex:none">K2</span><span class="w">scroll</span><span class="d">Any page scroll. A detached window dies too; only pinning survives scrolling.</span></div>
+      <div class="kill"><span class="idk" style="min-width:26px;flex:none">K3</span><span class="w">blur</span><span class="d">The browser window losing focus.</span></div>
+      <div class="kill"><span class="idk" style="min-width:26px;flex:none">K4</span><span class="w">resize</span><span class="d">Resizing the browser window. Pinned windows re-fit instead.</span></div>
+      <div class="kill"><span class="idk" style="min-width:26px;flex:none">K5</span><span class="w">Escape</span><span class="d">Closes it, but does not suppress the image.</span></div>
+      <div class="kill"><span class="idk" style="min-width:26px;flex:none">K6</span><span class="w">mousedown</span><span class="d">A press anywhere on the page outside the window's rectangle.</span></div>
+      <div class="kill"><span class="idk" style="min-width:26px;flex:none">K7</span><span class="w">key release</span><span class="d">In modifier mode, releasing the modifier key.</span></div>
+      <div class="kill"><span class="idk" style="min-width:26px;flex:none">K8</span><span class="w">button held</span><span class="d">No new window opens at all while a mouse button is down.</span></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sechead">
+      <span class="eyebrow">Button map</span>
+      <h2>Which button does what, and where</h2>
+    </div>
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr><th class="idcol">ID</th><th>Setting</th><th>On an open or detached window</th><th>On a pinned window</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="idcol idk">B1</td>
+            <td class="k">Pin with <b>left</b><br><span style="color:var(--faint)">default</span></td>
+            <td>Left pins · right dismisses and suppresses</td>
+            <td>Left pans or moves · right closes it</td>
+          </tr>
+          <tr>
+            <td class="idcol idk">B2</td>
+            <td class="k">Pin with <b>right</b></td>
+            <td>Right pins · left dismisses and suppresses</td>
+            <td>Left pans or moves · right does nothing, so the browser's own menu appears over the picture</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="prose">The left button always pans or moves a pinned window, whichever way the setting
+      is pointed — otherwise a pinned frame could have no way to be moved. That last cell is the one
+      place the browser's native context menu is still reachable over the window.</p>
+  </section>
+
+  <section>
+    <div class="sechead">
+      <span class="eyebrow">Known edges</span>
+      <h2>Consequences worth knowing about</h2>
+    </div>
+    <ol class="edges">
+      <li><b>A click on a hovered image usually pins instead of following the link.</b> The window is
+        invisible to the pointer, but a click inside its rectangle is still claimed by geometry — and
+        since the window is nudged to touch your cursor, your cursor is nearly always inside it. This
+        is the price of click-to-pin. If you want the page's own click, move off the image first.</li>
+      <li><b>Escape is not the same as a right-click dismiss.</b> Escape hides the window but does not
+        suppress the image, so crossing into a child element and back can re-open it. Right-click is
+        the one that stays down.</li>
+      <li><b>Scrolling kills a detached window.</b> Dragging a window aside to read the page under it
+        does not survive a scroll — pin it if you want that.</li>
+      <li><b>The window never follows the pointer.</b> It is placed once, when it opens. Moving around
+        within the same image does not reposition it.</li>
+      <li><b>A hover-held window cannot be clicked <em>on</em>.</b> Anything living inside it is out of
+        reach until you detach or pin, because moving toward it means leaving the image, which ends
+        it.</li>
+      <li><b>Leaving mid-search does not cancel the network.</b> Probes already in flight finish and
+        populate the cache — which is why an image that "did nothing" the first time can open
+        instantly a moment later. That is a cache warming up, not a fixed bug.</li>
+    </ol>
+  </section>
+
+</div>

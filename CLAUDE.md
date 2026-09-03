@@ -4,6 +4,12 @@ A single-purpose replacement for the Hover Zoom+ browser extension. **Images onl
 audio, galleries, downloads, or action keys, by design. Inherits the shared rules in
 `../CLAUDE.md` (version bumps, commit+push, no `innerHTML`, `#89b4fa` checkboxes).
 
+> **[`INTERACTION.md`](INTERACTION.md) is the behavioural spec for the preview window** — every
+> state, transition, terminator and known edge, each with a permanent ID (`S07`, `T12`, `E1` …).
+> The user cites those IDs in conversation, so read it before discussing or changing window
+> behaviour, and keep it current when behaviour changes. This file holds the *reasons*;
+> `INTERACTION.md` holds the *behaviour*. Where they overlap, do not let them drift.
+
 ## Why this exists
 
 Hover Zoom+ (extesy/hoverzoom) zooms some images on a page and silently ignores others. That is
@@ -57,6 +63,9 @@ path has been touched twice ever, both times in 2021.
   writes to the DOM. Nothing else may set `box`/`img` styles or the two representations drift.
 
 ## Three viewer states: hover → detached → pinned
+
+*Behaviour is specified in [`INTERACTION.md`](INTERACTION.md) (`S05`, `S07`, `S10` and the rule
+`R1`). What follows is why it is built that way — keep the two in step.*
 
 The preview escalates by gesture, and each step is one gesture, not a setting.
 
