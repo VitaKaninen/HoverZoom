@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.12.0
+// @version     0.13.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -50,10 +50,12 @@
         minRatio: 1.2,              // full size must be at least this much bigger
         showEvenIfNotLarger: false, // show at natural size even when it isn't an upgrade
         skipVideos: true,           // never preview a video thumbnail or a player surface
+        skipPageBackgrounds: true,  // never preview a page's own background, or a tiled one
         keepSearching: true,        // show the first hit at once, then keep probing and upgrade in place
         skipWhileMouseDown: true,   // don't fire mid drag/selection
         siteMode: 'blacklist',      // 'blacklist' | 'whitelist'
         siteList: [],               // hostnames, matched by suffix
+        blockList: [],              // image URLs never to preview; '*' matches anything
 
         // pinned mode
         pinButton: 'left',          // 'left' | 'right' — whichever pins, the other dismisses
@@ -76,6 +78,8 @@
         showStatusBar: true,        // filename / type / size / dimensions strip, also the move handle; auto-fades
         spinnerTheme: 'auto',       // 'auto' (follows the browser) | 'dark' | 'light'
         noReferrer: false,          // strip referrer when loading full image
+
+        debug: false,               // log every hover decision to the console
     };
 
     const KEY = 'hoverZoomSettings';
@@ -124,6 +128,28 @@
             return host === e || host.endsWith('.' + e);
         });
         return cfg.siteMode === 'whitelist' ? listed : !listed;
+    }
+
+    // ------------------------------------------------------------------- debug
+    //
+    // Off by default and completely silent when off. It exists for the one class of bug
+    // this script cannot reason about from the source: "it behaves differently in my
+    // browser than in yours". Every gate here is a DOM read, so only the DOM in front of
+    // the user can say which one did or did not fire — and the answer to "is the installed
+    // copy even the current one" is the first line it prints.
+
+    function version() {
+        try {
+            if (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) {
+                return 'v' + GM_info.script.version;
+            }
+        } catch (e) { /* not every manager exposes GM_info */ }
+        return 'v?';
+    }
+
+    function dbg(label, data) {
+        if (!cfg.debug) return;
+        try { console.log('[HoverZoom ' + version() + '] ' + label, data); } catch (e) { /* no console */ }
     }
 
     // ------------------------------------------------------------- url helpers
@@ -185,6 +211,31 @@
             if (looksLikeImage(value)) out.push(value);
         });
         return out;
+    }
+
+    // Images the user has said never to preview: a page's tiled wallpaper, a watermark, a
+    // sprite sheet, anything that keeps popping a preview nobody asked for. An entry is an
+    // exact URL, or a glob when it contains '*' — which is what a background carrying a
+    // cache-busting query needs, since its URL is never twice the same.
+    //
+    // Pure, and deliberately inside the slice test-resolver.js evaluates, so the matching
+    // can be exercised offline like the URL rules. A wrong match here is silent: the image
+    // simply stops previewing, with nothing on screen to say why.
+    function blockMatch(url, list) {
+        if (!url || !list || !list.length) return false;
+        for (let i = 0; i < list.length; i++) {
+            const entry = String(list[i]).trim();
+            if (!entry) continue;
+            if (entry.indexOf('*') === -1) {
+                if (entry === url) return true;
+                continue;
+            }
+            const rx = new RegExp('^' + entry.split('*').map(function (part) {
+                return part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            }).join('.*') + '$');
+            if (rx.test(url)) return true;
+        }
+        return false;
     }
 
     // Site-agnostic rewrites that turn a thumbnail URL into its original.
@@ -321,6 +372,7 @@
             let abs;
             try { abs = new URL(u, location.href).href; } catch (e) { return; }
             if (abs.startsWith('data:') || abs.startsWith('blob:')) return;
+            if (blocked(abs)) return;       // never probe something the user has ruled out
             if (seen.has(abs)) return;
             seen.add(abs);
             out.push(abs);
@@ -367,7 +419,7 @@
         }
 
         // 4. rewrites of the displayed src
-        const shown = el.tagName === 'IMG' ? (el.currentSrc || el.src) : backgroundUrl(el);
+        const shown = shownUrl(el);
         if (shown) upgradeCandidates(shown).forEach(add);
 
         // 5. the displayed src itself, last — it is the fallback, never the upgrade
@@ -381,6 +433,17 @@
         if (!bg || bg === 'none') return null;
         const m = bg.match(/url\((['"]?)(.*?)\1\)/);
         return m ? m[2] : null;
+    }
+
+    // What this element is actually showing right now — the only URL that exists for it
+    // without a probe. Three places wanted this expression; it is one function so a change
+    // to how "displayed" is read cannot land in two of them and miss the third.
+    function shownUrl(el) {
+        return el.tagName === 'IMG' ? (el.currentSrc || el.src) : backgroundUrl(el);
+    }
+
+    function blocked(url) {
+        return blockMatch(url, cfg.blockList);
     }
 
     // ------------------------------------------------------------------ probing
@@ -420,7 +483,8 @@
 
     async function resolve(el, displayed, token, onHit) {
         const candidates = collectCandidates(el).slice(0, MAX_PROBES);
-        const shown = el.tagName === 'IMG' ? (el.currentSrc || el.src) : backgroundUrl(el);
+        const shown = shownUrl(el);
+        dbg('candidates', candidates);
         let best = null;
         for (const url of candidates) {
             if (token.cancelled) return best;
@@ -432,11 +496,12 @@
             if (!usable) continue;
             if (best && dim.w * dim.h <= best.w * best.h) continue;   // not an improvement
             best = { url: url, w: dim.w, h: dim.h };
+            dbg('hit', best);
             if (onHit && !token.cancelled) onHit(best);
             if (!cfg.keepSearching) return best;
         }
         if (best) return best;
-        if (cfg.showEvenIfNotLarger && shown && !token.cancelled) {
+        if (cfg.showEvenIfNotLarger && shown && !blocked(shown) && !token.cancelled) {
             const dim = await probe(shown);
             if (dim) {
                 best = { url: shown, w: dim.w, h: dim.h };
@@ -466,7 +531,8 @@
     // DOM. Nothing else may set box/img styles, or the two will drift.
 
     let host = null, root = null, box = null, imgEl = null, dimEl = null, closeEl = null;
-    let capEl = null, capNameEl = null, capMetaEl = null, spinEl = null, spinSvg = null;
+    let capEl = null, capNameEl = null, capMetaEl = null, blockEl = null;
+    let spinEl = null, spinSvg = null;
 
     const SVG_NS = 'http://www.w3.org/2000/svg';
     const SPIN_SIZE = 34;                           // px, matches the .spin rule
@@ -576,6 +642,14 @@
             '.cap .name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;',
             'font-family:ui-monospace,SFMono-Regular,Consolas,monospace;color:#a6adc8}',
             '.cap .meta{flex:none;white-space:nowrap}',
+            // "Never this image again". Only on a PLACED window, for the same reason the X
+            // is: a hover preview is pointer-transparent, so a button on it cannot be
+            // clicked at all. Hover it, click to pin, then press this.
+            '.cap .block{flex:none;display:none;width:18px;height:18px;line-height:16px;',
+            'text-align:center;border-radius:4px;border:1px solid #45475a;',
+            'background:rgba(49,50,68,.9);color:#a6adc8;cursor:pointer;font-size:12px}',
+            '.box.hot .cap .block{display:block}',
+            '.cap .block:hover{background:#f38ba8;border-color:#f38ba8;color:#1e1e2e}',
             // The bar sits ON the picture, so on anything with text near the bottom — a meme,
             // a screenshot, a comic panel — it covers the thing you are reading. It fades out
             // after BAR_IDLE_MS of pointer stillness and comes back the moment the pointer
@@ -627,8 +701,19 @@
         capNameEl.className = 'name';
         capMetaEl = document.createElement('span');
         capMetaEl.className = 'meta';
+        blockEl = document.createElement('span');
+        blockEl.className = 'block';
+        blockEl.title = 'Never preview this image again';
+        blockEl.textContent = '⊘';
+        // Both halves swallowed, and both needed: onBoxDown/onBoxClick are capture
+        // listeners on an ANCESTOR, so they run first — isBoxControl() is what stops them
+        // eating this button's own events. See the note on isBoxControl().
+        blockEl.addEventListener('mousedown', function (e) { e.preventDefault(); e.stopPropagation(); }, true);
+        blockEl.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); blockCurrent(); }, true);
+
         capEl.appendChild(capNameEl);
         capEl.appendChild(capMetaEl);
+        capEl.appendChild(blockEl);
 
         closeEl = document.createElement('div');
         closeEl.className = 'x';
@@ -796,7 +881,7 @@
     // right-click to the BROWSER instead, whose own menu has no such limit — see the
     // image-actions section of CLAUDE.md.
 
-    const BAR_IDLE_MS = 2000;
+    const BAR_IDLE_MS = 1000;
 
     let barTimer = 0;
 
@@ -1138,7 +1223,27 @@
     // the X looked correct, hovered correctly and did nothing until this existed. Any new
     // control added inside the box goes in here; the symptom of forgetting is silence.
     function isBoxControl(t) {
-        return closeEl.contains(t);
+        return closeEl.contains(t) || blockEl.contains(t);
+    }
+
+    // "Never preview this image again", from the ⊘ in the status bar. Records the URL on
+    // screen AND the source element's own src, because those differ whenever the preview is
+    // an upgrade — blocking only the resolved one would leave the thumbnail still opening a
+    // preview that then failed to upgrade.
+    //
+    // reloadSettings() first: the list is the one setting written from outside the panel, so
+    // it is the one place a stale in-memory cfg would silently discard another tab's entries.
+    function blockCurrent() {
+        if (!view) return;
+        reloadSettings();
+        let added = false;
+        [view.url, activeShown].forEach(function (u) {
+            if (u && cfg.blockList.indexOf(u) === -1) { cfg.blockList.push(u); added = true; }
+        });
+        if (added) saveSettings();
+        dbg('blocked', cfg.blockList);
+        probeCache.clear();
+        dismiss();
     }
 
     function onBoxClick(e) {
@@ -1208,6 +1313,7 @@
     // ------------------------------------------------------------- interaction
 
     let active = null;      // element currently zoomed or pending
+    let activeShown = null; // what that element was displaying — the second URL ⊘ blocks
     let token = null;       // cancellation token for the in-flight resolve
     let timer = null;
     let drag = null;        // { x, y, mode:'pan'|'move', dist, moved } while dragging
@@ -1305,9 +1411,31 @@
         return false;
     }
 
-    function inVideoContext(el) {
-        if (el.closest && el.closest('video')) return true;
-        if (overVideoSurface(el)) return true;
+    // closest() and parentElement both stop dead at a shadow-root boundary. A site that
+    // builds its cards out of custom elements — YouTube's entire feed — can therefore put
+    // the <img> inside a shadow root and the <a> that wraps it outside, and the link gate
+    // below sees no link at all. This is the composed walk: ordinary closest() first, then
+    // hop to the shadow host and keep going.
+    function closestAcross(el, sel) {
+        let n = el;
+        while (n) {
+            if (n.closest) {
+                const hit = n.closest(sel);
+                if (hit) return hit;
+            }
+            const root = n.getRootNode ? n.getRootNode() : null;
+            n = root && root.host ? root.host : null;
+        }
+        return null;
+    }
+
+    // Returns WHY this element counts as video, or null. A string rather than a boolean
+    // because the debug log prints it: when a preview opens over a video it should not have,
+    // "which of the four gates fired, and what did the fourth one see" is the whole
+    // question, and it can only be answered on the machine showing the bug.
+    function videoReason(el) {
+        if (el.closest && el.closest('video')) return 'inside a <video>';
+        if (overVideoSurface(el)) return 'over a laid-out <video> rectangle';
         // Walk up only while the ancestor still looks like ONE card. The moment it holds
         // more than one image it is a grid or a page, and a <video> anywhere else in it
         // would poison every image on the page. Measured 2026-09-03: without this bound the
@@ -1315,20 +1443,71 @@
         let n = el;
         for (let up = 0; n && up < 4; up++, n = n.parentElement) {
             if (up > 0 && n.querySelectorAll && n.querySelectorAll('img').length > 1) break;
-            if (n.querySelector && n.querySelector('video')) return true;
+            if (n.querySelector && n.querySelector('video')) return '<video> in ancestor #' + up;
         }
-        const a = el.closest && el.closest('a[href]');
-        return !!(a && VIDEO_LINK_RE.test(a.getAttribute('href') || ''));
+        const a = closestAcross(el, 'a[href]');
+        const href = a ? (a.getAttribute('href') || '') : '';
+        if (href && VIDEO_LINK_RE.test(href)) return 'video link: ' + href;
+        return null;
+    }
+
+    function inVideoContext(el) {
+        return !!videoReason(el);
+    }
+
+    // A page's own background, and any background laid end to end, are wallpaper rather
+    // than pictures: hovering blank space on such a page opened a preview of the tile, and
+    // on a tiled page there is blank space everywhere.
+    //
+    // `background-repeat: repeat` alone does NOT mean tiled — it is the CSS default, so a
+    // hero image with `background-size: cover` computes to it too and would be caught. It is
+    // repeat AND an auto size together that mean the image is being laid out at its natural
+    // size and stepped across the element, which is the thing being described.
+    function isWallpaper(el) {
+        if (el === document.body || el === document.documentElement) return true;
+        const s = getComputedStyle(el);
+        if (/no-repeat/.test(s.backgroundRepeat)) return false;
+        return /^auto/.test(s.backgroundSize);
     }
 
     function eligible(el) {
         if (!el) return null;
         if (NEVER[el.tagName]) return null;
         if (cfg.skipVideos && inVideoContext(el)) return null;
-        if (el.tagName === 'IMG') return el;
+        if (el.tagName === 'IMG') return blocked(shownUrl(el)) ? null : el;
         // element with a background image and no img of its own
         if (el.querySelector && el.querySelector('img')) return null;
-        return backgroundUrl(el) ? el : null;
+        const bg = backgroundUrl(el);
+        if (!bg || blocked(bg)) return null;
+        if (cfg.skipPageBackgrounds && isWallpaper(el)) return null;
+        return el;
+    }
+
+    // One console line per hover, when `debug` is on. Every field is something that differs
+    // between browsers or between installs, and that nothing on screen reveals: which gate
+    // decided, whether an ancestor link was findable at all, whether the element is inside a
+    // shadow root, and how many laid-out <video> elements the page is offering.
+    function hoverReport(t, el) {
+        const a = closestAcross(t, 'a[href]');
+        const vids = document.getElementsByTagName('video');
+        const sizes = [];
+        for (let i = 0; i < vids.length; i++) {
+            const r = vids[i].getBoundingClientRect();
+            sizes.push(Math.round(r.width) + '×' + Math.round(r.height));
+        }
+        const cls = typeof t.className === 'string' ? t.className.trim() : '';
+        return {
+            target: t.tagName + (t.id ? '#' + t.id : '') +
+                (cls ? '.' + cls.split(/\s+/).slice(0, 2).join('.') : ''),
+            showing: (shownUrl(t) || '(nothing)').slice(0, 160),
+            eligible: !!el,
+            skipVideos: cfg.skipVideos,
+            videoGate: videoReason(t) || 'none — NOT treated as video',
+            videosOnPage: sizes.length ? sizes.join(', ') : 'none',
+            ancestorLink: a ? (a.getAttribute('href') || '(empty href)').slice(0, 160)
+                : 'NO <a href> ancestor, even across shadow roots',
+            inShadowRoot: !!(t.getRootNode && t.getRootNode() !== document),
+        };
     }
 
     function sizeOf(el) {
@@ -1342,6 +1521,7 @@
         if (token) token.cancelled = true;
         token = null;
         active = null;
+        activeShown = null;
         detached = false;
         disableWheelZoom();
         resetBar();
@@ -1446,6 +1626,7 @@
         if (cfg.activation === 'modifier' && !modifierHeld(e) && !modifierDown) return;
 
         const el = eligible(e.target);
+        if (cfg.debug) dbg('hover', hoverReport(e.target, el));
         if (!el) {
             // moving onto the page background closes an open viewer
             if (active && !active.contains(e.target)) cancel();
@@ -1460,6 +1641,7 @@
         if (cfg.maxDisplayed > 0 && (displayed.w > cfg.maxDisplayed || displayed.h > cfg.maxDisplayed)) return;
 
         active = el;
+        activeShown = shownUrl(el);
         const myToken = token = { cancelled: false };
         timer = setTimeout(async function () {
             showSpinner();
@@ -1611,7 +1793,9 @@
             'border-radius:6px;padding:6px 14px;font-size:12px;cursor:pointer}',
             'button:hover{background:' + C.surface2 + '}',
             'button.primary{background:' + C.blue + ';color:' + C.base + ';border-color:' + C.blue + ';font-weight:600}',
+            'button.add{background:' + C.green + ';color:' + C.base + ';border-color:' + C.green + ';font-weight:600}',
             'button.danger{color:' + C.red + '}',
+            '.listbtns{display:flex;gap:8px;justify-content:flex-end;margin-top:6px}',
         ].join('');
         sr.appendChild(st);
 
@@ -1625,7 +1809,9 @@
         sr.appendChild(panel);
 
         const h = document.createElement('h2');
-        h.textContent = 'Hover Zoom — settings';
+        // The version is here so "which copy is installed in this browser" is answerable
+        // without opening the manager. Read from GM_info, so it cannot drift from the header.
+        h.textContent = 'Hover Zoom — settings  ·  ' + version();
         panel.appendChild(h);
 
         const controls = [];
@@ -1701,6 +1887,54 @@
             row(labelText, hintText, el);
         }
 
+        // A labelled textarea backed by one of the array settings, plus a row of buttons
+        // under it. Both lists behave the same way, so they are built the same way.
+        function list(key, labelText, hintText) {
+            const ta = document.createElement('textarea');
+            ta.value = cfg[key].join('\n');
+            ta.spellcheck = false;
+            controls.push(function () {
+                cfg[key] = ta.value.split('\n').map(function (s) { return s.trim(); })
+                    .filter(function (s) { return s.length > 0; });
+            });
+            const wrap = document.createElement('div');
+            const l = document.createElement('label');
+            l.textContent = labelText;
+            const hint = document.createElement('span');
+            hint.className = 'hint';
+            hint.textContent = hintText;
+            l.appendChild(hint);
+            wrap.appendChild(l);
+            wrap.appendChild(ta);
+            panel.appendChild(wrap);
+            return ta;
+        }
+
+        function listButtons(buttons) {
+            const r = document.createElement('div');
+            r.className = 'listbtns';
+            buttons.forEach(function (b) {
+                const el = document.createElement('button');
+                if (b.cls) el.className = b.cls;
+                if (b.title) el.title = b.title;
+                el.textContent = b.label;
+                el.addEventListener('click', b.onClick);
+                r.appendChild(el);
+            });
+            panel.appendChild(r);
+        }
+
+        // Append a line unless it is already there, and scroll it into view. Nothing reaches
+        // storage until Save, exactly like every other control on this panel — the textarea
+        // visibly changing is the feedback that the button did something.
+        function addLine(ta, value) {
+            const lines = ta.value.split('\n').map(function (s) { return s.trim(); })
+                .filter(function (s) { return s.length > 0; });
+            if (lines.indexOf(value) === -1) lines.push(value);
+            ta.value = lines.join('\n');
+            ta.scrollTop = ta.scrollHeight;
+        }
+
         function color(key, labelText) {
             const el = document.createElement('input');
             el.type = 'color';
@@ -1728,27 +1962,31 @@
             'skips media elements, anything with a player next to it, and images inside a ' +
             'link that plainly points at a video (/watch?, /shorts/, /embed/, /video/, ' +
             'youtu.be, .mp4 and friends) — turn off if it is skipping stills you want');
+        check('skipPageBackgrounds', 'Never preview page backgrounds',
+            'the page\'s own background, and any background tiled end to end — wallpaper ' +
+            'rather than a picture, and on a tiled page there is blank space everywhere to ' +
+            'trip over it');
         check('skipWhileMouseDown', 'Suppress while a mouse button is down');
         pick('siteMode', 'Site list mode', null, [
             ['blacklist', 'Disable on listed sites'], ['whitelist', 'Enable only on listed sites']]);
 
-        const sites = document.createElement('textarea');
-        sites.value = cfg.siteList.join('\n');
-        sites.spellcheck = false;
-        controls.push(function () {
-            cfg.siteList = sites.value.split('\n').map(function (s) { return s.trim(); })
-                .filter(function (s) { return s.length > 0; });
-        });
-        const sr2 = document.createElement('div');
-        const sl = document.createElement('label');
-        sl.textContent = 'Sites';
-        const sh = document.createElement('span');
-        sh.className = 'hint';
-        sh.textContent = 'one hostname per line; subdomains included';
-        sl.appendChild(sh);
-        sr2.appendChild(sl);
-        sr2.appendChild(sites);
-        panel.appendChild(sr2);
+        const sites = list('siteList', 'Sites', 'one hostname per line; subdomains included');
+        listButtons([
+            { label: '+ This site', cls: 'add', title: location.hostname,
+                onClick: function () { addLine(sites, location.hostname); } },
+        ]);
+
+        section('Never preview these images');
+        note('Add one with the ⊘ button on a placed preview',
+            'Hover the image, click the preview to pin it, then press ⊘ in its status bar: ' +
+            'the image goes into this list and the preview closes. For a page whose tiled ' +
+            'background or watermark previews everywhere, that is one click and done.');
+        const blocks = list('blockList', 'Image URLs',
+            'one per line; * matches anything, so …/tile.png?* covers a cache-busted background');
+        listButtons([
+            { label: 'Clear all', cls: 'danger',
+                onClick: function () { blocks.value = ''; } },
+        ]);
 
         section('Pinned mode');
         note('Drag the preview to keep it, click it to pin it',
@@ -1786,12 +2024,19 @@
         num('dimOpacity', 'Dim the page behind', '% — 0 disables', 0, 90, 5);
         check('showStatusBar', 'Show the status bar',
             'filename, format, dimensions, size — and the handle that moves a pinned frame. ' +
-            'It fades out after two seconds of a still pointer so it stops covering the ' +
+            'It fades out after a second of a still pointer so it stops covering the ' +
             'bottom of the picture, and returns when you move the pointer over the preview');
         pick('spinnerTheme', 'Loading ring',
             'auto follows the browser’s light/dark setting', [
                 ['auto', 'Match the browser'], ['dark', 'Always dark'], ['light', 'Always light']]);
         check('noReferrer', 'Strip referrer', 'helps on some hosts, breaks others');
+
+        section('Diagnostics');
+        check('debug', 'Log every hover to the console',
+            'one line per hover in the browser console (F12): what was under the pointer, ' +
+            'whether it was treated as a video and by which rule, whether an ancestor link ' +
+            'was findable, and the URLs probed. Off unless a problem is being chased — it ' +
+            'is noisy on a page you are moving around');
 
         const foot = document.createElement('div');
         foot.className = 'foot';
@@ -1830,4 +2075,17 @@
     if (typeof GM_registerMenuCommand === 'function') {
         GM_registerMenuCommand('Hover Zoom settings', openPanel);
     }
+
+    // First line in the console when debug is on: which copy of the script is actually
+    // installed here, and whether the gates that matter are even armed. "Works in one
+    // browser, not another" is a stale install until proved otherwise.
+    dbg('loaded', {
+        version: version(),
+        url: location.href,
+        enabled: cfg.enabled,
+        siteEnabled: siteEnabled(),
+        skipVideos: cfg.skipVideos,
+        skipPageBackgrounds: cfg.skipPageBackgrounds,
+        blockList: cfg.blockList.length,
+    });
 })();

@@ -206,7 +206,7 @@ leftover `closeMenu()` is a runtime `ReferenceError` in a handler, which fails s
 
 The bar is drawn ON the picture, so on a meme, a screenshot or a comic panel it covers the text
 being read. `.cap.idle` sets `opacity:0` **and** `pointer-events:none`, `showBar()` clears it and
-arms a `BAR_IDLE_MS` (2000 ms) timer, and `onMove` calls `showBar()` only when the pointer is over
+arms a `BAR_IDLE_MS` (1000 ms since v0.13.0, 2000 before) timer, and `onMove` calls `showBar()` only when the pointer is over
 the window — moving anywhere else lets it fade, which is the point. `resetBar()` in `cancel()`
 keeps a closed preview from reopening with a stale class.
 
@@ -219,14 +219,83 @@ pointer first brings the real handle back. Points that are load-bearing:
   `hot` ghost above — something you cannot see still answering the mouse.
 - **`showBar()` is called from `onMove` only when the pointer is over the window** (`ours()` or
   `pointInPreview()`). Calling it on every mousemove would mean the bar never fades while the
-  pointer is anywhere on screen, which is not what "after two seconds" means.
+  pointer is anywhere on screen, which is not what "after a second" means.
 - **The timeout re-checks `view`** before adding `idle`, and `cancel()` calls `resetBar()`, so a
   preview cannot open with a stale class from the last one.
 
-Verified in the pane: `cap` → `cap idle` after 2.4 s of a still pointer → `cap` again on a
-mousemove over the window; while pinned, `pointer-events` goes `auto` → `none` → `auto` with it.
-Note the pane never advances CSS transitions (the zero-frame problem below), so **read the class,
-not the opacity** — computed opacity there is stuck at whatever it started as and proves nothing.
+Verified in the pane: `cap` → `cap idle` after a still pointer → `cap` again on a mousemove over
+the window; while pinned, `pointer-events` goes `auto` → `none` → `auto` with it. Note the pane
+never advances CSS transitions (the zero-frame problem below), so **read the class, not the
+opacity** — computed opacity there is stuck at whatever it started as and proves nothing. **Time
+the flip with a `MutationObserver`, not a polling loop**: the pane's `setTimeout` runs slow and
+each round trip costs ~700 ms, so a poll cannot resolve 1000 ms from 2000 ms. The observer
+measured 1318 ms for the 1000 ms timer — the overshoot is the pane, not the code.
+
+## Images the user has ruled out — the ⊘ button and `blockList` (v0.13.0)
+
+Reported: a page whose background is one image **tiled** previews that tile from every patch of
+blank space on the page. Two mechanisms, because neither covers the other.
+
+**Automatic — `skipPageBackgrounds` (on).** `isWallpaper()` skips `<body>`/`<html>`, and any
+element whose background both repeats *and* has an `auto` size.
+
+- **Repeat alone is NOT the test, and getting this wrong breaks a shipped case.**
+  `background-repeat: repeat` is the CSS *default*, so a hero image that sets only
+  `background-size: cover` computes to `repeat` too. Test case 9 is exactly that shape —
+  measured `repeat` + `cover` — so a repeat-only rule kills it. It is repeat **and** `auto`
+  together that mean the image is being laid out at natural size and stepped across the element,
+  which is the thing being described.
+
+**Manual — the `⊘` in the status bar, and the `blockList` setting.** Anything the automatic rule
+cannot know about: a watermark, a sprite sheet, one specific image that is simply not wanted.
+
+- **`blockCurrent()` records TWO urls** — `view.url` (what is on screen) and `activeShown` (the
+  source element's own src). They differ whenever the preview is an upgrade, and blocking only
+  the resolved one leaves the thumbnail still opening a preview that then fails to upgrade.
+  `activeShown` exists solely for this and is cleared in `cancel()`.
+- **The button is only on a PLACED window** (`.box.hot .cap .block`), for the same reason the X
+  is: a hover preview is pointer-transparent, so a button on it cannot be clicked at all. The
+  flow is hover → click to pin → ⊘. The panel's `note()` row says so, because it is not guessable.
+- **It goes in `isBoxControl()`.** That is the documented capture-listener trap — a control inside
+  the box whose events `onBoxDown`/`onBoxClick` eat first, and the symptom is silence, not an
+  error. Verified by dispatching a real click at the button and watching the list change.
+- **`blockCurrent()` calls `reloadSettings()` first.** The list is the one setting written from
+  *outside* the panel, so it is the one place a stale in-memory `cfg` would silently drop another
+  tab's entries — the same staleness bug as the settings panel, arriving by a different door.
+- Entries are exact URLs, or globs when they contain `*` — which is what a background carrying a
+  cache-busting query needs, since its URL is never twice the same. `blockMatch()` is pure and
+  sits **inside the slice `test-resolver.js` evaluates**, so the matching is tested offline like
+  the URL rules. It escapes regex metacharacters: an unescaped `?` or `.` in a URL would quietly
+  widen the match, and **a wrong match here is silent** — the image just stops previewing, with
+  nothing on screen to say why. Same discipline as `UPGRADES`: the negative tests matter more.
+
+Blocking is checked in three places, and all three are needed: `eligible()` (so no spinner even
+flashes), `collectCandidates`' `add()` (so a blocked URL is never *probed*), and the
+`showEvenIfNotLarger` fallback in `resolve()`.
+
+## Diagnostics — the `debug` setting (v0.13.0)
+
+Off by default and silent when off. It exists for the one class of bug that cannot be reasoned
+about from the source: **"it behaves differently in my browser than in yours."** Every gate in
+this script is a DOM read, so only the DOM in front of the user can say which one fired.
+
+- `dbg('loaded', …)` at boot prints the **installed version**, via `GM_info.script.version` so it
+  cannot drift from the header. The settings panel shows the same string in its heading. For a
+  "works in Chrome, not in Firefox" report, *is the installed copy even current* is the first
+  question and this is how it gets answered without opening the manager.
+- `hoverReport()` prints one line per hover: what was under the pointer, `videoGate` (which of the
+  four video rules fired, or none), whether an `<a href>` ancestor was findable **at all**, how
+  many laid-out `<video>` elements the page has, and whether the element sits in a shadow root.
+- `videoReason()` returns a *string* rather than a boolean for exactly this — `inVideoContext()`
+  is now a `!!` wrapper over it. Keep it that way; a boolean cannot be reported.
+
+**`closestAcross()` — `closest()` does not cross a shadow boundary.** Neither does
+`parentElement`. A site that builds its cards from custom elements can put the `<img>` inside a
+shadow root and the `<a>` that wraps it outside, and the video-**link** gate then sees no link at
+all and cannot fire. The composed walk (ordinary `closest()`, then hop to `getRootNode().host` and
+continue) is what the gate uses now. This is a real gap regardless of which browser exposed it;
+`collectCandidates` still uses plain `closest()` and is a candidate for the same treatment if an
+ancestor-link candidate ever comes back missing on a shadow-DOM site.
 
 ## Pinned mode
 
@@ -355,6 +424,18 @@ Browser test: `python test-server.py`, then open `http://localhost:8899/test-pag
   Also note the pane letterboxes the emulated viewport: screenshot coordinates were 800×446
   against a 1280×720 CSS viewport, a 0.625 scale factor that must be applied to every
   coordinate taken from `getBoundingClientRect()`.
+- **Driving the script with synthetic `MouseEvent`s works and is far cheaper than coordinates.**
+  Nothing checks `isTrusted`, so `dispatchEvent` on the element (plus a `mousemove` on `document`
+  to set `pointer`) exercises the real handlers — including the pointer-transparent pin path, by
+  dispatching `mousedown`/`mouseup`/`click` at `document` inside the frame's rect. Do the whole
+  sequence in **one** `javascript_tool` call: each round trip to the pane costs ~700 ms, which is
+  longer than most of the timings being measured.
+- **`.case` DOM order is NOT case-number order** — cases 15 and 16 are swapped in the markup. Find
+  a case by its heading text, never by array index; an index-based probe reports the wrong case's
+  result and case 15 stalls 3 s on purpose, so it reads as a failure at any shorter wait.
+- **Clear `blockList` between browser test runs.** It persists in `localStorage`, and the fixtures
+  share image files — blocking case 1 also silences cases 16 and 19, which then look like
+  regressions. Cost 10 minutes chasing exactly that on 2026-09-03.
 - **A `computer{action:"hover"}` to a coordinate the pointer is already at fires no `mouseover`,**
   so a second test against the same element silently does nothing and reads as a script bug. Move
   the pointer somewhere else first, and re-derive coordinates from a fresh screenshot after any

@@ -20,8 +20,8 @@ const VIDEO_LINK_RE = new Function(
 const location = { href: 'https://example.com/page/index.html' };
 const body = src.slice(start, end);
 const exported = new Function('location', body +
-    '\nreturn {parseSrcset, looksLikeImage, upgradeCandidates, linkParamCandidates};')(location);
-const { parseSrcset, looksLikeImage, upgradeCandidates, linkParamCandidates } = exported;
+    '\nreturn {parseSrcset, looksLikeImage, upgradeCandidates, linkParamCandidates, blockMatch};')(location);
+const { parseSrcset, looksLikeImage, upgradeCandidates, linkParamCandidates, blockMatch } = exported;
 
 let pass = 0, fail = 0;
 function eq(label, got, want) {
@@ -192,6 +192,33 @@ noisy.forEach(function (u) {
     if (!VIDEO_LINK_RE.test(u)) pass++;
     else { fail++; console.log('FAIL video link over-matched: ' + u); }
 });
+
+// ---- the never-preview list
+// A wrong match here is SILENT — the image just stops previewing, with nothing on screen to
+// say why — so the negative cases matter more than the positive ones, same as UPGRADES.
+const TILE = 'https://site.com/img/tile.png';
+eq('exact url matches', blockMatch(TILE, [TILE]), true);
+eq('empty list matches nothing', blockMatch(TILE, []), false);
+eq('no url matches nothing', blockMatch(null, [TILE]), false);
+eq('blank entries are ignored', blockMatch(TILE, ['', '   ']), false);
+eq('entries are trimmed', blockMatch(TILE, ['  ' + TILE + '  ']), true);
+eq('exact entry is not a prefix match', blockMatch(TILE + '?v=2', [TILE]), false);
+eq('a different image is not blocked', blockMatch('https://site.com/img/photo.png', [TILE]), false);
+
+eq('trailing * covers a cache-busted query', blockMatch(TILE + '?v=99', [TILE + '*']), true);
+eq('leading * covers a changing host', blockMatch(TILE, ['*/img/tile.png']), true);
+eq('* in the middle spans a path segment', blockMatch(TILE, ['https://site.com/*/tile.png']), true);
+eq('a glob still has to match the whole url',
+    blockMatch('https://other.com/img/tile.png.jpg', [TILE + '*']), false);
+
+// Regex metacharacters in a URL are literal, not syntax. Without escaping, a '?' would make
+// the preceding character optional and a '.' would match anything.
+eq('a dot is literal, not any-character',
+    blockMatch('https://site.com/imgXtile.png', [TILE]), false);
+eq('a query string in the entry is literal',
+    blockMatch('https://site.com/a?b=1', ['https://site.com/a?b=1']), true);
+eq('parentheses and brackets do not throw',
+    blockMatch('https://site.com/a(1)[2].png', ['https://site.com/a(1)[2].png']), true);
 
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);
