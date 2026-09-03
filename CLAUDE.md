@@ -106,8 +106,9 @@ The consequences, all of which have to be handled together:
   really on the page, and without them a link beneath would follow.
 - **`ours(e.target)` is only ever true once `hot` is set.** Both `onOver` and `onOut` rely on
   that: `ours()` now means "on a placed preview", which is exactly the detached hold rule.
-- **The ⋮ menu is only reachable once detached or pinned.** A plain hover preview cannot be
-  clicked on, by design — it dies the moment you move off the image toward it.
+- **Nothing inside the frame is clickable on a plain hover preview**, by design — it dies the
+  moment you move off the image toward it. Anything that needs clicking (the X, the browser's
+  context menu) belongs to a placed or pinned window.
 
 Two guards keep a drag from destroying the thing being dragged: `onOver` and `onOut` both
 return early while `drag` is set. Scroll still cancels an unpinned preview, detached or not —
@@ -167,59 +168,65 @@ depth alone does not distinguish a card from a grid.
 Cases 17 (video link), 18 (video in the card) and 19 (an ordinary `/gallery/` link, the
 control) exist so a regression shows up as a test-page failure rather than in the wild.
 
-## Image actions — the ⋮ button, and the browser's menu beside it
+## Image actions — the browser's own menu, on a pinned window
 
 **A userscript cannot *open* the browser's context menu.** A dispatched `contextmenu` event is
 untrusted and browsers run no default action for untrusted events — the menu is user-agent
 chrome, raised only by real input. So "a button that simulates a right click" is not a thing
 that can be built, at any price.
 
-**But it can decline to suppress one** (v0.11.0), and that is the answer to the two actions
-that never worked. Save and copy in our own menu run in page JavaScript, so they need the host
-to send `Access-Control-Allow-Origin` — and copy needs clipboard-write permission on top. Most
-hosts send neither and nothing in a page context gets around it. The browser's own menu has
-neither problem: its network stack, its already-decoded bitmap. So on a **placed** window
-(pinned or detached) `altButton()` returns false, `swallowMenu` stays off, and the browser
-raises its real menu over our `<img>` — whose `src` is the resolved full-size URL, so *Save
-image as…* and *Copy image* act on the original. Verified in a real browser 2026-09-03,
-including that native chrome does target an `<img>` inside an **open** shadow root.
+**But it can decline to suppress one** (v0.11.0), and that is the answer. On a **pinned** window
+`altButton()` returns false, `swallowMenu` stays off, and the browser raises its real menu over
+our `<img>` — whose `src` is the resolved full-size URL, so *Save image as…*, *Copy image*,
+*Copy image address* and *Open image in new tab* all act on the original. Verified in a real
+browser 2026-09-03, including that native chrome does target an `<img>` inside an **open**
+shadow root. `B2` (`pinButton:'right'`) already behaved this way and is the test that proved the
+mechanism before any of it was built — two right presses, no code.
 
-A **hover** preview keeps right-click-to-dismiss, and must: it is pointer-transparent, so the
-native menu there comes up for the thumbnail underneath and offers to save *that*. Placed
-windows can give the gesture up because they already close via the X, Escape, the backdrop, or
-moving off a detached one. `B2` (`pinButton:'right'`) already behaved this way and is the test
-that proved the mechanism before any of it was built — two right presses, no code.
+**Only pinned** (narrowed in v0.12.0). A hover preview is pointer-transparent, so the native menu
+there comes up for the thumbnail underneath and offers to save *that*; a detached window keeps
+dismiss because shoving it aside is worth more than a menu that is one click away. Pinning is the
+deliberate "I want to work with this image" gesture, and that is where the menu belongs.
 
-That leaves the ⋮ menu **largely redundant on a placed window**, which is the only state it is
-reachable in. It is still there; trimming it to the two items that work in page JS (open in a
-new tab, copy the URL) is an open decision, not an oversight. Points that are load-bearing:
+**The ⋮ menu was removed in v0.12.0**, along with `MENU_ITEMS`, `runMenu`, `openMenu`/`closeMenu`,
+`flash`, and the clipboard/canvas helpers (`legacyCopy`, `writeText`, `fetchBlob`, `toPng`,
+`openTab`). Its Save and Copy ran in page JavaScript and so needed the host to send
+`Access-Control-Allow-Origin` — and Copy needed clipboard-write permission on top. Most hosts
+send neither and nothing in a page context gets around it, which is why they were reported as
+simply not working. **Do not rebuild it.** If image actions are ever wanted somewhere the browser
+menu cannot reach, the two that work from page JS are "open in a new tab" and "copy the URL"; the
+other two cannot be made to work from here at any price.
 
-- **`.menu` is a SIBLING of `.box`, not a child.** `.box` has `overflow:hidden`, so a menu
-  inside it is clipped to nothing on a small preview. It is positioned in fixed coordinates
-  from `menuBtn.getBoundingClientRect()`, opening upward from the bar.
-- **The ⋮ button needs the `isBoxControl()` exemption**, same as the X — see the capture
-  gotcha below. Without it the button opens nothing and pins the preview instead.
-- **Opening the menu sets `detached`**, or aiming at an item means leaving the image and the
-  preview vanishes mid-gesture.
-- **`navigator.clipboard.write()` must be called SYNCHRONOUSLY inside the click**, with a
-  *promise* handed to `ClipboardItem` — not awaited first and written after. Measured
-  2026-09-03: the await-then-write version lost the transient user activation and was rejected
-  `NotAllowedError`, whose fallback then called `window.open`, which — also having no
-  activation — navigated the tab the user was on to the raw image. **No `window.open` from an
-  async continuation anywhere in this file.** The failure branches now only flash a message.
-- **`writeText` falls back to `execCommand('copy')` via a temp textarea**, and that fallback is
-  not theoretical: the Browser pane reports `clipboard-write` permission `denied`, and the URL
-  copy still worked through it.
-- Copy and save need a cross-origin read the host must permit (`Access-Control-Allow-Origin`).
-  Nothing in a page context can get around that. Both fail soft and say so in the status bar.
-  `ClipboardItem` only takes PNG in practice, so anything else goes through a canvas — which
-  needs the same CORS grant, so it fails in the same cases and no earlier.
+The removal took some care, because the menu had hooks in eight places: `isBoxControl()` (now the
+X alone), `unpin()`, `onBoxDown()`, `onPinWheel()`, `onPinKey()`'s Escape, `cancel()`, and the
+document `mousedown`, `keydown` and `resize` listeners. `node --check` catches none of that — a
+leftover `closeMenu()` is a runtime `ReferenceError` in a handler, which fails silently.
 
-Verified in the pane: menu opens above the bar without pinning, "Copy image URL" flashed
-`URL copied`, "Save image…" flashed `saved` with no navigation, the flash reverts to the
-filename after 1.8 s, and Escape closes the menu while leaving the preview up. Copy-image
-could not be verified end to end there — `clipboard-write` is denied in that environment — but
-the fetch → canvas → PNG pipeline ahead of the write was confirmed (75 KB JPEG → 130 KB PNG).
+### The status bar fades itself out (v0.12.0)
+
+The bar is drawn ON the picture, so on a meme, a screenshot or a comic panel it covers the text
+being read. `.cap.idle` sets `opacity:0` **and** `pointer-events:none`, `showBar()` clears it and
+arms a `BAR_IDLE_MS` (2000 ms) timer, and `onMove` calls `showBar()` only when the pointer is over
+the window — moving anywhere else lets it fade, which is the point. `resetBar()` in `cancel()`
+keeps a closed preview from reopening with a stale class.
+
+The `pointer-events` half is not decoration: the bar is the move handle, and an invisible move
+handle is a trap. Faded, a press where it was pans or moves by the ordinary rule, and moving the
+pointer first brings the real handle back. Points that are load-bearing:
+
+- **`.cap.idle` must drop `pointer-events` as well as `opacity`.** Opacity alone leaves an
+  invisible move handle across the bottom of the picture, which is the same class of bug as the
+  `hot` ghost above — something you cannot see still answering the mouse.
+- **`showBar()` is called from `onMove` only when the pointer is over the window** (`ours()` or
+  `pointInPreview()`). Calling it on every mousemove would mean the bar never fades while the
+  pointer is anywhere on screen, which is not what "after two seconds" means.
+- **The timeout re-checks `view`** before adding `idle`, and `cancel()` calls `resetBar()`, so a
+  preview cannot open with a stale class from the last one.
+
+Verified in the pane: `cap` → `cap idle` after 2.4 s of a still pointer → `cap` again on a
+mousemove over the window; while pinned, `pointer-events` goes `auto` → `none` → `auto` with it.
+Note the pane never advances CSS transitions (the zero-frame problem below), so **read the class,
+not the opacity** — computed opacity there is stuck at whatever it started as and proves nothing.
 
 ## Pinned mode
 
@@ -236,9 +243,10 @@ explains the controls without offering a switch.
   press is claimed in the document `mousedown` handler, not on `contextmenu` — mousedown fires
   first and would otherwise `cancel()` and clear `active` before the menu event could see what to
   dismiss; `swallowMenu` then suppresses the menu itself.
-- **On a PLACED window right-click is the browser's** (v0.11.0), not ours — see the image-actions
-  section for why. `altButton()` returns false on `pinned || detached`, which is what leaves
-  `swallowMenu` off. Do not "tidy" that early return into a dismiss: it is the whole feature.
+- **On a PINNED window right-click is the browser's**, not ours — see the image-actions section
+  for why. `altButton()` returns false on `pinned`, which is what leaves `swallowMenu` off. Do
+  not "tidy" that early return into a dismiss: it is the whole feature. It was `pinned ||
+  detached` for one version; detached went back to dismissing in v0.12.0.
 - **While pinned, the left button always pans or moves**, whatever `pinButton` says, so a pinned
   frame closes via the X, the backdrop, or Escape — under both button maps now, since right no
   longer closes it either. Do not wire dismissal onto the pan button.
@@ -302,7 +310,7 @@ tab's values instead of clobbering them.
 box — capture descends from the ancestor, so those two run first and their `stopPropagation()`
 kept `closeEl`'s own handlers from ever firing. The X looked correct, hovered correctly, and did
 nothing. Both handlers now `return` early on **`isBoxControl(e.target)`**, which is the one list
-of exempt controls (the X and the ⋮ button). Any new control placed inside the box goes in
+of exempt controls — just the X now that the ⋮ button is gone. Any new control placed inside it goes in
 there — it is not optional, and the symptom is silence. Found 2026-09-03 in browser testing; nothing
 static catches it — `node --check` passes and the markup is fine.
 

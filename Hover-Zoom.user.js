@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.11.0
+// @version     0.12.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -73,7 +73,7 @@
         cornerRadius: 6,
         shadow: true,
         dimOpacity: 0,              // 0 = no page dimming, up to 90
-        showStatusBar: true,        // filename / type / size / dimensions strip, also the move handle
+        showStatusBar: true,        // filename / type / size / dimensions strip, also the move handle; auto-fades
         spinnerTheme: 'auto',       // 'auto' (follows the browser) | 'dark' | 'light'
         noReferrer: false,          // strip referrer when loading full image
     };
@@ -467,7 +467,6 @@
 
     let host = null, root = null, box = null, imgEl = null, dimEl = null, closeEl = null;
     let capEl = null, capNameEl = null, capMetaEl = null, spinEl = null, spinSvg = null;
-    let menuEl = null, menuBtn = null;
 
     const SVG_NS = 'http://www.w3.org/2000/svg';
     const SPIN_SIZE = 34;                           // px, matches the .spin rule
@@ -577,23 +576,13 @@
             '.cap .name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;',
             'font-family:ui-monospace,SFMono-Regular,Consolas,monospace;color:#a6adc8}',
             '.cap .meta{flex:none;white-space:nowrap}',
-            // The browser's own context menu cannot be raised from script — a dispatched
-            // contextmenu event is untrusted and browsers run no default action for it —
-            // and right-click is spoken for by dismiss anyway. This is the replacement:
-            // the actions that menu was wanted for, on a button that is always reachable.
-            '.cap .more{flex:none;align-self:center;width:18px;height:18px;display:flex;',
-            'align-items:center;justify-content:center;border-radius:4px;cursor:pointer;',
-            'color:#a6adc8;font:14px/1 system-ui,sans-serif;margin-left:-2px}',
-            '.cap .more:hover{background:#45475a;color:#cdd6f4}',
-            // A sibling of .box, not a child: .box has overflow:hidden and a small preview
-            // would clip the menu to nothing.
-            '.menu{position:fixed;display:none;min-width:168px;padding:4px;',
-            'background:#1e1e2e;border:1px solid #45475a;border-radius:6px;',
-            'box-shadow:0 8px 24px rgba(0,0,0,.55);user-select:none;',
-            'font:12px/1.4 system-ui,sans-serif;color:#cdd6f4}',
-            '.menu.on{display:block}',
-            '.menu .item{padding:6px 10px;border-radius:4px;cursor:pointer;white-space:nowrap}',
-            '.menu .item:hover{background:#45475a}',
+            // The bar sits ON the picture, so on anything with text near the bottom — a meme,
+            // a screenshot, a comic panel — it covers the thing you are reading. It fades out
+            // after BAR_IDLE_MS of pointer stillness and comes back the moment the pointer
+            // moves over the window. pointer-events go with the opacity, so a faded bar is not
+            // an invisible move handle waiting to be pressed by mistake.
+            '.cap{transition:opacity 220ms ease}',
+            '.cap.idle{opacity:0;pointer-events:none}',
             // Resolve progress: an INDETERMINATE ring — a fixed arc sweeping a full track.
             // It says "still working" and nothing else. The determinate version it replaces
             // could not be honest: the denominator was the candidate count, most runs stop
@@ -638,19 +627,8 @@
         capNameEl.className = 'name';
         capMetaEl = document.createElement('span');
         capMetaEl.className = 'meta';
-        menuBtn = document.createElement('div');
-        menuBtn.className = 'more';
-        menuBtn.title = 'Image actions';
-        menuBtn.textContent = '⋮';
-        menuBtn.addEventListener('click', function (e) {
-            e.preventDefault();
-            e.stopPropagation();
-            if (menuEl.classList.contains('on')) closeMenu(); else openMenu();
-        });
-
         capEl.appendChild(capNameEl);
         capEl.appendChild(capMetaEl);
-        capEl.appendChild(menuBtn);
 
         closeEl = document.createElement('div');
         closeEl.className = 'x';
@@ -665,21 +643,6 @@
         box.addEventListener('mousedown', onBoxDown, true);
         box.addEventListener('click', onBoxClick, true);
         root.appendChild(box);
-
-        menuEl = document.createElement('div');
-        menuEl.className = 'menu';
-        MENU_ITEMS.forEach(function (it) {
-            const row = document.createElement('div');
-            row.className = 'item';
-            row.textContent = it[1];
-            row.addEventListener('click', function (e) {
-                e.preventDefault();
-                e.stopPropagation();
-                runMenu(it[0]);
-            });
-            menuEl.appendChild(row);
-        });
-        root.appendChild(menuEl);
 
         spinEl = document.createElement('div');
         spinEl.className = 'spin';
@@ -804,7 +767,7 @@
         capEl.style.display = '';
 
         const info = fileInfo(view.url);
-        if (!flashTimer) capNameEl.textContent = info.name;   // a flash owns the name slot
+        capNameEl.textContent = info.name;
         capNameEl.title = view.url;
 
         const parts = [];
@@ -820,176 +783,37 @@
         capMetaEl.textContent = parts.join('  ·  ');
     }
 
-    // ------------------------------------------------------------- image actions
+    // ------------------------------------------------------------- status bar fade
     //
-    // The browser's own context menu is not available to us. A dispatched `contextmenu`
-    // event is untrusted, and browsers run no default action for untrusted events — the
-    // menu is user-agent chrome, raised only by real input — so a button that "simulates a
-    // right click" would do precisely nothing. Right-click is also already spoken for by
-    // dismiss, and `swallowMenu` suppresses the native menu that press would raise.
+    // The bar is drawn ON the picture, so on a meme, a screenshot or a comic panel it covers
+    // the text you are trying to read. It fades after BAR_IDLE_MS of pointer stillness and
+    // returns the moment the pointer moves over the window — which is also how you get the
+    // move handle back, so nothing becomes unreachable.
     //
-    // So this is our own menu, carrying the actions that one was wanted for. Two of them
-    // need to READ the image bytes, which is a cross-origin fetch: hosts that send no
-    // Access-Control-Allow-Origin will refuse, and there is no way around that from a page
-    // context. Both fail soft, say so in the status bar, and fall back to opening the image
-    // in a tab where the browser's real menu is available on it.
+    // The ⋮ image-actions menu that used to live at the right end of this bar is gone
+    // (v0.12.0). Its Save and Copy could not work: both ran in page JavaScript and needed the
+    // host to send Access-Control-Allow-Origin, which most do not. A pinned window hands
+    // right-click to the BROWSER instead, whose own menu has no such limit — see the
+    // image-actions section of CLAUDE.md.
 
-    const MENU_ITEMS = [
-        ['tab', 'Open image in new tab'],
-        ['url', 'Copy image URL'],
-        ['copy', 'Copy image'],
-        ['save', 'Save image…'],
-    ];
+    const BAR_IDLE_MS = 2000;
 
-    let flashTimer = 0;
+    let barTimer = 0;
 
-    // Transient message in the status bar's name slot. caption() steps aside while one is
-    // up, or the next layout() would wipe it a frame later.
-    function flash(msg) {
-        if (!capNameEl) return;
-        clearTimeout(flashTimer);
-        capNameEl.textContent = msg;
-        flashTimer = setTimeout(function () {
-            flashTimer = 0;
-            if (view) caption();
-        }, 1800);
+    function showBar() {
+        if (!capEl) return;
+        capEl.classList.remove('idle');
+        clearTimeout(barTimer);
+        barTimer = setTimeout(function () {
+            barTimer = 0;
+            if (capEl && view) capEl.classList.add('idle');
+        }, BAR_IDLE_MS);
     }
 
-    function menuOpen() {
-        return !!menuEl && menuEl.classList.contains('on');
-    }
-
-    function openMenu() {
-        if (!view || !menuEl) return;
-        menuEl.classList.add('on');
-        // Aiming at a menu item means moving off the image, which would otherwise take the
-        // preview — and the menu with it — down mid-gesture.
-        if (!pinned) detach();
-        const b = menuBtn.getBoundingClientRect();
-        const m = viewportBox();
-        const w = menuEl.offsetWidth;
-        const h = menuEl.offsetHeight;
-        let top = b.top - h - 6;                       // above the bar, where the room is
-        if (top < 4) top = Math.min(b.bottom + 6, m.vh - h - 4);
-        menuEl.style.left = Math.max(4, Math.min(b.right - w, m.vw - w - 4)) + 'px';
-        menuEl.style.top = Math.max(4, top) + 'px';
-    }
-
-    function closeMenu() {
-        if (menuEl) menuEl.classList.remove('on');
-    }
-
-    function legacyCopy(s) {
-        try {
-            const ta = document.createElement('textarea');
-            ta.value = s;
-            ta.style.cssText = 'position:fixed;top:-1000px;left:0;opacity:0';
-            (document.body || document.documentElement).appendChild(ta);
-            ta.select();
-            const ok = document.execCommand('copy');
-            ta.remove();
-            return ok;
-        } catch (e) { return false; }
-    }
-
-    function writeText(s) {
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-            return navigator.clipboard.writeText(s).then(
-                function () { return true; },
-                function () { return legacyCopy(s); });
-        }
-        return Promise.resolve(legacyCopy(s));
-    }
-
-    function fetchBlob(url) {
-        const opts = { credentials: 'omit' };
-        if (cfg.noReferrer) opts.referrerPolicy = 'no-referrer';
-        return fetch(url, opts).then(function (r) {
-            if (!r.ok) throw new Error(r.status);
-            return r.blob();
-        });
-    }
-
-    // ClipboardItem accepts PNG everywhere and little else, so anything that is not already
-    // PNG goes through a canvas. That needs the bitmap, which needs the same CORS grant the
-    // fetch needed, so it fails in the same cases and no earlier.
-    function toPng(blob) {
-        return new Promise(function (res, rej) {
-            const url = URL.createObjectURL(blob);
-            const im = new Image();
-            im.onload = function () {
-                try {
-                    const c = document.createElement('canvas');
-                    c.width = im.naturalWidth;
-                    c.height = im.naturalHeight;
-                    c.getContext('2d').drawImage(im, 0, 0);
-                    c.toBlob(function (b) {
-                        URL.revokeObjectURL(url);
-                        b ? res(b) : rej(new Error('encode'));
-                    }, 'image/png');
-                } catch (e) { URL.revokeObjectURL(url); rej(e); }
-            };
-            im.onerror = function () { URL.revokeObjectURL(url); rej(new Error('decode')); };
-            im.src = url;
-        });
-    }
-
-    function openTab(url) {
-        window.open(url, '_blank', 'noopener,noreferrer');
-    }
-
-    function runMenu(kind) {
-        const url = view && view.url;
-        closeMenu();
-        if (!url) return;
-
-        if (kind === 'tab') { openTab(url); return; }
-
-        if (kind === 'url') {
-            writeText(url).then(function (ok) { flash(ok ? 'URL copied' : 'copy blocked'); });
-            return;
-        }
-
-        if (kind === 'copy') {
-            if (!navigator.clipboard || !window.ClipboardItem) {
-                flash('this browser cannot copy images');
-                return;
-            }
-            // ClipboardItem takes a PROMISE for its data, and clipboard.write() is called
-            // synchronously here, still inside the click. Fetching first and writing in a
-            // .then() instead loses the transient user activation and the write is rejected
-            // with NotAllowedError — measured, that is exactly what the first version did.
-            flash('copying image…');
-            const png = fetchBlob(url).then(function (b) {
-                return b.type === 'image/png' ? b : toPng(b);
-            });
-            png.catch(function () { /* reported by the write below; not also unhandled */ });
-            navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]).then(
-                function () { flash('image copied'); },
-                function () { flash('copy blocked — try Open image in new tab'); });
-            return;
-        }
-
-        if (kind === 'save') {
-            flash('saving…');
-            fetchBlob(url).then(function (blob) {
-                const href = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = href;
-                a.download = fileInfo(url).name || 'image';
-                a.style.display = 'none';
-                (document.body || document.documentElement).appendChild(a);
-                a.click();
-                a.remove();
-                setTimeout(function () { URL.revokeObjectURL(href); }, 10000);
-                flash('saved');
-            }, function () {
-                // No openTab() here: this runs after the fetch, so the user activation is
-                // gone and window.open would be popup-blocked — or, worse, navigate the tab
-                // the user is on. The first menu item does the same thing, from a click.
-                flash('host blocked the download — try Open image in new tab');
-            });
-        }
+    function resetBar() {
+        clearTimeout(barTimer);
+        barTimer = 0;
+        if (capEl) capEl.classList.remove('idle');
     }
 
     function layout() {
@@ -1180,6 +1004,7 @@
         deferredCaption(res.url);
 
         box.classList.add('on');
+        showBar();
         if (cfg.dimOpacity > 0) dimEl.classList.add('on');
     }
 
@@ -1300,7 +1125,6 @@
         if (!pinned) return;
         pinned = false;
         drag = null;
-        closeMenu();
         box.classList.remove('pinned', 'drag');
         dimEl.classList.remove('catch');
         CAP_TARGET.removeEventListener('keydown', onPinKey, true);
@@ -1312,9 +1136,9 @@
     // box, and capture descends from the ancestor, so without an explicit exemption their
     // stopPropagation() runs before a child's own handlers and the control does nothing —
     // the X looked correct, hovered correctly and did nothing until this existed. Any new
-    // control added inside the box goes in here.
+    // control added inside the box goes in here; the symptom of forgetting is silence.
     function isBoxControl(t) {
-        return closeEl.contains(t) || menuBtn.contains(t);
+        return closeEl.contains(t);
     }
 
     function onBoxClick(e) {
@@ -1337,7 +1161,6 @@
         // reach the page, and it may also turn into a drag.
         e.preventDefault();
         e.stopPropagation();
-        closeMenu();            // a press anywhere else on the frame dismisses it
         justDragged = false;
         if (!view) return;
         // One rule for every state: the status bar always moves the frame, and anywhere else
@@ -1357,7 +1180,7 @@
         const step = e.shiftKey ? cfg.panStep * 3 : cfg.panStep;
         let handled = true;
         switch (e.key) {
-            case 'Escape': if (menuOpen()) closeMenu(); else unpin(); break;
+            case 'Escape': unpin(); break;
             case 'ArrowLeft': panBy(step, 0); break;
             case 'ArrowRight': panBy(-step, 0); break;
             case 'ArrowUp': panBy(0, step); break;
@@ -1378,7 +1201,6 @@
         if (!pinned && !(ours(e.target) || pointInPreview(e.clientX, e.clientY))) return;
         e.preventDefault();
         e.stopPropagation();
-        closeMenu();            // it is anchored to the bar, and the bar is about to move
         const f = 1 + cfg.wheelZoomStep / 100;
         zoomAt(view.scale * (e.deltaY < 0 ? f : 1 / f), e.clientX, e.clientY);
     }
@@ -1522,7 +1344,7 @@
         active = null;
         detached = false;
         disableWheelZoom();
-        closeMenu();
+        resetBar();
         hideSpinner();
         hideViewer();
     }
@@ -1542,25 +1364,25 @@
     // The button that does NOT pin. Returns true when it acted, which is the signal to
     // swallow the context menu that a right press is about to raise.
     //
-    // A PLACED window (pinned or detached) deliberately does NOT act, so the browser raises
-    // its own context menu over our <img> — whose src is the resolved full-size URL. That is
-    // the only way "Save image as…" and "Copy image" can work at all: ours run in page
-    // JavaScript and need the host to send Access-Control-Allow-Origin, which most do not,
-    // while the browser's use its own network stack and the bitmap it has already decoded.
-    // Verified in a real browser 2026-09-03 (via pinButton:'right', where a second right
-    // press already fell through to it) — the native menu does target an <img> inside an
-    // open shadow root, and Save gives the full-size file.
+    // A PINNED window deliberately does NOT act, so the browser raises its own context menu
+    // over our <img> — whose src is the resolved full-size URL. That is the only way "Save
+    // image as…" and "Copy image" work at all: ours ran in page JavaScript and needed the host
+    // to send Access-Control-Allow-Origin, which most do not, while the browser's use its own
+    // network stack and the bitmap it has already decoded. Verified in a real browser
+    // 2026-09-03 (via pinButton:'right', where a second right press already fell through to
+    // it) — native chrome does target an <img> inside an open shadow root, and Save gives the
+    // full-size file.
     //
-    // A HOVER preview keeps dismiss, for two reasons: it is the state where "get this out of
-    // my way" is actually wanted, and it is pointer-transparent, so the native menu there
-    // would come up for the thumbnail underneath and offer to save *that* — worse than
-    // useless. A placed window is closed by the X, Escape, the backdrop, or moving off it,
-    // so right-click is not carrying anything there.
+    // Only pinned. A HOVER preview is pointer-transparent, so the native menu there would come
+    // up for the thumbnail underneath and offer to save *that*; and a DETACHED window keeps
+    // dismiss because right-click-to-shove-it-away is worth more there than a menu that is one
+    // click (a pin) away. Pinning is the deliberate "I want to work with this image" gesture,
+    // which is exactly where the menu belongs.
     function altButton(e) {
         let acted = false;
         if (cfg.pinButton === 'right') {
             if (!pinned && view && box.classList.contains('on')) { pin(); acted = true; }
-        } else if (pinned || detached) {
+        } else if (pinned) {
             return false;               // hands the press to the browser; see above
         } else if (active) {
             dismiss();
@@ -1584,6 +1406,10 @@
         pointer.x = e.clientX;
         pointer.y = e.clientY;
         if (spinEl && spinEl.classList.contains('on')) moveSpinner();
+        // The status bar comes back when the pointer moves OVER the window, and only then —
+        // moving anywhere else lets it fade, which is the whole point of it.
+        if (view && box && box.classList.contains('on') &&
+            (ours(e.target) || pointInPreview(e.clientX, e.clientY))) showBar();
         if (!drag) return;
         const dx = e.clientX - drag.x;
         const dy = e.clientY - drag.y;
@@ -1679,7 +1505,6 @@
     document.addEventListener('mouseover', onOver, true);
     document.addEventListener('mouseout', onOut, true);
     document.addEventListener('mousedown', function (e) {
-        if (!ours(e.target)) closeMenu();
         if (ours(e.target)) return;     // onBoxDown / the backdrop own this one
         // An unpinned preview is pointer-transparent, so a press ON it lands on the page
         // beneath and never reaches onBoxDown. Geometry decides ownership instead, and
@@ -1721,7 +1546,6 @@
     window.addEventListener('scroll', function () { if (!pinned) cancel(); }, true);
     window.addEventListener('blur', function () { if (!pinned) cancel(); });
     window.addEventListener('resize', function () {
-        closeMenu();
         if (!pinned) { cancel(); return; }
         // the window shrinking can leave the frame oversized and the pan out of bounds
         view.fitScale = Math.min(cfg.zoomFactor, viewportBox().w / view.natW, viewportBox().h / view.natH);
@@ -1731,7 +1555,6 @@
     });
     document.addEventListener('keydown', function (e) {
         if (e.key === 'Escape') {
-            if (menuOpen()) { closeMenu(); return; }
             cancel();                           // onPinKey has already handled the pinned case
         }
         if (cfg.activation === 'modifier' && modifierHeld(e)) modifierDown = true;
@@ -1934,11 +1757,10 @@
             'the X, a click outside it, or Escape. While pinned: wheel or +/− to zoom, drag the ' +
             'image or use the arrow keys to pan, 0 to reset, and drag the status bar to move ' +
             'the frame.');
-        note('The ⋮ button in the status bar opens the image actions',
-            'Open in a new tab, copy the URL, copy the image, save it. The browser\'s own ' +
-            'context menu cannot be opened from a script, and right-click is taken by ' +
-            'dismiss — this is the replacement. Copy and save need the host to allow a ' +
-            'cross-origin read; when it refuses, the image opens in a tab instead.');
+        note('Right-click a pinned preview for the browser\'s own menu',
+            'Save image as…, Copy image, Copy image address, Open image in new tab — all of ' +
+            'them acting on the full-size original, because the browser fetches it itself. ' +
+            'Right-click on an unpinned preview still dismisses it.');
         pick('pinButton', 'Pin with',
             'the other button dismisses instead — the preview stays down until you move off ' +
             'the image and back on', [
@@ -1963,8 +1785,9 @@
         check('shadow', 'Drop shadow');
         num('dimOpacity', 'Dim the page behind', '% — 0 disables', 0, 90, 5);
         check('showStatusBar', 'Show the status bar',
-            'filename, format, dimensions, size — plus the ⋮ button (open, copy or save the ' +
-            'full-size image) and the handle that moves a pinned frame');
+            'filename, format, dimensions, size — and the handle that moves a pinned frame. ' +
+            'It fades out after two seconds of a still pointer so it stops covering the ' +
+            'bottom of the picture, and returns when you move the pointer over the preview');
         pick('spinnerTheme', 'Loading ring',
             'auto follows the browser’s light/dark setting', [
                 ['auto', 'Match the browser'], ['dark', 'Always dark'], ['light', 'Always light']]);
