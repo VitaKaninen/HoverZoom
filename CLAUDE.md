@@ -47,6 +47,41 @@ path has been touched twice ever, both times in 2021.
   every probe has both `onload` and `onerror`.
 - **Build UI with `createElement` + `textContent`.** Trusted Types CSP sites (YouTube, Google)
   throw on `innerHTML` and abort the function mid-build with no visible error.
+- **`view` + `reflow()` + `layout()` own all viewer geometry.** `view` is the only state,
+  `reflow()` derives frame size and clamps the pan offsets, `layout()` is the only thing that
+  writes to the DOM. Nothing else may set `box`/`img` styles or the two representations drift.
+
+## Pinned mode (v0.3.0)
+
+Click the preview → it pins. The backdrop (`.dim.catch`) starts swallowing clicks, an X appears
+(`.box.pinned .x`), and wheel / `+` `−` / arrows / drag become a zoom-and-pan surface. It closes
+on the X, a click on the backdrop, or Escape.
+
+- **The frame grows before the image spills.** Zooming enlarges the frame until it reaches
+  `maxWidthPct`/`maxHeightPct` of the viewport; past that the frame is fixed and the image
+  overflows it, which is when `pannable()` (and the `grab` cursor) turn on. Zoom-out floors at
+  `fitScale`, the scale the preview opened at; `0` returns there.
+- **Pinned-mode key/wheel listeners live on `CAP_TARGET` (= `window`), in capture** — per
+  `../CLAUDE.md`, that beats every document-level listener on the page and in sibling
+  userscripts, so arrows and `+`/`−` are ours while pinned and nobody else's. Both are added in
+  `pin()` and removed in `unpin()` against that one constant; `wheel` uses the shared
+  `WHEEL_OPTS` object for add *and* remove, or the removal silently no-ops.
+- **Hover has a `HIDE_GRACE` (220 ms).** The preview sits `cursorGap` px from the image, so
+  reaching it means crossing page content. `onOut` schedules the hide instead of doing it, and
+  `onOver` cancels that timer when the pointer lands on the host. Without it the preview is
+  unreachable and click-to-pin cannot work at all.
+- **The preview is hit-testable while unpinned** (`.box.on.hot`, gated on `cfg.clickToPin`).
+  That is the cost of click-to-pin: the preview covers whatever is under it. Turning the setting
+  off restores `pointer-events:none`.
+
+## Gotcha: a capture listener on the box eats its own children's events
+
+`onBoxDown`/`onBoxClick` are capture listeners on `.box`, and the X button is a *child* of the
+box — capture descends from the ancestor, so those two run first and their `stopPropagation()`
+kept `closeEl`'s own handlers from ever firing. The X looked correct, hovered correctly, and did
+nothing. Both handlers now `return` early on `closeEl.contains(e.target)`. Any new control
+placed inside the box needs the same exemption. Found 2026-09-03 in browser testing; nothing
+static catches it — `node --check` passes and the markup is fine.
 
 ## Testing
 

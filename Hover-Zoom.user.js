@@ -1,18 +1,22 @@
 // ==UserScript==
-// @name         Hover Zoom
-// @namespace    https://github.com/azrobbins
-// @version      0.2.0
-// @description  Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand.
-// @author       azrobbins
-// @match        *://*/*
-// @grant        GM_getValue
-// @grant        GM_setValue
-// @grant        GM_registerMenuCommand
-// @run-at       document-idle
-// @noframes     false
-// @updateURL    https://raw.githubusercontent.com/VitaKaninen/HoverZoom/master/Hover-Zoom.user.js
-// @downloadURL  https://raw.githubusercontent.com/VitaKaninen/HoverZoom/master/Hover-Zoom.user.js
+// @name        Hover Zoom
+// @namespace   https://github.com/VitaKaninen
+// @version     0.3.0
+// @author      VitaKaninen
+// @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Click the preview to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
+// @match       *://*/*
+// @grant       GM_getValue
+// @grant       GM_setValue
+// @grant       GM_registerMenuCommand
+// @run-at      document-idle
+// @downloadURL https://raw.githubusercontent.com/VitaKaninen/HoverZoom/master/Hover-Zoom.user.js
+// @updateURL   https://raw.githubusercontent.com/VitaKaninen/HoverZoom/master/Hover-Zoom.user.js
 // ==/UserScript==
+
+// @noframes was previously written as `@noframes false`, which does NOT disable it —
+// Tampermonkey treats the tag as a presence flag and ignores the value, so that line was
+// switching frames OFF while reading as if it left them on. Removed rather than corrected:
+// this script is meant to run in subframes.
 
 /*
  * Design note — why this does no DOM scanning.
@@ -48,6 +52,12 @@
         skipWhileMouseDown: true,   // don't fire mid drag/selection
         siteMode: 'blacklist',      // 'blacklist' | 'whitelist'
         siteList: [],               // hostnames, matched by suffix
+
+        // pinned mode
+        clickToPin: true,           // click the preview to keep it open
+        wheelZoomStep: 15,          // % per wheel notch
+        panStep: 80,                // px per arrow-key press (Shift = 3x)
+        maxZoom: 32,                // hard ceiling, multiples of natural size
 
         // how to display
         maxWidthPct: 92,            // % of viewport
@@ -375,8 +385,31 @@
     }
 
     // ------------------------------------------------------------------ viewer
+    //
+    // The viewer has two states.
+    //
+    // UNPINNED it is a transient preview: it follows the hover and vanishes when the
+    // pointer leaves. It is still hit-testable (`.hot`) so the pointer can travel onto
+    // it and click, which is what a short grace period on mouseout buys time for.
+    //
+    // PINNED (after that click) it becomes a modal: the backdrop starts swallowing
+    // clicks, an X appears, and wheel / +− / arrows / drag turn it into a zoom-and-pan
+    // surface that keeps going past the point where the frame fills the window.
+    //
+    // `view` is the only source of truth for geometry. reflow() derives frame size and
+    // clamps the pan offsets; layout() is the only thing that writes any of it to the
+    // DOM. Nothing else may set box/img styles, or the two will drift.
 
-    let host = null, root = null, box = null, imgEl = null, capEl = null, dimEl = null;
+    let host = null, root = null, box = null, imgEl = null, capEl = null, dimEl = null, closeEl = null;
+
+    // { url, natW, natH, scale, fitScale, imgW, imgH, frameW, frameH, ox, oy, left, top }
+    // ox/oy are the image's top-left within the frame's content box: 0 or negative once
+    // the image outgrows the frame, centred while it still fits.
+    let view = null;
+    let pinned = false;
+
+    const MAX_SCALE_ABS = 64;   // ceiling on cfg.maxZoom; past this a pixel is a billboard
+    const KEY_ZOOM = 1.25;      // per +/− press
 
     function buildViewer() {
         if (host) return;
@@ -389,79 +422,220 @@
         style.textContent = [
             ':host{all:initial}',
             '.dim{position:fixed;inset:0;background:#000;opacity:0;pointer-events:none;transition:opacity var(--fade) ease}',
+            '.dim.on{opacity:var(--dim)}',
+            '.dim.catch{pointer-events:auto}',
             '.box{position:fixed;opacity:0;pointer-events:none;transition:opacity var(--fade) ease;',
             'background:#1e1e2e;box-sizing:content-box;overflow:hidden}',
+            '.box.on.hot{pointer-events:auto}',
             '.box.on{opacity:1}',
-            '.dim.on{opacity:var(--dim)}',
-            'img{display:block;width:100%;height:100%;object-fit:contain;background:#1e1e2e}',
+            '.box.pan{cursor:grab}',
+            '.box.pan.drag{cursor:grabbing}',
+            'img{display:block;position:absolute;background:#1e1e2e;-webkit-user-drag:none;user-select:none}',
             '.cap{position:absolute;left:0;right:0;bottom:0;padding:3px 7px;font:11px/1.4 system-ui,sans-serif;',
-            'color:#cdd6f4;background:rgba(30,30,46,.82);text-align:right;letter-spacing:.02em}',
+            'color:#cdd6f4;background:rgba(30,30,46,.82);text-align:right;letter-spacing:.02em;pointer-events:none}',
+            '.x{position:absolute;top:7px;right:7px;width:26px;height:26px;display:none;',
+            'align-items:center;justify-content:center;border-radius:50%;border:1px solid #45475a;',
+            'background:rgba(30,30,46,.88);color:#cdd6f4;font:17px/1 system-ui,sans-serif;',
+            'cursor:pointer;user-select:none}',
+            '.box.pinned .x{display:flex}',
+            '.x:hover{background:#f38ba8;border-color:#f38ba8;color:#1e1e2e}',
         ].join('');
         root.appendChild(style);
 
         dimEl = document.createElement('div');
         dimEl.className = 'dim';
+        // Only reachable while `.catch` is on, i.e. while pinned. Killing the mousedown
+        // as well as the click stops the page beneath from starting a selection or
+        // following a link with the same gesture that dismissed us.
+        dimEl.addEventListener('mousedown', function (e) { e.preventDefault(); e.stopPropagation(); }, true);
+        dimEl.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); unpin(); }, true);
         root.appendChild(dimEl);
 
         box = document.createElement('div');
         box.className = 'box';
+
         imgEl = document.createElement('img');
+        imgEl.draggable = false;
+
         capEl = document.createElement('div');
         capEl.className = 'cap';
+
+        closeEl = document.createElement('div');
+        closeEl.className = 'x';
+        closeEl.title = 'Close (Esc)';
+        closeEl.textContent = '×';
+        closeEl.addEventListener('mousedown', function (e) { e.preventDefault(); e.stopPropagation(); }, true);
+        closeEl.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); unpin(); }, true);
+
         box.appendChild(imgEl);
         box.appendChild(capEl);
+        box.appendChild(closeEl);
+        box.addEventListener('mousedown', onBoxDown, true);
+        box.addEventListener('click', onBoxClick, true);
         root.appendChild(box);
 
         (document.body || document.documentElement).appendChild(host);
     }
 
-    function showViewer(res, anchor, pointer) {
-        buildViewer();
+    // ----------------------------------------------------------------- geometry
 
+    function viewportBox() {
         const vw = document.documentElement.clientWidth;
         const vh = document.documentElement.clientHeight;
-        const maxW = vw * (cfg.maxWidthPct / 100) - cfg.borderWidth * 2;
-        const maxH = vh * (cfg.maxHeightPct / 100) - cfg.borderWidth * 2;
+        return {
+            vw: vw,
+            vh: vh,
+            w: Math.max(32, vw * (cfg.maxWidthPct / 100) - cfg.borderWidth * 2),
+            h: Math.max(32, vh * (cfg.maxHeightPct / 100) - cfg.borderWidth * 2),
+        };
+    }
 
-        let w = res.w * cfg.zoomFactor;
-        let h = res.h * cfg.zoomFactor;
-        const fit = Math.min(maxW / w, maxH / h, 1);
-        w = Math.round(w * fit);
-        h = Math.round(h * fit);
+    function pannable() {
+        return !!view && (view.imgW > view.frameW + 0.5 || view.imgH > view.frameH + 0.5);
+    }
+
+    // Frame grows with the image until it hits the viewport cap; after that the frame is
+    // fixed and further zoom spills out of it, which is exactly when panning starts to
+    // mean something.
+    function reflow() {
+        if (!view) return;
+        const m = viewportBox();
+        view.imgW = view.natW * view.scale;
+        view.imgH = view.natH * view.scale;
+        view.frameW = Math.round(Math.min(view.imgW, m.w));
+        view.frameH = Math.round(Math.min(view.imgH, m.h));
+        view.ox = view.imgW <= view.frameW
+            ? (view.frameW - view.imgW) / 2
+            : Math.min(0, Math.max(view.frameW - view.imgW, view.ox));
+        view.oy = view.imgH <= view.frameH
+            ? (view.frameH - view.imgH) / 2
+            : Math.min(0, Math.max(view.frameH - view.imgH, view.oy));
+    }
+
+    function clampPosition() {
+        const m = viewportBox();
+        const ow = view.frameW + cfg.borderWidth * 2;
+        const oh = view.frameH + cfg.borderWidth * 2;
+        view.left = Math.max(4, Math.min(view.left, m.vw - ow - 4));
+        view.top = Math.max(4, Math.min(view.top, m.vh - oh - 4));
+    }
+
+    function caption() {
+        const parts = [];
+        if (cfg.showDimensions) parts.push(view.natW + ' × ' + view.natH);
+        if (pinned) parts.push(Math.round(view.scale * 100) + '%');
+        if (!parts.length) {
+            capEl.textContent = '';
+            capEl.style.display = 'none';
+            return;
+        }
+        capEl.textContent = parts.join('  ·  ');
+        capEl.style.display = '';
+    }
+
+    function layout() {
+        if (!view) return;
+        clampPosition();
+        box.style.left = Math.round(view.left) + 'px';
+        box.style.top = Math.round(view.top) + 'px';
+        box.style.width = view.frameW + 'px';
+        box.style.height = view.frameH + 'px';
+        imgEl.style.width = Math.round(view.imgW) + 'px';
+        imgEl.style.height = Math.round(view.imgH) + 'px';
+        imgEl.style.left = Math.round(view.ox) + 'px';
+        imgEl.style.top = Math.round(view.oy) + 'px';
+        box.classList.toggle('pan', pinned && pannable());
+        caption();
+    }
+
+    // Zoom about a point given in SCREEN coordinates, keeping whatever pixel of the image
+    // sits under it there afterwards. The frame may resize and be re-centred in between,
+    // so the anchor's frame-relative position is derived twice: once against the old
+    // frame to find the image pixel, once against the new one to place it back.
+    function zoomAt(nextScale, screenX, screenY) {
+        if (!view) return;
+        const lo = view.fitScale;
+        const hi = Math.max(lo, Math.min(cfg.maxZoom, MAX_SCALE_ABS));
+        nextScale = Math.max(lo, Math.min(hi, nextScale));
+        if (Math.abs(nextScale - view.scale) < 1e-6) return;
+
+        const ax = Math.max(0, Math.min(view.frameW, screenX - (view.left + cfg.borderWidth)));
+        const ay = Math.max(0, Math.min(view.frameH, screenY - (view.top + cfg.borderWidth)));
+        const ix = (ax - view.ox) / view.scale;
+        const iy = (ay - view.oy) / view.scale;
+
+        const cx = view.left + (view.frameW + cfg.borderWidth * 2) / 2;
+        const cy = view.top + (view.frameH + cfg.borderWidth * 2) / 2;
+
+        view.scale = nextScale;
+        reflow();                       // new frame size; offsets are re-derived below
+        view.left = cx - (view.frameW + cfg.borderWidth * 2) / 2;
+        view.top = cy - (view.frameH + cfg.borderWidth * 2) / 2;
+        clampPosition();
+
+        const ax2 = Math.max(0, Math.min(view.frameW, screenX - (view.left + cfg.borderWidth)));
+        const ay2 = Math.max(0, Math.min(view.frameH, screenY - (view.top + cfg.borderWidth)));
+        view.ox = ax2 - ix * nextScale;
+        view.oy = ay2 - iy * nextScale;
+        reflow();                       // clamp the offsets; frame size is already settled
+        layout();
+    }
+
+    function zoomCentre(nextScale) {
+        if (!view) return;
+        zoomAt(nextScale,
+            view.left + cfg.borderWidth + view.frameW / 2,
+            view.top + cfg.borderWidth + view.frameH / 2);
+    }
+
+    function panBy(dx, dy) {
+        if (!view || !pannable()) return;
+        view.ox += dx;
+        view.oy += dy;
+        reflow();
+        layout();
+    }
+
+    // -------------------------------------------------------------------- show
+
+    function showViewer(res, pointer) {
+        buildViewer();
+
+        const m = viewportBox();
+        // Equivalent to the old "scale by zoomFactor, then shrink to fit, never enlarge":
+        // whichever of the three constraints binds first.
+        const fit = Math.min(cfg.zoomFactor, m.w / res.w, m.h / res.h);
+
+        view = {
+            url: res.url, natW: res.w, natH: res.h,
+            scale: fit, fitScale: fit,
+            imgW: 0, imgH: 0, frameW: 0, frameH: 0, ox: 0, oy: 0, left: 0, top: 0,
+        };
+        reflow();
 
         host.style.setProperty('--fade', cfg.fadeMs + 'ms');
         host.style.setProperty('--dim', (cfg.dimOpacity / 100).toString());
 
-        box.style.width = w + 'px';
-        box.style.height = h + 'px';
         box.style.border = cfg.borderWidth > 0 ? cfg.borderWidth + 'px solid ' + cfg.borderColor : 'none';
         box.style.borderRadius = cfg.cornerRadius + 'px';
         box.style.boxShadow = cfg.shadow ? '0 8px 32px rgba(0,0,0,.55)' : 'none';
+        box.classList.toggle('hot', !!cfg.clickToPin);
 
-        const outer = { w: w + cfg.borderWidth * 2, h: h + cfg.borderWidth * 2 };
-        let left, top;
+        const ow = view.frameW + cfg.borderWidth * 2;
+        const oh = view.frameH + cfg.borderWidth * 2;
         if (cfg.position === 'center') {
-            left = (vw - outer.w) / 2;
-            top = (vh - outer.h) / 2;
+            view.left = (m.vw - ow) / 2;
+            view.top = (m.vh - oh) / 2;
         } else {
             // prefer the side of the pointer with more room, then clamp
-            const rightRoom = vw - pointer.x - cfg.cursorGap;
-            left = rightRoom >= outer.w ? pointer.x + cfg.cursorGap : pointer.x - cfg.cursorGap - outer.w;
-            top = pointer.y - outer.h / 2;
+            const rightRoom = m.vw - pointer.x - cfg.cursorGap;
+            view.left = rightRoom >= ow ? pointer.x + cfg.cursorGap : pointer.x - cfg.cursorGap - ow;
+            view.top = pointer.y - oh / 2;
         }
-        box.style.left = Math.round(Math.max(4, Math.min(left, vw - outer.w - 4))) + 'px';
-        box.style.top = Math.round(Math.max(4, Math.min(top, vh - outer.h - 4))) + 'px';
 
         if (cfg.noReferrer) imgEl.referrerPolicy = 'no-referrer';
         imgEl.src = res.url;
-
-        if (cfg.showDimensions) {
-            capEl.textContent = res.w + ' × ' + res.h;
-            capEl.style.display = '';
-        } else {
-            capEl.textContent = '';
-            capEl.style.display = 'none';
-        }
+        layout();
 
         box.classList.add('on');
         if (cfg.dimOpacity > 0) dimEl.classList.add('on');
@@ -473,8 +647,95 @@
         dimEl.classList.remove('on');
         // release the decoded image so long sessions don't accumulate bitmaps
         setTimeout(function () {
-            if (box && !box.classList.contains('on')) imgEl.removeAttribute('src');
+            if (box && !box.classList.contains('on')) {
+                imgEl.removeAttribute('src');
+                view = null;
+            }
         }, cfg.fadeMs + 60);
+    }
+
+    // ------------------------------------------------------------- pinned mode
+
+    // Every pinned-mode key and wheel listener lives on this one node, in capture, so
+    // teardown cannot drift and so we outrank document-level listeners belonging to the
+    // page or to a sibling userscript (the capture path reaches window first).
+    const CAP_TARGET = window;
+    const WHEEL_OPTS = { capture: true, passive: false };
+
+    function pin() {
+        if (pinned || !view) return;
+        pinned = true;
+        clearTimeout(hideTimer);
+        clearTimeout(timer);
+        if (token) token.cancelled = true;
+        token = null;
+        box.classList.add('pinned');
+        dimEl.classList.add('catch');
+        CAP_TARGET.addEventListener('keydown', onPinKey, true);
+        CAP_TARGET.addEventListener('wheel', onPinWheel, WHEEL_OPTS);
+        layout();
+    }
+
+    function unpin() {
+        if (!pinned) return;
+        pinned = false;
+        drag = null;
+        box.classList.remove('pinned', 'drag');
+        dimEl.classList.remove('catch');
+        CAP_TARGET.removeEventListener('keydown', onPinKey, true);
+        CAP_TARGET.removeEventListener('wheel', onPinWheel, WHEEL_OPTS);
+        cancel();
+    }
+
+    // The X lives INSIDE the box, so these two capture listeners reach it first and their
+    // stopPropagation() would keep the button's own handlers from ever running — capture
+    // descends from the ancestor. Both have to step aside for it explicitly.
+    function onBoxClick(e) {
+        if (closeEl.contains(e.target)) return;
+        if (pinned) { e.stopPropagation(); return; }   // a pinned box only closes via X / backdrop / Esc
+        if (!cfg.clickToPin || !view) return;
+        e.preventDefault();
+        e.stopPropagation();
+        pin();
+    }
+
+    function onBoxDown(e) {
+        if (e.button !== 0) return;
+        if (closeEl.contains(e.target)) return;
+        // Swallow it either way: unpinned, this is the press half of the pin click and
+        // must not reach the page; pinned, it starts a pan.
+        e.preventDefault();
+        e.stopPropagation();
+        if (!pinned || !pannable()) return;
+        drag = { x: e.clientX, y: e.clientY };
+        box.classList.add('drag');
+    }
+
+    function onPinKey(e) {
+        if (!pinned || !view) return;
+        if (e.ctrlKey || e.metaKey || e.altKey) return;   // leave browser/page chords alone
+        const step = e.shiftKey ? cfg.panStep * 3 : cfg.panStep;
+        let handled = true;
+        switch (e.key) {
+            case 'Escape': unpin(); break;
+            case 'ArrowLeft': panBy(step, 0); break;
+            case 'ArrowRight': panBy(-step, 0); break;
+            case 'ArrowUp': panBy(0, step); break;
+            case 'ArrowDown': panBy(0, -step); break;
+            case '+': case '=': zoomCentre(view.scale * KEY_ZOOM); break;
+            case '-': case '_': zoomCentre(view.scale / KEY_ZOOM); break;
+            case '0': zoomCentre(view.fitScale); break;
+            default: handled = false;
+        }
+        if (handled) { e.preventDefault(); e.stopPropagation(); }
+    }
+
+    function onPinWheel(e) {
+        if (!pinned || !view) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const f = 1 + cfg.wheelZoomStep / 100;
+        zoomAt(view.scale * (e.deltaY < 0 ? f : 1 / f), e.clientX, e.clientY);
     }
 
     // ------------------------------------------------------------- interaction
@@ -482,9 +743,20 @@
     let active = null;      // element currently zoomed or pending
     let token = null;       // cancellation token for the in-flight resolve
     let timer = null;
+    let hideTimer = null;
+    let drag = null;        // { x, y } while panning a pinned image
     let pointer = { x: 0, y: 0 };
     let mouseDown = false;
     let modifierDown = false;
+
+    // The preview sits cfg.cursorGap away from the image, so reaching it means crossing
+    // page content that would otherwise dismiss it on mouseout. This is how long it
+    // survives that crossing.
+    const HIDE_GRACE = 220;
+
+    function ours(node) {
+        return !!host && (node === host || (host.contains && host.contains(node)));
+    }
 
     function modifierHeld(e) {
         if (cfg.modifierKey === 'ctrl') return e.ctrlKey;
@@ -507,19 +779,35 @@
     }
 
     function cancel() {
+        if (pinned) return;         // a pinned viewer outlives hover entirely
         clearTimeout(timer);
+        clearTimeout(hideTimer);
         if (token) token.cancelled = true;
         token = null;
         active = null;
         hideViewer();
     }
 
+    function scheduleHide() {
+        clearTimeout(hideTimer);
+        hideTimer = setTimeout(cancel, HIDE_GRACE);
+    }
+
     function onMove(e) {
         pointer.x = e.clientX;
         pointer.y = e.clientY;
+        if (!drag) return;
+        const dx = e.clientX - drag.x;
+        const dy = e.clientY - drag.y;
+        if (!dx && !dy) return;
+        drag.x = e.clientX;
+        drag.y = e.clientY;
+        panBy(dx, dy);
     }
 
     function onOver(e) {
+        if (pinned) return;
+        if (ours(e.target)) { clearTimeout(hideTimer); return; }   // pointer reached the preview
         if (!cfg.enabled || !siteEnabled()) return;
         if (cfg.skipWhileMouseDown && mouseDown) return;
         if (cfg.activation === 'modifier' && !modifierHeld(e) && !modifierDown) return;
@@ -530,7 +818,7 @@
             if (active && !active.contains(e.target)) cancel();
             return;
         }
-        if (el === active) return;
+        if (el === active) { clearTimeout(hideTimer); return; }
 
         cancel();
         const displayed = sizeOf(el);
@@ -542,26 +830,41 @@
         timer = setTimeout(async function () {
             const res = await resolve(el, displayed, myToken);
             if (myToken.cancelled || active !== el) return;
-            if (res) showViewer(res, el, pointer);
+            if (res) showViewer(res, pointer);
         }, cfg.hoverDelay);
     }
 
     function onOut(e) {
-        if (!active) return;
+        if (pinned || !active) return;
         const to = e.relatedTarget;
-        if (to && active.contains && active.contains(to)) return;
-        cancel();
+        if (to && (ours(to) || (active.contains && active.contains(to)))) return;
+        scheduleHide();     // not cancel(): give the pointer time to reach the preview
     }
 
     document.addEventListener('mousemove', onMove, true);
     document.addEventListener('mouseover', onOver, true);
     document.addEventListener('mouseout', onOut, true);
-    document.addEventListener('mousedown', function () { mouseDown = true; cancel(); }, true);
-    document.addEventListener('mouseup', function () { mouseDown = false; }, true);
-    window.addEventListener('scroll', cancel, true);
-    window.addEventListener('blur', cancel);
+    document.addEventListener('mousedown', function (e) {
+        if (ours(e.target)) return;     // onBoxDown / the backdrop own this one
+        mouseDown = true;
+        cancel();
+    }, true);
+    document.addEventListener('mouseup', function () {
+        mouseDown = false;
+        if (drag) { drag = null; if (box) box.classList.remove('drag'); }
+    }, true);
+    window.addEventListener('scroll', function () { if (!pinned) cancel(); }, true);
+    window.addEventListener('blur', function () { if (!pinned) cancel(); });
+    window.addEventListener('resize', function () {
+        if (!pinned) { cancel(); return; }
+        // the window shrinking can leave the frame oversized and the pan out of bounds
+        view.fitScale = Math.min(cfg.zoomFactor, viewportBox().w / view.natW, viewportBox().h / view.natH);
+        if (view.scale < view.fitScale) view.scale = view.fitScale;
+        reflow();
+        layout();
+    });
     document.addEventListener('keydown', function (e) {
-        if (e.key === 'Escape') cancel();
+        if (e.key === 'Escape') cancel();       // onPinKey has already handled the pinned case
         if (cfg.activation === 'modifier' && modifierHeld(e)) modifierDown = true;
     }, true);
     document.addEventListener('keyup', function (e) {
@@ -729,6 +1032,12 @@
         sr2.appendChild(sl);
         sr2.appendChild(sites);
         panel.appendChild(sr2);
+
+        section('Pinned mode');
+        check('clickToPin', 'Click the preview to pin it', 'X or a click outside closes it again');
+        num('wheelZoomStep', 'Wheel zoom step', '% per notch — +/− steps by 25%', 2, 100, 1);
+        num('panStep', 'Arrow-key pan step', 'px per press — Shift for 3×', 5, 500, 5);
+        num('maxZoom', 'Maximum zoom', '× the natural size', 1, 64, 1);
 
         section('How to display');
         num('zoomFactor', 'Zoom factor', 'scale applied before fitting to the window', 0.1, 8, 0.1);
