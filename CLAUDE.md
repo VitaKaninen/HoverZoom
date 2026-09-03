@@ -74,7 +74,9 @@ The preview escalates by gesture, and each step is one gesture, not a setting.
 - **Detached** — drag it anywhere and it stops tracking the source image. Now held open by
   ONE thing: the pointer being over the preview. Leaving the preview takes it down *and*
   `dismiss()` puts the source image in `suppressed`, so moving back onto that image does not
-  re-open it until the pointer has left the image and returned.
+  re-open it until the pointer has left the image and returned. A wheel over it zooms (v0.10.0):
+  having placed it deliberately, scrolling the page — which would close it — is not what the
+  gesture means.
 - **Pinned** — click. Modal: backdrop catches, X appears, wheel/keys/drag become zoom-and-pan.
 
 Read that as one rule: **exactly one thing holds the preview open at a time, and leaving it
@@ -108,13 +110,32 @@ The consequences, all of which have to be handled together:
   clicked on, by design — it dies the moment you move off the image toward it.
 
 Two guards keep a drag from destroying the thing being dragged: `onOver` and `onOut` both
-return early while `drag` is set. Scroll still cancels an unpinned preview, detached or not.
+return early while `drag` is set. Scroll still cancels an unpinned preview, detached or not —
+except a wheel *over* a placed preview, which zooms it (see the pinned-mode section).
+
+**`hot` is set by `layout()` and must be cleared by `hideViewer()`** — v0.9.0 set it and never
+removed it, and the symptom is nasty out of all proportion to the fix. `layout()` stops running
+once the frame is down, so the box kept `pointer-events:auto` and `cursor:move` at its last
+position and size: an invisible full-size rectangle that showed the move cursor, swallowed every
+click through its own `onBoxDown`, and made `onOver`'s `ours(e.target)` true so no image under it
+would ever preview again. Reported as "a phantom window where the preview used to be"; it needed
+one detach or pin to arm and then survived every close. **The general rule: a class that grants
+`pointer-events` must be removed on the same path that hides the element, not on the path that
+lays it out.** Fixed in v0.10.0; the browser check is `elementFromPoint` inside the old rectangle
+after closing, which must return page content, not `hover-zoom-host`.
 
 ## Videos are never previewed (v0.9.0)
 
 "Images only" was a stated invariant that nothing actually enforced — a video thumbnail is a
 plain `<img>` and previewed like any other. Reported on YouTube: "when I go to click a video,
-I get a preview." Three gates, in `eligible()` / `inVideoContext()`, any one sufficient:
+I get a preview." Four gates, in `eligible()` / `inVideoContext()` / `overVideoSurface()`, any
+one sufficient:
+
+0. **Geometry** (v0.10.0) — the element's centre lies inside the rect of a laid-out `<video>`.
+   A player's poster, cued-thumbnail overlay and endscreen images all occupy the video's own
+   rectangle, so this names them exactly whatever the DOM between them looks like. Videos
+   smaller than 2px are skipped, so the test page's 1×1 fixture contains nothing and cannot
+   poison a page the way an unbounded ancestor walk does.
 
 1. **`NEVER`** — `VIDEO`/`AUDIO`/`IFRAME`/`CANVAS`/`OBJECT`/`EMBED`/`SOURCE`/`TRACK` are never
    candidates, whatever CSS background they carry.
@@ -127,6 +148,15 @@ I get a preview." Three gates, in `eligible()` / `inVideoContext()`, any one suf
    positive costs one preview that never opens, a false negative is the reported bug. It is
    switchable — `skipVideos`, on by default — and has positive *and* negative cases in
    `test-resolver.js`, which slices the regex out of the script the way the URL tests do.
+
+**That bound is also why gate 0 had to exist.** The bound is applied to an ancestor *before* the
+ancestor is tested for a `<video>`, and on a YouTube watch page the player element holds the
+video **and** several `<img>`, so the walk ended before the exact structural signal was ever
+read — a preview opened over the video you were trying to click. Reordering the two inside the
+loop is not the fix: testing the video first re-breaks the test page, because the grid ancestor
+holding the 1×1 fixture would then match. The geometric test sits *outside* the walk and leaves
+the bound exactly as it was. Found 2026-09-03; the reproduction is a `<div>` holding a `<video>`,
+two sibling `<img>`, and the poster nested one level down.
 
 **The ancestor walk must stop at the first ancestor holding more than one `<img>`.** Measured
 2026-09-03: without that bound the walk reached the test page's grid, found the single 1×1
@@ -197,28 +227,36 @@ explains the controls without offering a switch.
 - **The preview opens beside the pointer, then is nudged just far enough to touch it**
   (`nudgeIntoReach`, `REACH_INSET` 10px). v0.4.0 centred it on the cursor, which solved
   reachability but moved the preview much further than needed. The nudge is ~34px with the
-  default 24px gap, and only on the axis that needs it. `HIDE_GRACE` still covers frames clamped
-  away from the cursor at a window edge.
-- **The status bar is the move handle.** Dragging it moves the frame (`drag.mode === 'move'`);
-  dragging the image pans within the frame (`'pan'`). Both go through the same `drag` object in
-  `onMove`. Hiding the status bar therefore also removes the only way to move a pinned frame.
+  default 24px gap, and only on the axis that needs it. (A frame clamped away from the cursor at
+  a window edge used to be covered by `HIDE_GRACE`; there is no grace period since v0.9.0, and
+  the preview being pointer-transparent is what makes that safe.)
+- **The status bar always moves the frame** (`drag.mode === 'move'`); everywhere else pans if
+  the picture is spilling and moves the frame if it is not. Both go through the same `drag`
+  object in `onMove`. Hiding the status bar therefore removes the only way to move a frame that
+  is zoomed in far enough to pan.
 
 - **The frame grows before the image spills.** Zooming enlarges the frame until it reaches
   `maxWidthPct`/`maxHeightPct` of the viewport; past that the frame is fixed and the image
   overflows it, which is when `pannable()` (and the `grab` cursor) turn on. Zoom-out floors at
   `fitScale`, the scale the preview opened at; `0` returns there.
-- **Pinned-mode key/wheel listeners live on `CAP_TARGET` (= `window`), in capture** — per
+- **Key and wheel listeners live on `CAP_TARGET` (= `window`), in capture** — per
   `../CLAUDE.md`, that beats every document-level listener on the page and in sibling
-  userscripts, so arrows and `+`/`−` are ours while pinned and nobody else's. Both are added in
+  userscripts, so arrows and `+`/`−` are ours while pinned and nobody else's. Keys are added in
   `pin()` and removed in `unpin()` against that one constant; `wheel` uses the shared
   `WHEEL_OPTS` object for add *and* remove, or the removal silently no-ops.
-- **Hover has a `HIDE_GRACE` (220 ms).** The preview sits `cursorGap` px from the image, so
-  reaching it means crossing page content. `onOut` schedules the hide instead of doing it, and
-  `onOver` cancels that timer when the pointer lands on the host. Without it the preview is
-  unreachable and click-to-pin cannot work at all.
-- **The preview is hit-testable while unpinned** (`.box.on.hot`, gated on `cfg.clickToPin`).
-  That is the cost of click-to-pin: the preview covers whatever is under it. Turning the setting
-  off restores `pointer-events:none`.
+- **Wheel zoom belongs to any PLACED preview, pinned or merely detached** (v0.10.0). A wheel
+  over a detached preview used to scroll the page, and the scroll then cancelled the preview —
+  the gesture destroyed what it was aimed at. `enableWheelZoom()`/`disableWheelZoom()` guard one
+  flag so add and remove cannot drift, and `detach()` is the single place `detached` is set so
+  the binding cannot fall out of step with it. It is bound **on demand, not for the life of the
+  script**: this is a non-passive capture listener on `window`, and leaving one attached makes
+  every wheel event on every page cancellable for nothing. Unpinned, `onPinWheel` acts only when
+  the pointer is actually over the frame, so a wheel anywhere else still scrolls.
+- **A drag pans only while the picture is spilling; otherwise it moves the frame** (v0.10.0) —
+  one rule for every state, with the status bar always moving the frame. Before this the pinned
+  branch was `'pan'` unconditionally and the press was simply dropped when `pannable()` was
+  false, so a pinned frame at `fitScale` could not be dragged at all. `pannable()` is read per
+  press, so zooming in and back out restores dragging with no state to keep in step.
 
 ## Settings are per-tab snapshots — always re-read before rendering the panel
 
@@ -258,8 +296,8 @@ node test-resolver.js               # 67 assertions on the pure URL and video-li
 python make-test-images.py          # regenerate fixtures into test-images/
 ```
 
-Browser test: `python test-server.py`, then open `http://localhost:8899/test-page.html`. 19 cases,
-9 of which HZ+ rejects outright. (`.claude/launch.json` wraps the same command as
+Browser test: `python test-server.py`, then open `http://localhost:8899/test-page.html`. 20 cases,
+10 of which HZ+ rejects outright. (`.claude/launch.json` wraps the same command as
 `hover-zoom-test`, but `.claude/` is gitignored — a fresh clone has only the direct command.)
 
 - **`test-server.py`, not `python -m http.server`.** It is the same static server plus
@@ -276,6 +314,12 @@ Browser test: `python test-server.py`, then open `http://localhost:8899/test-pag
   is the only one that exercises the "frame grows before the image spills" branch of `reflow()`.
   Every other case has a 1600×1200 original, which opens already clamped to the cap.
 - Case 16 is the `?imgurl=` shape — a 32px icon wrapped in an `/imgres?imgurl=…` viewer link.
+- **Case 20 is the only case where a progressive upgrade is VISIBLE**, and it exists because
+  "it never upgrades" was reported as a bug. Its `data-src` is probed first and already clears
+  the gate, so the preview opens at 800×600; the ancestor link is bigger again but carries
+  `?slow=3`. Measured: preview at 1085 ms, ring docks at 2077 ms, swap to 1600×1200 at 4400 ms.
+  Every other upgrade on the page resolves inside one frame, which is exactly why the feature
+  looks absent in normal use — see `INTERACTION.md` `E8`.
 - **`test-server.py` honours `$PORT`** (default 8899) and `.claude/launch.json` sets
   `autoPort: true`, so two sessions can each run their own copy. Without that the second
   session's `preview_start` just fails on the first session's server, which it cannot stop.

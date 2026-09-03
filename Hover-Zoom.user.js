@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.9.0
+// @version     0.10.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -563,6 +563,8 @@
             // Placed but not pinned, the whole frame is a move handle: there is nothing to
             // pan yet, and dragging is how a preview is kept without pinning it.
             '.box.hot:not(.pinned){cursor:move}',
+            // Pinned with nothing to pan, the frame moves too, so it says so.
+            '.box.pinned:not(.pan){cursor:move}',
             '.box.pan{cursor:grab}',
             '.box.pan.drag{cursor:grabbing}',
             'img{display:block;position:absolute;background:#1e1e2e;-webkit-user-drag:none;user-select:none}',
@@ -810,7 +812,11 @@
         parts.push(view.natW + ' × ' + view.natH);
         const bytes = transferBytes(view.url);
         if (bytes) parts.push(humanBytes(bytes));
-        if (pinned) parts.push(Math.round(view.scale * 100) + '%');
+        // A detached window can be zoomed too now, so the scale shows whenever it is pinned
+        // or has moved off the scale it opened at.
+        if (pinned || Math.abs(view.scale - view.fitScale) > 1e-6) {
+            parts.push(Math.round(view.scale * 100) + '%');
+        }
         capMetaEl.textContent = parts.join('  ·  ');
     }
 
@@ -858,7 +864,7 @@
         menuEl.classList.add('on');
         // Aiming at a menu item means moving off the image, which would otherwise take the
         // preview — and the menu with it — down mid-gesture.
-        if (!pinned) detached = true;
+        if (!pinned) detach();
         const b = menuBtn.getBoundingClientRect();
         const m = viewportBox();
         const w = menuEl.offsetWidth;
@@ -998,7 +1004,7 @@
         imgEl.style.left = Math.round(view.ox) + 'px';
         imgEl.style.top = Math.round(view.oy) + 'px';
         box.classList.toggle('hot', pinned || detached);
-        box.classList.toggle('pan', pinned && pannable());
+        box.classList.toggle('pan', (pinned || detached) && pannable());
         caption();
         if (spinDocked) moveSpinner();      // the dock rides with the frame
     }
@@ -1220,7 +1226,14 @@
 
     function hideViewer() {
         if (!box) return;
-        box.classList.remove('on');
+        // `hot` is what makes the frame hit-testable, and it is added by layout(), which no
+        // longer runs once the frame is down — so it has to come off HERE. Left on, the box
+        // stays a full-size invisible rectangle with pointer-events:auto and cursor:move at
+        // the frame's last position: it shows the move cursor, swallows every click through
+        // its own onBoxDown, and makes onOver's `ours(e.target)` true so no image under it
+        // can ever preview again. Reported as "a phantom window where the preview used to
+        // be"; it appeared only after a preview had been detached or pinned at least once.
+        box.classList.remove('on', 'hot', 'pan', 'drag');
         dimEl.classList.remove('on');
         // release the decoded image so long sessions don't accumulate bitmaps
         setTimeout(function () {
@@ -1239,6 +1252,36 @@
     const CAP_TARGET = window;
     const WHEEL_OPTS = { capture: true, passive: false };
 
+    // Wheel-to-zoom belongs to any PLACED window — pinned or merely detached. Having gone to
+    // the trouble of dragging a preview somewhere, a wheel over it means "make this bigger",
+    // not "scroll the page" — and scrolling the page would take the preview down (K2), so the
+    // gesture destroyed the thing it was aimed at.
+    //
+    // Bound on demand rather than for the life of the script: this is a non-passive capture
+    // listener on window, and leaving one attached on every page makes every wheel event on
+    // every page cancellable for nothing. One flag so add and remove cannot drift, and the
+    // same WHEEL_OPTS object for both, or the removal silently no-ops.
+    let wheelZoomOn = false;
+
+    function enableWheelZoom() {
+        if (wheelZoomOn) return;
+        wheelZoomOn = true;
+        CAP_TARGET.addEventListener('wheel', onPinWheel, WHEEL_OPTS);
+    }
+
+    function disableWheelZoom() {
+        if (!wheelZoomOn) return;
+        wheelZoomOn = false;
+        CAP_TARGET.removeEventListener('wheel', onPinWheel, WHEEL_OPTS);
+    }
+
+    // The one place `detached` is set, so the wheel binding cannot fall out of step with it.
+    function detach() {
+        if (detached) return;
+        detached = true;
+        enableWheelZoom();
+    }
+
     function pin() {
         if (pinned || !view) return;
         pinned = true;
@@ -1249,7 +1292,7 @@
         box.classList.add('pinned');
         dimEl.classList.add('catch');
         CAP_TARGET.addEventListener('keydown', onPinKey, true);
-        CAP_TARGET.addEventListener('wheel', onPinWheel, WHEEL_OPTS);
+        enableWheelZoom();
         layout();
     }
 
@@ -1261,7 +1304,7 @@
         box.classList.remove('pinned', 'drag');
         dimEl.classList.remove('catch');
         CAP_TARGET.removeEventListener('keydown', onPinKey, true);
-        CAP_TARGET.removeEventListener('wheel', onPinWheel, WHEEL_OPTS);
+        disableWheelZoom();
         cancel();
     }
 
@@ -1297,11 +1340,13 @@
         closeMenu();            // a press anywhere else on the frame dismisses it
         justDragged = false;
         if (!view) return;
-        // Unpinned the whole frame is a move handle — at fitScale there is nothing to pan,
-        // and grabbing the preview is how it gets kept without pinning. Pinned, the status
-        // bar moves the frame and the image pans within it.
-        const mode = (!pinned || capEl.contains(e.target)) ? 'move' : 'pan';
-        if (mode === 'pan' && !pannable()) return;
+        // One rule for every state: the status bar always moves the frame, and anywhere else
+        // pans when there is something to pan and moves the frame when there is not. Before
+        // this a pinned frame at fitScale answered a drag on the picture with nothing at all
+        // — mode came out 'pan', pannable() was false, and the press was dropped. pannable()
+        // is read per press, so zooming in and back out restores dragging by itself, with no
+        // state to keep in step.
+        const mode = (capEl.contains(e.target) || !pannable()) ? 'move' : 'pan';
         drag = { x: e.clientX, y: e.clientY, mode: mode, dist: 0, moved: false };
         box.classList.add('drag');
     }
@@ -1326,7 +1371,11 @@
     }
 
     function onPinWheel(e) {
-        if (!pinned || !view) return;
+        if (!view) return;
+        // Pinned, the wheel is ours wherever it lands — the window is modal. Merely detached,
+        // it is one of several things under the pointer, so only a wheel actually over the
+        // frame is claimed and everything else still scrolls the page.
+        if (!pinned && !(ours(e.target) || pointInPreview(e.clientX, e.clientY))) return;
         e.preventDefault();
         e.stopPropagation();
         closeMenu();            // it is anchored to the bar, and the bar is about to move
@@ -1384,8 +1433,10 @@
         SOURCE: 1, TRACK: 1 };
 
     // A video thumbnail is a plain <img>: at the DOM level there is nothing to tell it from
-    // any other image, so two independent signals are used and either one is enough.
+    // any other image, so three independent signals are used and any one is enough.
     //
+    // 0. GEOMETRY — the element sits inside the rectangle of a laid-out <video>. Exact for
+    //    a player surface of any shape; see overVideoSurface().
     // 1. STRUCTURE — a <video> in the element itself or in one of three ancestors. This
     //    catches players and the inline preview a card swaps in on hover. It is exact when
     //    it fires, but on a card whose player has not been injected yet it fires late or
@@ -1407,8 +1458,34 @@
         '\\.(?:mp4|webm|m3u8|mov|mkv|avi)(?:$|[?#])',
     ].join('|'), 'i');
 
+    // GEOMETRY — is this element sitting on top of a real, laid-out <video>? A player's
+    // poster, its cued-thumbnail overlay and its endscreen images all occupy the same
+    // rectangle as the <video> itself, so a containment test names them exactly, whatever
+    // the DOM between them looks like. This is what the ancestor walk below cannot do on a
+    // watch page: the player element holds the <video> AND several <img>, so the "still one
+    // card" bound ends the walk before the video test is ever reached, and a preview opens
+    // over the video you were trying to click. Reported on YouTube video pages.
+    //
+    // A zero-sized <video> (the 1x1 fixture in test case 18, a player not yet laid out)
+    // contains nothing, so this cannot poison a page the way an unbounded walk does.
+    function overVideoSurface(el) {
+        const vids = document.getElementsByTagName('video');
+        if (!vids.length) return false;
+        const r = el.getBoundingClientRect();
+        if (!r.width || !r.height) return false;
+        const cx = r.left + r.width / 2;
+        const cy = r.top + r.height / 2;
+        for (let i = 0; i < vids.length; i++) {
+            const v = vids[i].getBoundingClientRect();
+            if (v.width < 2 || v.height < 2) continue;
+            if (cx >= v.left && cx <= v.right && cy >= v.top && cy <= v.bottom) return true;
+        }
+        return false;
+    }
+
     function inVideoContext(el) {
         if (el.closest && el.closest('video')) return true;
+        if (overVideoSurface(el)) return true;
         // Walk up only while the ancestor still looks like ONE card. The moment it holds
         // more than one image it is a grid or a page, and a <video> anywhere else in it
         // would poison every image on the page. Measured 2026-09-03: without this bound the
@@ -1444,6 +1521,7 @@
         token = null;
         active = null;
         detached = false;
+        disableWheelZoom();
         closeMenu();
         hideSpinner();
         hideViewer();
@@ -1500,7 +1578,7 @@
         if (drag.mode === 'move') {
             // Dragging an unpinned preview detaches it: it has been deliberately placed, so
             // it stops following the hover and now lives until the pointer leaves IT.
-            if (drag.moved && !pinned && !detached) detached = true;
+            if (drag.moved && !pinned) detach();
             view.left += dx;
             view.top += dy;
             layout();       // clampPosition() keeps the frame on screen

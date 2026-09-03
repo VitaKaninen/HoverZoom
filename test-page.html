@@ -141,6 +141,25 @@
     </a>
   </div>
 
+  <!--
+    The only case where a progressive upgrade is VISIBLE. data-src is probed first and is
+    already an upgrade over the 200px thumbnail, so the preview opens at 800x600 straight
+    away; the link is probed next and is bigger again, but ?slow=3 holds it for three
+    seconds. So: preview at 800x600 -> ring docks into the lower-right corner -> the frame
+    swaps to 1600x1200 in place and the ring stops.
+
+    Every other upgrade on this page resolves inside one frame, which is why "it just grabs
+    the first image and never changes" is what the feature looks like in normal use.
+  -->
+  <div class="case" data-expect="1600">
+    <h2>20. upgrade in place, slowly</h2>
+    <p class="hz bad">HZ+: no equivalent — opens 800&times;600, then swaps to 1600&times;1200</p>
+    <a href="test-images/photo.jpg?slow=3">
+      <img id="c20" width="200" src="test-images/photo-200x150.jpg"
+           data-src="test-images/photo-800x600.jpg">
+    </a>
+  </div>
+
 </div>
 
 <!--

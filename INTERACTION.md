@@ -3,7 +3,7 @@
 What the preview **window** does, as a state machine. Menus, buttons, the status bar contents and
 the loading ring are out of scope except where they change what the window itself accepts.
 
-Describes `Hover-Zoom.user.js` **v0.9.0**.
+Describes `Hover-Zoom.user.js` **v0.10.0**.
 
 ---
 
@@ -84,7 +84,7 @@ arrives — nothing is decided in advance.
 | `P1` | The element is an `<img>`, or has a CSS background image and contains no `<img>` of its own | — |
 | `P2` | Displayed at least `minDisplayed` on screen | 48 px |
 | `P3` | Displayed no larger than `maxDisplayed` | 0 = no cap |
-| `P4` | Not a video: not a media/plugin tag, no `<video>` in it or within three ancestors, and not inside a link matching the video-URL shapes | `skipVideos` on |
+| `P4` | Not a video: not a media/plugin tag, not sitting inside the rectangle of a laid-out `<video>`, no `<video>` in it or within three ancestors, and not inside a link matching the video-URL shapes | `skipVideos` on |
 | `P5` | The site passes the blacklist / whitelist test | blacklist, empty |
 | `P6` | In modifier mode, the modifier key is held | activation = hover |
 
@@ -135,9 +135,15 @@ The window is up and transient.
   default) it opens beside the pointer with a `cursorGap` (24 px) and is then nudged the smallest
   distance that puts the pointer `REACH_INSET` (10 px) inside its edge. With `position: center` it
   is centred in the window and the pointer is usually *outside* it — which changes `E1`.
-- **On screen:** the window, **pointer-transparent**. Clicks, hovers and scrolls pass straight
-  through it to the page beneath. This is what makes a scan across a row of thumbnails give one
-  window per thumbnail.
+- **On screen:** the window, **pointer-transparent** — but only to *hover and wheel*, which is
+  the distinction that matters:
+  - **hover** passes through. `mouseover` reaches the element underneath, which is what makes a
+    scan across a row of thumbnails give one window per thumbnail.
+  - **the wheel** passes through. The page scrolls, and the scroll then closes the window
+    (`K2`).
+  - **a press or click does NOT.** It genuinely lands on the page, but the script's own
+    document-level capture listeners test the pointer against the window's rectangle and claim
+    it before the page sees it. See `E1` — that is the price of click-to-pin.
 - **Held by:** the pointer being on the source image. Nothing else (`R1`).
 - **Accepts:** left press + release → pin (`T07`); left press + drag > 3 px → detach (`T08`);
   right press → dismiss (`T10`). Default button map `B1`.
@@ -160,7 +166,12 @@ positioned, so it stops tracking the image and answers to the pointer directly.
 - **On screen:** the window, now **hit-testable** — it intercepts the pointer instead of passing it
   through.
 - **Held by:** the pointer being on the window. The source image is now irrelevant to it (`R1`).
-- **Accepts:** click → pin (`T14`); drag → move it again.
+- **Accepts:** click → pin (`T14`); drag → move it again; **wheel over it → zoom** about the
+  pointer, exactly as `S10` does (`T20`). Having dragged a window somewhere, a wheel over it
+  means "make this bigger" — and letting it scroll the page would close the window (`K2`), so
+  the gesture used to destroy what it was aimed at. A wheel anywhere *else* still scrolls.
+- **Zooming it** promotes it through the same `S11` → `S12` geometry as a pinned window, so a
+  detached window can end up spilling and pannable without ever being pinned.
 - **Ends on:** the pointer leaving the window — **and** the source image is put in `S16`, so moving
   back onto it does not re-open anything (`T11`, `T13`).
 
@@ -185,7 +196,8 @@ keyboard and wheel belong to the window.
 - **Held by:** nothing. It outlives hover, scrolling and focus loss entirely.
 - **Accepts:** wheel → zoom about the pointer (`wheelZoomStep`, 15 % per notch); `+` / `−` → zoom
   about the frame centre (1.25× per press); `0` → back to the opening scale; arrows → pan
-  (`panStep` 80 px, Shift for 3×); drag the status bar → move the frame (`S14`).
+  (`panStep` 80 px, Shift for 3×); drag → **pan if the picture is spilling, otherwise move the
+  frame** (`S13` / `S14`); drag the status bar → always move the frame (`S14`).
 - **Ends on:** the X, a click on the backdrop, Escape — or a right-click under `B1`.
 - **Note:** the key and wheel listeners are bound on `window` in capture, so they outrank the page
   and any sibling userscript while pinned.
@@ -193,9 +205,14 @@ keyboard and wheel belong to the window.
 #### S11 · pinned, frame growing
 The image at the current scale is still smaller than the viewport cap, so zooming in enlarges **the
 frame**. The picture always fits; there is nothing to pan.
-- **Cursor:** default. Dragging the image does nothing.
+- **Cursor:** `move`. There is nothing to pan, so dragging anywhere on it moves the frame
+  (`S14`) — including after zooming in and back out, because "can this pan" is asked afresh on
+  every press.
 - **Zoom floor:** the scale the window opened at. `0` returns there.
-- **Ends on:** the frame reaching `maxWidthPct` / `maxHeightPct` (92 %), which promotes it to `S12`.
+- **Growth:** each axis grows independently up to its own cap, so the frame keeps widening after
+  its height has capped, and vice versa. It stops at `maxWidthPct` / `maxHeightPct` — **92 % by
+  default, which is why a fully zoomed frame still leaves a margin all round** (`E7`).
+- **Ends on:** the frame reaching that cap, which promotes it to `S12`.
 
 #### S12 · pinned, image spilling
 The frame has hit the viewport cap and is now fixed. Further zoom pushes the image out past the
@@ -206,14 +223,18 @@ frame's edges, which is the moment panning starts to mean something.
 - **Zoom ceiling:** `maxZoom` (32×), hard-capped at 64×.
 
 #### S13 · dragging (pan), pinned
-Press on the image while it is spilling. The picture moves inside a frame that stays put.
+Press on the image while it is spilling — and only while it is spilling; with nothing to pan the
+same press moves the frame instead (`S14`). The picture moves inside a frame that stays put.
 - **Cursor:** `grabbing`.
 - **Bounds:** clamped so the frame never shows past the edges of the picture.
 
 #### S14 · dragging (move), pinned
-Press on the **status bar**. The whole frame moves; the picture stays put inside it. This is the
-only way to move a pinned window, which is why hiding the status bar also removes it.
-- **Cursor:** `move` over the bar.
+Press on the **status bar**, or anywhere on a frame whose picture is not spilling. The whole frame
+moves; the picture stays put inside it.
+- **Cursor:** `move`.
+- **The status bar always moves the frame**, whatever the zoom — it is the escape hatch once the
+  picture is spilling and every other press pans, which is why hiding the status bar leaves a
+  zoomed-in frame with no way to be moved.
 
 #### S15 · pinned, upgrading
 Pinning is a reason to keep looking, not to stop, so the search runs on.
@@ -262,6 +283,7 @@ inert.
 | `T17` | `S10` | Wheel, or `+` / `−` | `S11` → `S12` as the frame reaches the cap |
 | `T18` | `S10` | Press `0` | `S11` at the opening scale |
 | `T19` | `S10` | Resize the browser window | `S10`, re-fitted — it does not close |
+| `T20` | `S07` | Wheel over the window | `S07`, zoomed — the page does not scroll and the window does not close |
 
 ---
 
@@ -273,7 +295,7 @@ explicit dismissals in `T16`.
 | ID | Trigger | Notes |
 |---|---|---|
 | `K1` | The pointer leaves its holder | The image for `S05`; the window for `S07`. Immediate, no grace. |
-| `K2` | Page scroll | A detached window dies too — only pinning survives scrolling (`E3`). |
+| `K2` | Page scroll | A detached window dies too — only pinning survives scrolling (`E3`). A wheel *over* a detached window zooms it instead and never reaches the page (`T20`). |
 | `K3` | Browser window loses focus | — |
 | `K4` | Browser window resize | Pinned windows re-fit instead (`T19`). |
 | `K5` | Escape | Closes it, but does **not** suppress the image (`E2`). |
@@ -313,7 +335,8 @@ image and back can re-open it. Right-click (`T10`) is the one that stays down.
 
 #### E3 · Scrolling kills a detached window
 Dragging a window aside to read the page under it does not survive a scroll (`K2`). Pinning is the
-only way to keep a window across a scroll.
+only way to keep a window across a scroll. The one exception is a wheel with the pointer *on* the
+window, which zooms instead of scrolling (`T20`).
 
 #### E4 · The window never follows the pointer
 Placement is decided once, when it opens. Moving around within the same image does not reposition
@@ -328,17 +351,32 @@ hit-testable.
 Probes already in flight finish and populate the cache, which is why an image that "did nothing" the
 first time can open instantly a moment later. That is a cache warming up, not a fixed bug.
 
+#### E7 · A fully zoomed frame stops 8 % short of the screen
+`S11` grows each axis to `maxWidthPct` / `maxHeightPct`, both **92** by default, so the frame
+stops with a margin all round and the picture starts spilling from there. Measured on a
+1265 × 784 viewport: a 4:3 picture opens height-capped at 960 × 720, widens over two wheel
+notches to 1162 × 720, and stops — 91.9 % and 91.8 % of the viewport. If you want it to reach the
+edges, both settings go to 100; nothing else is capping it.
+
+#### E8 · An upgrade is almost never visible
+`S06` / `S08` / `S15` work, but the candidate list is ordered best-first, so the first hit is
+usually already the largest and there is nothing to upgrade to. On top of that the docked ring
+only appears if the search is still running 150 ms after the first hit, which a fast site never
+reaches. Test-page case 20 is built to make one observable: it opens at 800 × 600, docks the ring,
+and swaps to 1600 × 1200 three seconds later.
+
 ---
 
 ## Where this lives in the code
 
 | Area | Functions |
 |---|---|
-| Eligibility (`P1`–`P6`) | `eligible`, `inVideoContext`, `siteEnabled` |
+| Eligibility (`P1`–`P6`) | `eligible`, `inVideoContext`, `overVideoSurface`, `siteEnabled` |
 | Hover state machine (`R1`, `S01`–`S08`, `S16`) | `onOver`, `onOut`, `cancel`, `dismiss` |
 | Press / click ownership (`E1`) | `pointInPreview`, `onBoxDown`, `onBoxClick`, the document `mousedown` and `click` listeners |
 | Dragging (`S09`, `S13`, `S14`) | `onMove`, `onBoxDown` |
 | Pinned mode (`S10`–`S15`) | `pin`, `unpin`, `onPinKey`, `onPinWheel` |
+| Wheel zoom on a placed window (`T20`) | `detach`, `enableWheelZoom`, `disableWheelZoom`, `onPinWheel` |
 | Geometry (`S11`, `S12`) | `view`, `reflow`, `layout`, `zoomAt`, `pannable` |
 | Upgrades (`S06`, `S08`, `S15`) | `resolve`, `upgradeViewer` |
 
@@ -351,6 +389,7 @@ Function names are used rather than line numbers, which rot.
 | Date | Change |
 |---|---|
 | 2026-09-03 | Written against v0.9.0. Initial IDs `R1`, `P1`–`P6`, `S01`–`S17`, `T01`–`T19`, `K1`–`K8`, `B1`–`B2`, `E1`–`E6`. |
+| 2026-09-03 | v0.10.0. New: `T20` (wheel zooms a detached window), `E7` (the 92 % frame cap), `E8` (why upgrades are never seen). Changed: `S05` — the old text said clicks pass through the window, which contradicted `E1`; they do not, and only hover and the wheel do. `S07` — accepts the wheel. `S10`/`S11`/`S13`/`S14` — a drag now pans only while the picture is spilling and moves the frame otherwise, so a pinned frame at its opening scale can be dragged from anywhere; the status bar still always moves it. `P4` — a third video signal, the element sitting inside a laid-out `<video>`'s rectangle, because the ancestor walk's "still one card" bound was ending the search before the video test on a watch-page player. Also fixed, and not visible in this document: the closed window used to stay hit-testable, leaving an invisible rectangle that ate clicks and blocked hover where the window had been. |
 
 A browsable version of this document is published at
 <https://claude.ai/code/artifact/136cd3ba-c728-423a-90f3-ef78ad1c2bfd>. **This file is canonical**;
