@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.8.0
+// @version     0.9.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -49,6 +49,7 @@
         maxDisplayed: 0,            // ignore images displayed larger than this (0 = no cap)
         minRatio: 1.2,              // full size must be at least this much bigger
         showEvenIfNotLarger: false, // show at natural size even when it isn't an upgrade
+        skipVideos: true,           // never preview a video thumbnail or a player surface
         keepSearching: true,        // show the first hit at once, then keep probing and upgrade in place
         skipWhileMouseDown: true,   // don't fire mid drag/selection
         siteMode: 'blacklist',      // 'blacklist' | 'whitelist'
@@ -73,6 +74,7 @@
         shadow: true,
         dimOpacity: 0,              // 0 = no page dimming, up to 90
         showStatusBar: true,        // filename / type / size / dimensions strip, also the move handle
+        spinnerTheme: 'auto',       // 'auto' (follows the browser) | 'dark' | 'light'
         noReferrer: false,          // strip referrer when loading full image
     };
 
@@ -468,10 +470,10 @@
     let menuEl = null, menuBtn = null;
 
     const SVG_NS = 'http://www.w3.org/2000/svg';
-    const SPIN_SIZE = 30;                           // px, matches the .spin rule
-    const RING_R = 13;                              // in the 36×36 viewBox, stroke-width 3.5
+    const SPIN_SIZE = 34;                           // px, matches the .spin rule
+    const RING_R = 13;                              // in the 36×36 viewBox, stroke-width 4.5
     const RING_C = 2 * Math.PI * RING_R;
-    const ARC_FRAC = 0.28;                          // how much of the ring the moving arc covers
+    const ARC_FRAC = 0.3;                           // how much of the ring the moving arc covers
 
     function ringCircle(cls, r) {
         const c = document.createElementNS(SVG_NS, 'circle');
@@ -484,8 +486,12 @@
 
     // The spinner is the one part of the overlay that sits on the bare page rather than on
     // the frame's own dark background, so it has to read against whatever is behind it.
-    // The page's computed background is the direct evidence; prefers-color-scheme is the
-    // fallback for a page that paints nothing (transparent body over the UA default).
+    //
+    // `prefers-color-scheme` is the primary signal — it IS the browser's colour mode, which
+    // is what "match the browser" means, and it is what the user is looking at everywhere
+    // else. v0.7.0 keyed off the PAGE's computed background instead, which put a near-white
+    // disc on a white page: technically "matching", and nearly invisible. That is kept only
+    // as the fallback for a browser with no media-query support.
     function parseColor(s) {
         const m = String(s).match(/^rgba?\(([^)]+)\)$/i);
         if (!m) return null;
@@ -494,23 +500,32 @@
         return { r: p[0], g: p[1], b: p[2], a: p.length > 3 ? p[3] : 1 };
     }
 
-    function pageIsDark() {
+    function darkMode() {
+        if (cfg.spinnerTheme === 'dark') return true;
+        if (cfg.spinnerTheme === 'light') return false;
+        try {
+            const mq = matchMedia('(prefers-color-scheme: dark)');
+            if (mq && typeof mq.matches === 'boolean') return mq.matches;
+        } catch (e) { /* fall through to what the page actually painted */ }
         const els = [document.body, document.documentElement];
         for (let i = 0; i < els.length; i++) {
             if (!els[i]) continue;
             const c = parseColor(getComputedStyle(els[i]).backgroundColor);
             if (c && c.a > 0.05) return (0.299 * c.r + 0.587 * c.g + 0.114 * c.b) < 128;
         }
-        try { return matchMedia('(prefers-color-scheme: dark)').matches; } catch (e) { return false; }
+        return false;
     }
 
-    // Catppuccin Mocha on a dark page, Latte on a light one.
+    // Catppuccin Mocha in dark mode, near-white in light. Both carry a hard rim and a
+    // visible track: the disc lands on arbitrary page content, so the rim is what separates
+    // it from whatever is behind it, and a rim too faint to see was the whole of the
+    // "I can hardly see it" report.
     function applySpinTheme() {
         if (!host) return;
-        const dark = pageIsDark();
-        host.style.setProperty('--spin-bg', dark ? 'rgba(30,30,46,.94)' : 'rgba(239,241,245,.94)');
-        host.style.setProperty('--spin-edge', dark ? 'rgba(205,214,244,.20)' : 'rgba(76,79,105,.20)');
-        host.style.setProperty('--spin-track', dark ? 'rgba(205,214,244,.22)' : 'rgba(76,79,105,.20)');
+        const dark = darkMode();
+        host.style.setProperty('--spin-bg', dark ? 'rgba(24,24,37,.96)' : 'rgba(255,255,255,.97)');
+        host.style.setProperty('--spin-edge', dark ? 'rgba(205,214,244,.45)' : 'rgba(30,30,46,.45)');
+        host.style.setProperty('--spin-track', dark ? 'rgba(205,214,244,.30)' : 'rgba(30,30,46,.22)');
         host.style.setProperty('--spin-arc', dark ? '#89b4fa' : '#1e66f5');
     }
 
@@ -538,10 +553,16 @@
             '.dim.catch{pointer-events:auto}',
             '.box{position:fixed;opacity:0;pointer-events:none;transition:opacity var(--fade) ease;',
             'background:#1e1e2e;box-sizing:content-box;overflow:hidden}',
-            '.box.on{opacity:1;pointer-events:auto}',
-            // Unpinned, the whole frame is a move handle: there is nothing to pan yet, and
-            // dragging is how a preview is kept without pinning it.
-            '.box.on:not(.pinned){cursor:move}',
+            '.box.on{opacity:1}',
+            // POINTER-TRANSPARENT until it is pinned or deliberately placed. This is what
+            // lets a scan across a row of thumbnails work: the preview never intercepts the
+            // pointer, so leaving an image really does leave it, and the next image under
+            // the preview still gets its own mouseover. Pinning and dragging are decided by
+            // GEOMETRY at document level instead — see pointInPreview().
+            '.box.hot{pointer-events:auto}',
+            // Placed but not pinned, the whole frame is a move handle: there is nothing to
+            // pan yet, and dragging is how a preview is kept without pinning it.
+            '.box.hot:not(.pinned){cursor:move}',
             '.box.pan{cursor:grab}',
             '.box.pan.drag{cursor:grabbing}',
             'img{display:block;position:absolute;background:#1e1e2e;-webkit-user-drag:none;user-select:none}',
@@ -577,12 +598,12 @@
             // well before the end of that list, so the arc never once finished where it
             // said it would. The disc behind it is mostly opaque and themed to the page,
             // so the ring reads on a white page as well as a dark one.
-            '.spin{position:fixed;width:30px;height:30px;display:none;pointer-events:none;',
-            'filter:drop-shadow(0 1px 4px rgba(0,0,0,.35))}',
+            '.spin{position:fixed;width:34px;height:34px;display:none;pointer-events:none;',
+            'filter:drop-shadow(0 2px 6px rgba(0,0,0,.5))}',
             '.spin.on{display:block}',
             '.spin svg{display:block;width:100%;height:100%}',
-            '.spin .disc{fill:var(--spin-bg);stroke:var(--spin-edge);stroke-width:1}',
-            '.spin .track,.spin .arc{fill:none;stroke-width:3.5;stroke-linecap:round}',
+            '.spin .disc{fill:var(--spin-bg);stroke:var(--spin-edge);stroke-width:1.5}',
+            '.spin .track,.spin .arc{fill:none;stroke-width:4.5;stroke-linecap:round}',
             '.spin .track{stroke:var(--spin-track)}',
             '.spin .arc{stroke:var(--spin-arc)}',
             '.x{position:absolute;top:7px;right:7px;width:26px;height:26px;display:none;',
@@ -838,7 +859,6 @@
         // Aiming at a menu item means moving off the image, which would otherwise take the
         // preview — and the menu with it — down mid-gesture.
         if (!pinned) detached = true;
-        clearTimeout(hideTimer);
         const b = menuBtn.getBoundingClientRect();
         const m = viewportBox();
         const w = menuEl.offsetWidth;
@@ -977,6 +997,7 @@
         imgEl.style.height = Math.round(view.imgH) + 'px';
         imgEl.style.left = Math.round(view.ox) + 'px';
         imgEl.style.top = Math.round(view.oy) + 'px';
+        box.classList.toggle('hot', pinned || detached);
         box.classList.toggle('pan', pinned && pannable());
         caption();
         if (spinDocked) moveSpinner();      // the dock rides with the frame
@@ -1221,7 +1242,6 @@
     function pin() {
         if (pinned || !view) return;
         pinned = true;
-        clearTimeout(hideTimer);
         clearTimeout(timer);
         // The in-flight resolve is deliberately NOT cancelled: pinning is a reason to keep
         // looking for a better original, not to stop. upgradeViewer() preserves the pinned
@@ -1322,7 +1342,6 @@
     let active = null;      // element currently zoomed or pending
     let token = null;       // cancellation token for the in-flight resolve
     let timer = null;
-    let hideTimer = null;
     let drag = null;        // { x, y, mode:'pan'|'move', dist, moved } while dragging
     let justDragged = false;// the click that ends a real drag must not also pin
     let detached = false;   // an unpinned preview that was dragged: hover no longer owns it
@@ -1332,14 +1351,24 @@
     let mouseDown = false;
     let modifierDown = false;
 
-    // The preview opens beside the pointer and is nudged into reach, so it is normally
-    // already under the cursor. This still covers the cases where it gets clamped away
-    // from the pointer — near a window edge, or a frame wider than the viewport allows.
-    const HIDE_GRACE = 220;
-
     // A press that wanders this far in total is a drag, not a click. Below it, the frame
     // still moves, but the release is treated as a pin.
     const DRAG_SLOP = 3;
+
+    // There is no grace period on the hide any more, and no `hideTimer`. One existed so the
+    // pointer could travel onto the preview before it vanished — which mattered only while
+    // the preview was hit-testable. It is pointer-transparent now, so leaving the image is
+    // unambiguous and the preview goes at once. That is what makes scanning a row of
+    // thumbnails give one preview per thumbnail.
+
+    // The unpinned preview cannot be hit-tested, so "is the pointer on it" is answered from
+    // `view` instead. Outer rect: the frame plus its border, which is what layout() writes.
+    function pointInPreview(x, y) {
+        if (!view || !box || !box.classList.contains('on')) return false;
+        const w = view.frameW + cfg.borderWidth * 2;
+        const h = view.frameH + cfg.borderWidth * 2;
+        return x >= view.left && x <= view.left + w && y >= view.top && y <= view.top + h;
+    }
 
     function ours(node) {
         return !!host && (node === host || (host.contains && host.contains(node)));
@@ -1352,8 +1381,54 @@
         return false;
     }
 
+    // Images only, by design — so nothing that IS a media element or a plugin surface is a
+    // candidate, whatever CSS background it happens to carry.
+    const NEVER = { VIDEO: 1, AUDIO: 1, IFRAME: 1, CANVAS: 1, OBJECT: 1, EMBED: 1,
+        SOURCE: 1, TRACK: 1 };
+
+    // A video thumbnail is a plain <img>: at the DOM level there is nothing to tell it from
+    // any other image, so two independent signals are used and either one is enough.
+    //
+    // 1. STRUCTURE — a <video> in the element itself or in one of three ancestors. This
+    //    catches players and the inline preview a card swaps in on hover. It is exact when
+    //    it fires, but on a card whose player has not been injected yet it fires late or
+    //    not at all, which is why (2) exists.
+    // 2. THE LINK — the nearest ancestor <a href> pointing at something that is plainly a
+    //    video. This is a heuristic and it is the one that can be wrong; it is bounded to
+    //    unmistakable shapes and is switchable (`skipVideos`). The asymmetry favours it:
+    //    a false positive costs one preview that will not open, a false negative is the
+    //    reported bug — a preview covering the video you are trying to click.
+    //
+    // Three ancestors, not "walk to the top": querySelector on a high ancestor scans its
+    // whole subtree, and this runs on every mouseover.
+    const VIDEO_LINK_RE = new RegExp([
+        'youtu\\.be/',
+        '/watch\\?',
+        '/shorts/',
+        '/embed/',
+        '/videos?/',
+        '\\.(?:mp4|webm|m3u8|mov|mkv|avi)(?:$|[?#])',
+    ].join('|'), 'i');
+
+    function inVideoContext(el) {
+        if (el.closest && el.closest('video')) return true;
+        // Walk up only while the ancestor still looks like ONE card. The moment it holds
+        // more than one image it is a grid or a page, and a <video> anywhere else in it
+        // would poison every image on the page. Measured 2026-09-03: without this bound the
+        // single 1×1 <video> fixture on the test page disabled all nineteen cases.
+        let n = el;
+        for (let up = 0; n && up < 4; up++, n = n.parentElement) {
+            if (up > 0 && n.querySelectorAll && n.querySelectorAll('img').length > 1) break;
+            if (n.querySelector && n.querySelector('video')) return true;
+        }
+        const a = el.closest && el.closest('a[href]');
+        return !!(a && VIDEO_LINK_RE.test(a.getAttribute('href') || ''));
+    }
+
     function eligible(el) {
         if (!el) return null;
+        if (NEVER[el.tagName]) return null;
+        if (cfg.skipVideos && inVideoContext(el)) return null;
         if (el.tagName === 'IMG') return el;
         // element with a background image and no img of its own
         if (el.querySelector && el.querySelector('img')) return null;
@@ -1368,7 +1443,6 @@
     function cancel() {
         if (pinned) return;         // a pinned viewer outlives hover entirely
         clearTimeout(timer);
-        clearTimeout(hideTimer);
         if (token) token.cancelled = true;
         token = null;
         active = null;
@@ -1376,11 +1450,6 @@
         closeMenu();
         hideSpinner();
         hideViewer();
-    }
-
-    function scheduleHide() {
-        clearTimeout(hideTimer);
-        hideTimer = setTimeout(cancel, HIDE_GRACE);
     }
 
     // ---- pin / dismiss, and the switch that swaps which button does which
@@ -1415,6 +1484,7 @@
 
     function overOurs(e) {
         if (ours(e.target)) return true;
+        if (pointInPreview(e.clientX, e.clientY)) return true;
         return !!active && (active === e.target || (active.contains && active.contains(e.target)));
     }
 
@@ -1433,7 +1503,7 @@
         if (drag.mode === 'move') {
             // Dragging an unpinned preview detaches it: it has been deliberately placed, so
             // it stops following the hover and now lives until the pointer leaves IT.
-            if (drag.moved && !pinned && !detached) { detached = true; clearTimeout(hideTimer); }
+            if (drag.moved && !pinned && !detached) detached = true;
             view.left += dx;
             view.top += dy;
             layout();       // clampPosition() keeps the frame on screen
@@ -1447,7 +1517,12 @@
         // A drag can outrun the frame it is moving; without this, the page elements
         // sliding under the pointer would cancel the very preview being dragged.
         if (drag) return;
-        if (ours(e.target)) { clearTimeout(hideTimer); return; }   // pointer reached the preview
+        if (ours(e.target)) return;         // on the preview — only reachable once detached
+        // The pointer is on the page, so it is off any detached preview. A placed preview is
+        // held by nothing else, so it goes now, and dismiss() suppresses the image it came
+        // from: moving back onto that image must not re-open it until the pointer has left
+        // and returned.
+        if (detached) dismiss();
         if (!cfg.enabled || !siteEnabled()) return;
         if (cfg.skipWhileMouseDown && mouseDown) return;
         if (cfg.activation === 'modifier' && !modifierHeld(e) && !modifierDown) return;
@@ -1455,12 +1530,11 @@
         const el = eligible(e.target);
         if (!el) {
             // moving onto the page background closes an open viewer
-            if (detached) { scheduleHide(); return; }   // ...with the grace period, like the preview
             if (active && !active.contains(e.target)) cancel();
             return;
         }
         if (el === suppressed) return;      // dismissed; stays down until the pointer leaves
-        if (el === active) { clearTimeout(hideTimer); return; }
+        if (el === active) return;
 
         cancel();
         const displayed = sizeOf(el);
@@ -1496,11 +1570,17 @@
             suppressed = null;      // left the image; hovering it again may preview again
         }
         if (!active) return;
-        if (to && (ours(to) || (active.contains && active.contains(to)))) return;
-        // Detached, the source image no longer holds the preview open — only the preview
-        // does. Leaving the image is then not an event at all.
-        if (detached && !ours(e.target)) return;
-        scheduleHide();     // not cancel(): give the pointer time to reach the preview
+        if (detached) {
+            // Held by the preview alone. Leaving the source image is a non-event; leaving
+            // the PREVIEW takes it down and suppresses that image until it is re-entered.
+            if (ours(e.target) && !(to && ours(to))) dismiss();
+            return;
+        }
+        if (to && active.contains && active.contains(to)) return;   // still inside the image
+        // Off the image — the preview goes at once, even though it is sitting under the
+        // pointer. It cannot be hit-tested, so there is nothing to travel to and no reason
+        // to wait, and this is what makes a scan across a row give one preview per image.
+        cancel();
     }
 
     document.addEventListener('mousemove', onMove, true);
@@ -1509,12 +1589,28 @@
     document.addEventListener('mousedown', function (e) {
         if (!ours(e.target)) closeMenu();
         if (ours(e.target)) return;     // onBoxDown / the backdrop own this one
+        // An unpinned preview is pointer-transparent, so a press ON it lands on the page
+        // beneath and never reaches onBoxDown. Geometry decides ownership instead, and
+        // hands the press to that same handler so there is still only one state machine.
+        if (!pinned && view && box && box.classList.contains('on') &&
+            (e.button === 0 || e.button === 2) && pointInPreview(e.clientX, e.clientY)) {
+            onBoxDown(e);
+            return;
+        }
         // The right button has to be claimed here, not on contextmenu: mousedown fires
         // first, and letting it fall through to cancel() would clear `active` before the
         // menu event could see what to dismiss.
         if (e.button === 2 && overOurs(e) && altButton(e)) return;
         mouseDown = true;
         cancel();
+    }, true);
+    // The click half of the same handoff. Without it a press on a pointer-transparent
+    // preview would move or pin nothing and the page beneath would take the click.
+    document.addEventListener('click', function (e) {
+        if (ours(e.target)) return;             // onBoxClick owns it
+        if (pinned || !view || !box || !box.classList.contains('on')) return;
+        if (!pointInPreview(e.clientX, e.clientY)) return;
+        onBoxClick(e);
     }, true);
     document.addEventListener('contextmenu', function (e) {
         if (!swallowMenu) return;
@@ -1713,6 +1809,10 @@
         check('keepSearching', 'Keep looking after the first hit',
             'shows the first match immediately, then upgrades the preview in place as bigger ' +
             'originals turn up — costs up to 8 requests per hover instead of usually one');
+        check('skipVideos', 'Never preview videos',
+            'skips media elements, anything with a player next to it, and images inside a ' +
+            'link that plainly points at a video (/watch?, /shorts/, /embed/, /video/, ' +
+            'youtu.be, .mp4 and friends) — turn off if it is skipping stills you want');
         check('skipWhileMouseDown', 'Suppress while a mouse button is down');
         pick('siteMode', 'Site list mode', null, [
             ['blacklist', 'Disable on listed sites'], ['whitelist', 'Enable only on listed sites']]);
@@ -1773,6 +1873,9 @@
         check('showStatusBar', 'Show the status bar',
             'filename, format, dimensions, size — plus the ⋮ button (open, copy or save the ' +
             'full-size image) and the handle that moves a pinned frame');
+        pick('spinnerTheme', 'Loading ring',
+            'auto follows the browser’s light/dark setting', [
+                ['auto', 'Match the browser'], ['dark', 'Always dark'], ['light', 'Always light']]);
         check('noReferrer', 'Strip referrer', 'helps on some hosts, breaks others');
 
         const foot = document.createElement('div');

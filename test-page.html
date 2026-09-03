@@ -114,8 +114,31 @@
 
   <div class="case" data-expect="1600">
     <h2>15. slow original (3s)</h2>
-    <p class="hz good">the resolve spinner should appear and fill — needs test-server.py</p>
+    <p class="hz good">the resolve spinner should appear and turn — needs test-server.py</p>
     <img id="c15" width="200" src="test-images/photo-200x150.jpg" data-src="test-images/photo.jpg?slow=3">
+  </div>
+
+  <div class="case" data-expect="none">
+    <h2>17. thumbnail inside a video link</h2>
+    <p class="hz good">must NOT preview: the link is plainly a video (skipVideos)</p>
+    <a href="/watch?v=dQw4w9WgXcQ">
+      <img id="c17" width="200" src="test-images/photo-200x150.jpg" data-src="test-images/photo.jpg">
+    </a>
+  </div>
+
+  <div class="case" data-expect="none">
+    <h2>18. thumbnail beside an inline player</h2>
+    <p class="hz good">must NOT preview: a &lt;video&gt; sits in the same card (skipVideos)</p>
+    <img id="c18" width="200" src="test-images/photo-200x150.jpg" data-src="test-images/photo.jpg">
+    <video id="v18" width="1" height="1" muted></video>
+  </div>
+
+  <div class="case" data-expect="1600">
+    <h2>19. control for 17/18 — an ordinary link</h2>
+    <p class="hz good">must still preview: /gallery/ is not a video shape</p>
+    <a href="/gallery/item?id=5">
+      <img id="c19" width="200" src="test-images/photo-200x150.jpg" data-src="test-images/photo.jpg">
+    </a>
   </div>
 
 </div>

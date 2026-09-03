@@ -10,6 +10,13 @@ const start = src.indexOf('    function parseSrcset');
 const end = src.indexOf('    const DATA_ATTRS');
 if (start < 0 || end < 0) { console.error('markers not found'); process.exit(1); }
 
+// The video-link heuristic lives further down the file, outside the pure-URL slice.
+const vStart = src.indexOf('    const VIDEO_LINK_RE');
+const vEnd = src.indexOf('    function inVideoContext');
+if (vStart < 0 || vEnd < 0) { console.error('video markers not found'); process.exit(1); }
+const VIDEO_LINK_RE = new Function(
+    src.slice(vStart, vEnd) + '\nreturn VIDEO_LINK_RE;')();
+
 const location = { href: 'https://example.com/page/index.html' };
 const body = src.slice(start, end);
 const exported = new Function('location', body +
@@ -152,6 +159,38 @@ noisy.forEach(function (u) {
     if (!Array.isArray(out)) { fail++; console.log('FAIL non-array for ' + u); return; }
     if (out.some(function (r) { return r === u; })) { fail++; console.log('FAIL echoed input for ' + u); return; }
     pass++;
+});
+
+// ---- the video-link heuristic: what it must catch, and what it must leave alone.
+// Over-matching here is silent — the image simply never previews — so the negatives are
+// the half that matters, same as for UPGRADES.
+[
+    'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+    'https://youtu.be/dQw4w9WgXcQ',
+    'https://www.youtube.com/shorts/abc123',
+    'https://player.vimeo.com/video/12345',
+    'https://www.twitch.tv/videos/987654',
+    'https://site.com/embed/xyz',
+    'https://cdn.com/media/clip.mp4',
+    'https://cdn.com/media/stream.m3u8?token=1',
+].forEach(function (u) {
+    if (VIDEO_LINK_RE.test(u)) pass++;
+    else { fail++; console.log('FAIL video link not caught: ' + u); }
+});
+
+[
+    'https://site.com/photos/2024/beach.jpg',
+    'https://site.com/gallery/item?id=5',
+    'https://news.com/article/watch-out-for-scams',
+    'https://shop.com/products/movado-watch',
+    'https://site.com/embedded/thing',
+    'https://site.com/videography/portfolio.jpg',
+    'https://cdn.com/img/movies/poster.jpg',
+    'https://site.com/v/12345',
+    'https://site.com/watchmen-review',
+].forEach(function (u) {
+    if (!VIDEO_LINK_RE.test(u)) pass++;
+    else { fail++; console.log('FAIL video link over-matched: ' + u); }
 });
 
 console.log('\n' + pass + ' passed, ' + fail + ' failed');

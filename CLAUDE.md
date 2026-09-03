@@ -60,23 +60,75 @@ path has been touched twice ever, both times in 2021.
 
 The preview escalates by gesture, and each step is one gesture, not a setting.
 
-- **Hover** — transient. Opens beside the pointer, dies when the pointer leaves the source
-  image (with `HIDE_GRACE` to cross to it).
-- **Detached** (v0.7.0) — drag it anywhere and it stops tracking the source image; only
-  leaving the *preview* takes it down. Unpinned the whole frame is a move handle, because at
-  `fitScale` there is nothing to pan and shoving the preview aside without committing to a
-  pin is the point. `drag.dist > DRAG_SLOP` (3px) is what separates a drag from a click, and
-  the mouseup sets `justDragged` so the click that ends a real drag does not also pin —
-  without that, every drag pinned.
+- **Hover** — transient. Opens beside the pointer. Held open by ONE thing: the pointer being
+  over the source image. Leaving that image takes it down **at once**, with no grace period.
+- **Detached** — drag it anywhere and it stops tracking the source image. Now held open by
+  ONE thing: the pointer being over the preview. Leaving the preview takes it down *and*
+  `dismiss()` puts the source image in `suppressed`, so moving back onto that image does not
+  re-open it until the pointer has left the image and returned.
 - **Pinned** — click. Modal: backdrop catches, X appears, wheel/keys/drag become zoom-and-pan.
 
-Two guards keep a drag from destroying the thing being dragged: `onOver` and `onOut` both
-return early while `drag` is set (a fast drag outruns the frame, and the page elements
-sliding under the pointer would otherwise `cancel()`), and `detached` makes `onOut` ignore
-leaving the source image. Scroll still cancels an unpinned preview, detached or not — pin it
-if you want it to survive scrolling.
+Read that as one rule: **exactly one thing holds the preview open at a time, and leaving it
+ends the preview.** Every earlier version blurred this — both the image and the preview held
+it — and every reported hover bug came from the blur.
 
-## Image actions — the ⋮ button, and why it is not the browser's menu
+### The unpinned preview is POINTER-TRANSPARENT (v0.9.0) — this is the load-bearing decision
+
+`.box` has `pointer-events:none`; `.box.hot` turns it back on, and `layout()` sets `hot` only
+when `pinned || detached`. Do not "simplify" this back to always-on.
+
+The bug it fixes: with a hit-testable preview, scanning a row of five thumbnails gives ONE
+preview. The preview covers thumbnails 2–5, so the pointer never reaches them — no `mouseover`
+fires, and the first preview just sits there. The user's words: "If I have a row of 5 images
+and I scan my mouse across them, I expect to get 5 preview windows."
+
+The consequences, all of which have to be handled together:
+
+- **`HIDE_GRACE` and `hideTimer` are gone.** The grace existed so the pointer could travel onto
+  the preview before it vanished. There is nothing to travel to now, so leaving the image is
+  unambiguous and `onOut` calls `cancel()` directly. Re-adding a delay re-breaks scanning.
+- **Pinning and dragging are decided by GEOMETRY, not hit-testing.** A press on a transparent
+  preview lands on the page beneath, so the document-level `mousedown`/`click` capture
+  listeners test `pointInPreview(e.clientX, e.clientY)` against `view` and hand the event to
+  the same `onBoxDown`/`onBoxClick` the hit-testable states use — one state machine, two ways
+  in. Those handlers must keep their `preventDefault()` + `stopPropagation()`: the press is
+  really on the page, and without them a link beneath would follow.
+- **`ours(e.target)` is only ever true once `hot` is set.** Both `onOver` and `onOut` rely on
+  that: `ours()` now means "on a placed preview", which is exactly the detached hold rule.
+- **The ⋮ menu is only reachable once detached or pinned.** A plain hover preview cannot be
+  clicked on, by design — it dies the moment you move off the image toward it.
+
+Two guards keep a drag from destroying the thing being dragged: `onOver` and `onOut` both
+return early while `drag` is set. Scroll still cancels an unpinned preview, detached or not.
+
+## Videos are never previewed (v0.9.0)
+
+"Images only" was a stated invariant that nothing actually enforced — a video thumbnail is a
+plain `<img>` and previewed like any other. Reported on YouTube: "when I go to click a video,
+I get a preview." Three gates, in `eligible()` / `inVideoContext()`, any one sufficient:
+
+1. **`NEVER`** — `VIDEO`/`AUDIO`/`IFRAME`/`CANVAS`/`OBJECT`/`EMBED`/`SOURCE`/`TRACK` are never
+   candidates, whatever CSS background they carry.
+2. **Structure** — a `<video>` in the element or in up to three ancestors. Exact when it
+   fires, but late on a card whose inline player has not been injected yet, which is why (3)
+   exists.
+3. **The link** — the nearest ancestor `a[href]` matching `VIDEO_LINK_RE` (`/watch?`,
+   `/shorts/`, `/embed/`, `/video(s)/`, `youtu.be/`, `.mp4|webm|m3u8|mov|mkv|avi`). This is
+   the heuristic, and the one that can be wrong. The asymmetry favours having it: a false
+   positive costs one preview that never opens, a false negative is the reported bug. It is
+   switchable — `skipVideos`, on by default — and has positive *and* negative cases in
+   `test-resolver.js`, which slices the regex out of the script the way the URL tests do.
+
+**The ancestor walk must stop at the first ancestor holding more than one `<img>`.** Measured
+2026-09-03: without that bound the walk reached the test page's grid, found the single 1×1
+`<video>` fixture in case 18, and disabled all nineteen cases. One video anywhere on a page
+would otherwise poison every image on it. The bound is "still one card", not a depth count —
+depth alone does not distinguish a card from a grid.
+
+Cases 17 (video link), 18 (video in the card) and 19 (an ordinary `/gallery/` link, the
+control) exist so a regression shows up as a test-page failure rather than in the wild.
+
+## Image actions — the ⋮ button## Image actions — the ⋮ button, and why it is not the browser's menu
 
 **A userscript cannot open the browser's context menu.** A dispatched `contextmenu` event is
 untrusted and browsers run no default action for untrusted events — the menu is user-agent
@@ -193,11 +245,11 @@ static catches it — `node --check` passes and the markup is fine.
 
 ```bash
 node --check Hover-Zoom.user.js     # syntax
-node test-resolver.js               # 50 assertions on the pure URL logic
+node test-resolver.js               # 67 assertions on the pure URL and video-link logic
 python make-test-images.py          # regenerate fixtures into test-images/
 ```
 
-Browser test: `python test-server.py`, then open `http://localhost:8899/test-page.html`. 16 cases,
+Browser test: `python test-server.py`, then open `http://localhost:8899/test-page.html`. 19 cases,
 9 of which HZ+ rejects outright. (`.claude/launch.json` wraps the same command as
 `hover-zoom-test`, but `.claude/` is gitignored — a fresh clone has only the direct command.)
 
@@ -277,15 +329,23 @@ here: the cost is a network fetch of unknown size and the stopping point is data
 Do not reintroduce one (`CREEP_TAU`/`CREEP_MAX`, the exponential easing between steps, and
 `resolve()`'s `onProgress` parameter all went with it).
 
-**The disc behind the ring is mostly opaque and themed to the page** (`applySpinTheme()`,
-called per hover so a page that flips light/dark is picked up). The spinner is the only part
-of the overlay that sits on the bare page rather than on the frame's own dark background, so
-it is the only part that needs this. `pageIsDark()` reads the computed `backgroundColor` of
-`document.body` then `documentElement`, taking the first with alpha > 0.05 and thresholding
-luminance at 128; a page that paints nothing falls through to `prefers-color-scheme`. Dark
-gets Catppuccin Mocha (`#1e1e2e` at .94, `#89b4fa` arc), light gets Latte (`#eff1f5`,
-`#1e66f5`). v0.4.0 had a `#1e1e2e` disc unconditionally and it read as a dark blob; v0.5.0
-made the centre transparent, which then read as nothing at all on a busy image.
+**The disc behind the ring is mostly opaque and themed to the BROWSER** (`applySpinTheme()`,
+called per hover). The spinner is the only part of the overlay that sits on the bare page
+rather than on the frame's own dark background, so it is the only part that needs this.
+
+`darkMode()` reads `prefers-color-scheme` — that IS the browser's colour mode, and it is what
+the user sees everywhere else. **v0.7.0 keyed off the PAGE's computed background instead and
+that was wrong**: on a white page it picked the light palette and drew a near-white disc on
+white, which is "matching" and invisible. Reported as "still too light, I can hardly see it —
+I am using a dark browser theme". The page-background reading survives only as the fallback
+for a browser with no media-query support, and `spinnerTheme` (auto/dark/light) overrides
+both.
+
+Contrast is deliberate on both sides: 34px, 4.5px strokes, a 1.5px rim at .45 alpha, and a
+track at .22–.30. **The rim is what separates the disc from arbitrary page content behind it**
+— at v0.7.0's .20 alpha there was effectively no edge, which is most of why it read as a
+smudge. History worth not repeating: v0.4.0 had an unconditional `#1e1e2e` disc that was a
+dark blob; v0.5.0 made the centre transparent, which read as nothing at all on a busy image.
 
 `SPINNER_DELAY` (150 ms) keeps it from flashing on cached hits, but `buildViewer()` runs
 *immediately* in `showSpinner()` so the ring exists before anything can need it.
