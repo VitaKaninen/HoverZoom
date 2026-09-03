@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.14.0
+// @version     0.15.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -1406,17 +1406,65 @@
     //
     // A zero-sized <video> (the 1x1 fixture in test case 18, a player not yet laid out)
     // contains nothing, so this cannot poison a page the way an unbounded walk does.
-    function overVideoSurface(el) {
+    // THE VIDEO'S OWN RECTANGLE IS NOT ALWAYS WHERE THE PLAYER APPEARS. Measured on a
+    // LibreWolf YouTube watch page in the cued (not-yet-playing) state, 2026-09-03:
+    //
+    //     poster overlay   0,56   1903×798     (top 56, bottom 854)
+    //     <video>          0,-742 1903×798     (top -742, bottom 56)
+    //
+    // The video is laid out exactly its own height ABOVE the player — touching the poster's
+    // top edge, overlapping it nowhere. Testing the poster against the video's rect missed by
+    // precisely 798px, the gate reported "not a video", and the poster previewed. Chrome puts
+    // the video where the player is and never showed this.
+    //
+    // So the surface to test against is the player BOX, not the video element: the nearest
+    // ancestors of the <video> that the video substantially FILLS. On a watch page that is
+    // 100% of the player container, which is exactly the poster's rectangle. On a page whose
+    // only video is a small one in a grid, the video fills ~0% of the grid, so the walk stops
+    // at once — that fill test is what stops one <video> anywhere on a page from suppressing
+    // every image on it, and it is why the walk can be anchored at the video rather than
+    // needing the "still one card" img bound that the ancestor walk below uses.
+    const PLAYER_UP = 3;
+    const PLAYER_FILL = 0.5;
+
+    function videoSurfaces() {
+        const out = [];
         const vids = document.getElementsByTagName('video');
-        if (!vids.length) return false;
+        for (let i = 0; i < vids.length; i++) {
+            const v = vids[i].getBoundingClientRect();
+            if (v.width < 2 || v.height < 2) continue;   // not laid out; contains nothing
+            out.push({ what: 'video', rect: v });
+            const area = v.width * v.height;
+            let n = vids[i].parentElement;
+            for (let up = 0; n && up < PLAYER_UP; up++, n = n.parentElement) {
+                const r = n.getBoundingClientRect();
+                if (r.width < 2 || r.height < 2) continue;
+                if (area < r.width * r.height * PLAYER_FILL) break;   // too big to be this video's player
+                // An area test alone admits an oddly-shaped ancestor: a 40×7006 column passed
+                // it against a 640×360 video during testing. A player box cannot be NARROWER
+                // or SHORTER than the video it holds, whatever the area works out to. Skip and
+                // keep climbing rather than stop — a wrapper can be odd while its parent is
+                // the real player box. (1px of tolerance for sub-pixel layout.)
+                if (r.width < v.width - 1 || r.height < v.height - 1) continue;
+                out.push({ what: 'player box', rect: r });
+            }
+        }
+        return out;
+    }
+
+    function holds(rect, cx, cy) {
+        return cx >= rect.left && cx <= rect.right && cy >= rect.top && cy <= rect.bottom;
+    }
+
+    function overVideoSurface(el) {
+        const surfaces = videoSurfaces();
+        if (!surfaces.length) return false;
         const r = el.getBoundingClientRect();
         if (!r.width || !r.height) return false;
         const cx = r.left + r.width / 2;
         const cy = r.top + r.height / 2;
-        for (let i = 0; i < vids.length; i++) {
-            const v = vids[i].getBoundingClientRect();
-            if (v.width < 2 || v.height < 2) continue;
-            if (cx >= v.left && cx <= v.right && cy >= v.top && cy <= v.bottom) return true;
+        for (let i = 0; i < surfaces.length; i++) {
+            if (holds(surfaces[i].rect, cx, cy)) return true;
         }
         return false;
     }
@@ -1508,14 +1556,13 @@
         // size sitting somewhere else entirely looks identical in the log to one sitting
         // under the pointer. Each entry now says whether it contains the centre, so the
         // gate's own verdict is readable rather than inferred.
-        const vids = document.getElementsByTagName('video');
-        const sizes = [];
-        for (let i = 0; i < vids.length; i++) {
-            const v = vids[i].getBoundingClientRect();
-            const holds = cx >= v.left && cx <= v.right && cy >= v.top && cy <= v.bottom;
-            sizes.push(rectStr(v) + (v.width < 2 || v.height < 2 ? ' [too small, skipped]'
-                : holds ? ' [CONTAINS the pointer target]' : ' [does not contain it]'));
-        }
+        // The SURFACES actually tested, derived player boxes included — not the raw <video>
+        // list. Printing the raw list was what hid this bug for a round: the one video on the
+        // page had exactly the right size, so nothing in the log looked wrong.
+        const sizes = videoSurfaces().map(function (s) {
+            return s.what + ' ' + rectStr(s.rect) +
+                (holds(s.rect, cx, cy) ? ' [CONTAINS the pointer target]' : ' [does not contain it]');
+        });
         const cls = typeof t.className === 'string' ? t.className.trim() : '';
         return {
             target: t.tagName + (t.id ? '#' + t.id : '') +

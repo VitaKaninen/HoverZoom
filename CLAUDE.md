@@ -132,11 +132,43 @@ plain `<img>` and previewed like any other. Reported on YouTube: "when I go to c
 I get a preview." Four gates, in `eligible()` / `inVideoContext()` / `overVideoSurface()`, any
 one sufficient:
 
-0. **Geometry** (v0.10.0) — the element's centre lies inside the rect of a laid-out `<video>`.
-   A player's poster, cued-thumbnail overlay and endscreen images all occupy the video's own
-   rectangle, so this names them exactly whatever the DOM between them looks like. Videos
-   smaller than 2px are skipped, so the test page's 1×1 fixture contains nothing and cannot
-   poison a page the way an unbounded ancestor walk does.
+0. **Geometry** (v0.10.0, corrected in v0.15.0) — the element's centre lies inside a **video
+   surface**: the rect of a laid-out `<video>`, *or* of a player box derived from it. A
+   player's poster, cued-thumbnail overlay and endscreen images all occupy that rectangle, so
+   this names them exactly whatever the DOM between them looks like. Videos smaller than 2px
+   are skipped, so the test page's 1×1 fixture contains nothing and cannot poison a page the
+   way an unbounded ancestor walk does.
+
+   **The `<video>`'s own rect is NOT always where the player appears — this cost two rounds of
+   debugging.** Measured on a LibreWolf YouTube watch page in the cued (not-yet-playing) state,
+   2026-09-03:
+
+   | | rect | top | bottom |
+   |---|---|---|---|
+   | poster overlay (`.ytp-cued-thumbnail-overlay-image`) | `0,56 1903×798` | 56 | 854 |
+   | `<video>` | `0,-742 1903×798` | −742 | 56 |
+
+   The video is laid out exactly its own height **above** the player, touching the poster's top
+   edge and overlapping it nowhere. The gate missed by precisely 798px, reported "not a video",
+   and the poster previewed. Chrome puts the video where the player is, which is why this was
+   Firefox-only and read as a browser bug rather than a geometry bug.
+
+   `videoSurfaces()` therefore also derives the **player box**: walking up to `PLAYER_UP` (3)
+   ancestors of each `<video>`, keeping those the video substantially fills. Two bounds, both
+   load-bearing:
+   - **`PLAYER_FILL` (0.5)** — the video must cover half the ancestor's area. This is what stops
+     one `<video>` anywhere on a page from suppressing every image on it, and it is why this
+     walk can be anchored at the video and needs no "still one card" img bound.
+   - **Not narrower or shorter than the video.** An area test alone admitted a `40×7006` column
+     against a `640×360` video in testing. A player box cannot be smaller than the video it
+     holds, whatever the area works out to. It `continue`s rather than `break`s — a wrapper can
+     be odd while its parent is the real player box.
+
+   Reproduce it with a `<video>` positioned `top:-360px` inside a `position:relative` player of
+   the same size, with an `inset:0` background-image overlay: the two rects must not overlap.
+   Verified the poster is refused while test cases 1, 9, 19 and 20 still preview and 17 and 18
+   stay skipped — run that check with `showEvenIfNotLarger:true` and `minDisplayed:12`, the
+   permissive settings the bug was reported under, or the ratio gate hides the result.
 
 1. **`NEVER`** — `VIDEO`/`AUDIO`/`IFRAME`/`CANVAS`/`OBJECT`/`EMBED`/`SOURCE`/`TRACK` are never
    candidates, whatever CSS background they carry.
