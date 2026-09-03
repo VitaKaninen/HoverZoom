@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.4.0
+// @version     0.5.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Click the preview to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -164,6 +164,25 @@
         }
     }
 
+    // Viewer, redirect and proxy links carry the real image URL as a query parameter:
+    // Google Images' /imgres?imgurl=…, share endpoints, CMS lightboxes, image proxies.
+    // The href itself is an HTML page, so looksLikeImage() rejects it and the original is
+    // never seen. Nothing here names a host — it is the generic form of the trick HZ+'s
+    // Google plugin does with its `a[href*="imgurl="]` selector.
+    const THUMB_PARAM = /(?:^|[_-])(?:thumb|thumbnail|tn|small|preview|icon|avatar)(?:$|[_-])/i;
+
+    function linkParamCandidates(href) {
+        const out = [];
+        let u;
+        try { u = new URL(href, location.href); } catch (e) { return out; }
+        u.searchParams.forEach(function (value, name) {
+            if (THUMB_PARAM.test(name)) return;          // never trade an original for a thumbnail
+            if (!/^https?:\/\//i.test(value)) return;    // absolute only; a bare path is ambiguous
+            if (looksLikeImage(value)) out.push(value);
+        });
+        return out;
+    }
+
     // Site-agnostic rewrites that turn a thumbnail URL into its original.
     // Each returns a new URL string, or null when it doesn't apply.
     const UPGRADES = [
@@ -224,13 +243,18 @@
             u.pathname = kept.join('/');
             return u.href;
         },
-        // Google user content / Blogger: =s400-c or =w400-h300 -> =s0
+        // Google user content / Blogger. The size token appears in two forms — appended
+        // with '=' (…/abc=s400-c) or as its own path segment (…/s400/photo.jpg) — and
+        // 's0' means "no downscale". The segment form is why a Blogger or Photos image
+        // used to come back at its thumbnail size. Host-checked, because `/s400/` is an
+        // ordinary path segment anywhere else.
         function (u) {
             if (!/(^|\.)(googleusercontent\.com|ggpht\.com|blogspot\.com)$/.test(u.hostname)) return null;
-            const p = u.pathname.replace(/=[swh]\d+(-[a-z0-9-]+)*$/i, '=s0');
-            if (p === u.pathname && !/=/.test(u.pathname)) return u.href + '=s0';
-            u.pathname = p;
-            return u.href;
+            const p = u.pathname.replace(
+                /(\/|=)(?:w\d{2,}-h\d{2,}|[swh]\d{2,})(?:-[a-z0-9]+)*(\/|$)/i, '$1s0$2');
+            if (p !== u.pathname) { u.pathname = p; return u.href; }
+            if (!/[=/]s0(\/|$)/.test(u.pathname)) return u.href + '=s0';
+            return null;
         },
         // MediaWiki: /thumb/a/ab/File.jpg/220px-File.jpg -> /a/ab/File.jpg
         function (u) {
@@ -327,11 +351,15 @@
         // 2b. the widest srcset entry is itself often a resized derivative
         if (bestSrcset) upgradeCandidates(bestSrcset).forEach(add);
 
-        // 3. an ancestor link pointing at media
+        // 3. an ancestor link pointing at media — directly, via a query parameter, or
+        //    after a rewrite
         const a = el.closest && el.closest('a[href]');
         if (a && a.href) {
             if (looksLikeImage(a.href)) add(a.href);
-            else upgradeCandidates(a.href).forEach(function (u) { if (looksLikeImage(u)) add(u); });
+            else {
+                linkParamCandidates(a.href).forEach(add);
+                upgradeCandidates(a.href).forEach(function (u) { if (looksLikeImage(u)) add(u); });
+            }
         }
 
         // 4. rewrites of the displayed src
@@ -426,7 +454,20 @@
     // DOM. Nothing else may set box/img styles, or the two will drift.
 
     let host = null, root = null, box = null, imgEl = null, dimEl = null, closeEl = null;
-    let capEl = null, capNameEl = null, capMetaEl = null, spinEl = null, pieEl = null;
+    let capEl = null, capNameEl = null, capMetaEl = null, spinEl = null, arcEl = null;
+
+    const SVG_NS = 'http://www.w3.org/2000/svg';
+    const RING_R = 15;                              // in the 36×36 viewBox, stroke-width 4
+    const RING_C = 2 * Math.PI * RING_R;
+
+    function ringCircle(cls) {
+        const c = document.createElementNS(SVG_NS, 'circle');
+        c.setAttribute('class', cls);
+        c.setAttribute('cx', '18');
+        c.setAttribute('cy', '18');
+        c.setAttribute('r', String(RING_R));
+        return c;
+    }
 
     // { url, natW, natH, scale, fitScale, imgW, imgH, frameW, frameH, ox, oy, left, top }
     // ox/oy are the image's top-left within the frame's content box: 0 or negative once
@@ -465,17 +506,17 @@
             '.cap .name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;',
             'font-family:ui-monospace,SFMono-Regular,Consolas,monospace;color:#a6adc8}',
             '.cap .meta{flex:none;white-space:nowrap}',
-            // Resolve progress. The ring spins to say "still working"; the pie fills as
-            // candidates are probed. Both vanish the moment resolution stops either way.
-            '.spin{position:fixed;width:26px;height:26px;display:none;pointer-events:none;',
-            'filter:drop-shadow(0 2px 7px rgba(0,0,0,.7))}',
+            // Resolve progress: a determinate ring, arc growing clockwise from twelve.
+            // The centre is deliberately TRANSPARENT — the previous version filled it with
+            // a #1e1e2e disc, which read as a dark blob on a dark page and was the whole
+            // of the "it looks very dark" complaint.
+            '.spin{position:fixed;width:28px;height:28px;display:none;pointer-events:none;',
+            'filter:drop-shadow(0 1px 4px rgba(0,0,0,.55))}',
             '.spin.on{display:block}',
-            '.ring{position:absolute;inset:0;border-radius:50%;border:2px solid rgba(137,180,250,.22);',
-            'border-top-color:#89b4fa;animation:hzspin .75s linear infinite}',
-            '.pie{position:absolute;inset:5px;border-radius:50%;overflow:hidden;background:#1e1e2e}',
-            '.pie::after{content:"";position:absolute;inset:0;border-radius:50%;',
-            'background:conic-gradient(#89b4fa var(--p,0%),rgba(205,214,244,.13) 0)}',
-            '@keyframes hzspin{to{transform:rotate(360deg)}}',
+            '.spin svg{display:block;width:100%;height:100%;transform:rotate(-90deg)}',
+            '.spin circle{fill:none;stroke-width:4;stroke-linecap:round}',
+            '.spin .track{stroke:rgba(205,214,244,.25)}',
+            '.spin .arc{stroke:#89b4fa}',
             '.x{position:absolute;top:7px;right:7px;width:26px;height:26px;display:none;',
             'align-items:center;justify-content:center;border-radius:50%;border:1px solid #45475a;',
             'background:rgba(30,30,46,.88);color:#cdd6f4;font:17px/1 system-ui,sans-serif;',
@@ -525,12 +566,14 @@
 
         spinEl = document.createElement('div');
         spinEl.className = 'spin';
-        const ring = document.createElement('div');
-        ring.className = 'ring';
-        pieEl = document.createElement('div');
-        pieEl.className = 'pie';
-        spinEl.appendChild(ring);
-        spinEl.appendChild(pieEl);
+        const svg = document.createElementNS(SVG_NS, 'svg');
+        svg.setAttribute('viewBox', '0 0 36 36');
+        svg.appendChild(ringCircle('track'));
+        arcEl = ringCircle('arc');
+        arcEl.setAttribute('stroke-dasharray', RING_C.toFixed(2));
+        arcEl.setAttribute('stroke-dashoffset', RING_C.toFixed(2));
+        svg.appendChild(arcEl);
+        spinEl.appendChild(svg);
         root.appendChild(spinEl);
 
         (document.body || document.documentElement).appendChild(host);
@@ -712,23 +755,67 @@
     // usually finishes well before the pie fills.
 
     const SPINNER_DELAY = 150;   // don't flash it for a cached or instant resolve
+    const CREEP_TAU = 900;       // ms — how fast the arc eases toward the next boundary
+    const CREEP_MAX = 0.85;      // and how much of that gap it may claim before arriving
+
+    // setInterval, not requestAnimationFrame. rAF is starved whenever the compositor
+    // decides the page is not worth animating — a fully occluded window, some power-saving
+    // modes, and the Claude Code Browser pane, which reports visibilityState "visible" and
+    // still delivers zero frames. A frozen ring is indistinguishable from the stuck one
+    // this replaces, so the animation must not depend on frames being offered.
+    const CREEP_MS = 60;         // ~16fps, one attribute write per tick
+
     let spinTimer = null;
+    let spinState = null;        // { done, total, at, shown }
+    let creepTimer = 0;
+
+    function paintArc(p) {
+        if (!arcEl) return;
+        const v = Math.max(0, Math.min(1, p));
+        arcEl.setAttribute('stroke-dashoffset', (RING_C * (1 - v)).toFixed(2));
+    }
+
+    // Candidate ticks are the only thing actually measured, and there are often only one
+    // or two of them — which is why a purely step-driven arc sat at 0% for the whole wait
+    // and looked broken. Between ticks the arc eases toward the next boundary on an
+    // exponential curve, approaching but never reaching it. The STEPS are real progress;
+    // the motion between them is an estimate that says "still going", nothing more.
+    function spinFrame() {
+        if (!spinState) return;
+        const s = spinState;
+        const hard = s.total ? s.done / s.total : 0;
+        const next = s.total ? Math.min(1, (s.done + 1) / s.total) : 1;
+        const crept = hard + (next - hard) * CREEP_MAX *
+            (1 - Math.exp(-(performance.now() - s.at) / CREEP_TAU));
+        s.shown = Math.max(s.shown, crept);      // never runs backwards
+        paintArc(s.shown);
+    }
+
+    function startCreep() {
+        if (creepTimer) return;
+        creepTimer = setInterval(spinFrame, CREEP_MS);
+    }
 
     function showSpinner() {
         clearTimeout(spinTimer);
         // Build now, reveal later: resolve() reports its first progress tick immediately,
-        // and it would be dropped on the floor if spinEl did not exist yet.
+        // and it would be dropped on the floor if the ring did not exist yet.
         buildViewer();
-        spinEl.style.setProperty('--p', '0%');
+        spinState = { done: 0, total: 0, at: performance.now(), shown: 0 };
+        paintArc(0);
         spinTimer = setTimeout(function () {
             moveSpinner();
             spinEl.classList.add('on');
+            startCreep();
         }, SPINNER_DELAY);
     }
 
     function spinnerProgress(done, total) {
-        if (!spinEl || !total) return;
-        spinEl.style.setProperty('--p', Math.round((done / total) * 100) + '%');
+        if (!spinState) return;
+        spinState.done = done;
+        spinState.total = total;
+        spinState.at = performance.now();         // restart the creep from this boundary
+        spinFrame();                              // land the real step now, not on the next tick
     }
 
     function moveSpinner() {
@@ -740,9 +827,11 @@
 
     function hideSpinner() {
         clearTimeout(spinTimer);
+        if (creepTimer) { clearInterval(creepTimer); creepTimer = 0; }
+        spinState = null;
         if (spinEl) {
             spinEl.classList.remove('on');
-            spinEl.style.setProperty('--p', '0%');
+            paintArc(0);
         }
     }
 

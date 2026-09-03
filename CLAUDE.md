@@ -117,11 +117,11 @@ static catches it — `node --check` passes and the markup is fine.
 
 ```bash
 node --check Hover-Zoom.user.js     # syntax
-node test-resolver.js               # 39 assertions on the pure URL logic
+node test-resolver.js               # 50 assertions on the pure URL logic
 python make-test-images.py          # regenerate fixtures into test-images/
 ```
 
-Browser test: `python test-server.py`, then open `http://localhost:8899/test-page.html`. 15 cases,
+Browser test: `python test-server.py`, then open `http://localhost:8899/test-page.html`. 16 cases,
 9 of which HZ+ rejects outright. (`.claude/launch.json` wraps the same command as
 `hover-zoom-test`, but `.claude/` is gitignored — a fresh clone has only the direct command.)
 
@@ -138,6 +138,12 @@ Browser test: `python test-server.py`, then open `http://localhost:8899/test-pag
 - Case 14 is the only fixture whose original (800×600) is smaller than the viewport cap, so it
   is the only one that exercises the "frame grows before the image spills" branch of `reflow()`.
   Every other case has a 1600×1200 original, which opens already clamped to the cap.
+- Case 16 is the `?imgurl=` shape — a 32px icon wrapped in an `/imgres?imgurl=…` viewer link.
+- **A `computer{action:"hover"}` to a coordinate the pointer is already at fires no `mouseover`,**
+  so a second test against the same element silently does nothing and reads as a script bug. Move
+  the pointer somewhere else first, and re-derive coordinates from a fresh screenshot after any
+  pane resize — the emulated viewport is letterboxed into the pane, so a stale scale factor puts
+  every click off-target.
 
 Shadow roots are `mode: 'open'` specifically so the test harness can read the viewer. Encapsulation
 is identical to `closed`; only script access differs, and the page can find `#hover-zoom-host`
@@ -158,6 +164,13 @@ snapshot and the external script never executes. Use the HTTP server.
   `test-resolver.js`.
 - A first run of a new test suite that passes 33/33 deserves suspicion, not celebration. The
   over-match above was invisible until real URLs were printed and eyeballed.
+- **`linkParamCandidates()` needs the same discipline as `UPGRADES`.** It pulls any query-param
+  value that is an absolute http(s) URL passing `looksLikeImage()` out of an ancestor link, which
+  is how `/imgres?imgurl=…` works without naming Google. Two guards keep it from doing harm:
+  values must be absolute (a bare path is ambiguous), and `THUMB_PARAM` names are skipped so a
+  `?thumb=` never displaces the original. Everything it returns still faces the ratio gate, so
+  the worst case is a wasted probe rather than the wrong image — but only because of those
+  guards. Negative tests live beside the positive ones in `test-resolver.js`.
 
 ## Resolve progress
 
@@ -167,15 +180,29 @@ and populate `probeCache`, which is why the same image "works if you come back t
 That is a cache warming up, not a fixed bug, and it is why the silence needed a UI rather than
 a code fix.
 
-`.spin` answers it: a ring that turns while work is happening, over a conic-gradient pie that
-fills as candidates are probed. `SPINNER_DELAY` (150 ms) keeps it from flashing on cached hits,
-but `buildViewer()` runs *immediately* in `showSpinner()` — `resolve()` emits its first progress
-tick synchronously and it would be dropped if `spinEl` did not exist yet. `hideSpinner()` is in a
-`finally`, so the ring stops on every outcome including a throw; a ring still turning after the
-search stopped would be a lie.
+`.spin` answers it: an SVG ring whose arc grows clockwise from twelve, `stroke-dashoffset` driven.
+The centre is **transparent** — v0.4.0 filled it with a `#1e1e2e` disc and it read as a dark blob.
 
-The denominator is real, not invented: `candidates.length`, the worst case if nothing qualifies.
-A first-match run usually finishes before the pie fills, which is honest — it stopped early.
+`SPINNER_DELAY` (150 ms) keeps it from flashing on cached hits, but `buildViewer()` runs
+*immediately* in `showSpinner()` — `resolve()` emits its first progress tick synchronously and it
+would be dropped if the ring did not exist yet. `hideSpinner()` is in a `finally`, so the ring
+stops on every outcome including a throw; a ring still turning after the search stopped is a lie.
+
+**Two things about the progress that are easy to get wrong:**
+
+- **Steps alone are not enough.** The denominator is real — `candidates.length`, the worst case
+  if nothing qualifies — but there are often only one or two candidates, so a purely step-driven
+  arc sits at 0% for the entire wait and looks broken. That was the v0.4.0 bug ("always full or
+  empty"). Between ticks the arc now eases toward the next boundary on an exponential curve
+  (`CREEP_TAU`), claiming at most `CREEP_MAX` of the gap and never arriving. The steps are
+  measured; the motion between them is an estimate that says only "still going".
+- **`setInterval`, never `requestAnimationFrame`.** rAF is starved whenever the compositor
+  decides the page is not worth animating. **The Claude Code Browser pane delivers zero animation
+  frames while reporting `visibilityState: "visible"` and `document.hasFocus(): true`** — a
+  60-frame rAF probe returned 0. Real browsers do the same for occluded windows and some
+  power-saving modes. A frozen ring is indistinguishable from the stuck one it replaces, so this
+  animation must not depend on frames being offered. Anything else here that must animate has the
+  same constraint, and no screenshot will catch it — verify by reading the attribute over time.
 
 ## Known limits
 
@@ -185,3 +212,22 @@ A first-match run usually finishes before the pie fills, which is honest — it 
 - `preferLargest` (off by default) probes every candidate instead of stopping at the first that
   clears the ratio gate. It finds bigger originals — e.g. rewriting a `srcset`'s widest entry —
   at the cost of up to `MAX_PROBES` (8) requests per hover.
+
+### Google Images specifically
+
+Reported 2026-09-03: HZ+ returns full-size originals there, this script returns 500–700px.
+Google's live DOM could not be inspected — `google.com/search?udm=2` served `/sorry/index`
+bot detection, and a CAPTCHA is not something to work around. So this is read off HZ+'s own
+plugin source (`extesy/hoverzoom` `plugins/google.js`, v5.0), which uses four mechanisms:
+
+| HZ+ mechanism | Us |
+|---|---|
+| `=s0` / `/s0/` size-token rewrite on googleusercontent, ggpht | **have it**, both forms since v0.5.0 |
+| `a[href*="imgurl="]` — original URL in the link's query | **have it** since v0.5.0, as the generic `linkParamCandidates()` |
+| parse `<script>` JSON for `tbnid` → full URL | **no** — needs script scanning, against the no-DOM-scanning invariant |
+| hook XHR responses, cache them in sessionStorage | **no** — site-specific and invasive |
+
+The first two are genuinely generic and were worth taking; the last two are what a per-site
+plugin is *for*, and taking them would make this a Google plugin. If Google's results still come
+back small, the remaining gap is the `tbnid` table, and that is a deliberate non-goal. Verify
+against the live page before assuming which mechanism is carrying the result today.

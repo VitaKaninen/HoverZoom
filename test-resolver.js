@@ -12,8 +12,9 @@ if (start < 0 || end < 0) { console.error('markers not found'); process.exit(1);
 
 const location = { href: 'https://example.com/page/index.html' };
 const body = src.slice(start, end);
-const exported = new Function('location', body + '\nreturn {parseSrcset, looksLikeImage, upgradeCandidates};')(location);
-const { parseSrcset, looksLikeImage, upgradeCandidates } = exported;
+const exported = new Function('location', body +
+    '\nreturn {parseSrcset, looksLikeImage, upgradeCandidates, linkParamCandidates};')(location);
+const { parseSrcset, looksLikeImage, upgradeCandidates, linkParamCandidates } = exported;
 
 let pass = 0, fail = 0;
 function eq(label, got, want) {
@@ -107,6 +108,40 @@ has('multiple transform segments all stripped',
 has('transform segment without w_/h_ digits is left alone, others still work',
     upgradeCandidates('https://res.cloudinary.com/demo/image/upload/c_fill,w_400/sample.jpg'),
     'https://res.cloudinary.com/demo/image/upload/sample.jpg');
+
+// ---- google size tokens, both the '=' and the path-segment form
+has('googleusercontent /s400/ segment -> /s0/',
+    upgradeCandidates('https://lh3.googleusercontent.com/x/s400/photo.jpg'),
+    'https://lh3.googleusercontent.com/x/s0/photo.jpg');
+has('googleusercontent =w1200-h800 -> =s0',
+    upgradeCandidates('https://lh3.googleusercontent.com/abc=w1200-h800-no'),
+    'https://lh3.googleusercontent.com/abc=s0');
+none('a /s400/ segment on any other host is just a path',
+    'https://cdn.example.com/x/s400/photo.jpg');
+none('googleusercontent already at s0 is left alone',
+    'https://lh3.googleusercontent.com/x/s0/photo.jpg');
+
+// ---- image URLs carried as a query parameter of a viewer/redirect link
+eq('imgurl= parameter is extracted and decoded',
+    linkParamCandidates('https://www.google.com/imgres?imgurl=https%3A%2F%2Fsite.com%2Fbig.jpg&imgrefurl=x'),
+    ['https://site.com/big.jpg']);
+eq('proxy style ?url= is extracted',
+    linkParamCandidates('https://proxy.example/resize?url=https://cdn.site/photo.png&w=200'),
+    ['https://cdn.site/photo.png']);
+// Negative cases: over-matching here shows the WRONG image, which is worse than showing none.
+eq('non-image parameters are ignored',
+    linkParamCandidates('https://site.com/go?next=https://site.com/article.html&ref=abc'),
+    []);
+eq('relative parameter values are ignored',
+    linkParamCandidates('https://site.com/view?src=/images/photo.jpg'),
+    []);
+eq('thumbnail-named parameters are skipped even when they are images',
+    linkParamCandidates('https://site.com/v?thumb=https://cdn/small.jpg&preview_url=https://cdn/p.jpg'),
+    []);
+eq('a link with no query yields nothing',
+    linkParamCandidates('https://site.com/gallery/item'), []);
+eq('a malformed href yields nothing rather than throwing',
+    linkParamCandidates('::::not a url::::'), []);
 
 // ---- upgrades must never return the input unchanged, and never throw
 const noisy = ['https://a.com/x.jpg', 'not a url at all', '/relative/p.png', 'data:image/png;base64,AAA',

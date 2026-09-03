@@ -105,6 +105,14 @@
   </div>
 
   <div class="case" data-expect="1600">
+    <h2>16. viewer link carrying ?imgurl=</h2>
+    <p class="hz bad">HZ+: only via its Google plugin, not the generic path</p>
+    <a href="/imgres?imgurl=http%3A%2F%2Flocalhost%3A8899%2Ftest-images%2Fphoto.jpg&amp;imgrefurl=/x">
+      <img id="c16" width="200" src="test-images/icon.png" style="width:200px">
+    </a>
+  </div>
+
+  <div class="case" data-expect="1600">
     <h2>15. slow original (3s)</h2>
     <p class="hz good">the resolve spinner should appear and fill — needs test-server.py</p>
     <img id="c15" width="200" src="test-images/photo-200x150.jpg" data-src="test-images/photo.jpg?slow=3">
