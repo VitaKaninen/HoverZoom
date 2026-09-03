@@ -59,10 +59,21 @@ on the X, a click on the backdrop, or Escape. **Not optional** — there is no o
 on a floating preview could mean, so it has no setting; the panel carries a `note()` row that
 explains the controls without offering a switch.
 
-- **The preview opens centred ON the pointer** (`position: 'cursor'`). It used to open beside it
-  with a gap, which meant reaching it crossed page content — fatal for a small thumbnail or a
-  pointer already near the image's edge, because that crossing dismissed the very thing being
-  reached for. `HIDE_GRACE` now only covers frames clamped away from the cursor at a window edge.
+- **Left click pins, right click dismisses — and `pinButton` swaps them.** Dismiss is for "the
+  preview is in my way but my cursor is staying on this image": it takes the preview down and
+  records the element in `suppressed`, which `onOver` skips until `onOut` sees the pointer
+  actually leave it. Without that, the next mousemove just re-shows it. The right press is
+  claimed in the document `mousedown` handler, not on `contextmenu` — mousedown fires first and
+  would otherwise `cancel()` and clear `active` before the menu event could see what to dismiss;
+  `swallowMenu` then suppresses the menu itself.
+- **While pinned, the left button always pans or moves**, whatever `pinButton` says, so a pinned
+  frame closes via the X, the backdrop, or Escape. With the default (left pins) right-click also
+  closes it, since right is doing nothing else then. Do not wire dismissal onto the pan button.
+- **The preview opens beside the pointer, then is nudged just far enough to touch it**
+  (`nudgeIntoReach`, `REACH_INSET` 10px). v0.4.0 centred it on the cursor, which solved
+  reachability but moved the preview much further than needed. The nudge is ~34px with the
+  default 24px gap, and only on the axis that needs it. `HIDE_GRACE` still covers frames clamped
+  away from the cursor at a window edge.
 - **The status bar is the move handle.** Dragging it moves the frame (`drag.mode === 'move'`);
   dragging the image pans within the frame (`'pan'`). Both go through the same `drag` object in
   `onMove`. Hiding the status bar therefore also removes the only way to move a pinned frame.
@@ -209,25 +220,58 @@ stops on every outcome including a throw; a ring still turning after the search 
 - HZ+'s 399 plugins encode genuine per-site knowledge (Pixiv's referer requirement, Instagram's
   URL signing, Twitter's `:orig`). The generic resolver wins on the long tail and loses on a few
   hostile sites. Add narrowly-scoped rules to `UPGRADES` only with host checks and negative tests.
-- `preferLargest` (off by default) probes every candidate instead of stopping at the first that
-  clears the ratio gate. It finds bigger originals — e.g. rewriting a `srcset`'s widest entry —
-  at the cost of up to `MAX_PROBES` (8) requests per hover.
+- `keepSearching` (ON by default, was `preferLargest` and off) keeps probing past the first hit
+  and upgrades the preview in place each time something strictly bigger turns up. It costs up to
+  `MAX_PROBES` (8) requests per hover instead of usually one. Turning it off restores
+  stop-at-first-hit.
 
-### Google Images specifically
+## Progressive resolution, and why probes stay sequential
+
+`resolve()` takes an `onHit` callback and fires it for every strictly larger candidate, so the
+first match paints immediately and later ones replace it via `upgradeViewer()`. The ring docks
+into the frame's lower right (`dockSpinner()`) while the search continues, which is the only
+signal that what you are looking at is not final.
+
+**Do not parallelise the probes into a race.** The candidate list is ordered by *heuristic
+confidence*, not by measured size — `data-*` attributes, then srcset widest-first, then rewrites,
+then the link, then the displayed src last. Selection is "first in list order that clears the
+gate", so taking the first *response* instead hands the decision to whichever server answers
+fastest, which systematically favours the smallest file. If the latency ever needs fixing, the
+safe shape is: start all probes at once, then `await` them **in list order** — same result, wall
+clock drops from the sum to the slowest one actually needed, at the cost of always issuing N
+requests. That is a bandwidth decision, not a correctness one.
+
+`pin()` deliberately does **not** cancel the in-flight resolve; pinning is a reason to keep
+looking. `upgradeViewer()` holds the frame's centre, and for a pinned view also holds its
+on-screen size (`prevImgW / res.w`) and the fraction of the picture at the frame's middle, so a
+swap changes only the pixels, never what the eye is tracking.
+
+### Google Images cannot be fixed generically — measured, not assumed
 
 Reported 2026-09-03: HZ+ returns full-size originals there, this script returns 500–700px.
-Google's live DOM could not be inspected — `google.com/search?udm=2` served `/sorry/index`
-bot detection, and a CAPTCHA is not something to work around. So this is read off HZ+'s own
-plugin source (`extesy/hoverzoom` `plugins/google.js`, v5.0), which uses four mechanisms:
+Inspected live on `google.com/search?udm=2` (2026-09-03, real Chrome — the in-app browser gets
+`/sorry/index` bot detection). What a result thumbnail actually offers:
 
-| HZ+ mechanism | Us |
+| Source we could use | What Google gives |
 |---|---|
-| `=s0` / `/s0/` size-token rewrite on googleusercontent, ggpht | **have it**, both forms since v0.5.0 |
-| `a[href*="imgurl="]` — original URL in the link's query | **have it** since v0.5.0, as the generic `linkParamCandidates()` |
-| parse `<script>` JSON for `tbnid` → full URL | **no** — needs script scanning, against the no-DOM-scanning invariant |
-| hook XHR responses, cache them in sessionStorage | **no** — site-specific and invasive |
+| `src` | `encrypted-tbn0.gstatic.com/images?q=tbn:<opaque token>` — no extension, no size params, nothing to rewrite |
+| `srcset` | **absent** |
+| `data-*` on the img | `data-csiid`, `data-atf` only — no URL |
+| `data-*` on 6 levels of ancestors | `data-ved`, `data-eqld`, `data-preview-id` (empty), `data-img-wrapper` — no URL |
+| ancestor `<a href>` | **the anchor has no `href` attribute at all** |
 
-The first two are genuinely generic and were worth taking; the last two are what a per-site
-plugin is *for*, and taking them would make this a Google plugin. If Google's results still come
-back small, the remaining gap is the `tbnid` table, and that is a deliberate non-goal. Verify
-against the live page before assuming which mechanism is carrying the result today.
+Natural sizes of those thumbnails measured 678×452, 245×205, 503×397 — which *is* the reported
+500–700px. So nothing is malfunctioning: the thumbnail is the only candidate that exists, it
+clears the ratio gate against a 240px display, and it gets shown.
+
+The original URL is present only inside ~1 MB of inline script JSON across 273 `<script>` tags,
+keyed by the `tbn:` token. Reaching it means parsing that, which is HZ+'s third mechanism and
+squarely against the no-DOM-scanning invariant. **Note HZ+'s own `a[href*="imgurl="]` selector is
+now stale for this layout** — its Google support must be riding on the script-JSON path.
+
+Conclusion: this needs a site plugin or it does not work. Do not keep trying to solve it in
+`UPGRADES`. Keep HZ+ installed alongside if Google Images matters, or make an explicit decision
+to break the invariant for this one host.
+
+What v0.5.0 added is still worth having, just not for this: `linkParamCandidates()` (the generic
+`?imgurl=`-style rule) and the `/s0/` path-segment form of the googleusercontent size token.

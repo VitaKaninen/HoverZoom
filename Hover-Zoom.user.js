@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.5.0
+// @version     0.6.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Click the preview to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -49,12 +49,13 @@
         maxDisplayed: 0,            // ignore images displayed larger than this (0 = no cap)
         minRatio: 1.2,              // full size must be at least this much bigger
         showEvenIfNotLarger: false, // show at natural size even when it isn't an upgrade
-        preferLargest: false,       // probe every candidate and take the biggest, not the first hit
+        keepSearching: true,        // show the first hit at once, then keep probing and upgrade in place
         skipWhileMouseDown: true,   // don't fire mid drag/selection
         siteMode: 'blacklist',      // 'blacklist' | 'whitelist'
         siteList: [],               // hostnames, matched by suffix
 
         // pinned mode
+        pinButton: 'left',          // 'left' | 'right' — whichever pins, the other dismisses
         wheelZoomStep: 15,          // % per wheel notch
         panStep: 80,                // px per arrow-key press (Shift = 3x)
         maxZoom: 32,                // hard ceiling, multiples of natural size
@@ -64,6 +65,7 @@
         maxHeightPct: 92,
         zoomFactor: 1.0,            // scale applied to natural size before clamping
         position: 'cursor',         // 'cursor' | 'center'
+        cursorGap: 24,              // px between pointer and frame edge
         fadeMs: 90,
         borderWidth: 1,
         borderColor: '#45475a',
@@ -405,18 +407,23 @@
     //
     // Two modes. First-match stops at the first candidate that clears the ratio gate:
     // one extra request per hover, and it honours whatever the site declared as its
-    // largest. Prefer-largest probes the whole list and takes the biggest, which can
-    // beat the site's own srcset by rewriting it, at the cost of N requests.
+    // largest. Keep-searching carries on past that hit and reports every strictly larger
+    // one after it, so the caller can show something immediately and improve it in place.
+    //
+    // This is why the probes stay SEQUENTIAL and in list order. The list is ordered by
+    // heuristic confidence, not by measured size; racing it and taking the first response
+    // would hand the decision to whichever server answers fastest, which systematically
+    // favours the smallest file. Order is the selection rule, so order has to be kept.
     const MAX_PROBES = 8;
 
-    async function resolve(el, displayed, token, onProgress) {
+    async function resolve(el, displayed, token, onProgress, onHit) {
         const candidates = collectCandidates(el).slice(0, MAX_PROBES);
         const shown = el.tagName === 'IMG' ? (el.currentSrc || el.src) : backgroundUrl(el);
         let best = null;
         let done = 0;
         if (onProgress) onProgress(0, candidates.length);
         for (const url of candidates) {
-            if (token.cancelled) return null;
+            if (token.cancelled) return best;
             const dim = await probe(url);
             if (onProgress) onProgress(++done, candidates.length);
             if (!dim) continue;
@@ -424,16 +431,20 @@
             const bigEnough = dim.w >= displayed.w * cfg.minRatio || dim.h >= displayed.h * cfg.minRatio;
             const usable = bigEnough || (cfg.showEvenIfNotLarger && !isSameAsShown);
             if (!usable) continue;
-            const hit = { url: url, w: dim.w, h: dim.h };
-            if (!cfg.preferLargest) return hit;
-            if (!best || dim.w * dim.h > best.w * best.h) best = hit;
+            if (best && dim.w * dim.h <= best.w * best.h) continue;   // not an improvement
+            best = { url: url, w: dim.w, h: dim.h };
+            if (onHit && !token.cancelled) onHit(best);
+            if (!cfg.keepSearching) return best;
         }
         if (best) return best;
-        if (cfg.showEvenIfNotLarger && shown) {
+        if (cfg.showEvenIfNotLarger && shown && !token.cancelled) {
             const dim = await probe(shown);
-            if (dim) return { url: shown, w: dim.w, h: dim.h };
+            if (dim) {
+                best = { url: shown, w: dim.w, h: dim.h };
+                if (onHit && !token.cancelled) onHit(best);
+            }
         }
-        return null;
+        return best;
     }
 
     // ------------------------------------------------------------------ viewer
@@ -457,6 +468,7 @@
     let capEl = null, capNameEl = null, capMetaEl = null, spinEl = null, arcEl = null;
 
     const SVG_NS = 'http://www.w3.org/2000/svg';
+    const SPIN_SIZE = 28;                           // px, matches the .spin rule
     const RING_R = 15;                              // in the 36×36 viewBox, stroke-width 4
     const RING_C = 2 * Math.PI * RING_R;
 
@@ -614,6 +626,22 @@
             : Math.min(0, Math.max(view.frameH - view.imgH, view.oy));
     }
 
+    // Placed beside the pointer, the frame does not contain it, so reaching the preview
+    // means crossing page content that dismisses it. Centring it on the cursor fixed that
+    // but moved the preview much further than it needed to go. This shifts it by the
+    // smallest amount that puts the pointer just inside the frame's edge — with the
+    // default 24px gap, about 34px, and only along the axis that needs it.
+    const REACH_INSET = 10;
+
+    function nudgeIntoReach() {
+        const ow = view.frameW + cfg.borderWidth * 2;
+        const oh = view.frameH + cfg.borderWidth * 2;
+        if (pointer.x < view.left + REACH_INSET) view.left = pointer.x - REACH_INSET;
+        else if (pointer.x > view.left + ow - REACH_INSET) view.left = pointer.x - ow + REACH_INSET;
+        if (pointer.y < view.top + REACH_INSET) view.top = pointer.y - REACH_INSET;
+        else if (pointer.y > view.top + oh - REACH_INSET) view.top = pointer.y - oh + REACH_INSET;
+    }
+
     function clampPosition() {
         const m = viewportBox();
         const ow = view.frameW + cfg.borderWidth * 2;
@@ -695,6 +723,7 @@
         imgEl.style.top = Math.round(view.oy) + 'px';
         box.classList.toggle('pan', pinned && pannable());
         caption();
+        if (spinDocked) moveSpinner();      // the dock rides with the frame
     }
 
     // Zoom about a point given in SCREEN coordinates, keeping whatever pixel of the image
@@ -801,6 +830,7 @@
         // Build now, reveal later: resolve() reports its first progress tick immediately,
         // and it would be dropped on the floor if the ring did not exist yet.
         buildViewer();
+        spinDocked = false;
         spinState = { done: 0, total: 0, at: performance.now(), shown: 0 };
         paintArc(0);
         spinTimer = setTimeout(function () {
@@ -818,17 +848,36 @@
         spinFrame();                              // land the real step now, not on the next tick
     }
 
+    // Two homes. Before anything is on screen it trails the cursor, which is the only
+    // place the user is looking. Once a preview is up it docks into the frame's lower
+    // right, just above the status bar, where it means "this is not the final image yet".
+    let spinDocked = false;
+
+    function dockSpinner() {
+        spinDocked = true;
+        moveSpinner();
+    }
+
     function moveSpinner() {
         if (!spinEl) return;
         const m = viewportBox();
-        spinEl.style.left = Math.min(pointer.x + 16, m.vw - 32) + 'px';
-        spinEl.style.top = Math.min(pointer.y + 16, m.vh - 32) + 'px';
+        if (spinDocked && view && box && box.classList.contains('on')) {
+            const capH = cfg.showStatusBar ? capEl.offsetHeight : 0;
+            spinEl.style.left =
+                Math.round(view.left + cfg.borderWidth + view.frameW - SPIN_SIZE - 8) + 'px';
+            spinEl.style.top =
+                Math.round(view.top + cfg.borderWidth + view.frameH - capH - SPIN_SIZE - 8) + 'px';
+            return;
+        }
+        spinEl.style.left = Math.min(pointer.x + 16, m.vw - SPIN_SIZE - 4) + 'px';
+        spinEl.style.top = Math.min(pointer.y + 16, m.vh - SPIN_SIZE - 4) + 'px';
     }
 
     function hideSpinner() {
         clearTimeout(spinTimer);
         if (creepTimer) { clearInterval(creepTimer); creepTimer = 0; }
         spinState = null;
+        spinDocked = false;
         if (spinEl) {
             spinEl.classList.remove('on');
             paintArc(0);
@@ -865,26 +914,61 @@
             view.left = (m.vw - ow) / 2;
             view.top = (m.vh - oh) / 2;
         } else {
-            // Centred ON the pointer, not beside it. Opening beside it meant the pointer
-            // had to travel across page content to reach the preview — and for a small
-            // thumbnail, or a pointer already near the image's edge, that trip re-entered
-            // the page and dismissed the thing it was reaching for.
-            view.left = pointer.x - ow / 2;
+            // Beside the pointer, on whichever side has more room.
+            const rightRoom = m.vw - pointer.x - cfg.cursorGap;
+            view.left = rightRoom >= ow ? pointer.x + cfg.cursorGap : pointer.x - cfg.cursorGap - ow;
             view.top = pointer.y - oh / 2;
+            nudgeIntoReach();
         }
 
         if (cfg.noReferrer) imgEl.referrerPolicy = 'no-referrer';
         imgEl.src = res.url;
         layout();
-
-        // Resource Timing can land a tick after the load that the probe saw, so the byte
-        // size is often missing on this first pass. One re-read catches it.
-        if (cfg.showStatusBar && !transferBytes(res.url)) {
-            setTimeout(function () { if (view && view.url === res.url) caption(); }, 300);
-        }
+        deferredCaption(res.url);
 
         box.classList.add('on');
         if (cfg.dimOpacity > 0) dimEl.classList.add('on');
+    }
+
+    // A better original arrived while the preview is already up. Swap the pixels without
+    // moving anything the eye is tracking: the frame keeps its centre, and a pinned view
+    // keeps both its on-screen size and the part of the picture it was looking at. The
+    // decode is instant because the probe already pulled this URL into cache.
+    function upgradeViewer(res) {
+        if (!view) return;
+        const m = viewportBox();
+        const centreX = view.left + (view.frameW + cfg.borderWidth * 2) / 2;
+        const centreY = view.top + (view.frameH + cfg.borderWidth * 2) / 2;
+        // where the frame's middle sits in the picture, as a fraction of it
+        const fx = view.imgW ? (view.frameW / 2 - view.ox) / view.imgW : 0.5;
+        const fy = view.imgH ? (view.frameH / 2 - view.oy) / view.imgH : 0.5;
+        const prevImgW = view.imgW;
+
+        view.url = res.url;
+        view.natW = res.w;
+        view.natH = res.h;
+        view.fitScale = Math.min(cfg.zoomFactor, m.w / res.w, m.h / res.h);
+        view.scale = pinned && prevImgW
+            ? Math.max(view.fitScale, prevImgW / res.w)   // same size on screen, better pixels
+            : view.fitScale;                              // an unpinned preview re-fits
+
+        reflow();
+        view.ox = view.frameW / 2 - fx * view.imgW;
+        view.oy = view.frameH / 2 - fy * view.imgH;
+        reflow();
+        view.left = centreX - (view.frameW + cfg.borderWidth * 2) / 2;
+        view.top = centreY - (view.frameH + cfg.borderWidth * 2) / 2;
+
+        imgEl.src = res.url;
+        layout();
+        deferredCaption(res.url);
+    }
+
+    function deferredCaption(url) {
+        // Resource Timing can land a tick after the load the probe saw, so the byte size
+        // is often missing on the first pass. One re-read catches it.
+        if (!cfg.showStatusBar || transferBytes(url)) return;
+        setTimeout(function () { if (view && view.url === url) caption(); }, 300);
     }
 
     function hideViewer() {
@@ -913,8 +997,9 @@
         pinned = true;
         clearTimeout(hideTimer);
         clearTimeout(timer);
-        if (token) token.cancelled = true;
-        token = null;
+        // The in-flight resolve is deliberately NOT cancelled: pinning is a reason to keep
+        // looking for a better original, not to stop. upgradeViewer() preserves the pinned
+        // geometry when one arrives.
         box.classList.add('pinned');
         dimEl.classList.add('catch');
         CAP_TARGET.addEventListener('keydown', onPinKey, true);
@@ -943,10 +1028,11 @@
         if (!view) return;
         e.preventDefault();
         e.stopPropagation();
-        pin();
+        if (cfg.pinButton === 'left') pin(); else dismiss();
     }
 
     function onBoxDown(e) {
+        if (e.button === 2) { altButton(e); return; }
         if (e.button !== 0) return;
         if (closeEl.contains(e.target)) return;
         // Swallow it either way: unpinned, this is the press half of the pin click and
@@ -995,6 +1081,8 @@
     let timer = null;
     let hideTimer = null;
     let drag = null;        // { x, y, mode:'pan'|'move' } while dragging a pinned viewer
+    let suppressed = null;  // element whose preview was dismissed; skipped until re-entered
+    let swallowMenu = false;
     let pointer = { x: 0, y: 0 };
     let mouseDown = false;
     let modifierDown = false;
@@ -1044,6 +1132,41 @@
         hideTimer = setTimeout(cancel, HIDE_GRACE);
     }
 
+    // ---- pin / dismiss, and the switch that swaps which button does which
+    //
+    // Dismiss is for "the preview is in my way but my cursor is staying on this image":
+    // it takes the preview down and keeps it down until the pointer actually leaves the
+    // element and comes back. Without `suppressed` the next mousemove would just re-show
+    // it, which is the whole reason Escape alone was not enough.
+
+    function dismiss() {
+        suppressed = active;            // read it before unpin()/cancel() clear it
+        if (pinned) unpin(); else cancel();
+    }
+
+    // The button that does NOT pin. Returns true when it acted, which is the signal to
+    // swallow the context menu that a right press is about to raise.
+    function altButton(e) {
+        let acted = false;
+        if (cfg.pinButton === 'right') {
+            if (!pinned && view && box.classList.contains('on')) { pin(); acted = true; }
+        } else if (pinned || active) {
+            dismiss();
+            acted = true;
+        }
+        if (acted) {
+            e.preventDefault();
+            e.stopPropagation();
+            swallowMenu = true;
+        }
+        return acted;
+    }
+
+    function overOurs(e) {
+        if (ours(e.target)) return true;
+        return !!active && (active === e.target || (active.contains && active.contains(e.target)));
+    }
+
     function onMove(e) {
         pointer.x = e.clientX;
         pointer.y = e.clientY;
@@ -1076,6 +1199,7 @@
             if (active && !active.contains(e.target)) cancel();
             return;
         }
+        if (el === suppressed) return;      // dismissed; stays down until the pointer leaves
         if (el === active) { clearTimeout(hideTimer); return; }
 
         cancel();
@@ -1087,24 +1211,34 @@
         const myToken = token = { cancelled: false };
         timer = setTimeout(async function () {
             showSpinner();
-            let res = null;
             try {
-                res = await resolve(el, displayed, myToken, function (done, total) {
-                    if (!myToken.cancelled) spinnerProgress(done, total);
-                });
+                await resolve(el, displayed, myToken,
+                    function (done, total) {
+                        if (!myToken.cancelled) spinnerProgress(done, total);
+                    },
+                    function (hit) {
+                        // First hit paints the preview; every later one is strictly bigger
+                        // and replaces it in place, pinned or not.
+                        if (myToken.cancelled || active !== el) return;
+                        if (view && box.classList.contains('on')) upgradeViewer(hit);
+                        else { showViewer(hit, pointer); dockSpinner(); }
+                    });
             } finally {
                 // Off whatever the outcome — found, rejected, cancelled or thrown. A ring
                 // still turning after the search stopped would be a lie.
                 if (!myToken.cancelled) hideSpinner();
             }
-            if (myToken.cancelled || active !== el) return;
-            if (res) showViewer(res, pointer);
         }, cfg.hoverDelay);
     }
 
     function onOut(e) {
-        if (pinned || !active) return;
+        if (pinned) return;
         const to = e.relatedTarget;
+        if (suppressed && e.target === suppressed &&
+            !(to && suppressed.contains && suppressed.contains(to))) {
+            suppressed = null;      // left the image; hovering it again may preview again
+        }
+        if (!active) return;
         if (to && (ours(to) || (active.contains && active.contains(to)))) return;
         scheduleHide();     // not cancel(): give the pointer time to reach the preview
     }
@@ -1114,8 +1248,18 @@
     document.addEventListener('mouseout', onOut, true);
     document.addEventListener('mousedown', function (e) {
         if (ours(e.target)) return;     // onBoxDown / the backdrop own this one
+        // The right button has to be claimed here, not on contextmenu: mousedown fires
+        // first, and letting it fall through to cancel() would clear `active` before the
+        // menu event could see what to dismiss.
+        if (e.button === 2 && overOurs(e) && altButton(e)) return;
         mouseDown = true;
         cancel();
+    }, true);
+    document.addEventListener('contextmenu', function (e) {
+        if (!swallowMenu) return;
+        swallowMenu = false;
+        e.preventDefault();
+        e.stopPropagation();
     }, true);
     document.addEventListener('mouseup', function () {
         mouseDown = false;
@@ -1297,7 +1441,9 @@
         num('maxDisplayed', 'Ignore images larger than', 'px on screen — 0 means no limit', 0, 10000, 1);
         num('minRatio', 'Required upsize', 'full size must be this many times the thumbnail', 1, 10, 0.1);
         check('showEvenIfNotLarger', 'Show even when not larger', 'display at natural size anyway');
-        check('preferLargest', 'Always find the largest', 'probes every candidate instead of stopping at the first good one');
+        check('keepSearching', 'Keep looking after the first hit',
+            'shows the first match immediately, then upgrades the preview in place as bigger ' +
+            'originals turn up — costs up to 8 requests per hover instead of usually one');
         check('skipWhileMouseDown', 'Suppress while a mouse button is down');
         pick('siteMode', 'Site list mode', null, [
             ['blacklist', 'Disable on listed sites'], ['whitelist', 'Enable only on listed sites']]);
@@ -1325,6 +1471,11 @@
             'It then stays until the X, a click outside it, or Escape. While pinned: wheel or ' +
             '+/− to zoom, drag the image or use the arrow keys to pan, 0 to reset, and drag the ' +
             'status bar to move the frame.');
+        pick('pinButton', 'Pin with',
+            'the other button dismisses instead — the preview stays down until you move off ' +
+            'the image and back on', [
+                ['left', 'Left click  (right click dismisses)'],
+                ['right', 'Right click  (left click dismisses)']]);
         num('wheelZoomStep', 'Wheel zoom step', '% per notch — +/− steps by 25%', 2, 100, 1);
         num('panStep', 'Arrow-key pan step', 'px per press — Shift for 3×', 5, 500, 5);
         num('maxZoom', 'Maximum zoom', '× the natural size', 1, 64, 1);
@@ -1334,7 +1485,9 @@
         num('maxWidthPct', 'Max width', '% of window', 10, 100, 1);
         num('maxHeightPct', 'Max height', '% of window', 10, 100, 1);
         pick('position', 'Position', null, [
-            ['cursor', 'Centred under the cursor'], ['center', 'Centred in the window']]);
+            ['cursor', 'Beside the cursor'], ['center', 'Centred in the window']]);
+        num('cursorGap', 'Gap from cursor', 'px — the frame is still nudged to stay reachable',
+            0, 200, 1);
         num('fadeMs', 'Fade duration', 'ms', 0, 1000, 10);
         num('borderWidth', 'Border thickness', 'px', 0, 20, 1);
         color('borderColor', 'Border colour');
