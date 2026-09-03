@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.6.0
+// @version     0.7.0
 // @author      VitaKaninen
-// @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Click the preview to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
+// @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
 // @grant       GM_getValue
 // @grant       GM_setValue
@@ -416,16 +416,13 @@
     // favours the smallest file. Order is the selection rule, so order has to be kept.
     const MAX_PROBES = 8;
 
-    async function resolve(el, displayed, token, onProgress, onHit) {
+    async function resolve(el, displayed, token, onHit) {
         const candidates = collectCandidates(el).slice(0, MAX_PROBES);
         const shown = el.tagName === 'IMG' ? (el.currentSrc || el.src) : backgroundUrl(el);
         let best = null;
-        let done = 0;
-        if (onProgress) onProgress(0, candidates.length);
         for (const url of candidates) {
             if (token.cancelled) return best;
             const dim = await probe(url);
-            if (onProgress) onProgress(++done, candidates.length);
             if (!dim) continue;
             const isSameAsShown = (url === shown);
             const bigEnough = dim.w >= displayed.w * cfg.minRatio || dim.h >= displayed.h * cfg.minRatio;
@@ -449,14 +446,16 @@
 
     // ------------------------------------------------------------------ viewer
     //
-    // The viewer has two states.
+    // The viewer has three states.
     //
-    // UNPINNED it is a transient preview: it follows the hover and vanishes when the
-    // pointer leaves. It opens centred ON the pointer and is hit-testable, so clicking it
-    // needs no travel at all; the grace period on mouseout only covers the edge cases
-    // where the frame gets clamped away from the cursor.
+    // UNPINNED it is a transient preview: it opens beside the pointer, is hit-testable,
+    // and vanishes when the pointer leaves the image it came from.
     //
-    // PINNED (after that click) it becomes a modal: the backdrop starts swallowing
+    // DETACHED (after dragging it anywhere) it stops tracking the source image: only
+    // leaving the PREVIEW takes it down. Dragging is the cheap "keep this, I'm not done
+    // with it" gesture — no click, no modal, no backdrop.
+    //
+    // PINNED (after a click) it becomes a modal: the backdrop starts swallowing
     // clicks, an X appears, and wheel / +− / arrows / drag turn it into a zoom-and-pan
     // surface that keeps going past the point where the frame fills the window.
     //
@@ -465,20 +464,53 @@
     // DOM. Nothing else may set box/img styles, or the two will drift.
 
     let host = null, root = null, box = null, imgEl = null, dimEl = null, closeEl = null;
-    let capEl = null, capNameEl = null, capMetaEl = null, spinEl = null, arcEl = null;
+    let capEl = null, capNameEl = null, capMetaEl = null, spinEl = null, spinSvg = null;
 
     const SVG_NS = 'http://www.w3.org/2000/svg';
-    const SPIN_SIZE = 28;                           // px, matches the .spin rule
-    const RING_R = 15;                              // in the 36×36 viewBox, stroke-width 4
+    const SPIN_SIZE = 30;                           // px, matches the .spin rule
+    const RING_R = 13;                              // in the 36×36 viewBox, stroke-width 3.5
     const RING_C = 2 * Math.PI * RING_R;
+    const ARC_FRAC = 0.28;                          // how much of the ring the moving arc covers
 
-    function ringCircle(cls) {
+    function ringCircle(cls, r) {
         const c = document.createElementNS(SVG_NS, 'circle');
         c.setAttribute('class', cls);
         c.setAttribute('cx', '18');
         c.setAttribute('cy', '18');
-        c.setAttribute('r', String(RING_R));
+        c.setAttribute('r', String(r === undefined ? RING_R : r));
         return c;
+    }
+
+    // The spinner is the one part of the overlay that sits on the bare page rather than on
+    // the frame's own dark background, so it has to read against whatever is behind it.
+    // The page's computed background is the direct evidence; prefers-color-scheme is the
+    // fallback for a page that paints nothing (transparent body over the UA default).
+    function parseColor(s) {
+        const m = String(s).match(/^rgba?\(([^)]+)\)$/i);
+        if (!m) return null;
+        const p = m[1].split(/[\s,/]+/).filter(Boolean).map(parseFloat);
+        if (p.length < 3 || p.some(isNaN)) return null;
+        return { r: p[0], g: p[1], b: p[2], a: p.length > 3 ? p[3] : 1 };
+    }
+
+    function pageIsDark() {
+        const els = [document.body, document.documentElement];
+        for (let i = 0; i < els.length; i++) {
+            if (!els[i]) continue;
+            const c = parseColor(getComputedStyle(els[i]).backgroundColor);
+            if (c && c.a > 0.05) return (0.299 * c.r + 0.587 * c.g + 0.114 * c.b) < 128;
+        }
+        try { return matchMedia('(prefers-color-scheme: dark)').matches; } catch (e) { return false; }
+    }
+
+    // Catppuccin Mocha on a dark page, Latte on a light one.
+    function applySpinTheme() {
+        if (!host) return;
+        const dark = pageIsDark();
+        host.style.setProperty('--spin-bg', dark ? 'rgba(30,30,46,.94)' : 'rgba(239,241,245,.94)');
+        host.style.setProperty('--spin-edge', dark ? 'rgba(205,214,244,.20)' : 'rgba(76,79,105,.20)');
+        host.style.setProperty('--spin-track', dark ? 'rgba(205,214,244,.22)' : 'rgba(76,79,105,.20)');
+        host.style.setProperty('--spin-arc', dark ? '#89b4fa' : '#1e66f5');
     }
 
     // { url, natW, natH, scale, fitScale, imgW, imgH, frameW, frameH, ox, oy, left, top }
@@ -506,6 +538,9 @@
             '.box{position:fixed;opacity:0;pointer-events:none;transition:opacity var(--fade) ease;',
             'background:#1e1e2e;box-sizing:content-box;overflow:hidden}',
             '.box.on{opacity:1;pointer-events:auto}',
+            // Unpinned, the whole frame is a move handle: there is nothing to pan yet, and
+            // dragging is how a preview is kept without pinning it.
+            '.box.on:not(.pinned){cursor:move}',
             '.box.pan{cursor:grab}',
             '.box.pan.drag{cursor:grabbing}',
             'img{display:block;position:absolute;background:#1e1e2e;-webkit-user-drag:none;user-select:none}',
@@ -518,17 +553,20 @@
             '.cap .name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;',
             'font-family:ui-monospace,SFMono-Regular,Consolas,monospace;color:#a6adc8}',
             '.cap .meta{flex:none;white-space:nowrap}',
-            // Resolve progress: a determinate ring, arc growing clockwise from twelve.
-            // The centre is deliberately TRANSPARENT — the previous version filled it with
-            // a #1e1e2e disc, which read as a dark blob on a dark page and was the whole
-            // of the "it looks very dark" complaint.
-            '.spin{position:fixed;width:28px;height:28px;display:none;pointer-events:none;',
-            'filter:drop-shadow(0 1px 4px rgba(0,0,0,.55))}',
+            // Resolve progress: an INDETERMINATE ring — a fixed arc sweeping a full track.
+            // It says "still working" and nothing else. The determinate version it replaces
+            // could not be honest: the denominator was the candidate count, most runs stop
+            // well before the end of that list, so the arc never once finished where it
+            // said it would. The disc behind it is mostly opaque and themed to the page,
+            // so the ring reads on a white page as well as a dark one.
+            '.spin{position:fixed;width:30px;height:30px;display:none;pointer-events:none;',
+            'filter:drop-shadow(0 1px 4px rgba(0,0,0,.35))}',
             '.spin.on{display:block}',
-            '.spin svg{display:block;width:100%;height:100%;transform:rotate(-90deg)}',
-            '.spin circle{fill:none;stroke-width:4;stroke-linecap:round}',
-            '.spin .track{stroke:rgba(205,214,244,.25)}',
-            '.spin .arc{stroke:#89b4fa}',
+            '.spin svg{display:block;width:100%;height:100%}',
+            '.spin .disc{fill:var(--spin-bg);stroke:var(--spin-edge);stroke-width:1}',
+            '.spin .track,.spin .arc{fill:none;stroke-width:3.5;stroke-linecap:round}',
+            '.spin .track{stroke:var(--spin-track)}',
+            '.spin .arc{stroke:var(--spin-arc)}',
             '.x{position:absolute;top:7px;right:7px;width:26px;height:26px;display:none;',
             'align-items:center;justify-content:center;border-radius:50%;border:1px solid #45475a;',
             'background:rgba(30,30,46,.88);color:#cdd6f4;font:17px/1 system-ui,sans-serif;',
@@ -578,14 +616,15 @@
 
         spinEl = document.createElement('div');
         spinEl.className = 'spin';
-        const svg = document.createElementNS(SVG_NS, 'svg');
-        svg.setAttribute('viewBox', '0 0 36 36');
-        svg.appendChild(ringCircle('track'));
-        arcEl = ringCircle('arc');
-        arcEl.setAttribute('stroke-dasharray', RING_C.toFixed(2));
-        arcEl.setAttribute('stroke-dashoffset', RING_C.toFixed(2));
-        svg.appendChild(arcEl);
-        spinEl.appendChild(svg);
+        spinSvg = document.createElementNS(SVG_NS, 'svg');
+        spinSvg.setAttribute('viewBox', '0 0 36 36');
+        spinSvg.appendChild(ringCircle('disc', 17.5));
+        spinSvg.appendChild(ringCircle('track'));
+        const arcEl = ringCircle('arc');
+        arcEl.setAttribute('stroke-dasharray',
+            (RING_C * ARC_FRAC).toFixed(2) + ' ' + (RING_C * (1 - ARC_FRAC)).toFixed(2));
+        spinSvg.appendChild(arcEl);
+        spinEl.appendChild(spinSvg);
         root.appendChild(spinEl);
 
         (document.body || document.documentElement).appendChild(host);
@@ -778,74 +817,48 @@
     //
     // Probing is sequential and each step waits on a real image load, so a hover over a
     // slow or many-candidate image can sit silent for seconds and read as "nothing
-    // happened". The ring says work is in progress; the pie says how far through the
-    // candidate list it is. The denominator is honest — it is the worst case, the number
-    // of candidates that would be probed if none of them qualified — so a first-match run
-    // usually finishes well before the pie fills.
+    // happened". The ring says work is in progress. That is ALL it says, deliberately.
+    //
+    // It used to be determinate, filling against the candidate count. That number is the
+    // worst case — the run stops at the first candidate that clears the ratio gate, which
+    // is usually the first or second of up to eight — so the arc never finished anywhere
+    // near where it claimed it would. A progress bar that is wrong every single time is
+    // worse than no progress bar; there is no honest denominator available here, so the
+    // ring stopped pretending to have one.
 
     const SPINNER_DELAY = 150;   // don't flash it for a cached or instant resolve
-    const CREEP_TAU = 900;       // ms — how fast the arc eases toward the next boundary
-    const CREEP_MAX = 0.85;      // and how much of that gap it may claim before arriving
 
-    // setInterval, not requestAnimationFrame. rAF is starved whenever the compositor
-    // decides the page is not worth animating — a fully occluded window, some power-saving
-    // modes, and the Claude Code Browser pane, which reports visibilityState "visible" and
-    // still delivers zero frames. A frozen ring is indistinguishable from the stuck one
-    // this replaces, so the animation must not depend on frames being offered.
-    const CREEP_MS = 60;         // ~16fps, one attribute write per tick
+    // setInterval, not requestAnimationFrame, and not a CSS animation. rAF is starved
+    // whenever the compositor decides the page is not worth animating — a fully occluded
+    // window, some power-saving modes, and the Claude Code Browser pane, which reports
+    // visibilityState "visible" and still delivers zero frames. A frozen ring is
+    // indistinguishable from a hung script, so the animation must not depend on frames
+    // being offered.
+    const SPIN_MS = 60;          // ~16fps, one style write per tick
+    const SPIN_STEP = 24;        // degrees per tick — 400°/s
 
     let spinTimer = null;
-    let spinState = null;        // { done, total, at, shown }
-    let creepTimer = 0;
+    let spinAnim = 0;
+    let spinAngle = 0;
 
-    function paintArc(p) {
-        if (!arcEl) return;
-        const v = Math.max(0, Math.min(1, p));
-        arcEl.setAttribute('stroke-dashoffset', (RING_C * (1 - v)).toFixed(2));
-    }
-
-    // Candidate ticks are the only thing actually measured, and there are often only one
-    // or two of them — which is why a purely step-driven arc sat at 0% for the whole wait
-    // and looked broken. Between ticks the arc eases toward the next boundary on an
-    // exponential curve, approaching but never reaching it. The STEPS are real progress;
-    // the motion between them is an estimate that says "still going", nothing more.
     function spinFrame() {
-        if (!spinState) return;
-        const s = spinState;
-        const hard = s.total ? s.done / s.total : 0;
-        const next = s.total ? Math.min(1, (s.done + 1) / s.total) : 1;
-        const crept = hard + (next - hard) * CREEP_MAX *
-            (1 - Math.exp(-(performance.now() - s.at) / CREEP_TAU));
-        s.shown = Math.max(s.shown, crept);      // never runs backwards
-        paintArc(s.shown);
-    }
-
-    function startCreep() {
-        if (creepTimer) return;
-        creepTimer = setInterval(spinFrame, CREEP_MS);
+        if (!spinSvg) return;
+        spinAngle = (spinAngle + SPIN_STEP) % 360;
+        spinSvg.style.transform = 'rotate(' + spinAngle + 'deg)';
     }
 
     function showSpinner() {
         clearTimeout(spinTimer);
-        // Build now, reveal later: resolve() reports its first progress tick immediately,
-        // and it would be dropped on the floor if the ring did not exist yet.
         buildViewer();
+        applySpinTheme();           // per hover: the page may have flipped light/dark since
         spinDocked = false;
-        spinState = { done: 0, total: 0, at: performance.now(), shown: 0 };
-        paintArc(0);
+        spinAngle = 0;
+        spinFrame();
         spinTimer = setTimeout(function () {
             moveSpinner();
             spinEl.classList.add('on');
-            startCreep();
+            if (!spinAnim) spinAnim = setInterval(spinFrame, SPIN_MS);
         }, SPINNER_DELAY);
-    }
-
-    function spinnerProgress(done, total) {
-        if (!spinState) return;
-        spinState.done = done;
-        spinState.total = total;
-        spinState.at = performance.now();         // restart the creep from this boundary
-        spinFrame();                              // land the real step now, not on the next tick
     }
 
     // Two homes. Before anything is on screen it trails the cursor, which is the only
@@ -875,13 +888,9 @@
 
     function hideSpinner() {
         clearTimeout(spinTimer);
-        if (creepTimer) { clearInterval(creepTimer); creepTimer = 0; }
-        spinState = null;
+        if (spinAnim) { clearInterval(spinAnim); spinAnim = 0; }
         spinDocked = false;
-        if (spinEl) {
-            spinEl.classList.remove('on');
-            paintArc(0);
-        }
+        if (spinEl) spinEl.classList.remove('on');
     }
 
     // -------------------------------------------------------------------- show
@@ -1024,6 +1033,9 @@
     // control added inside the box needs the same exemption.
     function onBoxClick(e) {
         if (closeEl.contains(e.target)) return;
+        // A drag that actually moved something ends in a click too. Pinning on it would
+        // make the frame impossible to shove aside without committing to a pin.
+        if (justDragged) { justDragged = false; e.stopPropagation(); return; }
         if (pinned) { e.stopPropagation(); return; }   // a pinned box only closes via X / backdrop / Esc
         if (!view) return;
         e.preventDefault();
@@ -1035,15 +1047,18 @@
         if (e.button === 2) { altButton(e); return; }
         if (e.button !== 0) return;
         if (closeEl.contains(e.target)) return;
-        // Swallow it either way: unpinned, this is the press half of the pin click and
-        // must not reach the page; pinned, it starts a drag.
+        // Swallow it either way: this is the press half of the pin click and must not
+        // reach the page, and it may also turn into a drag.
         e.preventDefault();
         e.stopPropagation();
-        if (!pinned) return;
-        // The status bar moves the whole frame; the image itself pans within it.
-        const mode = capEl.contains(e.target) ? 'move' : 'pan';
+        justDragged = false;
+        if (!view) return;
+        // Unpinned the whole frame is a move handle — at fitScale there is nothing to pan,
+        // and grabbing the preview is how it gets kept without pinning. Pinned, the status
+        // bar moves the frame and the image pans within it.
+        const mode = (!pinned || capEl.contains(e.target)) ? 'move' : 'pan';
         if (mode === 'pan' && !pannable()) return;
-        drag = { x: e.clientX, y: e.clientY, mode: mode };
+        drag = { x: e.clientX, y: e.clientY, mode: mode, dist: 0, moved: false };
         box.classList.add('drag');
     }
 
@@ -1080,17 +1095,23 @@
     let token = null;       // cancellation token for the in-flight resolve
     let timer = null;
     let hideTimer = null;
-    let drag = null;        // { x, y, mode:'pan'|'move' } while dragging a pinned viewer
+    let drag = null;        // { x, y, mode:'pan'|'move', dist, moved } while dragging
+    let justDragged = false;// the click that ends a real drag must not also pin
+    let detached = false;   // an unpinned preview that was dragged: hover no longer owns it
     let suppressed = null;  // element whose preview was dismissed; skipped until re-entered
     let swallowMenu = false;
     let pointer = { x: 0, y: 0 };
     let mouseDown = false;
     let modifierDown = false;
 
-    // The preview opens centred on the pointer, so it is normally already under the
-    // cursor. This still covers the cases where it gets clamped away from the pointer —
-    // near a window edge, or a frame wider than the viewport allows.
+    // The preview opens beside the pointer and is nudged into reach, so it is normally
+    // already under the cursor. This still covers the cases where it gets clamped away
+    // from the pointer — near a window edge, or a frame wider than the viewport allows.
     const HIDE_GRACE = 220;
+
+    // A press that wanders this far in total is a drag, not a click. Below it, the frame
+    // still moves, but the release is treated as a pin.
+    const DRAG_SLOP = 3;
 
     function ours(node) {
         return !!host && (node === host || (host.contains && host.contains(node)));
@@ -1123,6 +1144,7 @@
         if (token) token.cancelled = true;
         token = null;
         active = null;
+        detached = false;
         hideSpinner();
         hideViewer();
     }
@@ -1177,7 +1199,12 @@
         if (!dx && !dy) return;
         drag.x = e.clientX;
         drag.y = e.clientY;
+        drag.dist += Math.abs(dx) + Math.abs(dy);
+        if (drag.dist > DRAG_SLOP) drag.moved = true;
         if (drag.mode === 'move') {
+            // Dragging an unpinned preview detaches it: it has been deliberately placed, so
+            // it stops following the hover and now lives until the pointer leaves IT.
+            if (drag.moved && !pinned && !detached) { detached = true; clearTimeout(hideTimer); }
             view.left += dx;
             view.top += dy;
             layout();       // clampPosition() keeps the frame on screen
@@ -1188,6 +1215,9 @@
 
     function onOver(e) {
         if (pinned) return;
+        // A drag can outrun the frame it is moving; without this, the page elements
+        // sliding under the pointer would cancel the very preview being dragged.
+        if (drag) return;
         if (ours(e.target)) { clearTimeout(hideTimer); return; }   // pointer reached the preview
         if (!cfg.enabled || !siteEnabled()) return;
         if (cfg.skipWhileMouseDown && mouseDown) return;
@@ -1196,6 +1226,7 @@
         const el = eligible(e.target);
         if (!el) {
             // moving onto the page background closes an open viewer
+            if (detached) { scheduleHide(); return; }   // ...with the grace period, like the preview
             if (active && !active.contains(e.target)) cancel();
             return;
         }
@@ -1213,9 +1244,6 @@
             showSpinner();
             try {
                 await resolve(el, displayed, myToken,
-                    function (done, total) {
-                        if (!myToken.cancelled) spinnerProgress(done, total);
-                    },
                     function (hit) {
                         // First hit paints the preview; every later one is strictly bigger
                         // and replaces it in place, pinned or not.
@@ -1232,7 +1260,7 @@
     }
 
     function onOut(e) {
-        if (pinned) return;
+        if (pinned || drag) return;
         const to = e.relatedTarget;
         if (suppressed && e.target === suppressed &&
             !(to && suppressed.contains && suppressed.contains(to))) {
@@ -1240,6 +1268,9 @@
         }
         if (!active) return;
         if (to && (ours(to) || (active.contains && active.contains(to)))) return;
+        // Detached, the source image no longer holds the preview open — only the preview
+        // does. Leaving the image is then not an event at all.
+        if (detached && !ours(e.target)) return;
         scheduleHide();     // not cancel(): give the pointer time to reach the preview
     }
 
@@ -1263,7 +1294,11 @@
     }, true);
     document.addEventListener('mouseup', function () {
         mouseDown = false;
-        if (drag) { drag = null; if (box) box.classList.remove('drag'); }
+        if (drag) {
+            justDragged = drag.moved;   // read by onBoxClick, which fires right after this
+            drag = null;
+            if (box) box.classList.remove('drag');
+        }
     }, true);
     window.addEventListener('scroll', function () { if (!pinned) cancel(); }, true);
     window.addEventListener('blur', function () { if (!pinned) cancel(); });
@@ -1467,10 +1502,12 @@
         panel.appendChild(sr2);
 
         section('Pinned mode');
-        note('Click the preview to pin it',
-            'It then stays until the X, a click outside it, or Escape. While pinned: wheel or ' +
-            '+/− to zoom, drag the image or use the arrow keys to pan, 0 to reset, and drag the ' +
-            'status bar to move the frame.');
+        note('Drag the preview to keep it, click it to pin it',
+            'Dragging an unpinned preview moves it and detaches it from the hover: it then ' +
+            'stays until you move off the preview itself. Clicking pins it, and it stays until ' +
+            'the X, a click outside it, or Escape. While pinned: wheel or +/− to zoom, drag the ' +
+            'image or use the arrow keys to pan, 0 to reset, and drag the status bar to move ' +
+            'the frame.');
         pick('pinButton', 'Pin with',
             'the other button dismisses instead — the preview stays down until you move off ' +
             'the image and back on', [

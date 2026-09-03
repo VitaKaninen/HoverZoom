@@ -11,12 +11,15 @@ then works instantly a while later once the probe has quietly finished and cache
     python test-server.py            # http://localhost:8899/test-page.html
 """
 
+import os
 import sys
 import time
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
-PORT = 8899
+# Honour $PORT so two sessions can run their own copy side by side; the documented
+# `python test-server.py` still lands on 8899.
+PORT = int(os.environ.get("PORT") or 8899)
 
 
 class SlowHandler(SimpleHTTPRequestHandler):

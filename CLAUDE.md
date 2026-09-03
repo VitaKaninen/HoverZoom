@@ -56,6 +56,26 @@ path has been touched twice ever, both times in 2021.
   `reflow()` derives frame size and clamps the pan offsets, `layout()` is the only thing that
   writes to the DOM. Nothing else may set `box`/`img` styles or the two representations drift.
 
+## Three viewer states: hover → detached → pinned
+
+The preview escalates by gesture, and each step is one gesture, not a setting.
+
+- **Hover** — transient. Opens beside the pointer, dies when the pointer leaves the source
+  image (with `HIDE_GRACE` to cross to it).
+- **Detached** (v0.7.0) — drag it anywhere and it stops tracking the source image; only
+  leaving the *preview* takes it down. Unpinned the whole frame is a move handle, because at
+  `fitScale` there is nothing to pan and shoving the preview aside without committing to a
+  pin is the point. `drag.dist > DRAG_SLOP` (3px) is what separates a drag from a click, and
+  the mouseup sets `justDragged` so the click that ends a real drag does not also pin —
+  without that, every drag pinned.
+- **Pinned** — click. Modal: backdrop catches, X appears, wheel/keys/drag become zoom-and-pan.
+
+Two guards keep a drag from destroying the thing being dragged: `onOver` and `onOut` both
+return early while `drag` is set (a fast drag outruns the frame, and the page elements
+sliding under the pointer would otherwise `cancel()`), and `detached` makes `onOut` ignore
+leaving the source image. Scroll still cancels an unpinned preview, detached or not — pin it
+if you want it to survive scrolling.
+
 ## Pinned mode
 
 Click the preview → it pins. The backdrop (`.dim.catch`) starts swallowing clicks, an X appears
@@ -155,6 +175,15 @@ Browser test: `python test-server.py`, then open `http://localhost:8899/test-pag
   is the only one that exercises the "frame grows before the image spills" branch of `reflow()`.
   Every other case has a 1600×1200 original, which opens already clamped to the cap.
 - Case 16 is the `?imgurl=` shape — a 32px icon wrapped in an `/imgres?imgurl=…` viewer link.
+- **`test-server.py` honours `$PORT`** (default 8899) and `.claude/launch.json` sets
+  `autoPort: true`, so two sessions can each run their own copy. Without that the second
+  session's `preview_start` just fails on the first session's server, which it cannot stop.
+- **The Browser pane's screenshots came back blank/stale for a whole session** (2026-09-03)
+  while `document.elementFromPoint` proved the content was there — same family as the
+  zero-rAF problem below. Verify by reading DOM state and computed style, not by looking.
+  Also note the pane letterboxes the emulated viewport: screenshot coordinates were 800×446
+  against a 1280×720 CSS viewport, a 0.625 scale factor that must be applied to every
+  coordinate taken from `getBoundingClientRect()`.
 - **A `computer{action:"hover"}` to a coordinate the pointer is already at fires no `mouseover`,**
   so a second test against the same element silently does nothing and reads as a script bug. Move
   the pointer somewhere else first, and re-derive coordinates from a fresh screenshot after any
@@ -196,29 +225,41 @@ and populate `probeCache`, which is why the same image "works if you come back t
 That is a cache warming up, not a fixed bug, and it is why the silence needed a UI rather than
 a code fix.
 
-`.spin` answers it: an SVG ring whose arc grows clockwise from twelve, `stroke-dashoffset` driven.
-The centre is **transparent** — v0.4.0 filled it with a `#1e1e2e` disc and it read as a dark blob.
+`.spin` answers it: an SVG ring, **indeterminate** — a fixed arc (`ARC_FRAC`, 28% of the ring)
+sweeping a full track at 400°/s. It says "still working" and deliberately nothing else.
+
+**The determinate version was removed in v0.7.0 because it could not be honest.** Its
+denominator was `candidates.length`, the worst case; the run stops at the first candidate that
+clears the ratio gate, usually the first or second of up to eight. So the arc never once
+finished where it said it would — reported as "it has never finished when it thinks it will".
+A progress bar that is wrong every time is worse than none, and no honest denominator exists
+here: the cost is a network fetch of unknown size and the stopping point is data-dependent.
+Do not reintroduce one (`CREEP_TAU`/`CREEP_MAX`, the exponential easing between steps, and
+`resolve()`'s `onProgress` parameter all went with it).
+
+**The disc behind the ring is mostly opaque and themed to the page** (`applySpinTheme()`,
+called per hover so a page that flips light/dark is picked up). The spinner is the only part
+of the overlay that sits on the bare page rather than on the frame's own dark background, so
+it is the only part that needs this. `pageIsDark()` reads the computed `backgroundColor` of
+`document.body` then `documentElement`, taking the first with alpha > 0.05 and thresholding
+luminance at 128; a page that paints nothing falls through to `prefers-color-scheme`. Dark
+gets Catppuccin Mocha (`#1e1e2e` at .94, `#89b4fa` arc), light gets Latte (`#eff1f5`,
+`#1e66f5`). v0.4.0 had a `#1e1e2e` disc unconditionally and it read as a dark blob; v0.5.0
+made the centre transparent, which then read as nothing at all on a busy image.
 
 `SPINNER_DELAY` (150 ms) keeps it from flashing on cached hits, but `buildViewer()` runs
-*immediately* in `showSpinner()` — `resolve()` emits its first progress tick synchronously and it
-would be dropped if the ring did not exist yet. `hideSpinner()` is in a `finally`, so the ring
-stops on every outcome including a throw; a ring still turning after the search stopped is a lie.
+*immediately* in `showSpinner()` so the ring exists before anything can need it.
+`hideSpinner()` is in a `finally`, so the ring stops on every outcome including a throw; a
+ring still turning after the search stopped is a lie.
 
-**Two things about the progress that are easy to get wrong:**
-
-- **Steps alone are not enough.** The denominator is real — `candidates.length`, the worst case
-  if nothing qualifies — but there are often only one or two candidates, so a purely step-driven
-  arc sits at 0% for the entire wait and looks broken. That was the v0.4.0 bug ("always full or
-  empty"). Between ticks the arc now eases toward the next boundary on an exponential curve
-  (`CREEP_TAU`), claiming at most `CREEP_MAX` of the gap and never arriving. The steps are
-  measured; the motion between them is an estimate that says only "still going".
-- **`setInterval`, never `requestAnimationFrame`.** rAF is starved whenever the compositor
-  decides the page is not worth animating. **The Claude Code Browser pane delivers zero animation
-  frames while reporting `visibilityState: "visible"` and `document.hasFocus(): true`** — a
-  60-frame rAF probe returned 0. Real browsers do the same for occluded windows and some
-  power-saving modes. A frozen ring is indistinguishable from the stuck one it replaces, so this
-  animation must not depend on frames being offered. Anything else here that must animate has the
-  same constraint, and no screenshot will catch it — verify by reading the attribute over time.
+- **`setInterval`, never `requestAnimationFrame` — and not a CSS animation either.** rAF is
+  starved whenever the compositor decides the page is not worth animating. **The Claude Code
+  Browser pane delivers zero animation frames while reporting `visibilityState: "visible"` and
+  `document.hasFocus(): true`** — a 60-frame rAF probe returned 0. Real browsers do the same
+  for occluded windows and some power-saving modes. A frozen ring is indistinguishable from a
+  hung script, so the animation must not depend on frames being offered. Anything else here
+  that must animate has the same constraint, and no screenshot will catch it — verify by
+  reading the attribute over time (`svg.style.transform` advances 24° every 60 ms).
 
 ## Known limits
 
