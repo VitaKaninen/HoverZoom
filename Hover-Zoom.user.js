@@ -1265,14 +1265,11 @@
         cancel();
     }
 
-    // The X lives INSIDE the box, so these two capture listeners reach it first and their
-    // stopPropagation() would keep the button's own handlers from ever running — capture
-    // descends from the ancestor. Both have to step aside for it explicitly. Any new
-    // control added inside the box needs the same exemption.
-    // Controls that live INSIDE the box. These two capture listeners are on the box, and
-    // capture descends from the ancestor, so without an explicit exemption their
-    // stopPropagation() reaches a child's own handlers first and the control does nothing.
-    // Any new control added inside the box goes in here.
+    // Controls that live INSIDE the box. onBoxDown/onBoxClick are capture listeners on the
+    // box, and capture descends from the ancestor, so without an explicit exemption their
+    // stopPropagation() runs before a child's own handlers and the control does nothing —
+    // the X looked correct, hovered correctly and did nothing until this existed. Any new
+    // control added inside the box goes in here.
     function isBoxControl(t) {
         return closeEl.contains(t) || menuBtn.contains(t);
     }
