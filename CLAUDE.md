@@ -76,6 +76,45 @@ sliding under the pointer would otherwise `cancel()`), and `detached` makes `onO
 leaving the source image. Scroll still cancels an unpinned preview, detached or not — pin it
 if you want it to survive scrolling.
 
+## Image actions — the ⋮ button, and why it is not the browser's menu
+
+**A userscript cannot open the browser's context menu.** A dispatched `contextmenu` event is
+untrusted and browsers run no default action for untrusted events — the menu is user-agent
+chrome, raised only by real input. So "a button that simulates a right click" is not a thing
+that can be built, at any price. Right-click is also already spoken for by dismiss, and
+`swallowMenu` suppresses the native menu that press would otherwise raise.
+
+v0.8.0's answer is our own menu on a ⋮ button at the right end of the status bar, carrying the
+four actions that menu was wanted for: open in a new tab, copy the URL, copy the image, save
+it. Points that are load-bearing:
+
+- **`.menu` is a SIBLING of `.box`, not a child.** `.box` has `overflow:hidden`, so a menu
+  inside it is clipped to nothing on a small preview. It is positioned in fixed coordinates
+  from `menuBtn.getBoundingClientRect()`, opening upward from the bar.
+- **The ⋮ button needs the `isBoxControl()` exemption**, same as the X — see the capture
+  gotcha below. Without it the button opens nothing and pins the preview instead.
+- **Opening the menu sets `detached`**, or aiming at an item means leaving the image and the
+  preview vanishes mid-gesture.
+- **`navigator.clipboard.write()` must be called SYNCHRONOUSLY inside the click**, with a
+  *promise* handed to `ClipboardItem` — not awaited first and written after. Measured
+  2026-09-03: the await-then-write version lost the transient user activation and was rejected
+  `NotAllowedError`, whose fallback then called `window.open`, which — also having no
+  activation — navigated the tab the user was on to the raw image. **No `window.open` from an
+  async continuation anywhere in this file.** The failure branches now only flash a message.
+- **`writeText` falls back to `execCommand('copy')` via a temp textarea**, and that fallback is
+  not theoretical: the Browser pane reports `clipboard-write` permission `denied`, and the URL
+  copy still worked through it.
+- Copy and save need a cross-origin read the host must permit (`Access-Control-Allow-Origin`).
+  Nothing in a page context can get around that. Both fail soft and say so in the status bar.
+  `ClipboardItem` only takes PNG in practice, so anything else goes through a canvas — which
+  needs the same CORS grant, so it fails in the same cases and no earlier.
+
+Verified in the pane: menu opens above the bar without pinning, "Copy image URL" flashed
+`URL copied`, "Save image…" flashed `saved` with no navigation, the flash reverts to the
+filename after 1.8 s, and Escape closes the menu while leaving the preview up. Copy-image
+could not be verified end to end there — `clipboard-write` is denied in that environment — but
+the fetch → canvas → PNG pipeline ahead of the write was confirmed (75 KB JPEG → 130 KB PNG).
+
 ## Pinned mode
 
 Click the preview → it pins. The backdrop (`.dim.catch`) starts swallowing clicks, an X appears
@@ -145,8 +184,9 @@ tab's values instead of clobbering them.
 `onBoxDown`/`onBoxClick` are capture listeners on `.box`, and the X button is a *child* of the
 box — capture descends from the ancestor, so those two run first and their `stopPropagation()`
 kept `closeEl`'s own handlers from ever firing. The X looked correct, hovered correctly, and did
-nothing. Both handlers now `return` early on `closeEl.contains(e.target)`. Any new control
-placed inside the box needs the same exemption. Found 2026-09-03 in browser testing; nothing
+nothing. Both handlers now `return` early on **`isBoxControl(e.target)`**, which is the one list
+of exempt controls (the X and the ⋮ button). Any new control placed inside the box goes in
+there — it is not optional, and the symptom is silence. Found 2026-09-03 in browser testing; nothing
 static catches it — `node --check` passes and the markup is fine.
 
 ## Testing
