@@ -51,11 +51,21 @@ path has been touched twice ever, both times in 2021.
   `reflow()` derives frame size and clamps the pan offsets, `layout()` is the only thing that
   writes to the DOM. Nothing else may set `box`/`img` styles or the two representations drift.
 
-## Pinned mode (v0.3.0)
+## Pinned mode
 
 Click the preview → it pins. The backdrop (`.dim.catch`) starts swallowing clicks, an X appears
 (`.box.pinned .x`), and wheel / `+` `−` / arrows / drag become a zoom-and-pan surface. It closes
-on the X, a click on the backdrop, or Escape.
+on the X, a click on the backdrop, or Escape. **Not optional** — there is no other thing a click
+on a floating preview could mean, so it has no setting; the panel carries a `note()` row that
+explains the controls without offering a switch.
+
+- **The preview opens centred ON the pointer** (`position: 'cursor'`). It used to open beside it
+  with a gap, which meant reaching it crossed page content — fatal for a small thumbnail or a
+  pointer already near the image's edge, because that crossing dismissed the very thing being
+  reached for. `HIDE_GRACE` now only covers frames clamped away from the cursor at a window edge.
+- **The status bar is the move handle.** Dragging it moves the frame (`drag.mode === 'move'`);
+  dragging the image pans within the frame (`'pan'`). Both go through the same `drag` object in
+  `onMove`. Hiding the status bar therefore also removes the only way to move a pinned frame.
 
 - **The frame grows before the image spills.** Zooming enlarges the frame until it reaches
   `maxWidthPct`/`maxHeightPct` of the viewport; past that the frame is fixed and the image
@@ -74,6 +84,26 @@ on the X, a click on the backdrop, or Escape.
   That is the cost of click-to-pin: the preview covers whatever is under it. Turning the setting
   off restores `pointer-events:none`.
 
+## Settings are per-tab snapshots — always re-read before rendering the panel
+
+`cfg` is read once at load, so every tab holds its own copy. A tab open for a while is editing a
+stale snapshot: the panel renders old values *and*, because Save writes the whole object, it
+reverts anything another tab changed since. Symptom as reported: "I change one thing and it
+saves other things I had previously disabled."
+
+Two defences, both needed:
+
+- `reloadSettings()` at the top of `openPanel()` — the one that always works, including where
+  the manager has no change API.
+- `GM_addValueChangeListener` on `KEY`, acting only when `remote` is true. This is the better
+  fix because it also keeps the *running* script current, not just the panel, and re-renders an
+  already-open panel. It needs the `@grant`, and it must be feature-detected — not every manager
+  implements it.
+
+Verified against the `storage`-event stub in `test-page.html`: a silent write is picked up on
+open, a signalled write is picked up immediately, and saving afterwards preserves the other
+tab's values instead of clobbering them.
+
 ## Gotcha: a capture listener on the box eats its own children's events
 
 `onBoxDown`/`onBoxClick` are capture listeners on `.box`, and the X button is a *child* of the
@@ -91,10 +121,23 @@ node test-resolver.js               # 39 assertions on the pure URL logic
 python make-test-images.py          # regenerate fixtures into test-images/
 ```
 
-Browser test: serve the folder (`.claude/launch.json` defines `hover-zoom-test` on port 8899,
-`python -m http.server`) and open `test-page.html`. 13 cases, 9 of which HZ+ rejects outright.
-The page loads `Hover-Zoom.user.js` via a `<script>` tag, so it runs without Tampermonkey —
-`GM_getValue` is absent, `readSettings()` catches the ReferenceError and falls back to defaults.
+Browser test: `python test-server.py`, then open `http://localhost:8899/test-page.html`. 15 cases,
+9 of which HZ+ rejects outright. (`.claude/launch.json` wraps the same command as
+`hover-zoom-test`, but `.claude/` is gitignored — a fresh clone has only the direct command.)
+
+- **`test-server.py`, not `python -m http.server`.** It is the same static server plus
+  `?slow=<seconds>`, which stalls that one response. Nothing else can reproduce the symptom that
+  motivated the resolve spinner: against localhost every probe finishes in single-digit ms, so
+  a slow resolve — the state the user actually sees as "hovering does nothing" — is otherwise
+  unreachable. Case 15 uses it. It is threaded, or one `?slow=` would block the whole page.
+- **The page defines GM stand-ins** (`GM_getValue`/`GM_setValue`/`GM_addValueChangeListener`/
+  `GM_registerMenuCommand`) over `localStorage` before loading the script, so the settings panel
+  opens from a button in the corner instead of the manager menu. `GM_addValueChangeListener` is
+  wired to the `storage` event, which is genuinely cross-tab: open the page twice and the
+  settings-staleness path below is reproducible for real.
+- Case 14 is the only fixture whose original (800×600) is smaller than the viewport cap, so it
+  is the only one that exercises the "frame grows before the image spills" branch of `reflow()`.
+  Every other case has a 1600×1200 original, which opens already clamped to the cap.
 
 Shadow roots are `mode: 'open'` specifically so the test harness can read the viewer. Encapsulation
 is identical to `closed`; only script access differs, and the page can find `#hover-zoom-host`
@@ -115,6 +158,24 @@ snapshot and the external script never executes. Use the HTTP server.
   `test-resolver.js`.
 - A first run of a new test suite that passes 33/33 deserves suspicion, not celebration. The
   over-match above was invisible until real URLs were printed and eyeballed.
+
+## Resolve progress
+
+Probes are sequential and each awaits a real image load, so a slow or many-candidate image can
+sit silent for seconds. Worse, leaving mid-probe does not abort the in-flight loads — they finish
+and populate `probeCache`, which is why the same image "works if you come back to it later".
+That is a cache warming up, not a fixed bug, and it is why the silence needed a UI rather than
+a code fix.
+
+`.spin` answers it: a ring that turns while work is happening, over a conic-gradient pie that
+fills as candidates are probed. `SPINNER_DELAY` (150 ms) keeps it from flashing on cached hits,
+but `buildViewer()` runs *immediately* in `showSpinner()` — `resolve()` emits its first progress
+tick synchronously and it would be dropped if `spinEl` did not exist yet. `hideSpinner()` is in a
+`finally`, so the ring stops on every outcome including a throw; a ring still turning after the
+search stopped would be a lie.
+
+The denominator is real, not invented: `candidates.length`, the worst case if nothing qualifies.
+A first-match run usually finishes before the pie fills, which is honest — it stopped early.
 
 ## Known limits
 

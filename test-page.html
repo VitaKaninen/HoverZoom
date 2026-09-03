@@ -98,6 +98,47 @@
     <img id="c13" width="1600" src="test-images/photo.jpg" style="width:1600px;max-width:none">
   </div>
 
+  <div class="case" data-expect="800">
+    <h2>14. original smaller than the window</h2>
+    <p class="hz good">frame opens below the viewport cap, so zooming grows the frame itself</p>
+    <img id="c14" width="200" src="test-images/photo-200x150.jpg" data-src="test-images/photo-800x600.jpg">
+  </div>
+
+  <div class="case" data-expect="1600">
+    <h2>15. slow original (3s)</h2>
+    <p class="hz good">the resolve spinner should appear and fill — needs test-server.py</p>
+    <img id="c15" width="200" src="test-images/photo-200x150.jpg" data-src="test-images/photo.jpg?slow=3">
+  </div>
+
 </div>
+
+<!--
+  Tampermonkey stand-ins. Without them the settings panel is unreachable here (it is only
+  opened from the manager's menu) and its cross-tab behaviour is untestable. Storage is
+  localStorage, and the `storage` event gives GM_addValueChangeListener exactly the signal
+  a real manager does: "another tab changed this". Open the page in two tabs to reproduce
+  the stale-settings case.
+-->
+<script>
+  var GM_getValue = function (key, dflt) {
+    var v = localStorage.getItem(key);
+    return v === null ? dflt : v;
+  };
+  var GM_setValue = function (key, val) { localStorage.setItem(key, val); };
+  var GM_addValueChangeListener = function (key, fn) {
+    window.addEventListener('storage', function (e) {
+      if (e.key === key) fn(key, e.oldValue, e.newValue, true);
+    });
+  };
+  var GM_registerMenuCommand = function (label, fn) {
+    var b = document.createElement('button');
+    b.id = 'menu-settings';
+    b.textContent = label;
+    b.style.cssText = 'position:fixed;right:12px;bottom:12px;z-index:99;padding:6px 12px;' +
+      'background:#313244;color:#cdd6f4;border:1px solid #45475a;border-radius:6px;cursor:pointer';
+    b.addEventListener('click', fn);
+    document.body.appendChild(b);
+  };
+</script>
 
 <script src="./Hover-Zoom.user.js"></script>

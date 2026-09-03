@@ -1,12 +1,13 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.3.0
+// @version     0.4.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Click the preview to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
 // @grant       GM_getValue
 // @grant       GM_setValue
+// @grant       GM_addValueChangeListener
 // @grant       GM_registerMenuCommand
 // @run-at      document-idle
 // @downloadURL https://raw.githubusercontent.com/VitaKaninen/HoverZoom/master/Hover-Zoom.user.js
@@ -54,7 +55,6 @@
         siteList: [],               // hostnames, matched by suffix
 
         // pinned mode
-        clickToPin: true,           // click the preview to keep it open
         wheelZoomStep: 15,          // % per wheel notch
         panStep: 80,                // px per arrow-key press (Shift = 3x)
         maxZoom: 32,                // hard ceiling, multiples of natural size
@@ -64,14 +64,13 @@
         maxHeightPct: 92,
         zoomFactor: 1.0,            // scale applied to natural size before clamping
         position: 'cursor',         // 'cursor' | 'center'
-        cursorGap: 24,              // px between pointer and image edge
         fadeMs: 90,
         borderWidth: 1,
         borderColor: '#45475a',
         cornerRadius: 6,
         shadow: true,
         dimOpacity: 0,              // 0 = no page dimming, up to 90
-        showDimensions: true,
+        showStatusBar: true,        // filename / type / size / dimensions strip, also the move handle
         noReferrer: false,          // strip referrer when loading full image
     };
 
@@ -89,6 +88,28 @@
 
     function saveSettings() {
         GM_setValue(KEY, JSON.stringify(cfg));
+    }
+
+    // Every tab holds its own `cfg`, read once at load. Without these two, a tab that has
+    // been open a while is editing a stale snapshot: the panel renders old values, and
+    // saving writes that whole snapshot back, silently reverting anything changed in
+    // another tab since. reloadSettings() before rendering the panel is the fix that
+    // always works; the change listener is the better one where the manager provides it,
+    // because it also keeps the *running* script current, not just the panel.
+    function reloadSettings() {
+        cfg = Object.assign({}, DEFAULTS, readSettings());
+        return cfg;
+    }
+
+    if (typeof GM_addValueChangeListener === 'function') {
+        try {
+            GM_addValueChangeListener(KEY, function (name, oldVal, newVal, remote) {
+                if (!remote) return;                // our own write; cfg already matches
+                reloadSettings();
+                probeCache.clear();
+                if (panelHost) openPanel();         // re-render an open panel onto fresh values
+            });
+        } catch (e) { /* not all managers implement it; reloadSettings() still covers the panel */ }
     }
 
     function siteEnabled() {
@@ -360,13 +381,16 @@
     // beat the site's own srcset by rewriting it, at the cost of N requests.
     const MAX_PROBES = 8;
 
-    async function resolve(el, displayed, token) {
+    async function resolve(el, displayed, token, onProgress) {
         const candidates = collectCandidates(el).slice(0, MAX_PROBES);
         const shown = el.tagName === 'IMG' ? (el.currentSrc || el.src) : backgroundUrl(el);
         let best = null;
+        let done = 0;
+        if (onProgress) onProgress(0, candidates.length);
         for (const url of candidates) {
             if (token.cancelled) return null;
             const dim = await probe(url);
+            if (onProgress) onProgress(++done, candidates.length);
             if (!dim) continue;
             const isSameAsShown = (url === shown);
             const bigEnough = dim.w >= displayed.w * cfg.minRatio || dim.h >= displayed.h * cfg.minRatio;
@@ -389,8 +413,9 @@
     // The viewer has two states.
     //
     // UNPINNED it is a transient preview: it follows the hover and vanishes when the
-    // pointer leaves. It is still hit-testable (`.hot`) so the pointer can travel onto
-    // it and click, which is what a short grace period on mouseout buys time for.
+    // pointer leaves. It opens centred ON the pointer and is hit-testable, so clicking it
+    // needs no travel at all; the grace period on mouseout only covers the edge cases
+    // where the frame gets clamped away from the cursor.
     //
     // PINNED (after that click) it becomes a modal: the backdrop starts swallowing
     // clicks, an X appears, and wheel / +− / arrows / drag turn it into a zoom-and-pan
@@ -400,7 +425,8 @@
     // clamps the pan offsets; layout() is the only thing that writes any of it to the
     // DOM. Nothing else may set box/img styles, or the two will drift.
 
-    let host = null, root = null, box = null, imgEl = null, capEl = null, dimEl = null, closeEl = null;
+    let host = null, root = null, box = null, imgEl = null, dimEl = null, closeEl = null;
+    let capEl = null, capNameEl = null, capMetaEl = null, spinEl = null, pieEl = null;
 
     // { url, natW, natH, scale, fitScale, imgW, imgH, frameW, frameH, ox, oy, left, top }
     // ox/oy are the image's top-left within the frame's content box: 0 or negative once
@@ -426,13 +452,30 @@
             '.dim.catch{pointer-events:auto}',
             '.box{position:fixed;opacity:0;pointer-events:none;transition:opacity var(--fade) ease;',
             'background:#1e1e2e;box-sizing:content-box;overflow:hidden}',
-            '.box.on.hot{pointer-events:auto}',
-            '.box.on{opacity:1}',
+            '.box.on{opacity:1;pointer-events:auto}',
             '.box.pan{cursor:grab}',
             '.box.pan.drag{cursor:grabbing}',
             'img{display:block;position:absolute;background:#1e1e2e;-webkit-user-drag:none;user-select:none}',
-            '.cap{position:absolute;left:0;right:0;bottom:0;padding:3px 7px;font:11px/1.4 system-ui,sans-serif;',
-            'color:#cdd6f4;background:rgba(30,30,46,.82);text-align:right;letter-spacing:.02em;pointer-events:none}',
+            // The status bar doubles as the frame's move handle, so unlike the rest of the
+            // overlay it must stay hit-testable.
+            '.cap{position:absolute;left:0;right:0;bottom:0;display:flex;align-items:baseline;gap:10px;',
+            'padding:4px 8px;font:11px/1.5 system-ui,sans-serif;color:#cdd6f4;',
+            'background:rgba(30,30,46,.86);letter-spacing:.02em;user-select:none}',
+            '.box.pinned .cap{cursor:move}',
+            '.cap .name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;',
+            'font-family:ui-monospace,SFMono-Regular,Consolas,monospace;color:#a6adc8}',
+            '.cap .meta{flex:none;white-space:nowrap}',
+            // Resolve progress. The ring spins to say "still working"; the pie fills as
+            // candidates are probed. Both vanish the moment resolution stops either way.
+            '.spin{position:fixed;width:26px;height:26px;display:none;pointer-events:none;',
+            'filter:drop-shadow(0 2px 7px rgba(0,0,0,.7))}',
+            '.spin.on{display:block}',
+            '.ring{position:absolute;inset:0;border-radius:50%;border:2px solid rgba(137,180,250,.22);',
+            'border-top-color:#89b4fa;animation:hzspin .75s linear infinite}',
+            '.pie{position:absolute;inset:5px;border-radius:50%;overflow:hidden;background:#1e1e2e}',
+            '.pie::after{content:"";position:absolute;inset:0;border-radius:50%;',
+            'background:conic-gradient(#89b4fa var(--p,0%),rgba(205,214,244,.13) 0)}',
+            '@keyframes hzspin{to{transform:rotate(360deg)}}',
             '.x{position:absolute;top:7px;right:7px;width:26px;height:26px;display:none;',
             'align-items:center;justify-content:center;border-radius:50%;border:1px solid #45475a;',
             'background:rgba(30,30,46,.88);color:#cdd6f4;font:17px/1 system-ui,sans-serif;',
@@ -459,6 +502,12 @@
 
         capEl = document.createElement('div');
         capEl.className = 'cap';
+        capNameEl = document.createElement('span');
+        capNameEl.className = 'name';
+        capMetaEl = document.createElement('span');
+        capMetaEl.className = 'meta';
+        capEl.appendChild(capNameEl);
+        capEl.appendChild(capMetaEl);
 
         closeEl = document.createElement('div');
         closeEl.className = 'x';
@@ -473,6 +522,16 @@
         box.addEventListener('mousedown', onBoxDown, true);
         box.addEventListener('click', onBoxClick, true);
         root.appendChild(box);
+
+        spinEl = document.createElement('div');
+        spinEl.className = 'spin';
+        const ring = document.createElement('div');
+        ring.className = 'ring';
+        pieEl = document.createElement('div');
+        pieEl.className = 'pie';
+        spinEl.appendChild(ring);
+        spinEl.appendChild(pieEl);
+        root.appendChild(spinEl);
 
         (document.body || document.documentElement).appendChild(host);
     }
@@ -520,17 +579,64 @@
         view.top = Math.max(4, Math.min(view.top, m.vh - oh - 4));
     }
 
+    // ------------------------------------------------------------- status bar
+
+    const TYPE_NAMES = { jpg: 'JPEG', jpeg: 'JPEG', jpe: 'JPEG', jfif: 'JPEG',
+        tif: 'TIFF', tiff: 'TIFF', ico: 'ICO', svg: 'SVG' };
+
+    // Filename and format, both taken from the URL — the only source available without a
+    // second request. An extension-less CDN path can still declare its format in the query.
+    function fileInfo(url) {
+        const out = { name: url, type: '' };
+        try {
+            const u = new URL(url, location.href);
+            const segs = u.pathname.split('/').filter(Boolean);
+            out.name = decodeURIComponent(segs.length ? segs[segs.length - 1] : u.hostname);
+            const ext = u.pathname.match(MEDIA_RE);
+            const q = ext ? null : u.search.match(/[?&](?:format|fm|output)=([a-z0-9]+)/i);
+            const raw = ext ? ext[1] : (q ? q[1] : '');
+            if (raw) out.type = TYPE_NAMES[raw.toLowerCase()] || raw.toUpperCase();
+        } catch (e) { /* keep the raw url as the name */ }
+        return out;
+    }
+
+    // Byte size for free: the probe already fetched it, so the Resource Timing entry is
+    // there. Cross-origin without Timing-Allow-Origin reports 0, and then we just omit it.
+    function transferBytes(url) {
+        try {
+            const entries = performance.getEntriesByName(url);
+            for (let i = entries.length - 1; i >= 0; i--) {
+                const n = entries[i].encodedBodySize || entries[i].transferSize || 0;
+                if (n > 0) return n;
+            }
+        } catch (e) { /* no Resource Timing */ }
+        return 0;
+    }
+
+    function humanBytes(n) {
+        if (n < 1024) return n + ' B';
+        if (n < 1024 * 1024) return Math.round(n / 1024) + ' KB';
+        return (n / (1024 * 1024)).toFixed(1) + ' MB';
+    }
+
     function caption() {
-        const parts = [];
-        if (cfg.showDimensions) parts.push(view.natW + ' × ' + view.natH);
-        if (pinned) parts.push(Math.round(view.scale * 100) + '%');
-        if (!parts.length) {
-            capEl.textContent = '';
+        if (!cfg.showStatusBar) {
             capEl.style.display = 'none';
             return;
         }
-        capEl.textContent = parts.join('  ·  ');
         capEl.style.display = '';
+
+        const info = fileInfo(view.url);
+        capNameEl.textContent = info.name;
+        capNameEl.title = view.url;
+
+        const parts = [];
+        if (info.type) parts.push(info.type);
+        parts.push(view.natW + ' × ' + view.natH);
+        const bytes = transferBytes(view.url);
+        if (bytes) parts.push(humanBytes(bytes));
+        if (pinned) parts.push(Math.round(view.scale * 100) + '%');
+        capMetaEl.textContent = parts.join('  ·  ');
     }
 
     function layout() {
@@ -596,6 +702,50 @@
         layout();
     }
 
+    // ---------------------------------------------------------- resolve spinner
+    //
+    // Probing is sequential and each step waits on a real image load, so a hover over a
+    // slow or many-candidate image can sit silent for seconds and read as "nothing
+    // happened". The ring says work is in progress; the pie says how far through the
+    // candidate list it is. The denominator is honest — it is the worst case, the number
+    // of candidates that would be probed if none of them qualified — so a first-match run
+    // usually finishes well before the pie fills.
+
+    const SPINNER_DELAY = 150;   // don't flash it for a cached or instant resolve
+    let spinTimer = null;
+
+    function showSpinner() {
+        clearTimeout(spinTimer);
+        // Build now, reveal later: resolve() reports its first progress tick immediately,
+        // and it would be dropped on the floor if spinEl did not exist yet.
+        buildViewer();
+        spinEl.style.setProperty('--p', '0%');
+        spinTimer = setTimeout(function () {
+            moveSpinner();
+            spinEl.classList.add('on');
+        }, SPINNER_DELAY);
+    }
+
+    function spinnerProgress(done, total) {
+        if (!spinEl || !total) return;
+        spinEl.style.setProperty('--p', Math.round((done / total) * 100) + '%');
+    }
+
+    function moveSpinner() {
+        if (!spinEl) return;
+        const m = viewportBox();
+        spinEl.style.left = Math.min(pointer.x + 16, m.vw - 32) + 'px';
+        spinEl.style.top = Math.min(pointer.y + 16, m.vh - 32) + 'px';
+    }
+
+    function hideSpinner() {
+        clearTimeout(spinTimer);
+        if (spinEl) {
+            spinEl.classList.remove('on');
+            spinEl.style.setProperty('--p', '0%');
+        }
+    }
+
     // -------------------------------------------------------------------- show
 
     function showViewer(res, pointer) {
@@ -619,7 +769,6 @@
         box.style.border = cfg.borderWidth > 0 ? cfg.borderWidth + 'px solid ' + cfg.borderColor : 'none';
         box.style.borderRadius = cfg.cornerRadius + 'px';
         box.style.boxShadow = cfg.shadow ? '0 8px 32px rgba(0,0,0,.55)' : 'none';
-        box.classList.toggle('hot', !!cfg.clickToPin);
 
         const ow = view.frameW + cfg.borderWidth * 2;
         const oh = view.frameH + cfg.borderWidth * 2;
@@ -627,15 +776,23 @@
             view.left = (m.vw - ow) / 2;
             view.top = (m.vh - oh) / 2;
         } else {
-            // prefer the side of the pointer with more room, then clamp
-            const rightRoom = m.vw - pointer.x - cfg.cursorGap;
-            view.left = rightRoom >= ow ? pointer.x + cfg.cursorGap : pointer.x - cfg.cursorGap - ow;
+            // Centred ON the pointer, not beside it. Opening beside it meant the pointer
+            // had to travel across page content to reach the preview — and for a small
+            // thumbnail, or a pointer already near the image's edge, that trip re-entered
+            // the page and dismissed the thing it was reaching for.
+            view.left = pointer.x - ow / 2;
             view.top = pointer.y - oh / 2;
         }
 
         if (cfg.noReferrer) imgEl.referrerPolicy = 'no-referrer';
         imgEl.src = res.url;
         layout();
+
+        // Resource Timing can land a tick after the load that the probe saw, so the byte
+        // size is often missing on this first pass. One re-read catches it.
+        if (cfg.showStatusBar && !transferBytes(res.url)) {
+            setTimeout(function () { if (view && view.url === res.url) caption(); }, 300);
+        }
 
         box.classList.add('on');
         if (cfg.dimOpacity > 0) dimEl.classList.add('on');
@@ -689,11 +846,12 @@
 
     // The X lives INSIDE the box, so these two capture listeners reach it first and their
     // stopPropagation() would keep the button's own handlers from ever running — capture
-    // descends from the ancestor. Both have to step aside for it explicitly.
+    // descends from the ancestor. Both have to step aside for it explicitly. Any new
+    // control added inside the box needs the same exemption.
     function onBoxClick(e) {
         if (closeEl.contains(e.target)) return;
         if (pinned) { e.stopPropagation(); return; }   // a pinned box only closes via X / backdrop / Esc
-        if (!cfg.clickToPin || !view) return;
+        if (!view) return;
         e.preventDefault();
         e.stopPropagation();
         pin();
@@ -703,11 +861,14 @@
         if (e.button !== 0) return;
         if (closeEl.contains(e.target)) return;
         // Swallow it either way: unpinned, this is the press half of the pin click and
-        // must not reach the page; pinned, it starts a pan.
+        // must not reach the page; pinned, it starts a drag.
         e.preventDefault();
         e.stopPropagation();
-        if (!pinned || !pannable()) return;
-        drag = { x: e.clientX, y: e.clientY };
+        if (!pinned) return;
+        // The status bar moves the whole frame; the image itself pans within it.
+        const mode = capEl.contains(e.target) ? 'move' : 'pan';
+        if (mode === 'pan' && !pannable()) return;
+        drag = { x: e.clientX, y: e.clientY, mode: mode };
         box.classList.add('drag');
     }
 
@@ -744,14 +905,14 @@
     let token = null;       // cancellation token for the in-flight resolve
     let timer = null;
     let hideTimer = null;
-    let drag = null;        // { x, y } while panning a pinned image
+    let drag = null;        // { x, y, mode:'pan'|'move' } while dragging a pinned viewer
     let pointer = { x: 0, y: 0 };
     let mouseDown = false;
     let modifierDown = false;
 
-    // The preview sits cfg.cursorGap away from the image, so reaching it means crossing
-    // page content that would otherwise dismiss it on mouseout. This is how long it
-    // survives that crossing.
+    // The preview opens centred on the pointer, so it is normally already under the
+    // cursor. This still covers the cases where it gets clamped away from the pointer —
+    // near a window edge, or a frame wider than the viewport allows.
     const HIDE_GRACE = 220;
 
     function ours(node) {
@@ -785,6 +946,7 @@
         if (token) token.cancelled = true;
         token = null;
         active = null;
+        hideSpinner();
         hideViewer();
     }
 
@@ -796,13 +958,20 @@
     function onMove(e) {
         pointer.x = e.clientX;
         pointer.y = e.clientY;
+        if (spinEl && spinEl.classList.contains('on')) moveSpinner();
         if (!drag) return;
         const dx = e.clientX - drag.x;
         const dy = e.clientY - drag.y;
         if (!dx && !dy) return;
         drag.x = e.clientX;
         drag.y = e.clientY;
-        panBy(dx, dy);
+        if (drag.mode === 'move') {
+            view.left += dx;
+            view.top += dy;
+            layout();       // clampPosition() keeps the frame on screen
+        } else {
+            panBy(dx, dy);
+        }
     }
 
     function onOver(e) {
@@ -828,7 +997,17 @@
         active = el;
         const myToken = token = { cancelled: false };
         timer = setTimeout(async function () {
-            const res = await resolve(el, displayed, myToken);
+            showSpinner();
+            let res = null;
+            try {
+                res = await resolve(el, displayed, myToken, function (done, total) {
+                    if (!myToken.cancelled) spinnerProgress(done, total);
+                });
+            } finally {
+                // Off whatever the outcome — found, rejected, cancelled or thrown. A ring
+                // still turning after the search stopped would be a lie.
+                if (!myToken.cancelled) hideSpinner();
+            }
             if (myToken.cancelled || active !== el) return;
             if (res) showViewer(res, pointer);
         }, cfg.hoverDelay);
@@ -884,6 +1063,10 @@
 
     function openPanel() {
         closePanel();
+        // Always render from storage, never from this tab's in-memory copy — see
+        // reloadSettings(). Without this, a long-lived tab shows stale values and saving
+        // reverts whatever another tab changed in the meantime.
+        reloadSettings();
         panelHost = document.createElement('div');
         panelHost.style.cssText = 'all:initial;position:fixed;inset:0;z-index:2147483647;';
         const sr = panelHost.attachShadow({ mode: 'open' });
@@ -955,6 +1138,21 @@
             r.appendChild(control);
             panel.appendChild(r);
             return r;
+        }
+
+        // A labelled row with no control — for behaviour that is always on and just needs
+        // explaining.
+        function note(labelText, hintText) {
+            const r = document.createElement('div');
+            r.className = 'row';
+            const l = document.createElement('label');
+            l.textContent = labelText;
+            const hint = document.createElement('span');
+            hint.className = 'hint';
+            hint.textContent = hintText;
+            l.appendChild(hint);
+            r.appendChild(l);
+            panel.appendChild(r);
         }
 
         function check(key, labelText, hintText) {
@@ -1034,7 +1232,10 @@
         panel.appendChild(sr2);
 
         section('Pinned mode');
-        check('clickToPin', 'Click the preview to pin it', 'X or a click outside closes it again');
+        note('Click the preview to pin it',
+            'It then stays until the X, a click outside it, or Escape. While pinned: wheel or ' +
+            '+/− to zoom, drag the image or use the arrow keys to pan, 0 to reset, and drag the ' +
+            'status bar to move the frame.');
         num('wheelZoomStep', 'Wheel zoom step', '% per notch — +/− steps by 25%', 2, 100, 1);
         num('panStep', 'Arrow-key pan step', 'px per press — Shift for 3×', 5, 500, 5);
         num('maxZoom', 'Maximum zoom', '× the natural size', 1, 64, 1);
@@ -1044,15 +1245,15 @@
         num('maxWidthPct', 'Max width', '% of window', 10, 100, 1);
         num('maxHeightPct', 'Max height', '% of window', 10, 100, 1);
         pick('position', 'Position', null, [
-            ['cursor', 'Beside the cursor'], ['center', 'Centered in the window']]);
-        num('cursorGap', 'Gap from cursor', 'px', 0, 200, 1);
+            ['cursor', 'Centred under the cursor'], ['center', 'Centred in the window']]);
         num('fadeMs', 'Fade duration', 'ms', 0, 1000, 10);
         num('borderWidth', 'Border thickness', 'px', 0, 20, 1);
         color('borderColor', 'Border colour');
         num('cornerRadius', 'Corner radius', 'px', 0, 40, 1);
         check('shadow', 'Drop shadow');
         num('dimOpacity', 'Dim the page behind', '% — 0 disables', 0, 90, 5);
-        check('showDimensions', 'Show image dimensions');
+        check('showStatusBar', 'Show the status bar',
+            'filename, format, dimensions, size — and the handle that moves a pinned frame');
         check('noReferrer', 'Strip referrer', 'helps on some hosts, breaks others');
 
         const foot = document.createElement('div');
