@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.10.0
+// @version     0.11.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -1541,11 +1541,28 @@
 
     // The button that does NOT pin. Returns true when it acted, which is the signal to
     // swallow the context menu that a right press is about to raise.
+    //
+    // A PLACED window (pinned or detached) deliberately does NOT act, so the browser raises
+    // its own context menu over our <img> — whose src is the resolved full-size URL. That is
+    // the only way "Save image as…" and "Copy image" can work at all: ours run in page
+    // JavaScript and need the host to send Access-Control-Allow-Origin, which most do not,
+    // while the browser's use its own network stack and the bitmap it has already decoded.
+    // Verified in a real browser 2026-09-03 (via pinButton:'right', where a second right
+    // press already fell through to it) — the native menu does target an <img> inside an
+    // open shadow root, and Save gives the full-size file.
+    //
+    // A HOVER preview keeps dismiss, for two reasons: it is the state where "get this out of
+    // my way" is actually wanted, and it is pointer-transparent, so the native menu there
+    // would come up for the thumbnail underneath and offer to save *that* — worse than
+    // useless. A placed window is closed by the X, Escape, the backdrop, or moving off it,
+    // so right-click is not carrying anything there.
     function altButton(e) {
         let acted = false;
         if (cfg.pinButton === 'right') {
             if (!pinned && view && box.classList.contains('on')) { pin(); acted = true; }
-        } else if (pinned || active) {
+        } else if (pinned || detached) {
+            return false;               // hands the press to the browser; see above
+        } else if (active) {
             dismiss();
             acted = true;
         }

@@ -167,17 +167,32 @@ depth alone does not distinguish a card from a grid.
 Cases 17 (video link), 18 (video in the card) and 19 (an ordinary `/gallery/` link, the
 control) exist so a regression shows up as a test-page failure rather than in the wild.
 
-## Image actions — the ⋮ button## Image actions — the ⋮ button, and why it is not the browser's menu
+## Image actions — the ⋮ button, and the browser's menu beside it
 
-**A userscript cannot open the browser's context menu.** A dispatched `contextmenu` event is
+**A userscript cannot *open* the browser's context menu.** A dispatched `contextmenu` event is
 untrusted and browsers run no default action for untrusted events — the menu is user-agent
 chrome, raised only by real input. So "a button that simulates a right click" is not a thing
-that can be built, at any price. Right-click is also already spoken for by dismiss, and
-`swallowMenu` suppresses the native menu that press would otherwise raise.
+that can be built, at any price.
 
-v0.8.0's answer is our own menu on a ⋮ button at the right end of the status bar, carrying the
-four actions that menu was wanted for: open in a new tab, copy the URL, copy the image, save
-it. Points that are load-bearing:
+**But it can decline to suppress one** (v0.11.0), and that is the answer to the two actions
+that never worked. Save and copy in our own menu run in page JavaScript, so they need the host
+to send `Access-Control-Allow-Origin` — and copy needs clipboard-write permission on top. Most
+hosts send neither and nothing in a page context gets around it. The browser's own menu has
+neither problem: its network stack, its already-decoded bitmap. So on a **placed** window
+(pinned or detached) `altButton()` returns false, `swallowMenu` stays off, and the browser
+raises its real menu over our `<img>` — whose `src` is the resolved full-size URL, so *Save
+image as…* and *Copy image* act on the original. Verified in a real browser 2026-09-03,
+including that native chrome does target an `<img>` inside an **open** shadow root.
+
+A **hover** preview keeps right-click-to-dismiss, and must: it is pointer-transparent, so the
+native menu there comes up for the thumbnail underneath and offers to save *that*. Placed
+windows can give the gesture up because they already close via the X, Escape, the backdrop, or
+moving off a detached one. `B2` (`pinButton:'right'`) already behaved this way and is the test
+that proved the mechanism before any of it was built — two right presses, no code.
+
+That leaves the ⋮ menu **largely redundant on a placed window**, which is the only state it is
+reachable in. It is still there; trimming it to the two items that work in page JS (open in a
+new tab, copy the URL) is an open decision, not an oversight. Points that are load-bearing:
 
 - **`.menu` is a SIBLING of `.box`, not a child.** `.box` has `overflow:hidden`, so a menu
   inside it is clipped to nothing on a small preview. It is positioned in fixed coordinates
@@ -214,16 +229,19 @@ on the X, a click on the backdrop, or Escape. **Not optional** — there is no o
 on a floating preview could mean, so it has no setting; the panel carries a `note()` row that
 explains the controls without offering a switch.
 
-- **Left click pins, right click dismisses — and `pinButton` swaps them.** Dismiss is for "the
-  preview is in my way but my cursor is staying on this image": it takes the preview down and
-  records the element in `suppressed`, which `onOver` skips until `onOut` sees the pointer
-  actually leave it. Without that, the next mousemove just re-shows it. The right press is
-  claimed in the document `mousedown` handler, not on `contextmenu` — mousedown fires first and
-  would otherwise `cancel()` and clear `active` before the menu event could see what to dismiss;
-  `swallowMenu` then suppresses the menu itself.
+- **Left click pins, right click dismisses a HOVER preview — and `pinButton` swaps them.**
+  Dismiss is for "the preview is in my way but my cursor is staying on this image": it takes the
+  preview down and records the element in `suppressed`, which `onOver` skips until `onOut` sees
+  the pointer actually leave it. Without that, the next mousemove just re-shows it. The right
+  press is claimed in the document `mousedown` handler, not on `contextmenu` — mousedown fires
+  first and would otherwise `cancel()` and clear `active` before the menu event could see what to
+  dismiss; `swallowMenu` then suppresses the menu itself.
+- **On a PLACED window right-click is the browser's** (v0.11.0), not ours — see the image-actions
+  section for why. `altButton()` returns false on `pinned || detached`, which is what leaves
+  `swallowMenu` off. Do not "tidy" that early return into a dismiss: it is the whole feature.
 - **While pinned, the left button always pans or moves**, whatever `pinButton` says, so a pinned
-  frame closes via the X, the backdrop, or Escape. With the default (left pins) right-click also
-  closes it, since right is doing nothing else then. Do not wire dismissal onto the pan button.
+  frame closes via the X, the backdrop, or Escape — under both button maps now, since right no
+  longer closes it either. Do not wire dismissal onto the pan button.
 - **The preview opens beside the pointer, then is nudged just far enough to touch it**
   (`nudgeIntoReach`, `REACH_INSET` 10px). v0.4.0 centred it on the cursor, which solved
   reachability but moved the preview much further than needed. The nudge is ~34px with the

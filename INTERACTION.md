@@ -3,7 +3,7 @@
 What the preview **window** does, as a state machine. Menus, buttons, the status bar contents and
 the loading ring are out of scope except where they change what the window itself accepts.
 
-Describes `Hover-Zoom.user.js` **v0.10.0**.
+Describes `Hover-Zoom.user.js` **v0.11.0**.
 
 ---
 
@@ -91,7 +91,7 @@ arrives — nothing is decided in advance.
 A candidate that passes all six still shows nothing unless a probe finds an image at least
 `minRatio` (1.2×) bigger than what is displayed — see `T04`.
 
-*Code: `eligible`, `inVideoContext`, `siteEnabled`, `onOver`.*
+*Code: `eligible`, `inVideoContext`, `overVideoSurface`, `siteEnabled`, `onOver`.*
 
 ---
 
@@ -146,7 +146,9 @@ The window is up and transient.
     it before the page sees it. See `E1` — that is the price of click-to-pin.
 - **Held by:** the pointer being on the source image. Nothing else (`R1`).
 - **Accepts:** left press + release → pin (`T07`); left press + drag > 3 px → detach (`T08`);
-  right press → dismiss (`T10`). Default button map `B1`.
+  right press → dismiss (`T10`), and the browser's own menu is suppressed with it. Default button
+  map `B1`. This is the one state that keeps right-click: the window is transparent here, so the
+  browser's menu would come up for the *thumbnail* underneath (`E9`).
 - **Ends on:** leaving the image, **immediately** — no grace period, even though the window is
   sitting under the cursor.
 
@@ -172,6 +174,8 @@ positioned, so it stops tracking the image and answers to the pointer directly.
   the gesture used to destroy what it was aimed at. A wheel anywhere *else* still scrolls.
 - **Zooming it** promotes it through the same `S11` → `S12` geometry as a pinned window, so a
   detached window can end up spilling and pannable without ever being pinned.
+- **Right press → the browser's own context menu**, over the full-size picture (`T21`, `E9`). It
+  does not dismiss: a placed window already closes four other ways.
 - **Ends on:** the pointer leaving the window — **and** the source image is put in `S16`, so moving
   back onto it does not re-open anything (`T11`, `T13`).
 
@@ -198,7 +202,8 @@ keyboard and wheel belong to the window.
   about the frame centre (1.25× per press); `0` → back to the opening scale; arrows → pan
   (`panStep` 80 px, Shift for 3×); drag → **pan if the picture is spilling, otherwise move the
   frame** (`S13` / `S14`); drag the status bar → always move the frame (`S14`).
-- **Ends on:** the X, a click on the backdrop, Escape — or a right-click under `B1`.
+- **Ends on:** the X, a click on the backdrop, or Escape. **Right-click no longer closes it** under
+  either button map — it raises the browser's own menu over the picture instead (`T21`, `E9`).
 - **Note:** the key and wheel listeners are bound on `window` in capture, so they outrank the page
   and any sibling userscript while pinned.
 
@@ -284,6 +289,7 @@ inert.
 | `T18` | `S10` | Press `0` | `S11` at the opening scale |
 | `T19` | `S10` | Resize the browser window | `S10`, re-fitted — it does not close |
 | `T20` | `S07` | Wheel over the window | `S07`, zoomed — the page does not scroll and the window does not close |
+| `T21` | `S07`/`S10` | Right-click the window | unchanged — the browser raises its own menu over the picture (`E9`) |
 
 ---
 
@@ -309,12 +315,13 @@ explicit dismissals in `T16`.
 
 | ID | Setting | On `S05` / `S07` | On `S10` |
 |---|---|---|---|
-| `B1` | Pin with **left** (default) | Left pins · right dismisses and suppresses | Left pans or moves · right closes it |
+| `B1` | Pin with **left** (default) | Left pins · right dismisses and suppresses on a *hover* preview, and raises the browser's own menu on a *placed* one (`E9`) | Left pans or moves · right raises the browser's own menu |
 | `B2` | Pin with **right** | Right pins · left dismisses and suppresses | Left pans or moves · right does nothing, so the browser's own context menu appears over the picture |
 
 The left button always pans or moves a pinned window, whichever way the setting points — otherwise
-a pinned frame could have no way to be moved. `B2`'s pinned cell is the one place the browser's
-native context menu is still reachable over the window.
+a pinned frame could have no way to be moved. Under both settings the browser's own context menu is
+reachable over a placed window, which is where `Save image as…` and `Copy image` actually work
+(`E9`).
 
 ---
 
@@ -365,6 +372,22 @@ only appears if the search is still running 150 ms after the first hit, which a 
 reaches. Test-page case 20 is built to make one observable: it opens at 800 × 600, docks the ring,
 and swaps to 1600 × 1200 three seconds later.
 
+#### E9 · The browser's own context menu is the one that can save and copy
+The ⋮ menu's *Save image…* and *Copy image* run in page JavaScript, so they need the image host
+to send `Access-Control-Allow-Origin`, and Copy additionally needs clipboard-write permission.
+Most hosts send neither, and nothing in a page context can get around it. The browser's own menu
+has neither problem: it uses the browser's network stack and the bitmap already decoded.
+
+So a **placed** window hands right-click back to the browser (`T21`). The element under the
+pointer is our `<img>`, whose `src` is the resolved full-size URL, so *Save image as…*, *Copy
+image*, *Copy image address* and *Open image in new tab* all act on the original. Verified in a
+real browser 2026-09-03, including that native chrome targets an `<img>` inside an open shadow
+root.
+
+A **hover** window keeps dismiss instead, because it is pointer-transparent: the menu there would
+come up for the thumbnail underneath and offer to save that. It also keeps the gesture where it
+is wanted — "get this out of my way, my cursor is staying on this image".
+
 ---
 
 ## Where this lives in the code
@@ -390,7 +413,7 @@ Function names are used rather than line numbers, which rot.
 |---|---|
 | 2026-09-03 | Written against v0.9.0. Initial IDs `R1`, `P1`–`P6`, `S01`–`S17`, `T01`–`T19`, `K1`–`K8`, `B1`–`B2`, `E1`–`E6`. |
 | 2026-09-03 | v0.10.0. New: `T20` (wheel zooms a detached window), `E7` (the 92 % frame cap), `E8` (why upgrades are never seen). Changed: `S05` — the old text said clicks pass through the window, which contradicted `E1`; they do not, and only hover and the wheel do. `S07` — accepts the wheel. `S10`/`S11`/`S13`/`S14` — a drag now pans only while the picture is spilling and moves the frame otherwise, so a pinned frame at its opening scale can be dragged from anywhere; the status bar still always moves it. `P4` — a third video signal, the element sitting inside a laid-out `<video>`'s rectangle, because the ancestor walk's "still one card" bound was ending the search before the video test on a watch-page player. Also fixed, and not visible in this document: the closed window used to stay hit-testable, leaving an invisible rectangle that ate clicks and blocked hover where the window had been. |
+| 2026-09-03 | v0.11.0. New: `T21`, `E9` — right-click on a *placed* window now raises the browser's own context menu instead of dismissing, which is the only way `Save image as…` and `Copy image` work. `S05` keeps right-click-to-dismiss. `B1` changed accordingly; `B2` was already behaving this way and is unchanged. |
 
-A browsable version of this document is published at
-<https://claude.ai/code/artifact/136cd3ba-c728-423a-90f3-ef78ad1c2bfd>. **This file is canonical**;
-if the two ever disagree, this one is right.
+This file is the only copy. A rendered HTML version used to sit beside it and was deleted in
+v0.11.0 — it could only ever go stale, and there is nothing in it that is not here.
