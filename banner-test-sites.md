@@ -176,14 +176,46 @@ nasa.gov            1556x640  @x0    86px down  -> REFUSED (alone, 1 same-width)
 
 Sample: <https://a1esska.itch.io/771-demo> (any itch.io game page is this shape).
 
+```
+allbirds.com        1536x810  @x10   42px down  -> REFUSED (alone, 0 same-width)   (Chrome)
+```
+
 NASA's is a full-bleed editorial hero photo with a headline over it; itch.io's is the game's key
-art, the main thing the page is selling. **Whether these are false positives is a judgement call,
+art, the main thing the page is selling; Allbirds' is the storefront hero. **Whether these are false positives is a judgement call,
 and that is the point** — `CLAUDE.md` says a full-width `<img>` with text over it is "an ordinary
 shape for a picture that is genuinely the content", while `bannerReason()` refuses exactly that
 shape. These are the clean examples of the two rules disagreeing, and NASA's is one same-width
 neighbour away from flipping.
 
 ---
+
+## `bannerReason()` also judges CSS backgrounds — undocumented, and it matters
+
+`CLAUDE.md` frames the banner gate as "the narrow exception" that applies to an `<img>`, against
+page-furniture rules that are "CSS backgrounds ONLY". In the code, `eligibleDirect()` calls
+`bannerReason(el)` on whatever `el` is, and `bannerCheck()` only ever touches
+`getBoundingClientRect()` and `shownUrl()` — **so it judges background elements too.**
+
+Measured on `soundcloud.com/<artist>` (Chrome), where the profile banner is a CSS background:
+
+```
+BG 1208x254 @x174 110px down :: wallpaper=NO :: BANNER-REFUSED (alone, 0 same-width)
+```
+
+It escapes **all five** `wallpaperReason()` tests — not fixed, not tiled, `textContent` length 0,
+and 1208/1556 = 78% of the viewport, under `BAND_WIDTH` 0.98 — and is then caught by the banner
+gate instead. The right answer, by the other rule.
+
+By contrast `nationalgeographic.com/animals` has its hero caught by **both** paths:
+
+```
+BG 1712x437 @x-78 48px down :: wallpaper=full-bleed band :: BANNER-REFUSED (alone, 0)
+BG 1556x397 @x0   68px down :: wallpaper=full-bleed band :: BANNER-REFUSED (alone, 0)
+```
+
+Any rewrite needs to decide this deliberately rather than inherit it: **the two gates overlap on
+CSS backgrounds, and the docs say they do not.** A probe that only walks `document.images` — as
+the first version of the one below did — cannot see this class at all.
 
 ## MEASURED — controls and near-misses (currently correct)
 
@@ -202,12 +234,20 @@ A rewrite that breaks these has traded one bug for another.
 | `alrincon.com/en/` (Pane) | 1000x557 @ 60px down, **set of 3** [621, 17189, 26919 down] | **previews — correct now.** Your reported case, fixed by `BANNER_SET_MIN` 2. Survives only because the page held three more 1000px posts; a short day's page would refuse it again. |
 | `newegg.com` (Pane) | 1280x315 hero @ 140px down, alone | **REFUSED — correct.** Only one carousel slide mounts. |
 | `aliexpress.us` (Pane) | 539x38 promo strip @ 182px down, alone | **REFUSED — correct.** |
+| `soundcloud.com/<artist>` (Chrome) | CSS bg 1208x254 @ 110px down, `wallpaper=NO`, alone | **REFUSED — correct**, but by the banner gate, not the wallpaper gate. See the section above. |
+| `nationalgeographic.com/animals` (Chrome) | CSS bg 1712x437 @ 48px down | **REFUSED — correct**, and caught by both gates at once. |
+| `old.reddit.com/r/pics` (Chrome) | 300x31 CSS bg @ 148px down, `wallpaper=tiled` | **Correctly identified as tiled.** No header image on this sub. |
 | `phpbb.com/community/` (Pane) | header is a **CSS background**, 1152x129 @ 42px down, `textContent` length **43** | Caught by `wallpaperReason`'s `CONTENT_CHARS` 40 — by three characters. Different gate, same brittleness. |
 
 **No exposure at all** (nothing ≥250px wide within 900px of the document top, so the gate is never
 reached): `reddit.com/r/EarthPorn` (first post at 352px down), `theverge.com/tech` (725px down),
-`arstechnica.com` article (418px down), `9gag.com` (301px down), `deviantart.com/<user>/gallery`
-(851px down), `elderscrolls.fandom.com` article, `xenforo.com/community`.
+`arstechnica.com` article (418px down), `9gag.com` (301px down), `apnews.com` (508px down),
+`deviantart.com/<user>/gallery` (851px down), `resetera.com`, `bestbuy.com`, `xenforo.com/community`.
+
+**Would not measure**: both Fandom wikis tried (`elderscrolls`, `minecraft`) returned
+`document.images.length === 0` in both browsers after a 6s wait, which is not a real zero — the
+probe cannot see whatever Fandom is doing. Worth a manual look, since wiki heroes are a plausible
+shape.
 
 ### The YouTube case, re-measured signed in
 
@@ -273,34 +313,54 @@ to do.
 
 ## Blocked, and still unmeasured
 
-**`danbooru.donmai.us` — blocked by the Claude-in-Chrome extension's own safety policy**, not by
-the network or by any blocker. Tool-driven navigation is refused with `This site is not allowed
-due to safety restrictions`, and while a Danbooru tab is open the extension refuses to enumerate
-tabs at all, so no other site can be reached either. Manual browsing is unaffected. To add it,
-run the probe below in the console on a post page and paste the output.
+**Blocked by the Claude-in-Chrome extension's own safety policy** — not by the network, a VPN, or
+any ad blocker: `danbooru.donmai.us`, `gelbooru.com`, `patreon.com`. Tool-driven navigation is
+refused with `This site is not allowed due to safety restrictions`, and while such a tab is *open*
+the extension refuses to enumerate tabs at all, so no other site can be reached either. Manual
+browsing is unaffected. To add any of them, run the probe below in the console on the page and
+paste the output.
 
-Not attempted: pixiv, 500px, e621, behance, patreon, soundcloud, furaffinity, custom-theme Tumblr
-blogs. All are the detail-page or profile-header shape already well covered above.
+This is why **the Gelbooru-engine family claim above rests on safebooru alone.** Both siblings
+that would have confirmed it are blocked.
 
-**The all-slides carousel is now confirmed indirectly** (Samsung, 27 swiper slides). Note *how* it
-fails, because it is not the way it was predicted to: the hidden slides measured `vis=false` and
-were correctly discarded by `reallyVisible()`. What defeated the gate was the **stacked
-full-width section banners further down the page**, the same mechanism as Home Depot. A carousel
-whose clones are genuinely visible and same-width has still not been found.
+Not attempted: pixiv, 500px, e621, furaffinity, custom-theme Tumblr blogs. `behance.net` and
+`ko-fi.com` were tried with guessed URLs that did not resolve. All are the detail-page or
+profile-header shape already well covered above.
+
+**The all-slides carousel was predicted to be a miss, and the evidence now says it is not.**
+Carousel-bearing pages were checked at Samsung (27 slides), Best Buy (27), Allbirds (23), Newegg,
+Steam and AliExpress. In every case the off-screen slides and duplicate clones measured
+`vis=false` and were correctly discarded by `reallyVisible()` — Allbirds shows the shape plainly,
+with each product tile appearing twice, once `vis=true` and once `vis=false`. **`reallyVisible()`
+and the v0.27.0 cross-fader fix are handling this class across six sites.**
+
+What actually defeated the gate on Samsung was the **stacked full-width section banners further
+down the page**, the same mechanism as Home Depot — not the slides. Treat "carousel clones form a
+set" as disproved unless a counter-example turns up.
 
 ---
 
 ## Re-running the probe
 
-Paste into the console on any page, scrolled to the top. Reports every image and video at least
-250px wide within 900px of the document top, with the gate's verdict and the operands it decided
-on. Changes nothing on the page.
+Paste into the console on any page, scrolled to the top. Reports every image, video **and
+CSS-background element** at least 250px wide within 900px of the document top, with both gates'
+verdicts and the operands they decided on. Changes nothing on the page.
+
+**Walk backgrounds as well as `document.images`** — the first version of this probe did not, and
+it is blind to the entire SoundCloud/NatGeo class described above.
 
 ```js
-(()=>{const T=200,M=400,S=.1,P=.25,N=2;
+(()=>{const T=200,M=400,S=.1,P=.25,N=2,BW=.98,CC=40;
 const u=n=>n.currentSrc||n.src||'';
 const V=n=>n.checkVisibility?n.checkVisibility({opacityProperty:true,visibilityProperty:true}):true;
 const A=[...document.images,...document.getElementsByTagName('video')];
+const vw=document.documentElement.clientWidth;
+const wall=el=>{if(el===document.body||el===document.documentElement)return'page background';
+  const s=getComputedStyle(el);
+  if(s.backgroundAttachment.indexOf('fixed')>=0)return'attachment:fixed';
+  if(!/no-repeat/.test(s.backgroundRepeat)&&/^auto/.test(s.backgroundSize))return'tiled';
+  const r=el.getBoundingClientRect(); if(vw>0&&r.width>=vw*BW)return'full-bleed band';
+  if((el.textContent||'').trim().length>=CC)return'text sits on it'; return null;};
 const chk=el=>{const r=el.getBoundingClientRect(),w=r.width,d=Math.round(r.top+scrollY);
   if(w<M||r.height<2)return'previews (under '+M+'px wide)';
   if(d>T)return'previews ('+d+'px down, past '+T+')';
@@ -312,12 +372,17 @@ const chk=el=>{const r=el.getBoundingClientRect(),w=r.width,d=Math.round(r.top+s
     if(Math.abs(q.width-w)<=w*S&&V(n))sw.push(Math.round(q.width)+'@x'+Math.round(q.left)+','+Math.round(q.top+scrollY)+'down');}
   const bl=[];if(b)bl.push('peer '+b+'px beside');
   if(sw.length>=N)bl.push('set of '+sw.length+' ['+sw.slice(0,3).join(' ')+']');
-  return bl.length?'previews ('+bl.join(' + ')+')':'REFUSED (alone, '+sw.length+' same-width)';};
+  return bl.length?'previews ('+bl.join(' + ')+')':'BANNER-REFUSED (alone, '+sw.length+' same-width)';};
 const o=[];
 for(const el of A){const r=el.getBoundingClientRect();const d=Math.round(r.top+scrollY);
   if(r.width<250||d>900)continue;
-  o.push(Math.round(r.width)+'x'+Math.round(r.height)+' @x'+Math.round(r.left)+' '+d+'down :: '+chk(el)+' :: '+u(el).slice(-45));}
-return{url:location.href,vw:document.documentElement.clientWidth,imgs:document.images.length,top:o};})()
+  o.push('IMG '+Math.round(r.width)+'x'+Math.round(r.height)+' @x'+Math.round(r.left)+' '+d+'down vis='+V(el)+' :: '+chk(el)+' :: '+u(el).slice(-45));}
+for(const el of document.querySelectorAll('div,section,header,a,span,picture')){
+  const s=getComputedStyle(el); if(!/url\(/.test(s.backgroundImage))continue;
+  const r=el.getBoundingClientRect();const d=Math.round(r.top+scrollY);
+  if(r.width<250||d>900)continue;
+  o.push('BG  '+Math.round(r.width)+'x'+Math.round(r.height)+' @x'+Math.round(r.left)+' '+d+'down :: wallpaper='+(wall(el)||'NO')+' :: '+chk(el));}
+return{url:location.href,vw,imgs:document.images.length,rows:o};})()
 ```
 
 Some hosts (The Verge) make the harness redact any output containing a query string — print
