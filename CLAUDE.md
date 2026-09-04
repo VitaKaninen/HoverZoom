@@ -1,7 +1,10 @@
 # Hover Zoom — project notes
 
-A single-purpose replacement for the Hover Zoom+ browser extension. **Images only** — no video,
-audio, galleries, downloads, or action keys, by design. Inherits the shared rules in
+A single-purpose replacement for the Hover Zoom+ browser extension. **Pictures only** — no
+galleries, downloads, or action keys, by design. It said *images* only until v0.18.0; the preview
+may now be a muted looping clip, because a large class of animated posts has no image form at all
+and "no video" meant "no answer" for them. That is a display capability, not a change of purpose:
+nothing here plays sound, offers controls, or previews a video *player*. Inherits the shared rules in
 `../CLAUDE.md` (version bumps, commit+push, no `innerHTML`, `#89b4fa` checkboxes).
 
 > **[`INTERACTION.md`](INTERACTION.md) is the behavioural spec for the preview window** — every
@@ -61,6 +64,8 @@ path has been touched twice ever, both times in 2021.
 - **`view` + `reflow()` + `layout()` own all viewer geometry.** `view` is the only state,
   `reflow()` derives frame size and clamps the pan offsets, `layout()` is the only thing that
   writes to the DOM. Nothing else may set `box`/`img` styles or the two representations drift.
+  Since v0.18.0 the frame has two possible faces and `layout()` writes to whichever `mediaEl`
+  points at — the rule is unchanged, only what it writes *to* is.
 
 ## Three viewer states: hover → detached → pinned
 
@@ -535,11 +540,11 @@ static catches it — `node --check` passes and the markup is fine.
 
 ```bash
 node --check Hover-Zoom.user.js     # syntax
-node test-resolver.js               # 92 assertions on the pure URL and video-link logic
+node test-resolver.js               # 111 assertions on the pure URL and video-link logic
 python make-test-images.py          # regenerate fixtures into test-images/
 ```
 
-Browser test: `python test-server.py`, then open `http://localhost:8899/test-page.html`. 22 cases,
+Browser test: `python test-server.py`, then open `http://localhost:8899/test-page.html`. 23 cases,
 10 of which HZ+ rejects outright. (`.claude/launch.json` wraps the same command as
 `hover-zoom-test`, but `.claude/` is gitignored — a fresh clone has only the direct command.)
 
@@ -770,14 +775,68 @@ from the thumbnail URL. If it ever is, the generic hook is `og:image`/`og:video`
 `twitter:player:stream`), it needs `GM_xmlhttpRequest` + a `@grant` for cross-origin destinations,
 a cache, and a hover-delay gate — one HTML request per hover is not free.
 
-**The thing that actually blocks "same treatment for gifs" is the viewer, not the resolver.** For
-an imgur video post the moving original is only ever `.mp4` (table above), and gifwow's is only
-ever `.mp4`. Both URLs are derivable with a pure string rule the existing machinery could hold
-today. What cannot happen today is displaying the result: `probe()` measures with `new Image()`
-and the frame is a single `<img>`. Playing video means a `<video>` in the viewer, `probe()`
-learning a second way to measure (`loadedmetadata` → `videoWidth`/`videoHeight`), and the
-"images only" invariant at the top of this file being deliberately retired rather than eroded.
-Not built as of v0.17.0 — the user's call, asked and pending.
+**The thing that actually blocked "same treatment for gifs" was the viewer, not the resolver** —
+built in v0.18.0, see the next section. For an imgur video post the moving original is only ever
+`.mp4` (table above), and gifwow's is only ever `.mp4`; both URLs are derivable with a pure string
+rule the existing machinery already held.
+
+## The preview can BE a video (v0.18.0) — "images only" is retired, deliberately
+
+The header invariant said images only, and for the class of post above that means *there is no
+answer at all*: an imgur video post's `.jpg` is one frozen frame, and no URL rule can change that.
+So the frame grew a second face. Decided by the user 2026-09-03, asked explicitly rather than
+assumed, because it is the one stated design rule this project was built around.
+
+- **`mediaEl` is the whole of the design.** `imgEl` and `vidEl` both live in the box, exactly one
+  is visible, and `mediaEl` points at it. `layout()` writes geometry to `mediaEl` and nothing
+  else, so the "`view` + `reflow()` + `layout()` own all geometry" invariant survives intact —
+  the frame having two possible faces changes what is written to, not who writes.
+- **`setMedia()` is the only place either `src` is set**, and it clears the one being put away.
+  Both halves matter for different reasons: a `<video>` left with a src goes on buffering behind
+  `hidden`, and an `<img>` left with one holds its decoded bitmap for the life of the tab. The
+  same pair is cleared in `cancel()`'s teardown via `clearMedia()`.
+- **`img[hidden],video[hidden]{display:none}` is required**, because the rule above it sets
+  `display:block` on both and that outranks the UA's `[hidden]` rule. Without it the idle face
+  keeps its box and sits under the live one.
+- **The `<video>` has no `controls`, on purpose.** A play button and a scrubber would sit under
+  the very clicks that pin, drag and dismiss the window. It is `muted` + `loop` + `autoplay`
+  because it stands in for an animated picture, not for a player — which also means the browser's
+  autoplay policy never blocks it.
+- **`probeVideo()` measures with `loadedmetadata` → `videoWidth`/`videoHeight`, `preload:
+  'metadata'`, and a 6 s timeout.** The timeout is load-bearing, not caution: imgur ignores the
+  extension you ask for, so `<id>.mp4` on a *static* post answers 200 with `image/jpeg` — neither
+  playable nor an error the element must report promptly. Probes are sequential, so one that never
+  settles stalls every candidate behind it, and the symptom is the exact silence the spinner
+  exists to apologise for. Read every measurement BEFORE clearing `src` and calling `load()`;
+  that teardown resets `videoWidth` to 0 and `duration` to `NaN`.
+- **An upgrade may not trade motion for a bigger still** (`resolve()`: `if (best && best.video &&
+  !dim.video) continue`). "Bigger wins" is right between two pictures and wrong here — a
+  1600×1200 frozen frame is not an improvement on a 640×480 clip of the same post, it is a
+  different and worse answer. On imgur the still and the mp4 are the *same pixel size*, so probe
+  order settles it there and this rule settles it everywhere else. A bigger video still replaces
+  a smaller one. Test case 23 is built to fail if this regresses: its thumbnail deliberately
+  upgrades to a 1600×1200 still that is probed second.
+- **The video candidate is offered FIRST** (the imgur mp4 rule is `UPGRADES[0]`), for the same
+  reason — with identical dimensions, first probed is what shows.
+- **`playVideos` (on) turns it all off**, and it is checked in `collectCandidates`' `add()` so a
+  video candidate is not merely unusable but never *probed*: it would otherwise spend one of
+  `MAX_PROBES` ahead of the image candidate behind it. It is a separate setting from
+  `skipVideos`, and the two are easy to confuse — `skipVideos` is about *what on the page may be
+  hovered*, `playVideos` is about *what the frame may display*.
+- **Our own `<video>` cannot poison the video gates.** `videoSurfaces()` uses
+  `document.getElementsByTagName('video')`, which does not cross a shadow boundary, so the
+  preview's clip is invisible to it. It would read as `gifLike` anyway — muted, looping, no
+  controls — which is a second, independent reason it is harmless.
+
+**Known cost, stated because it is real:** on a *static* imgur post the mp4 candidate is probed
+and cannot succeed, spending one request per hover. Nothing in a thumbnail URL says whether the
+post behind it moves, so the choice is that or no gifs.
+
+**Not verified here, and worth measuring on the real site:** whether imgur's grid serves a
+*truncated* clip that differs from the post page's. `<id>.mp4` and `<id>_lq.mp4` measured
+identical durations (10.85 s and 10.85 s; 5.04 s and 5.04 s — `_lq` is lower resolution, not
+shorter), and imgur's grid never mounted a `<video>` in the in-app browser, so the grid's own URL
+shape was never observed. The rule targets `<id>.mp4`, which is the full-length post either way.
 
 ## Known limits
 

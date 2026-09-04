@@ -20,10 +20,11 @@ const VIDEO_LINK_RE = new Function(
 const location = { href: 'https://example.com/page/index.html' };
 const body = src.slice(start, end);
 const exported = new Function('location', body +
-    '\nreturn {parseSrcset, looksLikeImage, upgradeCandidates, linkParamCandidates, blockMatch};')(location);
-const { parseSrcset, looksLikeImage, upgradeCandidates, linkParamCandidates, blockMatch } = exported;
+    '\nreturn {parseSrcset, looksLikeImage, isVideoUrl, upgradeCandidates, linkParamCandidates, blockMatch};')(location);
+const { parseSrcset, looksLikeImage, isVideoUrl, upgradeCandidates, linkParamCandidates, blockMatch } = exported;
 
 let pass = 0, fail = 0;
+const NL = String.fromCharCode(10);
 function eq(label, got, want) {
     const ok = JSON.stringify(got) === JSON.stringify(want);
     if (ok) { pass++; } else { fail++; console.log('FAIL ' + label + '\n  got  ' + JSON.stringify(got) + '\n  want ' + JSON.stringify(want)); }
@@ -126,13 +127,61 @@ has('imgur bare webp is still worth rewriting — it is the de-animated transcod
     upgradeCandidates('https://i.imgur.com/zFAj8eD.webp'),
     'https://i.imgur.com/zFAj8eD.jpg');
 
-none('imgur bare 7-char id is left alone', 'https://i.imgur.com/T22ZUhZ.jpg');
-none('imgur bare 5-char id is left alone', 'https://i.imgur.com/T22ZU.jpg');
-none('imgur bare 7-char png id is left alone', 'https://i.imgur.com/KlprxXs.png');
+// Every imgur URL now also yields the moving original, so "left alone" no longer means
+// "no candidates" — it means THE ID WAS NOT TRUNCATED. That is the bound whose failure
+// shows the wrong picture (T22ZUh.jpg is a real image of something else entirely), so it
+// is asserted directly rather than inferred from an empty list.
+onlyVideo('imgur bare 7-char id is left alone',
+    'https://i.imgur.com/T22ZUhZ.jpg', 'https://i.imgur.com/T22ZUhZ.mp4');
+onlyVideo('imgur bare 5-char id is left alone',
+    'https://i.imgur.com/T22ZU.jpg', 'https://i.imgur.com/T22ZU.mp4');
+onlyVideo('imgur bare 7-char png id is left alone',
+    'https://i.imgur.com/KlprxXs.png', 'https://i.imgur.com/KlprxXs.mp4');
 none('the imgur rule is host-checked', 'https://notimgur.com/T22ZUhZ_d.jpg');
 none('imgur nested paths are not ids', 'https://i.imgur.com/a/b/T22ZUhZ_d.jpg');
 
+// ---- the moving original. Measured 2026-09-03: EDiKb3d.jpg is image/jpeg and a single
+// frozen frame, EDiKb3d.mp4 is 10.85 s of the actual post at the same 480×854. For that
+// kind of imgur post the animated form does not exist as an image at all.
+eq('the video candidate is offered FIRST, ahead of the still',
+    upgradeCandidates('https://i.imgur.com/EDiKb3d_d.jpg?maxwidth=520&shape=thumb')[0],
+    'https://i.imgur.com/EDiKb3d.mp4');
+has('imgur thumbnail still also yields the image original',
+    upgradeCandidates('https://i.imgur.com/EDiKb3d_d.jpg?maxwidth=520&shape=thumb'),
+    'https://i.imgur.com/EDiKb3d.jpg');
+has('an imgur webp thumbnail yields the moving original too',
+    upgradeCandidates('https://i.imgur.com/KlprxXsm.webp'),
+    'https://i.imgur.com/KlprxXs.mp4');
+none('the imgur video rule is host-checked too', 'https://imgur.com.evil.test/T22ZUhZ.jpg');
+
+// gifwow: /gifs/<id>.jpg is the grid poster, /gifs/<id>.mp4 is the post page's player.
+has('gifwow poster to player',
+    upgradeCandidates('https://gifwow.com/gifs/gp-1tnq3g.jpg'),
+    'https://gifwow.com/gifs/gp-1tnq3g.mp4');
+has('gifwow webp animation to player',
+    upgradeCandidates('https://gifwow.com/gifs/gp-1tnq3g.webp'),
+    'https://gifwow.com/gifs/gp-1tnq3g.mp4');
+none('the gifwow rule is host-checked', 'https://notgifwow.com/gifs/gp-1tnq3g.jpg');
+none('the gifwow rule is anchored to /gifs/', 'https://gifwow.com/img/gp-1tnq3g.jpg');
+none('the gifwow rule does not touch its own mp4', 'https://gifwow.com/gifs/gp-1tnq3g.mp4');
+
+// ---- which face of the viewer a candidate needs
+['a.mp4', 'a.webm', 'a.m4v', 'a.mov', 'a.ogv', 'a.MP4'].forEach(function (n) {
+    if (isVideoUrl('https://example.com/' + n)) pass++; else { fail++; console.log('FAIL video ext ' + n); }
+});
+eq('a query string does not hide the extension', isVideoUrl('https://x.com/a.mp4?t=1'), true);
+eq('an image is not a video', isVideoUrl('https://x.com/a.jpg'), false);
+eq('mp4 in the QUERY is not a video url', isVideoUrl('https://x.com/page?file=a.mp4'), false);
+eq('mp4 mid-path is not the extension', isVideoUrl('https://x.com/a.mp4.jpg'), false);
+
 // ---- the transform-segment rule must not eat ordinary path segments
+// Produces exactly one candidate, the moving original, and no image rewrite at all.
+function onlyVideo(label, url, wanted) {
+    const out = upgradeCandidates(url);
+    if (JSON.stringify(out) === JSON.stringify([wanted])) { pass++; return; }
+    fail++; console.log('FAIL ' + label + NL + '  got  ' + JSON.stringify(out) + NL + '  want ' + JSON.stringify([wanted]));
+}
+
 function none(label, url) {
     const out = upgradeCandidates(url);
     if (out.length === 0) { pass++; return; }

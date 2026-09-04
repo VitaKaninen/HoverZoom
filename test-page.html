@@ -155,6 +155,23 @@
     <video id="v22" width="80" height="60" src="test-images/clip-2s.mp4" muted loop controls></video>
   </div>
 
+  <!--
+    The preview showing a VIDEO. data-src is an ordinary candidate, so no host rule and no
+    link is involved — this tests the machinery (probeVideo measuring with loadedmetadata,
+    setMedia swapping the frame's face) rather than any one site's URL shape. It must open
+    as a playing <video> at 640x480, not an <img>.
+
+    It is ALSO the precedence test, which is why the thumbnail is left as one that upgrades:
+    photo-200x150.jpg resolves to photo.jpg at 1600x1200, which is bigger by area than the
+    clip and is probed second. If the frame ends up showing photo.jpg, the "an upgrade may
+    not trade motion for a bigger still" rule in resolve() has regressed.
+  -->
+  <div class="case" data-expect="640 (video)">
+    <h2>23. the upgrade is a video</h2>
+    <p class="hz bad">HZ+: no equivalent — the preview itself plays, muted and looping</p>
+    <img id="c23" width="200" src="test-images/photo-200x150.jpg" data-src="test-images/clip-2s.mp4">
+  </div>
+
   <div class="case" data-expect="1600">
     <h2>19. control for 17/18 — an ordinary link</h2>
     <p class="hz good">must still preview: /gallery/ is not a video shape</p>

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.17.0
+// @version     0.18.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -50,6 +50,7 @@
         minRatio: 1.2,              // full size must be at least this much bigger
         showEvenIfNotLarger: false, // show at natural size even when it isn't an upgrade
         skipVideos: true,           // never preview a video thumbnail or a player surface
+        playVideos: true,           // the preview may BE a video — the only form some gifs have
         skipPageBackgrounds: true,  // never preview a page's own background, or a tiled one
         keepSearching: true,        // show the first hit at once, then keep probing and upgrade in place
         skipWhileMouseDown: true,   // don't fire mid drag/selection
@@ -189,6 +190,18 @@
 
     const MEDIA_RE = /\.(avif|bmp|gif|heic|heif|ico|jfif|jpe|jpeg|jpg|jxl|png|svg|tif|tiff|webp)(?=$|[?#])/i;
 
+    // The moving originals. Deliberately a SEPARATE list from MEDIA_RE rather than an
+    // addition to it, because the two answer different questions: MEDIA_RE asks "is this a
+    // picture", this asks "does the frame need a <video> rather than an <img> to show it".
+    // Every candidate goes through one or the other, and which one decides how it is
+    // measured and which face of the viewer displays it.
+    const VIDEO_EXT_RE = /\.(mp4|m4v|webm|mov|ogv)(?=$|[?#])/i;
+
+    function isVideoUrl(url) {
+        try { return VIDEO_EXT_RE.test(new URL(url, location.href).pathname); }
+        catch (e) { return false; }
+    }
+
     function looksLikeImage(url) {
         try {
             const u = new URL(url, location.href);
@@ -247,8 +260,58 @@
 
     // Site-agnostic rewrites that turn a thumbnail URL into its original.
     // Each returns a new URL string, or null when it doesn't apply.
+    // The post id inside an i.imgur.com path, or null. Both imgur rules below need it and
+    // the restraint documented on the first one is the entire safety of the pair, so it is
+    // written once: a second copy is a second place for the "leave a bare id alone" bound to
+    // be got wrong, and getting it wrong shows the WRONG PICTURE rather than none.
+    function imgurId(u) {
+        if (!/(^|\.)imgur\.com$/.test(u.hostname)) return null;
+        const m = u.pathname.match(/^\/([A-Za-z0-9]+(?:_d)?)(\.[a-z0-9]+)$/);
+        if (!m) return null;
+        let id = m[1];
+        if (/_d$/.test(id)) id = id.slice(0, -2);
+        else if ((id.length === 6 || id.length === 8) && /[sbtmlhg]$/.test(id)) id = id.slice(0, -1);
+        return { id: id, ext: m[2] };
+    }
+
     const UPGRADES = [
-        // Imgur: reduce a thumbnail URL to the stored original. First in the list because it
+        // Imgur, the MOVING original — before the still rule below, and the order is the
+        // whole point. For a video post the two candidates have IDENTICAL pixel dimensions,
+        // and resolve() only replaces a hit with something strictly bigger, so whichever is
+        // probed first is what you get. Measured 2026-09-03, both ids live:
+        //
+        //   EDiKb3d.jpg  image/jpeg   36 KB  480×854   a STILL FRAME
+        //   EDiKb3d.mp4  video/mp4   2.6 MB  480×854   10.85 s — the actual post
+        //   T22ZUhZ.jpg  image/gif   3.1 MB  800×450   animated
+        //   T22ZUhZ.mp4  video/mp4   1.8 MB  800×450   5.04 s
+        //
+        // There are two kinds of animated imgur post and only one has an image form at all:
+        // a legacy GIF post answers `.jpg` with image/gif, a video post answers it with one
+        // frame. For the second kind NO url rule can ever make the preview move, which is
+        // why the viewer had to learn video rather than this rule being enough.
+        //
+        // COST, stated because it is real: imgur ignores the extension you ask for, so on a
+        // STATIC post `<id>.mp4` answers 200 with image/jpeg and this spends one probe that
+        // cannot succeed. probeVideo()'s timeout is what bounds that; `playVideos` turns the
+        // whole thing off. There is nothing in a thumbnail URL that says whether the post
+        // behind it moves, so the choice is this or no gifs.
+        function (u) {
+            const hit = imgurId(u);
+            if (!hit) return null;
+            const url = 'https://i.imgur.com/' + hit.id + '.mp4';
+            return url === u.href ? null : url;
+        },
+        // gifwow.com: the grid shows /gifs/<id>.jpg — a poster frame — or the .webp
+        // animation, and the post page's player is /gifs/<id>.mp4. Same directory, same
+        // basename, extension swapped. Measured 2026-09-03: grid item /gifs/gp-1tnq3g.jpg
+        // under a /go/gp-1tnq3g link, and that page's <video src="/gifs/gp-1tnq3g.mp4">.
+        // Host-checked and anchored to /gifs/, so it cannot reach any other path shape.
+        function (u) {
+            if (!/(^|\.)gifwow\.com$/.test(u.hostname)) return null;
+            const m = u.pathname.match(/^\/gifs\/([A-Za-z0-9_-]+)\.(?:jpe?g|png|webp|gif)$/i);
+            return m ? u.origin + '/gifs/' + m[1] + '.mp4' : null;
+        },
+        // Imgur: reduce a thumbnail URL to the stored original. Early in the list because it
         // is host-checked and high-confidence, and because the generic query-strip rule below
         // actively goes the WRONG WAY here. All measured 2026-09-03 against i.imgur.com:
         //
@@ -283,16 +346,12 @@
         // image of something else entirely. Over-matching here would silently show the WRONG
         // PICTURE, which is far worse than showing none. See the negative tests.
         function (u) {
-            if (!/(^|\.)imgur\.com$/.test(u.hostname)) return null;
-            const m = u.pathname.match(/^\/([A-Za-z0-9]+(?:_d)?)(\.[a-z0-9]+)$/);
-            if (!m) return null;
+            const hit = imgurId(u);
+            if (!hit) return null;
             const was = u.href;
-            let id = m[1];
-            if (/_d$/.test(id)) id = id.slice(0, -2);
-            else if ((id.length === 6 || id.length === 8) && /[sbtmlhg]$/.test(id)) id = id.slice(0, -1);
             // .webp is the de-animating transcode; anything else gives the stored original.
-            const ext = /^\.webp$/i.test(m[2]) ? '.jpg' : m[2];
-            u.pathname = '/' + id + ext;
+            const ext = /^\.webp$/i.test(hit.ext) ? '.jpg' : hit.ext;
+            u.pathname = '/' + hit.id + ext;
             u.search = '';      // ?maxwidth= and ?tb both just ask for a smaller picture
             return u.href === was ? null : u.href;
         },
@@ -428,6 +487,10 @@
             try { abs = new URL(u, location.href).href; } catch (e) { return; }
             if (abs.startsWith('data:') || abs.startsWith('blob:')) return;
             if (blocked(abs)) return;       // never probe something the user has ruled out
+            // `playVideos` off means the frame cannot display one, so a video candidate is
+            // not merely useless — probing it would spend one of MAX_PROBES on a result
+            // that has to be thrown away, ahead of the image candidate behind it.
+            if (!cfg.playVideos && isVideoUrl(abs)) return;
             if (seen.has(abs)) return;
             seen.add(abs);
             out.push(abs);
@@ -466,7 +529,7 @@
         //    after a rewrite
         const a = el.closest && el.closest('a[href]');
         if (a && a.href) {
-            if (looksLikeImage(a.href)) add(a.href);
+            if (looksLikeImage(a.href) || (cfg.playVideos && isVideoUrl(a.href))) add(a.href);
             else {
                 linkParamCandidates(a.href).forEach(add);
                 upgradeCandidates(a.href).forEach(function (u) { if (looksLikeImage(u)) add(u); });
@@ -505,8 +568,50 @@
 
     const probeCache = new Map(); // url -> Promise<{w,h}|null>
 
+    // A video is measured exactly the way an image is — load it and ask how big it came out
+    // — only the event is `loadedmetadata` and the size is videoWidth/videoHeight. preload
+    // is 'metadata', so a probe costs the container header rather than the file; the frames
+    // are only fetched if this candidate wins and the viewer actually plays it.
+    //
+    // The TIMEOUT is not belt-and-braces. imgur ignores the extension you ask for, so
+    // <id>.mp4 on a static post answers 200 with image/jpeg — a response that is neither a
+    // playable video nor an error the element is obliged to report promptly. A probe that
+    // never settles stalls the whole sequential resolve behind it, and the symptom is the
+    // one this script's spinner exists to apologise for: hovering appears to do nothing.
+    const VIDEO_PROBE_MS = 6000;
+
+    function probeVideo(url) {
+        return new Promise(function (resolve) {
+            const v = document.createElement('video');
+            v.preload = 'metadata';
+            v.muted = true;
+            let timer = 0;
+            const done = function (ok) {
+                clearTimeout(timer);
+                v.onloadedmetadata = v.onerror = null;
+                // Read every measurement BEFORE tearing the element down: clearing src and
+                // calling load() resets videoWidth to 0 and duration to NaN.
+                const out = ok && v.videoWidth > 0
+                    ? { w: v.videoWidth, h: v.videoHeight, video: true, duration: v.duration }
+                    : null;
+                v.removeAttribute('src');
+                v.load();                       // stop a fetch whose answer we already have
+                resolve(out);
+            };
+            v.onloadedmetadata = function () { done(true); };
+            v.onerror = function () { done(false); };
+            timer = setTimeout(function () { done(false); }, VIDEO_PROBE_MS);
+            v.src = url;
+        });
+    }
+
     function probe(url) {
         if (probeCache.has(url)) return probeCache.get(url);
+        if (isVideoUrl(url)) {
+            const pv = probeVideo(url);
+            probeCache.set(url, pv);
+            return pv;
+        }
         const p = new Promise(function (resolve) {
             const img = new Image();
             if (cfg.noReferrer) img.referrerPolicy = 'no-referrer';
@@ -550,7 +655,14 @@
             const usable = bigEnough || (cfg.showEvenIfNotLarger && !isSameAsShown);
             if (!usable) continue;
             if (best && dim.w * dim.h <= best.w * best.h) continue;   // not an improvement
-            best = { url: url, w: dim.w, h: dim.h };
+            // An upgrade may not trade MOTION for a bigger still. "Bigger wins" is the right
+            // rule between two pictures, but a moving original is the thing being asked for
+            // here — a 1600×1200 frozen frame is not an improvement on a 640×480 clip of the
+            // same post, it is a different and worse answer to the question. On imgur the
+            // two happen to be the same pixel size so probe order settles it; this is what
+            // settles it everywhere else. A bigger VIDEO still replaces a smaller one.
+            if (best && best.video && !dim.video) continue;
+            best = { url: url, w: dim.w, h: dim.h, video: !!dim.video, duration: dim.duration };
             dbg('hit', best);
             if (onHit && !token.cancelled) onHit(best);
             if (!cfg.keepSearching) return best;
@@ -559,7 +671,7 @@
         if (cfg.showEvenIfNotLarger && shown && !blocked(shown) && !token.cancelled) {
             const dim = await probe(shown);
             if (dim) {
-                best = { url: shown, w: dim.w, h: dim.h };
+                best = { url: shown, w: dim.w, h: dim.h, video: !!dim.video, duration: dim.duration };
                 // This branch paints a preview too, so it MUST log one. Without it a hover
                 // that showed something produced no 'hit' line at all, and a debug log with
                 // a silent success path is worse than none — it reads as proof that nothing
@@ -590,7 +702,13 @@
     // clamps the pan offsets; layout() is the only thing that writes any of it to the
     // DOM. Nothing else may set box/img styles, or the two will drift.
 
-    let host = null, root = null, box = null, imgEl = null, dimEl = null, closeEl = null;
+    // The frame has two possible faces and `mediaEl` is whichever one is currently showing.
+    // layout() writes geometry to `mediaEl` and to nothing else, so "one thing owns the
+    // DOM" survives the frame being able to hold a picture or a clip. setMedia() is the
+    // only function that reassigns it, and it is also the only place either element's src
+    // is set, so the two can never both be loaded at once.
+    let host = null, root = null, box = null, imgEl = null, vidEl = null, mediaEl = null;
+    let dimEl = null, closeEl = null;
     let capEl = null, capNameEl = null, capMetaEl = null, blockEl = null;
     let spinEl = null, spinSvg = null;
 
@@ -692,7 +810,10 @@
             '.box.pinned:not(.pan){cursor:move}',
             '.box.pan{cursor:grab}',
             '.box.pan.drag{cursor:grabbing}',
-            'img{display:block;position:absolute;background:#1e1e2e;-webkit-user-drag:none;user-select:none}',
+            'img,video{display:block;position:absolute;background:#1e1e2e;-webkit-user-drag:none;user-select:none}',
+            // `display:block` above outranks the hidden attribute's UA rule, so the face
+            // that is not in use would keep its box and sit under the other one.
+            'img[hidden],video[hidden]{display:none}',
             // The status bar doubles as the frame's move handle, so unlike the rest of the
             // overlay it must stay hit-testable.
             '.cap{position:absolute;left:0;right:0;bottom:0;display:flex;align-items:baseline;gap:10px;',
@@ -759,6 +880,19 @@
         imgEl = document.createElement('img');
         imgEl.draggable = false;
 
+        // The frame's other face. An imgur video post has no animated image form at all, so
+        // "the better version of this gif" is an mp4 or it is nothing. It is muted, looping
+        // and autoplaying because it stands in for an animated picture rather than offering
+        // a player — and deliberately WITHOUT `controls`, which would put a play button and
+        // a scrubber under the same clicks that pin, drag and dismiss the window.
+        vidEl = document.createElement('video');
+        vidEl.muted = true;
+        vidEl.loop = true;
+        vidEl.autoplay = true;
+        vidEl.playsInline = true;
+        vidEl.draggable = false;
+        vidEl.hidden = true;
+
         capEl = document.createElement('div');
         capEl.className = 'cap';
         capNameEl = document.createElement('span');
@@ -787,6 +921,7 @@
         closeEl.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); unpin(); }, true);
 
         box.appendChild(imgEl);
+        box.appendChild(vidEl);
         box.appendChild(capEl);
         box.appendChild(closeEl);
         box.addEventListener('mousedown', onBoxDown, true);
@@ -905,7 +1040,7 @@
             const u = new URL(url, location.href);
             const segs = u.pathname.split('/').filter(Boolean);
             out.name = decodeURIComponent(segs.length ? segs[segs.length - 1] : u.hostname);
-            const ext = u.pathname.match(MEDIA_RE);
+            const ext = u.pathname.match(MEDIA_RE) || u.pathname.match(VIDEO_EXT_RE);
             const q = ext ? null : u.search.match(/[?&](?:format|fm|output)=([a-z0-9]+)/i);
             const raw = ext ? ext[1] : (q ? q[1] : '');
             if (raw) out.type = TYPE_NAMES[raw.toLowerCase()] || raw.toUpperCase();
@@ -1012,17 +1147,45 @@
         if (capEl) capEl.classList.remove('idle');
     }
 
+    // Point the frame at a resolved candidate, picking the face that can display it. The
+    // one being put away has its src cleared as well as being hidden: a <video> left with a
+    // src goes on buffering behind a hidden element, and an <img> left with one holds its
+    // decoded bitmap for the life of the tab.
+    function setMedia(res) {
+        const wantsVideo = !!res.video;
+        mediaEl = wantsVideo ? vidEl : imgEl;
+        const idle = wantsVideo ? imgEl : vidEl;
+        idle.hidden = true;
+        clearMedia(idle);
+        mediaEl.hidden = false;
+        if (!wantsVideo && cfg.noReferrer) imgEl.referrerPolicy = 'no-referrer';
+        mediaEl.src = res.url;
+        if (wantsVideo) {
+            // Autoplay is muted, so this is allowed everywhere — but it still returns a
+            // promise that rejects if the element is torn down mid-start, and an unhandled
+            // rejection in a hover handler is noise in every page's console.
+            const started = vidEl.play();
+            if (started && started.catch) started.catch(function () { /* torn down or blocked */ });
+        }
+    }
+
+    function clearMedia(el) {
+        if (!el) return;
+        if (el === vidEl) { vidEl.pause(); vidEl.removeAttribute('src'); vidEl.load(); }
+        else el.removeAttribute('src');
+    }
+
     function layout() {
-        if (!view) return;
+        if (!view || !mediaEl) return;
         clampPosition();
         box.style.left = Math.round(view.left) + 'px';
         box.style.top = Math.round(view.top) + 'px';
         box.style.width = view.frameW + 'px';
         box.style.height = view.frameH + 'px';
-        imgEl.style.width = Math.round(view.imgW) + 'px';
-        imgEl.style.height = Math.round(view.imgH) + 'px';
-        imgEl.style.left = Math.round(view.ox) + 'px';
-        imgEl.style.top = Math.round(view.oy) + 'px';
+        mediaEl.style.width = Math.round(view.imgW) + 'px';
+        mediaEl.style.height = Math.round(view.imgH) + 'px';
+        mediaEl.style.left = Math.round(view.ox) + 'px';
+        mediaEl.style.top = Math.round(view.oy) + 'px';
         box.classList.toggle('hot', pinned || detached);
         box.classList.toggle('pan', (pinned || detached) && pannable());
         caption();
@@ -1194,8 +1357,7 @@
             nudgeIntoReach();
         }
 
-        if (cfg.noReferrer) imgEl.referrerPolicy = 'no-referrer';
-        imgEl.src = res.url;
+        setMedia(res);
         layout();
         deferredCaption(res.url);
 
@@ -1233,7 +1395,7 @@
         view.left = centreX - (view.frameW + cfg.borderWidth * 2) / 2;
         view.top = centreY - (view.frameH + cfg.borderWidth * 2) / 2;
 
-        imgEl.src = res.url;
+        setMedia(res);
         layout();
         deferredCaption(res.url);
     }
@@ -1256,10 +1418,13 @@
         // be"; it appeared only after a preview had been detached or pinned at least once.
         box.classList.remove('on', 'hot', 'pan', 'drag');
         dimEl.classList.remove('on');
-        // release the decoded image so long sessions don't accumulate bitmaps
+        // Release the decoded image, or stop the clip, so long sessions accumulate
+        // neither bitmaps nor a video quietly buffering behind a hidden element.
         setTimeout(function () {
             if (box && !box.classList.contains('on')) {
-                imgEl.removeAttribute('src');
+                clearMedia(imgEl);
+                clearMedia(vidEl);
+                mediaEl = null;
                 view = null;
             }
         }, cfg.fadeMs + 60);
@@ -2324,6 +2489,11 @@
             'youtu.be, .mp4 and friends) — turn off if it is skipping stills you want. ' +
             'A short muted clip already playing with no controls counts as an animated ' +
             'picture, not a player, so pages like Imgur’s gallery still preview normally');
+        check('playVideos', 'Let the preview be a video',
+            'some animated posts have no image form at all — an Imgur video post answers ' +
+            '.jpg with a single frozen frame, and the moving original exists only as .mp4. ' +
+            'With this on, the preview window plays it, muted and looping. Turn it off to ' +
+            'keep previews to still pictures; you will get the frozen frame instead');
         check('skipPageBackgrounds', 'Never preview page backgrounds',
             'the page\'s own background, and any background tiled end to end — wallpaper ' +
             'rather than a picture, and on a tiled page there is blank space everywhere to ' +
@@ -2457,6 +2627,7 @@
         enabled: cfg.enabled,
         siteEnabled: siteEnabled(),
         skipVideos: cfg.skipVideos,
+        playVideos: cfg.playVideos,
         skipPageBackgrounds: cfg.skipPageBackgrounds,
         blockList: cfg.blockList.length,
         // These three decide whether a probed candidate becomes a preview, so a log without
