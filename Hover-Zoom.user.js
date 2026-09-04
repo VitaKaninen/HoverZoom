@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.29.0
+// @version     0.30.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -89,6 +89,11 @@
         borderWidth: 1,
         borderColor: '#45475a',
         cornerRadius: 6,
+        frameMargin: 24,            // px of frame around the picture, on all four sides. It is
+                                    // a move handle you can SEE: the middle pans, the edge
+                                    // resizes, and this ring moves the window at any zoom. The
+                                    // status bar fills the bottom one. 0 puts the bar back on
+                                    // top of the picture and leaves only it to move by
         shadow: true,
         showStatusBar: true,        // filename / type / size / dimensions strip, also the move handle; auto-fades
         spinnerTheme: 'auto',       // 'auto' (follows the browser) | 'dark' | 'light'
@@ -1000,7 +1005,7 @@
     // is set, so the two can never both be loaded at once.
     let host = null, root = null, box = null, imgEl = null, vidEl = null, mediaEl = null;
     let dimEl = null, closeEl = null;
-    let capEl = null, capNameEl = null, capMetaEl = null, blockEl = null;
+    let capEl = null, capNameEl = null, capMetaEl = null, blockEl = null, apEl = null;
     let spinEl = null, spinSvg = null;
 
     const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -1103,14 +1108,21 @@
             '.box.placed:not(.pan){cursor:move}',
             '.box.pan{cursor:grab}',
             '.box.pan.drag{cursor:grabbing}',
+            // The APERTURE. The picture lives inside it and is clipped to it, so the frame
+            // margin around it stays clear at every zoom - that ring is the move handle, and
+            // a picture spilling across it would make it a lie. The hairline is what keeps
+            // the two readable as separate things once a zoomed-out picture leaves the
+            // frame's own background showing around itself.
+            '.ap{position:absolute;overflow:hidden;background:#181825;',
+            'box-shadow:0 0 0 1px rgba(205,214,244,.13)}',
             'img,video{display:block;position:absolute;background:#1e1e2e;-webkit-user-drag:none;user-select:none}',
             // `display:block` above outranks the hidden attribute's UA rule, so the face
             // that is not in use would keep its box and sit under the other one.
             'img[hidden],video[hidden]{display:none}',
             // The status bar doubles as the frame's move handle, so unlike the rest of the
             // overlay it must stay hit-testable.
-            '.cap{position:absolute;left:0;right:0;bottom:0;display:flex;align-items:baseline;gap:10px;',
-            'padding:4px 8px;font:11px/1.5 system-ui,sans-serif;color:#cdd6f4;',
+            '.cap{position:absolute;left:0;right:0;bottom:0;display:flex;align-items:center;gap:10px;',
+            'padding:0 8px;font:11px/16px system-ui,sans-serif;color:#cdd6f4;box-sizing:border-box;',
             'background:rgba(30,30,46,.86);letter-spacing:.02em;user-select:none}',
             '.box.placed .cap{cursor:move}',
             '.cap .name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;',
@@ -1119,10 +1131,17 @@
             // "Never this image again". Only on a PLACED window, for the same reason the X
             // is: a hover preview is pointer-transparent, so a button on it cannot be
             // clicked at all. Hover it, click to pin, then press this.
-            '.cap .block{flex:none;display:none;width:18px;height:18px;line-height:16px;',
+            // ABSOLUTE, not a flex item, plus a reserved gutter on the bar. As a flex item it
+            // sat after a `flex:none` dimensions field, so on a narrow bar it was pushed past
+            // the end and clipped away entirely - on a preview of a small picture, which is
+            // the case where the button is most wanted. Its position no longer depends on
+            // anything else in the bar.
+            '.cap .block{position:absolute;right:' + BLOCK_RIGHT + 'px;top:50%;',
+            'transform:translateY(-50%);display:none;width:18px;height:18px;line-height:16px;',
             'text-align:center;border-radius:4px;border:1px solid #45475a;',
             'background:rgba(49,50,68,.9);color:#a6adc8;cursor:pointer;font-size:12px}',
             '.box.hot .cap .block{display:block}',
+            '.box.hot .cap{padding-right:' + (BLOCK_RIGHT + 26) + 'px}',
             '.cap .block:hover{background:#f38ba8;border-color:#f38ba8;color:#1e1e2e}',
             // The bar sits ON the picture, so on anything with text near the bottom — a meme,
             // a screenshot, a comic panel — it covers the thing you are reading. It fades out
@@ -1149,7 +1168,7 @@
             '.spin .track,.spin .arc{fill:none;stroke-width:4.5;stroke-linecap:round}',
             '.spin .track{stroke:var(--spin-track)}',
             '.spin .arc{stroke:var(--spin-arc)}',
-            '.x{position:absolute;top:7px;right:7px;width:26px;height:26px;display:none;',
+            '.x{position:absolute;width:26px;height:26px;display:none;',
             'align-items:center;justify-content:center;border-radius:50%;border:1px solid #45475a;',
             'background:rgba(30,30,46,.88);color:#cdd6f4;font:17px/1 system-ui,sans-serif;',
             'cursor:pointer;user-select:none}',
@@ -1223,8 +1242,12 @@
         closeEl.addEventListener('mousedown', function (e) { e.preventDefault(); e.stopPropagation(); }, true);
         closeEl.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); unplace(); }, true);
 
-        box.appendChild(imgEl);
-        box.appendChild(vidEl);
+        apEl = document.createElement('div');
+        apEl.className = 'ap';
+        apEl.appendChild(imgEl);
+        apEl.appendChild(vidEl);
+
+        box.appendChild(apEl);
         box.appendChild(capEl);
         box.appendChild(closeEl);
         box.addEventListener('mousedown', onBoxDown, true);
@@ -1261,6 +1284,34 @@
     // here. `bottomReserve` is taken off the height ONCE, at the top of viewportBox(), so
     // the size cap, the opening position, clampPosition() and the floating spinner all
     // inherit it from this single place and cannot disagree about where the bottom is.
+    // The frame around the picture, and the smallest one worth having.
+    //
+    // THE MARGIN IS A MOVE HANDLE YOU CAN SEE. Before it, a window whose picture had spilled
+    // could only be moved by the status bar, because the middle had become a pan surface -
+    // one control, at the bottom, and none at all with the bar turned off. An earlier cut
+    // tried an INVISIBLE move band just inside the resize strip and it was removed as a
+    // mis-grab hazard: two bands within 30px of each other, and the edge meaning two
+    // different things depending on a number nobody can see. A ring that is drawn, and that
+    // the picture never covers, is the version of that idea which does not have the problem.
+    //
+    // MIN_FRAME is the APERTURE, not the window - the window is that plus two margins and
+    // two borders, about 98px at the defaults. It exists because `minDisplayed: 0` otherwise
+    // gives a preview a few pixels across, with nowhere for the status bar or the block
+    // button to be.
+    const MIN_FRAME = 48;
+
+    function chrome() {
+        return Math.max(0, Math.min(80, cfg.frameMargin | 0));
+    }
+
+    // Margin + border: what sits between view.left/top and the picture's own top-left. Every
+    // geometry site goes through these four, so the margin cannot be counted twice or
+    // forgotten in one of them.
+    function insetX() { return chrome() + cfg.borderWidth; }
+    function insetY() { return chrome() + cfg.borderWidth; }
+    function outerW() { return view.frameW + insetX() * 2; }
+    function outerH() { return view.frameH + insetY() * 2; }
+
     function usableHeight() {
         const vh = document.documentElement.clientHeight;
         return Math.max(64, vh - Math.max(0, cfg.bottomReserve || 0));
@@ -1276,8 +1327,8 @@
         return {
             vw: vw,
             vh: vh,
-            w: Math.max(32, vw - EDGE_GAP * 2 - cfg.borderWidth * 2),
-            h: Math.max(32, vh - EDGE_GAP * 2 - cfg.borderWidth * 2),
+            w: Math.max(MIN_FRAME, vw - EDGE_GAP * 2 - insetX() * 2),
+            h: Math.max(MIN_FRAME, vh - EDGE_GAP * 2 - insetY() * 2),
         };
     }
 
@@ -1307,6 +1358,19 @@
         return Math.min(cfg.zoomFactor, m.w / w, m.h / h);
     }
 
+    // The zoom FLOOR is no longer "fit". A frame may now be bigger than the picture inside
+    // it: zoom out past fit and the picture shrinks in place, with the frame's own
+    // background behind it, the way any image viewer behaves. What stops it is an absolute
+    // size rather than the frame's - below this there is nothing left to look at.
+    const MIN_MEDIA = 32;
+
+    function minScaleFor(w, h) {
+        if (!w || !h) return 1;
+        // Never a floor ABOVE where the picture opens, or a thumbnail smaller than MIN_MEDIA
+        // would be forced to open enlarged.
+        return Math.min(MIN_MEDIA / Math.max(w, h), fitScaleFor(w, h));
+    }
+
     // While it is still a hover preview the frame grows with the image, up to the growth
     // ceiling: zooming a small picture is how you get a preview big enough to be worth
     // placing, and having to resize every one of them by hand on a page full of small
@@ -1320,8 +1384,10 @@
         const g = growBox();
         view.imgW = view.natW * view.scale;
         view.imgH = view.natH * view.scale;
-        view.frameW = Math.round(view.fixedW != null ? view.fixedW : Math.min(view.imgW, g.w));
-        view.frameH = Math.round(view.fixedH != null ? view.fixedH : Math.min(view.imgH, g.h));
+        view.frameW = Math.round(view.fixedW != null ? view.fixedW
+            : Math.max(MIN_FRAME, Math.min(view.imgW, g.w)));
+        view.frameH = Math.round(view.fixedH != null ? view.fixedH
+            : Math.max(MIN_FRAME, Math.min(view.imgH, g.h)));
         view.ox = view.imgW <= view.frameW
             ? (view.frameW - view.imgW) / 2
             : Math.min(0, Math.max(view.frameW - view.imgW, view.ox));
@@ -1338,8 +1404,8 @@
     const REACH_INSET = 10;
 
     function nudgeIntoReach() {
-        const ow = view.frameW + cfg.borderWidth * 2;
-        const oh = view.frameH + cfg.borderWidth * 2;
+        const ow = outerW();
+        const oh = outerH();
         if (pointer.x < view.left + REACH_INSET) view.left = pointer.x - REACH_INSET;
         else if (pointer.x > view.left + ow - REACH_INSET) view.left = pointer.x - ow + REACH_INSET;
         if (pointer.y < view.top + REACH_INSET) view.top = pointer.y - REACH_INSET;
@@ -1367,8 +1433,8 @@
         const vw = document.documentElement.clientWidth;
         const vh = document.documentElement.clientHeight;
         if (!vw || !vh) return;      // the Browser pane reports 0 while hidden
-        const ow = view.frameW + cfg.borderWidth * 2;
-        const oh = view.frameH + cfg.borderWidth * 2;
+        const ow = outerW();
+        const oh = outerH();
         if (!placed) {
             const bh = usableHeight();
             const loX = vw - ow - EDGE_GAP, hiX = EDGE_GAP;
@@ -1416,12 +1482,11 @@
     // frame with no bar can be resized and panned but not moved, and Escape is the way out.
     const RESIZE_BAND = 12;   // px of the outer edge that resizes along one axis
     const CORNER_REACH = 24;  // px from a corner where a drag resizes both axes at once
-    const MIN_FRAME = 80;     // a frame smaller than this cannot be grabbed at all
 
     function hitRegion(x, y) {
         if (!view) return null;
-        const ow = view.frameW + cfg.borderWidth * 2;
-        const oh = view.frameH + cfg.borderWidth * 2;
+        const ow = outerW();
+        const oh = outerH();
         const rx = x - view.left, ry = y - view.top;
         if (rx < 0 || ry < 0 || rx > ow || ry > oh) return null;
         const dl = rx, dr = ow - rx, dt = ry, db = oh - ry;
@@ -1437,11 +1502,17 @@
         if (dr <= rb) return { kind: 'resize', ex: 'r', ey: null };
         if (dt <= rb) return { kind: 'resize', ex: null, ey: 't' };
         if (db <= rb) return { kind: 'resize', ex: null, ey: 'b' };
+        // Past the resize strip and still outside the picture: the frame margin, which moves
+        // the window whatever the zoom. Bounded by a third of the frame so that on a small
+        // one the ring cannot swallow the middle entirely.
+        const mx = Math.min(insetX(), ow / 3), my = Math.min(insetY(), oh / 3);
+        if (dl < mx || dr < mx || dt < my || db < my) return { kind: 'move' };
         return null;    // the middle — the pan-or-move rule decides
     }
 
     function regionCursor(reg) {
         if (!reg) return '';        // the middle: leave it to the .pan / .placed CSS rules
+        if (reg.kind === 'move') return 'move';
         if (!reg.ey) return 'ew-resize';
         if (!reg.ex) return 'ns-resize';
         return (reg.ex === 'l') === (reg.ey === 't') ? 'nwse-resize' : 'nesw-resize';
@@ -1532,6 +1603,14 @@
     const BAR_FADE_MS = 1200;
     const BAR_SHOW_MS = 120;
 
+    // The bar's own readable height. It is stretched to the frame margin when that is
+    // larger, so at the default the bar IS the bottom margin exactly.
+    const BAR_MIN_H = 24;
+    // How far the block button sits in from the right edge. Off the corner on purpose: the
+    // corner is where the hand goes to resize or to move, and a destructive button there is
+    // a trap.
+    const BLOCK_RIGHT = 20;
+
     let barTimer = 0;
 
     // The bar must not fade while the pointer is ON it: it holds the ⊘ button and the
@@ -1618,7 +1697,7 @@
         view.natW = w;
         view.natH = h;
         view.fitScale = fitScaleFor(w, h);
-        view.scale = Math.max(view.scale, view.fitScale);
+        view.scale = Math.max(view.scale, minScaleFor(w, h));
         reflow();
         layout();
     }
@@ -1636,9 +1715,9 @@
     // window. The offset is clamped so the bar can never climb above the frame's own top.
     function stickBar() {
         if (!capEl || !cfg.showStatusBar) return;
-        const oh = view.frameH + cfg.borderWidth * 2;
+        const oh = outerH();
         const overhang = (view.top + oh) - usableHeight();
-        const room = Math.max(0, view.frameH - capEl.offsetHeight);
+        const room = Math.max(0, oh - cfg.borderWidth * 2 - capEl.offsetHeight);
         capEl.style.bottom = Math.round(Math.max(0, Math.min(overhang, room))) + 'px';
     }
 
@@ -1647,8 +1726,15 @@
         clampPosition();
         box.style.left = Math.round(view.left) + 'px';
         box.style.top = Math.round(view.top) + 'px';
-        box.style.width = view.frameW + 'px';
-        box.style.height = view.frameH + 'px';
+        // The box is the aperture plus its margin; the aperture is the only thing the
+        // picture is measured against, and the only thing it is clipped to.
+        const pad = chrome();
+        box.style.width = (view.frameW + pad * 2) + 'px';
+        box.style.height = (view.frameH + pad * 2) + 'px';
+        apEl.style.left = pad + 'px';
+        apEl.style.top = pad + 'px';
+        apEl.style.width = view.frameW + 'px';
+        apEl.style.height = view.frameH + 'px';
         mediaEl.style.width = Math.round(view.imgW) + 'px';
         mediaEl.style.height = Math.round(view.imgH) + 'px';
         mediaEl.style.left = Math.round(view.ox) + 'px';
@@ -1666,27 +1752,27 @@
     // frame to find the image pixel, once against the new one to place it back.
     function zoomAt(nextScale, screenX, screenY) {
         if (!view) return;
-        const lo = view.fitScale;
+        const lo = minScaleFor(view.natW, view.natH);
         const hi = Math.max(lo, Math.min(cfg.maxZoom, MAX_SCALE_ABS));
         nextScale = Math.max(lo, Math.min(hi, nextScale));
         if (Math.abs(nextScale - view.scale) < 1e-6) return;
 
-        const ax = Math.max(0, Math.min(view.frameW, screenX - (view.left + cfg.borderWidth)));
-        const ay = Math.max(0, Math.min(view.frameH, screenY - (view.top + cfg.borderWidth)));
+        const ax = Math.max(0, Math.min(view.frameW, screenX - (view.left + insetX())));
+        const ay = Math.max(0, Math.min(view.frameH, screenY - (view.top + insetY())));
         const ix = (ax - view.ox) / view.scale;
         const iy = (ay - view.oy) / view.scale;
 
-        const cx = view.left + (view.frameW + cfg.borderWidth * 2) / 2;
-        const cy = view.top + (view.frameH + cfg.borderWidth * 2) / 2;
+        const cx = view.left + outerW() / 2;
+        const cy = view.top + outerH() / 2;
 
         view.scale = nextScale;
         reflow();                       // new frame size; offsets are re-derived below
-        view.left = cx - (view.frameW + cfg.borderWidth * 2) / 2;
-        view.top = cy - (view.frameH + cfg.borderWidth * 2) / 2;
+        view.left = cx - outerW() / 2;
+        view.top = cy - outerH() / 2;
         clampPosition();
 
-        const ax2 = Math.max(0, Math.min(view.frameW, screenX - (view.left + cfg.borderWidth)));
-        const ay2 = Math.max(0, Math.min(view.frameH, screenY - (view.top + cfg.borderWidth)));
+        const ax2 = Math.max(0, Math.min(view.frameW, screenX - (view.left + insetX())));
+        const ay2 = Math.max(0, Math.min(view.frameH, screenY - (view.top + insetY())));
         view.ox = ax2 - ix * nextScale;
         view.oy = ay2 - iy * nextScale;
         reflow();                       // clamp the offsets; frame size is already settled
@@ -1696,8 +1782,8 @@
     function zoomCentre(nextScale) {
         if (!view) return;
         zoomAt(nextScale,
-            view.left + cfg.borderWidth + view.frameW / 2,
-            view.top + cfg.borderWidth + view.frameH / 2);
+            view.left + insetX() + view.frameW / 2,
+            view.top + insetY() + view.frameH / 2);
     }
 
     function panBy(dx, dy) {
@@ -1770,11 +1856,14 @@
         if (!spinEl) return;
         const m = viewportBox();
         if (spinDocked && view && box && box.classList.contains('on')) {
-            const capH = cfg.showStatusBar ? capEl.offsetHeight : 0;
+            // The bar has a strip of its own below the aperture now, so there is nothing to
+            // subtract for it - except where the margin is small enough that it still
+            // overhangs the picture.
+            const capH = cfg.showStatusBar ? Math.max(0, capEl.offsetHeight - chrome()) : 0;
             spinEl.style.left =
-                Math.round(view.left + cfg.borderWidth + view.frameW - SPIN_SIZE - 8) + 'px';
+                Math.round(view.left + insetX() + view.frameW - SPIN_SIZE - 8) + 'px';
             spinEl.style.top =
-                Math.round(view.top + cfg.borderWidth + view.frameH - capH - SPIN_SIZE - 8) + 'px';
+                Math.round(view.top + insetY() + view.frameH - capH - SPIN_SIZE - 8) + 'px';
             return;
         }
         spinEl.style.left = Math.min(pointer.x + 16, m.vw - SPIN_SIZE - 4) + 'px';
@@ -1818,9 +1907,15 @@
         box.style.border = cfg.borderWidth > 0 ? cfg.borderWidth + 'px solid ' + cfg.borderColor : 'none';
         box.style.borderRadius = cfg.cornerRadius + 'px';
         box.style.boxShadow = cfg.shadow ? '0 8px 32px rgba(0,0,0,.55)' : 'none';
+        // The bar fills the bottom margin exactly at the default, and keeps its own readable
+        // height when the margin is set smaller - at 0 it lands back on the picture, which is
+        // where it was before the margin existed.
+        capEl.style.height = Math.max(BAR_MIN_H, chrome()) + 'px';
+        // Clear of the margin, so reaching for the X is not reaching for a resize edge.
+        closeEl.style.top = closeEl.style.right = (chrome() + 8) + 'px';
 
-        const ow = view.frameW + cfg.borderWidth * 2;
-        const oh = view.frameH + cfg.borderWidth * 2;
+        const ow = outerW();
+        const oh = outerH();
         if (cfg.position === 'center') {
             view.left = (m.vw - ow) / 2;
             view.top = (m.vh - oh) / 2;
@@ -1846,14 +1941,17 @@
     // decode is instant because the probe already pulled this URL into cache.
     function upgradeViewer(res) {
         if (!view) return;
-        const centreX = view.left + (view.frameW + cfg.borderWidth * 2) / 2;
-        const centreY = view.top + (view.frameH + cfg.borderWidth * 2) / 2;
+        const centreX = view.left + outerW() / 2;
+        const centreY = view.top + outerH() / 2;
         // where the frame's middle sits in the picture, as a fraction of it
         const fx = view.imgW ? (view.frameW / 2 - view.ox) / view.imgW : 0.5;
         const fy = view.imgH ? (view.frameH / 2 - view.oy) / view.imgH : 0.5;
         const prevImgW = view.imgW;
         // Read against the OLD fit, before it is recomputed for the new picture.
-        const userSized = view.fixedW != null || view.scale > view.fitScale + 1e-6;
+        // Either side of fit counts: since the frame may now be bigger than the picture, a
+        // view deliberately zoomed OUT is as hand-made as one zoomed in, and re-fitting it on
+        // an upgrade would undo that just as visibly.
+        const userSized = view.fixedW != null || Math.abs(view.scale - view.fitScale) > 1e-6;
 
         view.url = res.url;
         view.natW = res.w;
@@ -1864,15 +1962,15 @@
         // Missing the wheel-grown case would mean a late upgrade quietly undoing the sizing
         // that had just been done by hand.
         view.scale = userSized && prevImgW
-            ? Math.max(view.fitScale, prevImgW / res.w)   // same size on screen, better pixels
+            ? Math.max(minScaleFor(res.w, res.h), prevImgW / res.w)   // same size, better pixels
             : view.fitScale;
 
         reflow();
         view.ox = view.frameW / 2 - fx * view.imgW;
         view.oy = view.frameH / 2 - fy * view.imgH;
         reflow();
-        view.left = centreX - (view.frameW + cfg.borderWidth * 2) / 2;
-        view.top = centreY - (view.frameH + cfg.borderWidth * 2) / 2;
+        view.left = centreX - outerW() / 2;
+        view.top = centreY - outerH() / 2;
 
         setMedia(res);
         layout();
@@ -2120,9 +2218,17 @@
                 // Captured at grab time: a frame whose picture already spills is an
                 // aperture, and widening it should reveal more rather than undo the zoom.
                 spilling: pannable(),
+                // Only a picture sitting EXACTLY at fit follows the frame. One deliberately
+                // zoomed OUT below fit keeps its scale, or a resize would undo the zoom-out
+                // exactly the way it is forbidden to undo a zoom-in.
+                refit: !pannable() && Math.abs(view.scale - view.fitScale) < 1e-6,
             };
         } else {
-            const mode = onBar || !pannable() ? 'move' : 'pan';
+            // The frame margin moves the window for the same reason the bar does, and it is
+            // what makes the bar optional again: a spilling frame is now movable by any of
+            // its four sides rather than by the bar alone.
+            const onFrame = onBar || (reg && reg.kind === 'move');
+            const mode = onFrame || !pannable() ? 'move' : 'pan';
             drag = { x: e.clientX, y: e.clientY, mode: mode, dist: 0 };
         }
         box.classList.add('drag');
@@ -2167,7 +2273,7 @@
         view.fixedW = w;
         view.fixedH = h;
         view.fitScale = fitScaleFor(view.natW, view.natH);
-        if (!drag.spilling) view.scale = view.fitScale;
+        if (drag.refit) view.scale = view.fitScale;
         reflow();
         layout();
     }
@@ -2251,8 +2357,8 @@
     // `view` instead. Outer rect: the frame plus its border, which is what layout() writes.
     function pointInPreview(x, y) {
         if (!view || !box || !box.classList.contains('on')) return false;
-        const w = view.frameW + cfg.borderWidth * 2;
-        const h = view.frameH + cfg.borderWidth * 2;
+        const w = outerW();
+        const h = outerH();
         return x >= view.left && x <= view.left + w && y >= view.top && y <= view.top + h;
     }
 
@@ -3122,7 +3228,8 @@
         // window would throw away the size they chose. clampPosition() still runs, so a
         // window narrowed to nothing cannot leave the frame stranded off the edge.
         view.fitScale = fitScaleFor(view.natW, view.natH);
-        if (view.scale < view.fitScale) view.scale = view.fitScale;
+        const lo = minScaleFor(view.natW, view.natH);
+        if (view.scale < lo) view.scale = lo;
         reflow();
         layout();
     });
@@ -3529,11 +3636,12 @@
             'wheel and +/− zoom the picture inside the frame instead, the arrow keys pan it, ' +
             'and 0 fits it back to the frame.');
         note('It behaves like an ordinary window, and may hang off the screen',
-            'Drag the middle to move it, or the status bar at any time. Drag an edge or a ' +
-            'corner to resize (hold Shift to change its shape rather than keep it). Once you ' +
-            'have zoomed in past the frame, dragging the middle pans the picture instead — the ' +
-            'status bar is then what moves the window. Close it with the X, Escape, or a click ' +
-            'anywhere outside it.');
+            'Drag the frame around the picture — the margin or the status bar — to move it, ' +
+            'at any zoom. Drag an edge or a corner to resize (hold Shift to change its shape ' +
+            'rather than keep it). Dragging the middle moves it too, until you have zoomed in ' +
+            'past the frame, at which point the middle pans the picture instead. Zoom out past ' +
+            'the fit and the picture shrinks inside the frame rather than stopping. Close it ' +
+            'with the X, Escape, or a click anywhere outside it.');
         note('Right-click a placed window for the browser\'s own menu',
             'Save image as…, Copy image, Copy image address, Open image in new tab — all of ' +
             'them acting on the full-size original, because the browser fetches it itself. ' +
@@ -3564,17 +3672,22 @@
             0, 200, 1);
         num('fadeMs', 'Fade duration', 'ms', 0, 1000, 10);
         num('borderWidth', 'Border thickness', 'px', 0, 20, 1);
+        num('frameMargin', 'Frame margin',
+            'px of frame drawn around the picture. It is a move handle: drag it to move a '
+            + 'placed window at any zoom, exactly as the status bar does - and the bar fills '
+            + 'the bottom one. Set it to 0 and the bar goes back on top of the picture',
+            0, 80, 2);
         color('borderColor', 'Border colour');
         num('cornerRadius', 'Corner radius', 'px', 0, 40, 1);
         check('shadow', 'Drop shadow');
         check('showStatusBar', 'Show the status bar',
-            'filename, format, dimensions, size — and the handle that moves a placed window, the '
-            + 'way a title bar does. Once you have zoomed in past the frame, dragging the middle '
-            + 'pans the picture and the edges resize, so the bar is the only thing left that '
-            + 'moves it: turn this off and a zoomed-in window can be resized and panned but not '
-            + 'moved. ' +
-            'It fades out after a second of a still pointer so it stops covering the ' +
-            'bottom of the picture, and returns when you move the pointer over the preview');
+            'filename, format, dimensions, size — and the bottom edge of the frame, which moves '
+            + 'a placed window the way a title bar does. The frame margin above moves it just as '
+            + 'well, so turning this off no longer strands a zoomed-in window — unless the '
+            + 'margin is also 0, in which case such a window can be resized and panned but not '
+            + 'moved. '
+            + 'It fades out after a second of a still pointer and returns when you move the '
+            + 'pointer over the preview');
         pick('spinnerTheme', 'Loading ring',
             'auto follows the browser’s light/dark setting', [
                 ['auto', 'Match the browser'], ['dark', 'Always dark'], ['light', 'Always light']]);

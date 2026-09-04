@@ -152,9 +152,10 @@ So `reflow()` has two modes, switched by `view.fixedW`/`fixedH` being null or no
 A window placed by a click and never moved keeps growing on the wheel until it reaches the
 ceiling, where the frame stops and the picture spills anyway — a longer road, not a dead end.
 
-**`fitScaleFor()` exists because of this.** The zoom floor and what `0` returns to used to be
-"fit the window"; on a frozen frame it has to become "fit the FRAME", or `0` on a window the user
-sized by hand would spring it back to the window's shape and throw the size away.
+**`fitScaleFor()` exists because of this.** What `0` returns to used to be "fit the window"; on a
+frozen frame it has to become "fit the FRAME", or `0` on a window the user sized by hand would
+spring it back to the window's shape and throw the size away. It was also the zoom *floor* until
+v0.30.0 — that job is `minScaleFor()`'s now, see "The picture may be smaller than the frame".
 
 **`upgradeViewer()` reads `userSized` against the OLD fit, before recomputing it.** A hover
 preview that has been wheel-grown must hold its on-screen size exactly as a placed one does —
@@ -173,20 +174,22 @@ the frame's, anywhere else is the page's*), and reverting it is one condition in
 a window dragged fully off screen, and strands one at `left: 1500` the moment the browser is
 narrowed to 1200. It now guarantees only that `KEEP_ON_SCREEN` (72px) stays in view per axis.
 
-`hitRegion()` is two rings and nothing cleverer, which is the v0.29.0 correction: **corners and a
-`RESIZE_BAND` (12px) edge strip resize; everything else is the middle**, which moves the frame or
-pans the picture by the old rule.
+`hitRegion()` is three rings since v0.30.0: **corners and a `RESIZE_BAND` (12px) edge strip
+resize, the rest of the frame margin moves, and everything inside that is the middle**, which
+moves the frame or pans the picture by the old rule.
 
-**The move band is gone, and it is worth knowing why it existed.** v0.28.0 put a second,
-move-only band just inside the resize strip so a window dragged half off screen always had
-something to drag it back by. Two bands within 30px of each other is a mis-grab waiting to happen,
-and it made the edge mean two different things depending on a number nobody can see. **The status
-bar is the answer instead** — it moves the frame whatever the zoom, which is exactly a title bar's
-job, and once the picture spills it is the only handle that moves rather than pans or resizes.
+**The middle ring is the move band that v0.29.0 removed, and the difference is that this one is
+drawn.** v0.28.0 put an *invisible* move-only band just inside the resize strip so a window
+dragged half off screen always had something to drag it back by. It was removed because two bands
+within 30px of each other is a mis-grab waiting to happen, and because it made the edge mean two
+different things depending on a number nobody can see. Both objections are about *invisibility*,
+not about the idea: `frameMargin` paints the ring, clips the picture out of it, and puts the
+`move` cursor on it, so there is no hidden number left. See "The window has a frame" below.
 
-So `showStatusBar: false` is a real trade, not a cosmetic one: a spilling frame with no bar can be
-resized and panned but not moved, and Escape is the way out. Say that in the setting's
-description; do not quietly re-add a move band to paper over it.
+`showStatusBar: false` used to be a real trade — a spilling frame with no bar could be resized and
+panned but not moved. The margin removes that; turning the bar off now costs the filename and the
+⊘, not the ability to move the window. `frameMargin: 0` **and** `showStatusBar: false` together
+bring the old trade back, and that is what the setting's description says.
 
 **`stickBar()` exists because the bar being the only handle is otherwise not enough.** Found while
 verifying v0.29.0: grow the frame past the viewport, then keep zooming until the picture spills,
@@ -271,6 +274,9 @@ then:
   it to the size I want" means; letting the frame grow grey bars instead would be a worse answer.
 - **Picture spilling** → the scale is kept and the aperture simply shows more. Rescaling here
   would undo a zoom asked for deliberately.
+- **Picture zoomed OUT below fit** (v0.30.0) → the scale is kept for the same reason. This is
+  why `drag.refit` is captured alongside `drag.spilling` and the test is `scale === fitScale`
+  rather than `!spilling`: "not spilling" used to mean "at fit" and no longer does.
 
 `drag.spilling` is captured at **grab time**, not read per move, or the gesture would change
 character halfway through as the frame passed the picture's size.
@@ -284,6 +290,61 @@ Without the lock an edge drag would just grow grey bars, which is why locked is 
 and Shift is the escape. On the axis not being dragged the frame grows about its **centre** —
 anchoring it to top or left instead makes the window crawl diagonally while you pull one edge
 straight.
+
+### The window has a frame, and the frame is the handle (v0.30.0)
+
+*Specified as `E25`.* `frameMargin` (24px, a setting) is a ring drawn on all four sides; the
+status bar fills the bottom one. It is a move handle, so the window reads as an ordinary window
+from the outside in: **outer 12px resize, the rest of the margin moves, the picture pans**.
+
+- **`.ap` is a wrapper, and it is what makes the ring honest.** The picture is clipped to the
+  aperture, so it can never paint over the margin — a move handle the picture covers at some
+  zooms is exactly the invisible-band problem again. `layout()` writes the aperture's position
+  and size along with everything else, so the "one function writes the DOM" invariant holds.
+- **`insetX()`/`insetY()`/`outerW()`/`outerH()` replaced ~15 copies of
+  `view.frameW + cfg.borderWidth * 2`.** That expression was the thing most likely to be
+  half-updated; going through helpers is what makes the margin impossible to count twice or miss
+  in one place.
+- **`onBar` still outranks `hitRegion()`** in `onBoxDown`. At the default the bar *is* the bottom
+  margin, so the two agree — but at `frameMargin: 0` the bar sits on the picture again and the
+  precedence is what stops its lower half resizing.
+- **Geometry, not child elements**, for the same reason as before: corner and edge divs land in
+  the `isBoxControl()` capture trap.
+
+**The minimum window is a 48px aperture — about 98px overall.** `minDisplayed: 0` on a page of
+tiny pictures otherwise produced previews a few pixels across, which is where the ⊘ complaint
+started. `MIN_FRAME` is applied in `reflow()` (so it bounds the opening size and the wheel) and
+in `resizeBy()` (so it bounds a hand resize); both were needed.
+
+**The ⊘ is absolutely positioned, 20px in from the right edge.** As a flex item it sat after a
+`flex:none` dimensions field, so on a narrow bar the name shrank to nothing, the dimensions
+overflowed, and the button was pushed past the end and clipped — invisible on exactly the
+previews where it is most wanted. `.box.hot .cap` reserves a matching gutter so text never runs
+under it. 20px rather than flush because the corner is where the hand goes to resize or move.
+The **X** moved in for the same reason: `chrome() + 8`, inside the picture rather than in the
+frame's corner.
+
+**The aperture is `#181825` against the frame's `#1e1e2e`.** One shade apart, plus a 1px hairline
+— enough to read the ring as chrome once a zoomed-out picture leaves background showing on all
+four sides, without turning the letterbox into a decoration.
+
+### The picture may be smaller than the frame (v0.30.0)
+
+*Specified as `E26`.* Two limits were removed together, because either alone is incoherent: the
+zoom floor was `fitScale`, and `reflow()` never let a free frame exceed the picture. So a window
+could not be made smaller than the picture it held, and the picture could not be made smaller
+than the window — the frame and the picture were welded at the fit.
+
+- **`minScaleFor()` is the floor now**: `MIN_MEDIA` (32px) on the picture's long side, **capped at
+  `fitScaleFor()`** so a thumbnail smaller than 32px is never forced to open enlarged.
+- **The background is already there.** `.ap` centres the picture (`reflow()`'s existing ox/oy
+  branch) and the frame's own colour shows around it; nothing new had to be painted.
+- **Every enforcement of the old floor had to go together** — `zoomAt`, `verifyMedia`, the window
+  `resize` listener, `upgradeViewer`, and `resizeBy`. Missing one leaves the floor in place on a
+  path nobody tests, and the symptom is a zoom-out that silently springs back.
+- **`upgradeViewer`'s `userSized` is now `Math.abs(scale - fitScale) > 1e-6`, not `>`.** A view
+  deliberately zoomed *out* is as hand-made as one zoomed in, and the one-sided test would have
+  let a late upgrade undo it.
 
 ### The HOVER preview is POINTER-TRANSPARENT (v0.9.0) — this is the load-bearing decision
 
@@ -912,6 +973,9 @@ cannot know about: a watermark, a sprite sheet, one specific image that is simpl
 - **The button is only on a PLACED window** (`.box.hot .cap .block`), for the same reason the X
   is: a hover preview is pointer-transparent, so a button on it cannot be clicked at all. The
   flow is hover → click to pin → ⊘. The panel's `note()` row says so, because it is not guessable.
+- **It is absolutely positioned, 20px in from the right edge** (v0.30.0). As a flex item it was
+  clipped off the end of a narrow bar; see "The window has a frame" for why that failed exactly
+  where the button matters most.
 - **It goes in `isBoxControl()`.** That is the documented capture-listener trap — a control inside
   the box whose events `onBoxDown`/`onBoxClick` eat first, and the symptom is silence, not an
   error. Verified by dispatching a real click at the button and watching the list change.
