@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.30.0
+// @version     0.31.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -89,11 +89,11 @@
         borderWidth: 1,
         borderColor: '#45475a',
         cornerRadius: 6,
-        frameMargin: 24,            // px of frame around the picture, on all four sides. It is
-                                    // a move handle you can SEE: the middle pans, the edge
-                                    // resizes, and this ring moves the window at any zoom. The
-                                    // status bar fills the bottom one. 0 puts the bar back on
-                                    // top of the picture and leaves only it to move by
+        frameMargin: 24,            // px of frame drawn ON TOP of the picture, on all four
+                                    // sides, the way the status bar always was. It is a move
+                                    // handle: the middle pans, the edge resizes, this ring
+                                    // moves the window at any zoom. It fades with the bar, and
+                                    // stops being a handle while faded. 0 leaves only the bar
         shadow: true,
         showStatusBar: true,        // filename / type / size / dimensions strip, also the move handle; auto-fades
         spinnerTheme: 'auto',       // 'auto' (follows the browser) | 'dark' | 'light'
@@ -1005,7 +1005,8 @@
     // is set, so the two can never both be loaded at once.
     let host = null, root = null, box = null, imgEl = null, vidEl = null, mediaEl = null;
     let dimEl = null, closeEl = null;
-    let capEl = null, capNameEl = null, capMetaEl = null, blockEl = null, apEl = null;
+    let capEl = null, capNameEl = null, capMetaEl = null, blockEl = null;
+    let edgeEls = null;         // [top, left, right, bottom] — the drawn frame margin
     let spinEl = null, spinSvg = null;
 
     const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -1108,21 +1109,21 @@
             '.box.placed:not(.pan){cursor:move}',
             '.box.pan{cursor:grab}',
             '.box.pan.drag{cursor:grabbing}',
-            // The APERTURE. The picture lives inside it and is clipped to it, so the frame
-            // margin around it stays clear at every zoom - that ring is the move handle, and
-            // a picture spilling across it would make it a lie. The hairline is what keeps
-            // the two readable as separate things once a zoomed-out picture leaves the
-            // frame's own background showing around itself.
-            '.ap{position:absolute;overflow:hidden;background:#181825;',
-            'box-shadow:0 0 0 1px rgba(205,214,244,.13)}',
             'img,video{display:block;position:absolute;background:#1e1e2e;-webkit-user-drag:none;user-select:none}',
+            // The frame margin: three strips drawn ON TOP of the picture, matching the status
+            // bar along the bottom. Mostly transparent, because unlike the bar they carry no
+            // text and their whole job is to say "there is a handle here" without hiding the
+            // picture. Pointer-transparent decoration — hitRegion() decides what a press on
+            // them does, so they never enter the isBoxControl() capture trap.
+            '.edge{position:absolute;pointer-events:none;background:rgba(30,30,46,.30)}',
             // `display:block` above outranks the hidden attribute's UA rule, so the face
             // that is not in use would keep its box and sit under the other one.
             'img[hidden],video[hidden]{display:none}',
             // The status bar doubles as the frame's move handle, so unlike the rest of the
             // overlay it must stay hit-testable.
-            '.cap{position:absolute;left:0;right:0;bottom:0;display:flex;align-items:center;gap:10px;',
-            'padding:0 8px;font:11px/16px system-ui,sans-serif;color:#cdd6f4;box-sizing:border-box;',
+            '.cap{position:absolute;left:0;right:0;bottom:0;height:' + BAR_MIN_H + 'px;',
+            'display:flex;align-items:center;gap:10px;box-sizing:border-box;',
+            'padding:0 8px;font:11px/16px system-ui,sans-serif;color:#cdd6f4;',
             'background:rgba(30,30,46,.86);letter-spacing:.02em;user-select:none}',
             '.box.placed .cap{cursor:move}',
             '.cap .name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;',
@@ -1141,7 +1142,6 @@
             'text-align:center;border-radius:4px;border:1px solid #45475a;',
             'background:rgba(49,50,68,.9);color:#a6adc8;cursor:pointer;font-size:12px}',
             '.box.hot .cap .block{display:block}',
-            '.box.hot .cap{padding-right:' + (BLOCK_RIGHT + 26) + 'px}',
             '.cap .block:hover{background:#f38ba8;border-color:#f38ba8;color:#1e1e2e}',
             // The bar sits ON the picture, so on anything with text near the bottom — a meme,
             // a screenshot, a comic panel — it covers the thing you are reading. It fades out
@@ -1152,8 +1152,9 @@
             // The fade itself takes BAR_FADE_MS, kept deliberately long: the whole of it is
             // reaction time, and the bar carries the ⊘ button. It comes BACK instantly
             // (BAR_SHOW_MS) — a slow return would read as lag on a control you just asked for.
-            '.cap{transition:opacity ' + BAR_SHOW_MS + 'ms ease}',
-            '.cap.idle{opacity:0;pointer-events:none;transition:opacity ' + BAR_FADE_MS + 'ms ease}',
+            '.cap,.edge{transition:opacity ' + BAR_SHOW_MS + 'ms ease}',
+            '.box.idle .cap{opacity:0;pointer-events:none;transition:opacity ' + BAR_FADE_MS + 'ms ease}',
+            '.box.idle .edge{opacity:0;transition:opacity ' + BAR_FADE_MS + 'ms ease}',
             // Resolve progress: an INDETERMINATE ring — a fixed arc sweeping a full track.
             // It says "still working" and nothing else. The determinate version it replaces
             // could not be honest: the denominator was the candidate count, most runs stop
@@ -1242,12 +1243,17 @@
         closeEl.addEventListener('mousedown', function (e) { e.preventDefault(); e.stopPropagation(); }, true);
         closeEl.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); unplace(); }, true);
 
-        apEl = document.createElement('div');
-        apEl.className = 'ap';
-        apEl.appendChild(imgEl);
-        apEl.appendChild(vidEl);
+        // After the picture and before the bar, so the bar is drawn over the bottom strip
+        // where the two overlap.
+        edgeEls = ['t', 'l', 'r', 'b'].map(function (k) {
+            const d = document.createElement('div');
+            d.className = 'edge ' + k;
+            return d;
+        });
 
-        box.appendChild(apEl);
+        box.appendChild(imgEl);
+        box.appendChild(vidEl);
+        edgeEls.forEach(function (d) { box.appendChild(d); });
         box.appendChild(capEl);
         box.appendChild(closeEl);
         box.addEventListener('mousedown', onBoxDown, true);
@@ -1284,31 +1290,30 @@
     // here. `bottomReserve` is taken off the height ONCE, at the top of viewportBox(), so
     // the size cap, the opening position, clampPosition() and the floating spinner all
     // inherit it from this single place and cannot disagree about where the bottom is.
-    // The frame around the picture, and the smallest one worth having.
+    // The frame around the picture, and the smallest window worth having.
     //
-    // THE MARGIN IS A MOVE HANDLE YOU CAN SEE. Before it, a window whose picture had spilled
-    // could only be moved by the status bar, because the middle had become a pan surface -
-    // one control, at the bottom, and none at all with the bar turned off. An earlier cut
-    // tried an INVISIBLE move band just inside the resize strip and it was removed as a
-    // mis-grab hazard: two bands within 30px of each other, and the edge meaning two
-    // different things depending on a number nobody can see. A ring that is drawn, and that
-    // the picture never covers, is the version of that idea which does not have the problem.
+    // THE MARGIN IS DRAWN ON TOP OF THE PICTURE, exactly as the status bar always has been,
+    // and it costs the frame no size at all (v0.31.0 — v0.30.0 laid it out around the
+    // picture, which made every preview 48px wider and taller than it needed to be). It is a
+    // move handle, and the answer to the old objection that a move band is an invisible
+    // second meaning for the edge is that this one is painted and carries the `move` cursor.
+    // While it is FADED it stops being a handle at all, which is the same rule the bar has
+    // always had — see hitRegion().
     //
-    // MIN_FRAME is the APERTURE, not the window - the window is that plus two margins and
-    // two borders, about 98px at the defaults. It exists because `minDisplayed: 0` otherwise
-    // gives a preview a few pixels across, with nowhere for the status bar or the block
-    // button to be.
+    // MIN_FRAME is the whole picture area, so the smallest window is 50px at the default
+    // border. It exists because `minDisplayed: 0` otherwise gives a preview a few pixels
+    // across, with nowhere for the status bar or the block button to be.
     const MIN_FRAME = 48;
 
     function chrome() {
         return Math.max(0, Math.min(80, cfg.frameMargin | 0));
     }
 
-    // Margin + border: what sits between view.left/top and the picture's own top-left. Every
-    // geometry site goes through these four, so the margin cannot be counted twice or
-    // forgotten in one of them.
-    function insetX() { return chrome() + cfg.borderWidth; }
-    function insetY() { return chrome() + cfg.borderWidth; }
+    // What sits between view.left/top and the picture's own top-left, and the window's outer
+    // size. The margin is NOT part of this: it floats over the picture. Every geometry site
+    // goes through these four so there is one place to change if that ever stops being true.
+    function insetX() { return cfg.borderWidth; }
+    function insetY() { return cfg.borderWidth; }
     function outerW() { return view.frameW + insetX() * 2; }
     function outerH() { return view.frameH + insetY() * 2; }
 
@@ -1502,11 +1507,17 @@
         if (dr <= rb) return { kind: 'resize', ex: 'r', ey: null };
         if (dt <= rb) return { kind: 'resize', ex: null, ey: 't' };
         if (db <= rb) return { kind: 'resize', ex: null, ey: 'b' };
-        // Past the resize strip and still outside the picture: the frame margin, which moves
-        // the window whatever the zoom. Bounded by a third of the frame so that on a small
-        // one the ring cannot swallow the middle entirely.
-        const mx = Math.min(insetX(), ow / 3), my = Math.min(insetY(), oh / 3);
-        if (dl < mx || dr < mx || dt < my || db < my) return { kind: 'move' };
+        // Past the resize strip and inside the frame margin: the drawn ring, which moves the
+        // window whatever the zoom. Bounded by a third of the frame so that on a small one it
+        // cannot swallow the middle entirely.
+        //
+        // ONLY WHILE IT IS VISIBLE. The ring fades with the status bar, and a faded bar has
+        // always dropped its pointer-events so that a press there falls through to the
+        // ordinary pan-or-move rule rather than being an invisible handle. The ring is drawn
+        // rather than hit-tested, so the same rule has to be applied here by hand.
+        if (!chromeVisible()) return null;
+        const m = chromeThickness() + cfg.borderWidth;
+        if (dl < m || dr < m || dt < m || db < m) return { kind: 'move' };
         return null;    // the middle — the pan-or-move rule decides
     }
 
@@ -1603,8 +1614,7 @@
     const BAR_FADE_MS = 1200;
     const BAR_SHOW_MS = 120;
 
-    // The bar's own readable height. It is stretched to the frame margin when that is
-    // larger, so at the default the bar IS the bottom margin exactly.
+    // The bar's height, fixed so the ring around it can be a matching thickness.
     const BAR_MIN_H = 24;
     // How far the block button sits in from the right edge. Off the corner on purpose: the
     // corner is where the hand goes to resize or to move, and a destructive button there is
@@ -1628,15 +1638,37 @@
                pointer.y >= r.top && pointer.y <= r.bottom;
     }
 
+    // The margin ring counts too, for the same reason the bar does: it is a control, and a
+    // control that vanishes under a resting cursor is unusable. Geometry rather than a hit
+    // test, because the strips are pointer-transparent decoration.
+    function pointerOverChrome() {
+        if (pointerOverBar()) return true;
+        if (!view || !box || !box.classList.contains('on') || !chrome()) return false;
+        const ow = outerW(), oh = outerH();
+        const rx = pointer.x - view.left, ry = pointer.y - view.top;
+        if (rx < 0 || ry < 0 || rx > ow || ry > oh) return false;
+        const m = chromeThickness() + cfg.borderWidth;
+        return rx < m || ry < m || ow - rx < m || oh - ry < m;
+    }
+
+    // Whether the frame's own furniture — bar and margin — is showing. hitRegion() reads it,
+    // so the ring is a move handle exactly while it can be seen.
+    function chromeVisible() {
+        return !!box && !box.classList.contains('idle');
+    }
+
+    // The class lives on the BOX, not on the bar: the margin strips are siblings of the bar
+    // and CSS cannot select backwards, so one class on their common ancestor is what keeps
+    // the two halves of the frame fading as one thing.
     function showBar() {
-        if (!capEl) return;
-        capEl.classList.remove('idle');
+        if (!box) return;
+        box.classList.remove('idle');
         clearTimeout(barTimer);
         barTimer = setTimeout(function () {
             barTimer = 0;
-            if (!capEl || !view) return;
-            if (pointerOverBar()) { showBar(); return; }   // parked on the bar: keep it
-            capEl.classList.add('idle');
+            if (!box || !view) return;
+            if (pointerOverChrome()) { showBar(); return; }   // parked on it: keep it
+            box.classList.add('idle');
         }, BAR_IDLE_MS);
     }
 
@@ -1645,7 +1677,8 @@
         barTimer = 0;
         // The offset stickBar() wrote belongs to the frame that just closed; leaving it on
         // would open the next preview with its bar floating somewhere up the picture.
-        if (capEl) { capEl.classList.remove('idle'); capEl.style.bottom = '0px'; }
+        if (box) box.classList.remove('idle');
+        if (capEl) capEl.style.bottom = '0px';
     }
 
     // Point the frame at a resolved candidate, picking the face that can display it. The
@@ -1721,20 +1754,48 @@
         capEl.style.bottom = Math.round(Math.max(0, Math.min(overhang, room))) + 'px';
     }
 
+    // How thick the drawn margin actually is. Capped at a third of the frame so the smallest
+    // window is not entirely chrome. hitRegion() reads the same number, or the ring you can
+    // see and the ring you can grab would not be the same ring.
+    function chromeThickness() {
+        if (!view) return 0;
+        return Math.round(Math.min(chrome(), view.frameW / 3, view.frameH / 3));
+    }
+
+    // The margin strips and the X, all of which float over the picture and therefore have to
+    // be re-placed whenever the frame changes size.
+    //
+    // The sides run the full height under the bar rather than stopping at it: stopping at
+    // whichever of the two is thicker leaves a gap in the ring just above the bar whenever
+    // they disagree. The bar is drawn after them and is nearly opaque, so the overlap reads
+    // as the bar. The bottom strip only appears when there is no bar to be the bottom edge.
+    function layoutChrome() {
+        const m = chromeThickness();
+        const px = function (n) { return n + 'px'; };
+        edgeEls[0].style.cssText = 'left:0;right:0;top:0;height:' + px(m);
+        edgeEls[1].style.cssText = 'left:0;top:' + px(m) + ';bottom:0;width:' + px(m);
+        edgeEls[2].style.cssText = 'right:0;top:' + px(m) + ';bottom:0;width:' + px(m);
+        edgeEls[3].style.cssText = cfg.showStatusBar ? 'display:none'
+            : 'left:' + px(m) + ';right:' + px(m) + ';bottom:0;height:' + px(m);
+        // The gutter the block button sits in, reserved so the filename and the dimensions
+        // can never run under it. Clamped rather than fixed in CSS: the bar is positioned
+        // left:0/right:0 with border-box sizing, so a padding wider than the frame does not
+        // shrink the text, it forces the whole bar wider than the window it is in.
+        capEl.style.paddingRight =
+            px(placed ? Math.min(BLOCK_RIGHT + 26, Math.max(8, view.frameW - 8)) : 8);
+        // Pulled in from the corner only as far as there is room for it.
+        const inset = Math.max(4, Math.min(m + 6, Math.min(view.frameW, view.frameH) - 32));
+        closeEl.style.top = closeEl.style.right = px(inset);
+    }
+
     function layout() {
         if (!view || !mediaEl) return;
         clampPosition();
         box.style.left = Math.round(view.left) + 'px';
         box.style.top = Math.round(view.top) + 'px';
-        // The box is the aperture plus its margin; the aperture is the only thing the
-        // picture is measured against, and the only thing it is clipped to.
-        const pad = chrome();
-        box.style.width = (view.frameW + pad * 2) + 'px';
-        box.style.height = (view.frameH + pad * 2) + 'px';
-        apEl.style.left = pad + 'px';
-        apEl.style.top = pad + 'px';
-        apEl.style.width = view.frameW + 'px';
-        apEl.style.height = view.frameH + 'px';
+        box.style.width = view.frameW + 'px';
+        box.style.height = view.frameH + 'px';
+        layoutChrome();
         mediaEl.style.width = Math.round(view.imgW) + 'px';
         mediaEl.style.height = Math.round(view.imgH) + 'px';
         mediaEl.style.left = Math.round(view.ox) + 'px';
@@ -1856,10 +1917,7 @@
         if (!spinEl) return;
         const m = viewportBox();
         if (spinDocked && view && box && box.classList.contains('on')) {
-            // The bar has a strip of its own below the aperture now, so there is nothing to
-            // subtract for it - except where the margin is small enough that it still
-            // overhangs the picture.
-            const capH = cfg.showStatusBar ? Math.max(0, capEl.offsetHeight - chrome()) : 0;
+            const capH = cfg.showStatusBar ? capEl.offsetHeight : 0;
             spinEl.style.left =
                 Math.round(view.left + insetX() + view.frameW - SPIN_SIZE - 8) + 'px';
             spinEl.style.top =
@@ -1899,20 +1957,10 @@
         reflow();
 
         host.style.setProperty('--fade', cfg.fadeMs + 'ms');
-        // The wheel belongs to the frame from the moment it appears: on a page of small
-        // pictures, growing the preview before placing it is the only alternative to
-        // resizing every single one by hand.
-        enableWheelZoom();
 
         box.style.border = cfg.borderWidth > 0 ? cfg.borderWidth + 'px solid ' + cfg.borderColor : 'none';
         box.style.borderRadius = cfg.cornerRadius + 'px';
         box.style.boxShadow = cfg.shadow ? '0 8px 32px rgba(0,0,0,.55)' : 'none';
-        // The bar fills the bottom margin exactly at the default, and keeps its own readable
-        // height when the margin is set smaller - at 0 it lands back on the picture, which is
-        // where it was before the margin existed.
-        capEl.style.height = Math.max(BAR_MIN_H, chrome()) + 'px';
-        // Clear of the margin, so reaching for the X is not reaching for a resize edge.
-        closeEl.style.top = closeEl.style.right = (chrome() + 8) + 'px';
 
         const ow = outerW();
         const oh = outerH();
@@ -2062,6 +2110,12 @@
     // same WHEEL_OPTS object for both, or the removal silently no-ops.
     let wheelZoomOn = false;
 
+    // Bound when the window is PLACED, not when it appears. A wheel over a preview you are
+    // merely hovering belongs to the PAGE: it scrolls, and the scroll takes the preview down.
+    // v0.30.0 had the wheel place the window and grow it, which made growing-before-placing
+    // possible but stole the scroll wheel from every hover — reverted deliberately in
+    // v0.31.0. Growing the frame still works, one click later: placing does not freeze the
+    // size, so the wheel over a placed-but-unmoved window grows it exactly as before.
     function enableWheelZoom() {
         if (wheelZoomOn) return;
         wheelZoomOn = true;
@@ -2101,6 +2155,8 @@
         box.classList.add('placed');
         dimEl.classList.add('catch');
         CAP_TARGET.addEventListener('keydown', onPinKey, true);
+        // The wheel becomes the window's only now — see enableWheelZoom.
+        enableWheelZoom();
         layout();
     }
 
@@ -2297,23 +2353,18 @@
         if (handled) { e.preventDefault(); e.stopPropagation(); }
     }
 
-    // A wheel over the frame is the frame's, in both states — see enableWheelZoom. What it
-    // DOES is decided by reflow(), not here: while the frame is still free it grows with the
-    // picture, and once frozen the picture spills inside it.
+    // A wheel over a PLACED window is the window's; anywhere else, and in every other state,
+    // it is the page's. What it does is decided by reflow(), not here: while the frame is
+    // still free it grows with the picture, and once a move has frozen it the picture spills
+    // inside it.
     //
-    // The wheel also PLACES the window, because growing something that dies as soon as you
-    // move the pointer is not a gesture anyone can finish. Freezing is left to freezeSize(),
-    // which the move triggers — so scrolling enlarges it for as long as you like, and
-    // putting it somewhere settles the size.
-    //
-    // pointInPreview() rather than the hit test, because on a hover preview the frame is
-    // pointer-transparent and e.target is whatever is on the page underneath.
+    // The listener is only bound while placed, so the `placed` test is belt and braces
+    // against a stray wheel arriving between place() and unplace().
     function onPinWheel(e) {
-        if (!view) return;
+        if (!view || !placed) return;
         if (!pointInPreview(e.clientX, e.clientY)) return;
         e.preventDefault();
         e.stopPropagation();
-        if (!placed) place();
         const f = 1 + cfg.wheelZoomStep / 100;
         zoomAt(view.scale * (e.deltaY < 0 ? f : 1 / f), e.clientX, e.clientY);
     }
@@ -3629,12 +3680,13 @@
         ]);
 
         section('The placed window');
-        note('Scroll the preview to make it bigger, then move it where you want it',
-            'The wheel over a preview keeps it on screen and grows the whole window — which is ' +
-            'how a page full of small pictures gives usable previews without resizing every one ' +
-            'of them by hand. Moving the window then settles its size: from that point the ' +
-            'wheel and +/− zoom the picture inside the frame instead, the arrow keys pan it, ' +
-            'and 0 fits it back to the frame.');
+        note('Click the preview, then scroll to make it bigger',
+            'While you are only hovering, the wheel belongs to the page and scrolls it — which ' +
+            'takes the preview down with it. Click the preview first and the wheel becomes the ' +
+            'window\'s: it grows the whole window, which is how a page full of small pictures ' +
+            'gives usable previews without resizing every one by hand. Moving the window then ' +
+            'settles its size: from that point the wheel and +/− zoom the picture inside the ' +
+            'frame instead, the arrow keys pan it, and 0 fits it back to the frame.');
         note('It behaves like an ordinary window, and may hang off the screen',
             'Drag the frame around the picture — the margin or the status bar — to move it, ' +
             'at any zoom. Drag an edge or a corner to resize (hold Shift to change its shape ' +
@@ -3673,21 +3725,23 @@
         num('fadeMs', 'Fade duration', 'ms', 0, 1000, 10);
         num('borderWidth', 'Border thickness', 'px', 0, 20, 1);
         num('frameMargin', 'Frame margin',
-            'px of frame drawn around the picture. It is a move handle: drag it to move a '
-            + 'placed window at any zoom, exactly as the status bar does - and the bar fills '
-            + 'the bottom one. Set it to 0 and the bar goes back on top of the picture',
+            'px of frame drawn over the edges of the picture, matching the status bar along '
+            + 'the bottom. It is a move handle: drag it to move a placed window at any zoom. '
+            + 'It fades with the bar after a second of stillness, and stops being a handle '
+            + 'while faded, so it is never something invisible to press by mistake. 0 leaves '
+            + 'the status bar as the only handle',
             0, 80, 2);
         color('borderColor', 'Border colour');
         num('cornerRadius', 'Corner radius', 'px', 0, 40, 1);
         check('shadow', 'Drop shadow');
         check('showStatusBar', 'Show the status bar',
             'filename, format, dimensions, size — and the bottom edge of the frame, which moves '
-            + 'a placed window the way a title bar does. The frame margin above moves it just as '
-            + 'well, so turning this off no longer strands a zoomed-in window — unless the '
-            + 'margin is also 0, in which case such a window can be resized and panned but not '
-            + 'moved. '
-            + 'It fades out after a second of a still pointer and returns when you move the '
-            + 'pointer over the preview');
+            + 'a placed window the way a title bar does. The frame margin does the same on the '
+            + 'other three sides, so turning this off no longer strands a zoomed-in window — '
+            + 'unless the margin is also 0, in which case such a window can be resized and '
+            + 'panned but not moved. '
+            + 'Both fade out after a second of a still pointer so they stop covering the '
+            + 'picture, and return when you move the pointer over the preview');
         pick('spinnerTheme', 'Loading ring',
             'auto follows the browser’s light/dark setting', [
                 ['auto', 'Match the browser'], ['dark', 'Always dark'], ['light', 'Always light']]);

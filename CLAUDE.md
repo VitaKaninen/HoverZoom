@@ -13,6 +13,21 @@ nothing here plays sound, offers controls, or previews a video *player*. Inherit
 > behaviour, and keep it current when behaviour changes. This file holds the *reasons*;
 > `INTERACTION.md` holds the *behaviour*. Where they overlap, do not let them drift.
 
+> **These notes are a record of reasons, not a veto.** Both files are written in a confident
+> voice — "do not regress this", "settled", "decided deliberately" — because a reason that is
+> not stated plainly is a reason nobody can weigh later. That voice is *not* a claim that the
+> decision is permanent. Said by the user, 2026-09-04, after two changes were reverted in the
+> session that shipped them: *"we need to not treat what is written in the notes as law. We are
+> making this up as we go. Settled decisions from the past can be changed. If there is a good
+> reason behind it, then we need to address it head on, not just decide that we can't do that
+> because we previously decided against it."*
+>
+> So when a note argues against what is being asked for: **say what the old reason was, say
+> whether the new request answers it, and then do the work.** Quoting the note as an objection
+> and stopping there is the failure mode. v0.31.0 is the worked example — it reverses two of
+> v0.30.0's decisions, and both notes now carry the argument in both directions rather than
+> being deleted.
+
 ## Why this exists
 
 Hover Zoom+ (extesy/hoverzoom) zooms some images on a page and silently ignores others. That is
@@ -77,7 +92,7 @@ and `R2`). What follows is why it is built that way — keep the two in step.*
 
 - **Hover** — transient. Opens beside the pointer. Held open by ONE thing: the pointer being
   over the source image. Leaving that image takes it down **at once**, with no grace period.
-  A wheel over it grows the whole window (see below).
+  A wheel over it belongs to the PAGE: it scrolls, and the scroll takes the preview down.
 - **Placed** — one press: a click, a drag, or a corner grab, all the same gesture. Held open by
   NOTHING; it ends only on the X, Escape, or a click outside it. Position becomes free, the size
   freezes, and the page underneath stays readable and scrollable.
@@ -127,7 +142,7 @@ listening there would see a phantom click — nothing on the page can act on it 
 is the backdrop), but being observed at all is avoidable. Note `e.composedPath()[0]`, not
 `e.target`: outside the shadow tree the target is retargeted to the host.
 
-### The wheel PLACES it and grows it; MOVING it freezes the size (v0.28.0, refined v0.29.0)
+### The wheel grows a PLACED window; MOVING it freezes the size (v0.28.0, reverted to placed-only in v0.31.0)
 
 *Specified as `E22`.* The reported problem: on a page whose pictures are all small, every preview
 opens small, and "resize each one by hand" is not a workflow.
@@ -139,15 +154,24 @@ So `reflow()` has two modes, switched by `view.fixedW`/`fixedH` being null or no
 - **Frame frozen** — `frameW = view.fixedW`. The wheel then zooms the picture *inside* a fixed
   aperture, which spills and pans. Only `resizeBy()` changes it after that.
 
-**Two things switch that, and v0.29.0 separated them deliberately.**
+**`freezeSize()` is called from the MOVE, not from `place()`.** Putting the window somewhere is
+the moment its size is settled; until then the wheel keeps growing it. `MOVE_SLOP` (3px) so a
+hand shaking during a click does not count as putting it somewhere. That separation is what
+leaves room for the wheel to grow a window that has been placed but not yet positioned.
 
-- **`onPinWheel` calls `place()`.** A wheel over the frame is a deliberate act on it, so it earns
-  the same promotion a press does. Without this, growing a preview was a gesture nobody could
-  finish: it was still hover-held, so moving the pointer *towards the window you had just
-  enlarged* killed it.
-- **`freezeSize()` is called from the MOVE, not from `place()`.** Putting the window somewhere is
-  the moment its size is settled; until then the wheel keeps growing it. `MOVE_SLOP` (3px) so a
-  hand shaking during a click does not count as putting it somewhere.
+**A wheel over a HOVER preview is the page's, and that is the v0.31.0 correction.** v0.29.0 had
+`onPinWheel` call `place()`, so one notch promoted the window and grew it — which made
+grow-then-position a gesture you could finish without clicking first. The cost was that the
+wheel stopped scrolling the page whenever a preview was up, and since `nudgeIntoReach()` puts the
+cursor inside the frame, that was nearly always. Asked for and reverted the same day it shipped:
+scrolling a page is a thing people do constantly and previewing is incidental to it, so the
+common gesture wins. The bought gesture survives one click later — placing still does not freeze
+the size, so a placed-but-unmoved window grows on the wheel exactly as before.
+
+**`enableWheelZoom()` is therefore called from `place()`, not `showViewer()`**, and
+`disableWheelZoom()` from `cancel()`. Binding it on show and gating inside the handler would work
+too, and is worse: this is a non-passive capture listener on `window`, so while it is attached
+every wheel event on the page is cancellable for nothing.
 
 A window placed by a click and never moved keeps growing on the wheel until it reaches the
 ceiling, where the frame stops and the picture spills anyway — a longer road, not a dead end.
@@ -162,12 +186,6 @@ preview that has been wheel-grown must hold its on-screen size exactly as a plac
 missing that case means a late upgrade quietly undoing the sizing just done by hand. Getting the
 ordering wrong here compiles and silently does the wrong thing.
 
-**The known cost, and it is the change most likely to be felt:** while a hover preview is up, the
-wheel no longer scrolls the page. `nudgeIntoReach()` puts the cursor inside the frame, so the
-wheel is nearly always claimed. Scrolling means moving off the image — which takes the preview
-down at once — then scrolling. This buys one rule covering both states (*a wheel over the frame is
-the frame's, anywhere else is the page's*), and reverting it is one condition in `onPinWheel`.
-
 ### Free positioning, and the status bar as the title bar (v0.28.0, settled v0.29.0)
 
 *Specified as `E21`.* `clampPosition()` was not deleted, it was **loosened** — deleting it strands
@@ -176,7 +194,9 @@ narrowed to 1200. It now guarantees only that `KEEP_ON_SCREEN` (72px) stays in v
 
 `hitRegion()` is three rings since v0.30.0: **corners and a `RESIZE_BAND` (12px) edge strip
 resize, the rest of the frame margin moves, and everything inside that is the middle**, which
-moves the frame or pans the picture by the old rule.
+moves the frame or pans the picture by the old rule. The move ring only exists **while the frame
+margin is visible** (`chromeVisible()`); faded, a press there falls through to the middle's rule,
+which is what keeps an overlaid ring from being the invisible band all over again.
 
 **The middle ring is the move band that v0.29.0 removed, and the difference is that this one is
 drawn.** v0.28.0 put an *invisible* move-only band just inside the resize strip so a window
@@ -222,7 +242,7 @@ at all.
 
 A hover preview is deliberately **not** free: it is positioned by the script rather than the user,
 so it is kept fully on screen while it fits, and only stopped from sliding a gap in at an edge
-once the wheel has grown it past the window.
+once it has been grown past the window.
 
 ### A drag outlives the frame and the browser (v0.29.0)
 
@@ -291,42 +311,63 @@ and Shift is the escape. On the axis not being dragged the frame grows about its
 anchoring it to top or left instead makes the window crawl diagonally while you pull one edge
 straight.
 
-### The window has a frame, and the frame is the handle (v0.30.0)
+### The window has a frame, drawn ON the picture (v0.30.0, corrected in v0.31.0)
 
-*Specified as `E25`.* `frameMargin` (24px, a setting) is a ring drawn on all four sides; the
-status bar fills the bottom one. It is a move handle, so the window reads as an ordinary window
-from the outside in: **outer 12px resize, the rest of the margin moves, the picture pans**.
+*Specified as `E25`.* `frameMargin` (24px, a setting) is a ring painted **over** the edges of the
+picture, exactly as the status bar always has been — the bar *is* the bottom of that ring. It is
+a move handle, so the window reads as an ordinary window from the outside in: **outer 12px
+resize, the rest of the margin moves, the picture pans**.
 
-- **`.ap` is a wrapper, and it is what makes the ring honest.** The picture is clipped to the
-  aperture, so it can never paint over the margin — a move handle the picture covers at some
-  zooms is exactly the invisible-band problem again. `layout()` writes the aperture's position
-  and size along with everything else, so the "one function writes the DOM" invariant holds.
-- **`insetX()`/`insetY()`/`outerW()`/`outerH()` replaced ~15 copies of
-  `view.frameW + cfg.borderWidth * 2`.** That expression was the thing most likely to be
-  half-updated; going through helpers is what makes the margin impossible to count twice or miss
-  in one place.
-- **`onBar` still outranks `hitRegion()`** in `onBoxDown`. At the default the bar *is* the bottom
-  margin, so the two agree — but at `frameMargin: 0` the bar sits on the picture again and the
-  precedence is what stops its lower half resizing.
-- **Geometry, not child elements**, for the same reason as before: corner and edge divs land in
-  the `isBoxControl()` capture trap.
+**v0.30.0 laid the ring out AROUND the picture and that was the wrong shape.** It cost every
+preview 48px of width and height, and it forced a 98px minimum window — which then read back as
+"the minimum is large because the frame is large", a number invented to prop up a mistake. The
+user's own framing settled it: the bottom border was always drawn on top of the picture, and the
+other three were meant to match it. Overlaying costs nothing and needs no minimum beyond the one
+the ⊘ needs anyway.
 
-**The minimum window is a 48px aperture — about 98px overall.** `minDisplayed: 0` on a page of
-tiny pictures otherwise produced previews a few pixels across, which is where the ⊘ complaint
-started. `MIN_FRAME` is applied in `reflow()` (so it bounds the opening size and the wheel) and
-in `resizeBy()` (so it bounds a hand resize); both were needed.
+- **Four `.edge` divs, `pointer-events: none`, sized by `layoutChrome()`.** They are pure
+  decoration: `hitRegion()` decides what a press on them does, from `view`, so they never enter
+  the `isBoxControl()` capture trap. The sides run the full height *under* the bar rather than
+  stopping at it — stopping at whichever of the two is thicker leaves a visible gap in the ring
+  just above the bar whenever they disagree. The bottom strip only appears when there is no bar.
+- **`chromeThickness()` is read by both the drawing and `hitRegion()`.** The ring is capped at a
+  third of the frame so a 50px window is not entirely chrome, and if the two capped differently
+  the ring you can see and the ring you can grab would not be the same ring.
+- **The ring FADES with the bar, and stops being a handle while faded** (`chromeVisible()`, read
+  by `hitRegion()`). This is the whole answer to the objection that killed v0.28.0's invisible
+  move band: there is never a region that means something different from what is drawn. The bar
+  got this for free from `pointer-events: none`; the ring is drawn rather than hit-tested, so the
+  same rule has to be applied by hand.
+- **The `idle` class moved from `capEl` to `box`.** The strips are siblings of the bar and CSS
+  cannot select backwards, so one class on their common ancestor is what makes the two halves of
+  the frame fade as one thing. `showBar()`, `resetBar()` and `chromeVisible()` all read it there.
+- **`pointerOverChrome()` extends `pointerOverBar()` to the ring**, so a pointer parked on the
+  margin holds it open the same way. Geometry, because the strips are pointer-transparent.
+- **`insetX()`/`insetY()`/`outerW()`/`outerH()` are kept even though the margin no longer feeds
+  them.** They replaced ~15 copies of `view.frameW + cfg.borderWidth * 2` — the expression most
+  likely to be half-updated — and they are where a future margin-affects-layout change would go.
+- **`onBar` still outranks `hitRegion()`** in `onBoxDown`, or the bar's lower half would resize.
+
+**The minimum window is 48px of picture — 50px at the default border**, which is the number the
+user asked for. `minDisplayed: 0` on a page of tiny pictures otherwise produced previews a few
+pixels across, which is where the ⊘ complaint started. `MIN_FRAME` is applied in `reflow()` (so it
+bounds the opening size and the wheel) and in `resizeBy()` (so it bounds a hand resize); both were
+needed.
 
 **The ⊘ is absolutely positioned, 20px in from the right edge.** As a flex item it sat after a
 `flex:none` dimensions field, so on a narrow bar the name shrank to nothing, the dimensions
 overflowed, and the button was pushed past the end and clipped — invisible on exactly the
-previews where it is most wanted. `.box.hot .cap` reserves a matching gutter so text never runs
-under it. 20px rather than flush because the corner is where the hand goes to resize or move.
-The **X** moved in for the same reason: `chrome() + 8`, inside the picture rather than in the
-frame's corner.
+previews where it is most wanted. 20px rather than flush because the corner is where the hand
+goes to resize or move. The **X** moved in for the same reason, to just inside the ring.
 
-**The aperture is `#181825` against the frame's `#1e1e2e`.** One shade apart, plus a 1px hairline
-— enough to read the ring as chrome once a zoomed-out picture leaves background showing on all
-four sides, without turning the letterbox into a decoration.
+**The gutter that keeps text off the ⊘ is set inline by `layoutChrome()`, not in CSS, and it is
+clamped.** `.cap` is `left:0;right:0` with `box-sizing: border-box`, so a padding wider than the
+frame does not shrink the text — it forces the whole bar wider than the window, which then gets
+clipped and drags the ⊘ off its 20px. Measured on a 50px window: the bar came out 54px.
+
+**The side and top strips are `rgba(30,30,46,.30)` against the bar's `.86`** — mostly transparent
+on purpose, since they carry no text and their whole job is to say "there is a handle here"
+without hiding the picture.
 
 ### The picture may be smaller than the frame (v0.30.0)
 
@@ -337,7 +378,7 @@ than the window — the frame and the picture were welded at the fit.
 
 - **`minScaleFor()` is the floor now**: `MIN_MEDIA` (32px) on the picture's long side, **capped at
   `fitScaleFor()`** so a thumbnail smaller than 32px is never forced to open enlarged.
-- **The background is already there.** `.ap` centres the picture (`reflow()`'s existing ox/oy
+- **The background is already there.** `reflow()` centres the picture (its existing ox/oy
   branch) and the frame's own colour shows around it; nothing new had to be painted.
 - **Every enforcement of the old floor had to go together** — `zoomAt`, `verifyMedia`, the window
   `resize` listener, `upgradeViewer`, and `resizeBy`. Missing one leaves the floor in place on a
@@ -384,14 +425,14 @@ The consequences, all of which have to be handled together:
   status bar. Using `ours()` there would mean the bar never faded again.
 - **Nothing inside the frame is clickable on a plain hover preview**, by design — it dies the
   moment you move off the image toward it. Anything that needs clicking (the X, the ⊘, the
-  browser's context menu, the resize corners' cursors) belongs to a placed window. The wheel is
-  the exception, and always was: it needs no pointer travel, which is exactly what makes
-  growing a preview before placing it possible (v0.28.0).
+  browser's context menu, the resize corners' cursors) belongs to a placed window. **The wheel is
+  not an exception either, since v0.31.0**: it goes to the page, which scrolls and takes the
+  preview with it. v0.28.0–v0.30.0 made it the frame's on the argument that a wheel needs no
+  pointer travel; true, but it meant a preview being up silently disabled scrolling.
 
 Two guards keep a drag from destroying the thing being dragged: `onOver` and `onOut` both
-return early while `drag` is set. Scroll still cancels a hover preview — but note that a wheel
-over the frame is claimed for zoom and never reaches the page, so in practice that fires only
-for a wheel somewhere else.
+return early while `drag` is set. Scroll cancels a hover preview, and since the wheel is the
+page's there again, that fires wherever the pointer is.
 
 **`hot` is set by `layout()` and must be cleared by `hideViewer()`** — v0.9.0 set it and never
 removed it, and the symptom is nasty out of all proportion to the fix. `layout()` stops running
@@ -1078,24 +1119,24 @@ the controls without offering a switch.
   not remove the need to *place* a preview well, and the browser still paints there.
   `usableHeight()` floors at 64px: the Browser pane reports `clientHeight` **0** while
   hidden, and without the floor the reserve would make the viewport negative.
-- **The frame grows before the image spills — but only while HOVERING** (changed in v0.28.0; see
-  the wheel section above). Zooming a hover preview enlarges the frame up to `maxSizeMultiple` ×
-  the viewport; placing freezes it, and from then on zoom overflows the frame, which is when
-  `pannable()` (and the `grab` cursor) turn on. Zoom-out floors at `fitScale`, which is
-  `fitScaleFor()` — fit-to-window while the frame is free, fit-to-frame once it is frozen.
+- **The frame grows before the image spills — until the window is MOVED** (see the wheel section
+  above). Zooming a placed-but-unmoved window enlarges the frame up to `maxSizeMultiple` × the
+  viewport; moving it freezes the frame, and from then on zoom overflows it, which is when
+  `pannable()` (and the `grab` cursor) turn on. Zoom-out floors at `minScaleFor()` since v0.30.0,
+  not at the fit; `fitScaleFor()` is still what `0` returns to — fit-to-window while the frame is
+  free, fit-to-frame once it is frozen.
 - **Key and wheel listeners live on `CAP_TARGET` (= `window`), in capture** — per
   `../CLAUDE.md`, that beats every document-level listener on the page and in sibling
   userscripts, so arrows and `+`/`−` are ours while placed and nobody else's. Keys are added in
   `place()` and removed in `unplace()` against that one constant; `wheel` uses the shared
   `WHEEL_OPTS` object for add *and* remove, or the removal silently no-ops.
-- **The wheel belongs to the frame in BOTH states** (v0.28.0; it was placed-only before).
-  `enableWheelZoom()` is called from `showViewer()` and `disableWheelZoom()` from `cancel()`, one
-  flag so add and remove cannot drift. It is bound **on demand, not for the life of the script**:
-  this is a non-passive capture listener on `window`, and leaving one attached makes every wheel
-  event on every page cancellable for nothing. `onPinWheel` claims it only when the pointer is
-  actually over the frame — `pointInPreview()` geometry rather than the hit test, because on a
-  hover preview `e.target` is whatever is on the page underneath — so a wheel anywhere else
-  still scrolls, in both states.
+- **The wheel belongs to the frame only while PLACED** (v0.28.0 made it both states; v0.31.0 put
+  it back). `enableWheelZoom()` is called from `place()` and `disableWheelZoom()` from `cancel()`,
+  one flag so add and remove cannot drift. It is bound **on demand, not for the life of the
+  script**: this is a non-passive capture listener on `window`, and leaving one attached makes
+  every wheel event on every page cancellable for nothing. `onPinWheel` claims it only when the
+  pointer is actually over the frame — `pointInPreview()` geometry rather than the hit test,
+  because `e.target` is the shadow host — so a wheel anywhere else still scrolls.
 - **In the frame's MIDDLE a drag pans only while the picture is spilling; otherwise it moves
   the frame** (v0.10.0) — with the status bar always moving it whatever the zoom.
   Before this the placed branch was `'pan'` unconditionally and the press was simply dropped when
