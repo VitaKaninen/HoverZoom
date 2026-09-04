@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.31.0
+// @version     0.32.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -1358,6 +1358,9 @@
     // and throw away the size they chose.
     function fitScaleFor(w, h) {
         if (!w || !h) return 1;
+        // Against the LOCKED box rather than the frame's current size: under a 'max' lock the
+        // frame may be hugging a zoomed-out picture, and `0` should take the window back up to
+        // the size it was given, not freeze it at whatever it has shrunk to.
         if (view && view.fixedW != null) return Math.min(view.fixedW / w, view.fixedH / h);
         const m = viewportBox();
         return Math.min(cfg.zoomFactor, m.w / w, m.h / h);
@@ -1381,18 +1384,30 @@
     // placing, and having to resize every one of them by hand on a page full of small
     // images is the thing that made this necessary.
     //
-    // Placing it FREEZES the frame (view.fixedW/fixedH, set by place() and by a corner
-    // drag). From then on the frame is an aperture: zooming scales the picture inside it,
-    // which spills and pans, and only a corner changes the frame again.
+    // THREE modes, not two (v0.32.0), because moving a window and resizing it by hand are
+    // different statements about how big it should be:
+    //
+    //   sizeLock null     free      the frame follows the picture, up to the growth ceiling
+    //   sizeLock 'max'    a ceiling the frame still follows the picture, but no further than
+    //                               the size it had when it was moved
+    //   sizeLock 'exact'  fixed     the frame is exactly what was dragged, whatever the
+    //                               picture does inside it
+    //
+    // The middle one is the point of the change. Moving a window says where it goes, not what
+    // shape it is, so zooming out afterwards should shrink the whole window the way it did
+    // before the move — and zooming back in should stop where it stopped before, rather than
+    // growing on forever. Only a deliberate resize pins the edges.
     function reflow() {
         if (!view) return;
         const g = growBox();
         view.imgW = view.natW * view.scale;
         view.imgH = view.natH * view.scale;
-        view.frameW = Math.round(view.fixedW != null ? view.fixedW
-            : Math.max(MIN_FRAME, Math.min(view.imgW, g.w)));
-        view.frameH = Math.round(view.fixedH != null ? view.fixedH
-            : Math.max(MIN_FRAME, Math.min(view.imgH, g.h)));
+        const capW = view.fixedW == null ? g.w : (view.sizeLock === 'max' ? view.fixedW : null);
+        const capH = view.fixedH == null ? g.h : (view.sizeLock === 'max' ? view.fixedH : null);
+        view.frameW = Math.round(capW == null ? view.fixedW
+            : Math.max(MIN_FRAME, Math.min(view.imgW, capW)));
+        view.frameH = Math.round(capH == null ? view.fixedH
+            : Math.max(MIN_FRAME, Math.min(view.imgH, capH)));
         view.ox = view.imgW <= view.frameW
             ? (view.frameW - view.imgW) / 2
             : Math.min(0, Math.max(view.frameW - view.imgW, view.ox));
@@ -1949,10 +1964,9 @@
             url: res.url, natW: res.w, natH: res.h,
             scale: fit, fitScale: fit,
             imgW: 0, imgH: 0, frameW: 0, frameH: 0, ox: 0, oy: 0, left: 0, top: 0,
-            // null while it is still a hover preview, which is what lets the wheel grow the
-            // frame; place() and a corner drag fill them in and the frame stops following
-            // the picture. See reflow().
-            fixedW: null, fixedH: null,
+            // null while nothing has settled the size. freezeSize() (the move) fills them in
+            // as a CEILING, resizeBy() as an exact size — see sizeLock and reflow().
+            fixedW: null, fixedH: null, sizeLock: null,
         };
         reflow();
 
@@ -2172,6 +2186,9 @@
         if (!view || view.fixedW != null) return;
         view.fixedW = view.frameW;
         view.fixedH = view.frameH;
+        // A CEILING, not a size. The window keeps shrinking with the picture on the way down
+        // and stops here on the way back up; only resizeBy() pins the edges outright.
+        view.sizeLock = 'max';
         view.fitScale = fitScaleFor(view.natW, view.natH);
     }
 
@@ -2294,12 +2311,13 @@
     // be null — that is what makes an edge a one-axis version of a corner rather than a
     // separate gesture.
     //
-    // Aspect is locked to the frame as it was at GRAB TIME — locking it to the picture's
-    // shape instead would snap the frame the instant it was touched — and Shift frees it.
-    // The lock is what makes an edge drag useful rather than a way to grow grey bars: pull
-    // the right edge and the frame widens AND heightens, staying the shape it was. Freed,
-    // an edge drag changes one dimension only, which is what you want on a spilling frame
-    // being used as an aperture.
+    // Aspect is FREE by default and Shift keeps it (v0.32.0 — it was the other way round).
+    // The lock existed because an edge drag that changes one dimension only just grows bands
+    // of background down the sides, and that used to be an incoherent state; since the frame
+    // is allowed to be a different shape from the picture (E26) it is an ordinary one, and
+    // "drag the window to whatever shape I want" is what a window does. Shift still locks it,
+    // to the frame's shape as it was at GRAB TIME — locking to the picture's shape instead
+    // would snap the frame the instant it was touched.
     //
     // On the axis NOT being dragged, the frame grows about its centre. Anchoring that axis
     // to its top or left instead would make the window crawl diagonally while you pull one
@@ -2308,13 +2326,14 @@
     // What happens to the PICTURE depends on whether it was already spilling, which keeps
     // one gesture honest in both cases: a picture at fit stays at fit, so the window gets
     // bigger and so does the picture, and a picture already zoomed in keeps its zoom and
-    // simply shows more of itself.
+    // simply shows more of itself. With a free aspect "at fit" means fitted on whichever axis
+    // binds, so pulling one edge grows the picture only until the other axis takes over.
     function resizeBy(e) {
         const g = growBox();
         let w = drag.w0, h = drag.h0;
         if (drag.ex) w = drag.w0 + (drag.ex === 'r' ? 1 : -1) * (e.clientX - drag.x0);
         if (drag.ey) h = drag.h0 + (drag.ey === 'b' ? 1 : -1) * (e.clientY - drag.y0);
-        if (!e.shiftKey && drag.aspect > 0) {
+        if (e.shiftKey && drag.aspect > 0) {
             if (!drag.ey) h = w / drag.aspect;                                  // vertical edge
             else if (!drag.ex) w = h * drag.aspect;                             // horizontal edge
             else if (Math.abs(w - drag.w0) >= Math.abs(h - drag.h0)) h = w / drag.aspect;
@@ -2328,6 +2347,9 @@
         else if (!drag.ey) view.top = drag.t0 - (h - drag.h0) / 2;
         view.fixedW = w;
         view.fixedH = h;
+        // EXACT from here on: these edges were put where they are on purpose, so they stop
+        // following the picture. A move-lock is only a ceiling; see reflow().
+        view.sizeLock = 'exact';
         view.fitScale = fitScaleFor(view.natW, view.natH);
         if (drag.refit) view.scale = view.fitScale;
         reflow();
@@ -3689,7 +3711,7 @@
             'frame instead, the arrow keys pan it, and 0 fits it back to the frame.');
         note('It behaves like an ordinary window, and may hang off the screen',
             'Drag the frame around the picture — the margin or the status bar — to move it, ' +
-            'at any zoom. Drag an edge or a corner to resize (hold Shift to change its shape ' +
+            'at any zoom. Drag an edge or a corner to resize it freely (hold Shift to keep its shape ' +
             'rather than keep it). Dragging the middle moves it too, until you have zoomed in ' +
             'past the frame, at which point the middle pans the picture instead. Zoom out past ' +
             'the fit and the picture shrinks inside the frame rather than stopping. Close it ' +

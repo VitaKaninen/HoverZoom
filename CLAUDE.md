@@ -147,17 +147,28 @@ is the backdrop), but being observed at all is avoidable. Note `e.composedPath()
 *Specified as `E22`.* The reported problem: on a page whose pictures are all small, every preview
 opens small, and "resize each one by hand" is not a workflow.
 
-So `reflow()` has two modes, switched by `view.fixedW`/`fixedH` being null or not:
+So `reflow()` has THREE modes, named by `view.sizeLock` (v0.32.0 — there were two):
 
-- **Frame free** — `frameW = min(imgW, growBox().w)`. The frame follows the picture, so the wheel
-  makes the whole window bigger, up to `maxSizeMultiple` (2×) of the browser window.
-- **Frame frozen** — `frameW = view.fixedW`. The wheel then zooms the picture *inside* a fixed
-  aperture, which spills and pans. Only `resizeBy()` changes it after that.
+| `sizeLock` | set by | `frameW` |
+|---|---|---|
+| `null` | nothing yet | `max(MIN_FRAME, min(imgW, growBox().w))` — follows the picture to the ceiling |
+| `'max'` | `freezeSize()`, i.e. the MOVE | `max(MIN_FRAME, min(imgW, fixedW))` — still follows it, but no further than the size it had when it was moved |
+| `'exact'` | `resizeBy()`, i.e. a hand resize | `fixedW` — pinned, whatever the picture does inside it |
+
+**The middle one is what the user asked for and it is the whole of v0.32.0.** Moving a window
+says where it goes, not what shape it is: zoom out after a move and the window shrinks with the
+picture the way it did before, zoom back in and it stops where it stopped last time. Measured:
+995×747 → move → zoom out → 327×246 → zoom in → back to 995×747 and the picture spills from
+there. Only dragging an edge is a statement about the edges, and that is the `'exact'` one.
 
 **`freezeSize()` is called from the MOVE, not from `place()`.** Putting the window somewhere is
-the moment its size is settled; until then the wheel keeps growing it. `MOVE_SLOP` (3px) so a
+the moment its size gets a ceiling; until then the wheel keeps growing it. `MOVE_SLOP` (3px) so a
 hand shaking during a click does not count as putting it somewhere. That separation is what
 leaves room for the wheel to grow a window that has been placed but not yet positioned.
+
+**`fitScaleFor()` measures against the LOCKED box, not the current frame.** Under a `'max'` lock
+the frame may be hugging a zoomed-out picture, and `0` has to take the window back up to the size
+it was given rather than freezing it at whatever it has shrunk to.
 
 **A wheel over a HOVER preview is the page's, and that is the v0.31.0 correction.** v0.29.0 had
 `onPinWheel` call `place()`, so one notch promoted the window and grew it — which made
@@ -298,16 +309,23 @@ then:
   why `drag.refit` is captured alongside `drag.spilling` and the test is `scale === fitScale`
   rather than `!spilling`: "not spilling" used to mean "at fit" and no longer does.
 
+With a free aspect, "at fit" means fitted on whichever axis binds, so pulling one edge grows the
+picture only until the other axis takes over. Measured: a 995×747 frame at fit, right edge pulled
+in 400px, gives 595×747 with the picture at 593×445 and background above and below it.
+
 `drag.spilling` is captured at **grab time**, not read per move, or the gesture would change
 character halfway through as the frame passed the picture's size.
 
-Aspect locks to `drag.aspect` — the frame's shape when the edge was grabbed — rather than to the
-picture's, which would snap the frame the instant it was touched. Shift frees it.
+**Aspect is FREE, and Shift keeps it** (v0.32.0 — it was the other way round). The lock was the
+default because an edge drag that changes one dimension only just grows bands of background down
+the sides; that was an incoherent state before v0.30.0's `E26` let the frame be a different shape
+from the picture, and it is an ordinary one now. Shift still locks to `drag.aspect` — the frame's
+shape when the edge was grabbed — rather than to the picture's, which would snap the frame the
+instant it was touched.
 
 **`ex`/`ey` may each be null, and that is what makes an edge a one-axis corner** rather than a
-separate gesture: a `null` axis is left alone by the mouse and then filled in by the aspect lock.
-Without the lock an edge drag would just grow grey bars, which is why locked is the default here
-and Shift is the escape. On the axis not being dragged the frame grows about its **centre** —
+separate gesture: a `null` axis is left alone by the mouse, and it stays alone unless Shift fills
+it in from the aspect lock. On the axis not being dragged the frame grows about its **centre** —
 anchoring it to top or left instead makes the window crawl diagonally while you pull one edge
 straight.
 
