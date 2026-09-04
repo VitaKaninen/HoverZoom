@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.27.0
+// @version     0.28.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -69,15 +69,17 @@
         siteList: [],               // hostnames, matched by suffix
         blockList: [],              // image URLs never to preview; '*' matches anything
 
-        // pinned mode
+        // placed mode
         pinButton: 'left',          // 'left' | 'right' — whichever pins, the other dismisses
         wheelZoomStep: 15,          // % per wheel notch
         panStep: 80,                // px per arrow-key press (Shift = 3x)
         maxZoom: 32,                // hard ceiling, multiples of natural size
 
         // how to display
-        maxWidthPct: 92,            // % of viewport — 100 fills it, less EDGE_GAP
-        maxHeightPct: 92,
+        maxSizeMultiple: 2,         // how far the frame may GROW, as a multiple of the window.
+                                    // Above 1 on purpose: a frame bigger than the window can be
+                                    // shoved aside or upwards and still reach the screen edges,
+                                    // so it never leaves a strip of empty page behind it
         bottomReserve: 30,          // px of the window's bottom edge kept clear — the browser
                                     // paints its link/status text there, over the picture
         zoomFactor: 1.0,            // scale applied to natural size before clamping
@@ -88,7 +90,6 @@
         borderColor: '#45475a',
         cornerRadius: 6,
         shadow: true,
-        dimOpacity: 0,              // 0 = no page dimming, up to 90
         showStatusBar: true,        // filename / type / size / dimensions strip, also the move handle; auto-fades
         spinnerTheme: 'auto',       // 'auto' (follows the browser) | 'dark' | 'light'
         noReferrer: false,          // strip referrer when loading full image
@@ -99,10 +100,21 @@
     const KEY = 'hoverZoomSettings';
     let cfg = Object.assign({}, DEFAULTS, readSettings());
 
+    // Settings that no longer exist are DELETED on read, not merely ignored. cfg is
+    // DEFAULTS merged with what is stored and the whole object is written back on Save, so
+    // a retired key survives every save forever and reappears the moment someone greps for
+    // it. maxWidthPct/maxHeightPct do not convert into maxSizeMultiple — the old pair capped
+    // the size a preview OPENED at (below the window), the new one caps how far it may GROW
+    // (above it), so they do not measure the same thing and there is no honest arithmetic
+    // between them. A preview now opens filling the window instead of 92% of it.
+    const RETIRED = ['maxWidthPct', 'maxHeightPct', 'dimOpacity'];
+
     function readSettings() {
         try {
             const raw = GM_getValue(KEY, null);
-            return raw ? JSON.parse(raw) : {};
+            const o = raw ? JSON.parse(raw) : {};
+            RETIRED.forEach(function (k) { delete o[k]; });
+            return o;
         } catch (e) {
             return {};
         }
@@ -1055,7 +1067,7 @@
     // ox/oy are the image's top-left within the frame's content box: 0 or negative once
     // the image outgrows the frame, centred while it still fits.
     let view = null;
-    let pinned = false;
+    let placed = false;
 
     const MAX_SCALE_ABS = 64;   // ceiling on cfg.maxZoom; past this a pixel is a billboard
     const KEY_ZOOM = 1.25;      // per +/− press
@@ -1070,23 +1082,25 @@
         const style = document.createElement('style');
         style.textContent = [
             ':host{all:initial}',
-            '.dim{position:fixed;inset:0;background:#000;opacity:0;pointer-events:none;transition:opacity var(--fade) ease}',
-            '.dim.on{opacity:var(--dim)}',
+            // Invisible, and never anything else. It exists only to catch the click that
+            // dismisses a placed window before the page can act on it — no dimming, because
+            // the whole point of placing a window is to compare it with what is behind it.
+            // It does not block SCROLLING: a wheel over it finds no scrollable ancestor
+            // until the document, so the page still moves under a placed window.
+            '.dim{position:fixed;inset:0;background:transparent;pointer-events:none}',
             '.dim.catch{pointer-events:auto}',
             '.box{position:fixed;opacity:0;pointer-events:none;transition:opacity var(--fade) ease;',
             'background:#1e1e2e;box-sizing:content-box;overflow:hidden}',
             '.box.on{opacity:1}',
-            // POINTER-TRANSPARENT until it is pinned or deliberately placed. This is what
-            // lets a scan across a row of thumbnails work: the preview never intercepts the
-            // pointer, so leaving an image really does leave it, and the next image under
-            // the preview still gets its own mouseover. Pinning and dragging are decided by
-            // GEOMETRY at document level instead — see pointInPreview().
+            // POINTER-TRANSPARENT until it is placed. This is what lets a scan across a row
+            // of thumbnails work: the preview never intercepts the pointer, so leaving an
+            // image really does leave it, and the next image under the preview still gets
+            // its own mouseover. The press that places one is decided by GEOMETRY at window
+            // level instead — see pointInPreview() and hitRegion().
             '.box.hot{pointer-events:auto}',
-            // Placed but not pinned, the whole frame is a move handle: there is nothing to
-            // pan yet, and dragging is how a preview is kept without pinning it.
-            '.box.hot:not(.pinned){cursor:move}',
-            // Pinned with nothing to pan, the frame moves too, so it says so.
-            '.box.pinned:not(.pan){cursor:move}',
+            // With nothing to pan the frame moves, so it says so. onMove overrides this with
+            // an inline cursor over the edge band and the corners.
+            '.box.placed:not(.pan){cursor:move}',
             '.box.pan{cursor:grab}',
             '.box.pan.drag{cursor:grabbing}',
             'img,video{display:block;position:absolute;background:#1e1e2e;-webkit-user-drag:none;user-select:none}',
@@ -1098,7 +1112,7 @@
             '.cap{position:absolute;left:0;right:0;bottom:0;display:flex;align-items:baseline;gap:10px;',
             'padding:4px 8px;font:11px/1.5 system-ui,sans-serif;color:#cdd6f4;',
             'background:rgba(30,30,46,.86);letter-spacing:.02em;user-select:none}',
-            '.box.pinned .cap{cursor:move}',
+            '.box.placed .cap{cursor:move}',
             '.cap .name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;',
             'font-family:ui-monospace,SFMono-Regular,Consolas,monospace;color:#a6adc8}',
             '.cap .meta{flex:none;white-space:nowrap}',
@@ -1139,18 +1153,22 @@
             'align-items:center;justify-content:center;border-radius:50%;border:1px solid #45475a;',
             'background:rgba(30,30,46,.88);color:#cdd6f4;font:17px/1 system-ui,sans-serif;',
             'cursor:pointer;user-select:none}',
-            '.box.pinned .x{display:flex}',
+            '.box.placed .x{display:flex}',
             '.x:hover{background:#f38ba8;border-color:#f38ba8;color:#1e1e2e}',
         ].join('');
         root.appendChild(style);
 
         dimEl = document.createElement('div');
         dimEl.className = 'dim';
-        // Only reachable while `.catch` is on, i.e. while pinned. Killing the mousedown
+        // Only reachable while `.catch` is on, i.e. while placed. Killing the mousedown
         // as well as the click stops the page beneath from starting a selection or
         // following a link with the same gesture that dismissed us.
+        //
+        // dismiss() rather than unplace(): the click that gets rid of a window very often
+        // lands on the thumbnail it came from, and a plain close would let the next mouse
+        // movement re-open the thing just thrown away.
         dimEl.addEventListener('mousedown', function (e) { e.preventDefault(); e.stopPropagation(); }, true);
-        dimEl.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); unpin(); }, true);
+        dimEl.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); dismiss(); }, true);
         root.appendChild(dimEl);
 
         box = document.createElement('div');
@@ -1203,7 +1221,7 @@
         closeEl.title = 'Close (Esc)';
         closeEl.textContent = '×';
         closeEl.addEventListener('mousedown', function (e) { e.preventDefault(); e.stopPropagation(); }, true);
-        closeEl.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); unpin(); }, true);
+        closeEl.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); unplace(); }, true);
 
         box.appendChild(imgEl);
         box.appendChild(vidEl);
@@ -1231,9 +1249,9 @@
 
     // ----------------------------------------------------------------- geometry
 
-    // The one gutter between the frame and the edge of the window. clampPosition() uses it
-    // too, and it is subtracted from the cap here so that maxWidthPct:100 means "fill the
-    // window" and not "be 8px wider than clampPosition will allow you to sit".
+    // The one gutter between the frame and the edge of the window, applied wherever WE place
+    // a frame rather than the user. It is subtracted from the opening size as well as the
+    // opening position, or a preview would open exactly 8px wider than it is allowed to sit.
     const EDGE_GAP = 4;
 
     // The browser paints its own status text — the target of the link under the pointer,
@@ -1248,38 +1266,62 @@
         return Math.max(64, vh - Math.max(0, cfg.bottomReserve || 0));
     }
 
+    // The box a preview OPENS into. Never larger than the window, whatever the growth
+    // ceiling says: a preview appears without being asked for, so one that arrived taller
+    // than the screen would be a nuisance rather than a feature. Growing past this point is
+    // something the user does on purpose, with the wheel or a corner.
     function viewportBox() {
         const vw = document.documentElement.clientWidth;
         const vh = usableHeight();
-        // The percentage is of the OUTER frame, borders included, so the number in the panel
-        // is the fraction of the window the preview visibly occupies. Below 100 the cap is
-        // the percentage; at 100 the gutter is what stops it, not the percentage. It is a
-        // percentage of the USABLE height, so raising bottomReserve shrinks the preview
-        // rather than pushing it off the bottom.
-        const outerW = Math.min(vw * (cfg.maxWidthPct / 100), vw - EDGE_GAP * 2);
-        const outerH = Math.min(vh * (cfg.maxHeightPct / 100), vh - EDGE_GAP * 2);
         return {
             vw: vw,
             vh: vh,
-            w: Math.max(32, outerW - cfg.borderWidth * 2),
-            h: Math.max(32, outerH - cfg.borderWidth * 2),
+            w: Math.max(32, vw - EDGE_GAP * 2 - cfg.borderWidth * 2),
+            h: Math.max(32, vh - EDGE_GAP * 2 - cfg.borderWidth * 2),
         };
+    }
+
+    // A setting this high is a compositing cost, not a feature: 4x a 1920x1080 window is a
+    // 33-megapixel frame.
+    const MAX_MULTIPLE_ABS = 4;
+
+    // How far the frame may grow. Deliberately bigger than the window — see the setting.
+    function growBox() {
+        const m = Math.max(1, Math.min(cfg.maxSizeMultiple || 1, MAX_MULTIPLE_ABS));
+        const b = viewportBox();
+        return { vw: b.vw, vh: b.vh, w: b.w * m, h: b.h * m };
     }
 
     function pannable() {
         return !!view && (view.imgW > view.frameW + 0.5 || view.imgH > view.frameH + 0.5);
     }
 
-    // Frame grows with the image until it hits the viewport cap; after that the frame is
-    // fixed and further zoom spills out of it, which is exactly when panning starts to
-    // mean something.
+    // The zoom floor, and what `0` returns to. While the frame still follows the picture
+    // that is "fit the window"; once the frame is frozen it has to become "fit the FRAME",
+    // or `0` on a window the user sized by hand would spring it back to the window's shape
+    // and throw away the size they chose.
+    function fitScaleFor(w, h) {
+        if (!w || !h) return 1;
+        if (view && view.fixedW != null) return Math.min(view.fixedW / w, view.fixedH / h);
+        const m = viewportBox();
+        return Math.min(cfg.zoomFactor, m.w / w, m.h / h);
+    }
+
+    // While it is still a hover preview the frame grows with the image, up to the growth
+    // ceiling: zooming a small picture is how you get a preview big enough to be worth
+    // placing, and having to resize every one of them by hand on a page full of small
+    // images is the thing that made this necessary.
+    //
+    // Placing it FREEZES the frame (view.fixedW/fixedH, set by place() and by a corner
+    // drag). From then on the frame is an aperture: zooming scales the picture inside it,
+    // which spills and pans, and only a corner changes the frame again.
     function reflow() {
         if (!view) return;
-        const m = viewportBox();
+        const g = growBox();
         view.imgW = view.natW * view.scale;
         view.imgH = view.natH * view.scale;
-        view.frameW = Math.round(Math.min(view.imgW, m.w));
-        view.frameH = Math.round(Math.min(view.imgH, m.h));
+        view.frameW = Math.round(view.fixedW != null ? view.fixedW : Math.min(view.imgW, g.w));
+        view.frameH = Math.round(view.fixedH != null ? view.fixedH : Math.min(view.imgH, g.h));
         view.ox = view.imgW <= view.frameW
             ? (view.frameW - view.imgW) / 2
             : Math.min(0, Math.max(view.frameW - view.imgW, view.ox));
@@ -1304,12 +1346,85 @@
         else if (pointer.y > view.top + oh - REACH_INSET) view.top = pointer.y - oh + REACH_INSET;
     }
 
+    // Enough of a placed frame to grab hold of. It must be at least the width of the edge
+    // band that moves the frame (hitRegion), because that is what makes the rule safe:
+    // whatever strip of a half-offscreen window is still visible runs along one of its
+    // edges, so it is always in the band, so the window can always be dragged back. Drop
+    // below the band width and a window can be stranded with nothing but Escape.
+    const KEEP_ON_SCREEN = 72;
+
+    // Two different jobs behind one name.
+    //
+    // A HOVER preview was placed by us, not by the user, so it is kept fully on screen while
+    // it fits — and once the wheel has grown it past the window there is nothing left to
+    // keep inside, so it is only stopped from sliding a gap in at an edge.
+    //
+    // A PLACED window was put where it is on purpose. It may hang off any edge, which is the
+    // whole point of the growth ceiling being above 1x: shove it aside or upwards and the
+    // picture still reaches the screen edges instead of leaving a strip of page behind it.
     function clampPosition() {
-        const m = viewportBox();
+        if (!view) return;
+        const vw = document.documentElement.clientWidth;
+        const vh = document.documentElement.clientHeight;
+        if (!vw || !vh) return;      // the Browser pane reports 0 while hidden
         const ow = view.frameW + cfg.borderWidth * 2;
         const oh = view.frameH + cfg.borderWidth * 2;
-        view.left = Math.max(EDGE_GAP, Math.min(view.left, m.vw - ow - EDGE_GAP));
-        view.top = Math.max(EDGE_GAP, Math.min(view.top, m.vh - oh - EDGE_GAP));
+        if (!placed) {
+            const bh = usableHeight();
+            const loX = vw - ow - EDGE_GAP, hiX = EDGE_GAP;
+            const loY = bh - oh - EDGE_GAP, hiY = EDGE_GAP;
+            view.left = loX >= hiX ? Math.max(hiX, Math.min(view.left, loX))
+                                   : Math.max(loX, Math.min(view.left, hiX));
+            view.top = loY >= hiY ? Math.max(hiY, Math.min(view.top, loY))
+                                  : Math.max(loY, Math.min(view.top, hiY));
+            return;
+        }
+        const keep = Math.min(KEEP_ON_SCREEN, ow, oh);
+        view.left = Math.max(keep - ow, Math.min(view.left, vw - keep));
+        view.top = Math.max(keep - oh, Math.min(view.top, vh - keep));
+    }
+
+    // ------------------------------------------------------- where a press landed
+    //
+    // GEOMETRY, not child elements. Four corner divs and four edge divs would be the
+    // obvious build, and they would land straight in the documented isBoxControl() trap:
+    // onBoxDown is a capture listener on an ANCESTOR, so it eats a child's events before
+    // the child sees them and the symptom is silence rather than an error. Doing it from
+    // `view` also means one code path for both states — on a hover preview the frame is
+    // pointer-transparent and there is nothing to hit-test at all.
+    //
+    // The bands are what make a half-offscreen window recoverable, so the three numbers
+    // below have to be read together with KEEP_ON_SCREEN. A window pushed to the clamp shows
+    // a KEEP_ON_SCREEN square of one of its corners; within that square the corner itself is
+    // a resize handle, and what is left over — KEEP_ON_SCREEN minus CORNER_BAND along each
+    // edge — is the strip that drags it back. Raise CORNER_BAND past KEEP_ON_SCREEN and a
+    // window at the clamp can only be resized, never moved, which is a trap: the corner it
+    // would resize from is anchored off screen.
+    const EDGE_BAND = 20;     // px inside each edge: always moves the frame
+    const CORNER_BAND = 24;   // px square at each corner: resizes
+    const MIN_FRAME = 80;     // a frame smaller than this cannot be grabbed at all
+
+    function hitRegion(x, y) {
+        if (!view) return null;
+        const ow = view.frameW + cfg.borderWidth * 2;
+        const oh = view.frameH + cfg.borderWidth * 2;
+        const rx = x - view.left, ry = y - view.top;
+        if (rx < 0 || ry < 0 || rx > ow || ry > oh) return null;
+        // Bands shrink on a small frame, or they swallow the whole of it and there is no
+        // interior left to pan.
+        const corner = Math.min(CORNER_BAND, ow / 3, oh / 3);
+        const band = Math.min(EDGE_BAND, ow / 4, oh / 4);
+        const l = rx <= corner, r = rx >= ow - corner;
+        const t = ry <= corner, b = ry >= oh - corner;
+        if ((l || r) && (t || b)) return { kind: 'resize', cx: l ? 'l' : 'r', cy: t ? 't' : 'b' };
+        if (rx <= band || rx >= ow - band || ry <= band || ry >= oh - band) return { kind: 'move' };
+        return null;    // interior — the pan-or-move rule decides
+    }
+
+    function regionCursor(reg) {
+        if (!reg) return '';
+        if (reg.kind === 'move') return 'move';
+        return (reg.cx === 'l') === (reg.cy === 't') ? 'nwse-resize' : 'nesw-resize';
     }
 
     // ------------------------------------------------------------- status bar
@@ -1368,9 +1483,9 @@
         parts.push(view.natW + ' × ' + view.natH);
         const bytes = transferBytes(view.url);
         if (bytes) parts.push(humanBytes(bytes));
-        // A detached window can be zoomed too now, so the scale shows whenever it is pinned
-        // or has moved off the scale it opened at.
-        if (pinned || Math.abs(view.scale - view.fitScale) > 1e-6) {
+        // A hover preview can be grown with the wheel, so the scale shows whenever it is
+        // placed or has moved off the scale it opened at.
+        if (placed || Math.abs(view.scale - view.fitScale) > 1e-6) {
             parts.push(Math.round(view.scale * 100) + '%');
         }
         capMetaEl.textContent = parts.join('  ·  ');
@@ -1385,7 +1500,7 @@
     //
     // The ⋮ image-actions menu that used to live at the right end of this bar is gone
     // (v0.12.0). Its Save and Copy could not work: both ran in page JavaScript and needed the
-    // host to send Access-Control-Allow-Origin, which most do not. A pinned window hands
+    // host to send Access-Control-Allow-Origin, which most do not. A placed window hands
     // right-click to the BROWSER instead, whose own menu has no such limit — see the
     // image-actions section of CLAUDE.md.
 
@@ -1477,11 +1592,10 @@
         if (!w || !h) return;
         if (w === view.natW && h === view.natH) return;
         markUnstable(view.url, { w: view.natW, h: view.natH }, { w: w, h: h });
-        if (!pinned) { cancel(); return; }
-        const m = viewportBox();
+        if (!placed) { cancel(); return; }
         view.natW = w;
         view.natH = h;
-        view.fitScale = Math.min(cfg.zoomFactor, m.w / w, m.h / h);
+        view.fitScale = fitScaleFor(w, h);
         view.scale = Math.max(view.scale, view.fitScale);
         reflow();
         layout();
@@ -1498,8 +1612,8 @@
         mediaEl.style.height = Math.round(view.imgH) + 'px';
         mediaEl.style.left = Math.round(view.ox) + 'px';
         mediaEl.style.top = Math.round(view.oy) + 'px';
-        box.classList.toggle('hot', pinned || detached);
-        box.classList.toggle('pan', (pinned || detached) && pannable());
+        box.classList.toggle('hot', placed);
+        box.classList.toggle('pan', placed && pannable());
         caption();
         if (spinDocked) moveSpinner();      // the dock rides with the frame
     }
@@ -1646,11 +1760,18 @@
             url: res.url, natW: res.w, natH: res.h,
             scale: fit, fitScale: fit,
             imgW: 0, imgH: 0, frameW: 0, frameH: 0, ox: 0, oy: 0, left: 0, top: 0,
+            // null while it is still a hover preview, which is what lets the wheel grow the
+            // frame; place() and a corner drag fill them in and the frame stops following
+            // the picture. See reflow().
+            fixedW: null, fixedH: null,
         };
         reflow();
 
         host.style.setProperty('--fade', cfg.fadeMs + 'ms');
-        host.style.setProperty('--dim', (cfg.dimOpacity / 100).toString());
+        // The wheel belongs to the frame from the moment it appears: on a page of small
+        // pictures, growing the preview before placing it is the only alternative to
+        // resizing every single one by hand.
+        enableWheelZoom();
 
         box.style.border = cfg.borderWidth > 0 ? cfg.borderWidth + 'px solid ' + cfg.borderColor : 'none';
         box.style.borderRadius = cfg.cornerRadius + 'px';
@@ -1675,30 +1796,34 @@
 
         box.classList.add('on');
         showBar();
-        if (cfg.dimOpacity > 0) dimEl.classList.add('on');
     }
 
     // A better original arrived while the preview is already up. Swap the pixels without
-    // moving anything the eye is tracking: the frame keeps its centre, and a pinned view
+    // moving anything the eye is tracking: the frame keeps its centre, and a placed view
     // keeps both its on-screen size and the part of the picture it was looking at. The
     // decode is instant because the probe already pulled this URL into cache.
     function upgradeViewer(res) {
         if (!view) return;
-        const m = viewportBox();
         const centreX = view.left + (view.frameW + cfg.borderWidth * 2) / 2;
         const centreY = view.top + (view.frameH + cfg.borderWidth * 2) / 2;
         // where the frame's middle sits in the picture, as a fraction of it
         const fx = view.imgW ? (view.frameW / 2 - view.ox) / view.imgW : 0.5;
         const fy = view.imgH ? (view.frameH / 2 - view.oy) / view.imgH : 0.5;
         const prevImgW = view.imgW;
+        // Read against the OLD fit, before it is recomputed for the new picture.
+        const userSized = view.fixedW != null || view.scale > view.fitScale + 1e-6;
 
         view.url = res.url;
         view.natW = res.w;
         view.natH = res.h;
-        view.fitScale = Math.min(cfg.zoomFactor, m.w / res.w, m.h / res.h);
-        view.scale = pinned && prevImgW
+        view.fitScale = fitScaleFor(res.w, res.h);
+        // Hold the on-screen size whenever the user has had a hand in it — placed, or grown
+        // with the wheel while still hovering. Only a preview nobody has touched re-fits.
+        // Missing the wheel-grown case would mean a late upgrade quietly undoing the sizing
+        // that had just been done by hand.
+        view.scale = userSized && prevImgW
             ? Math.max(view.fitScale, prevImgW / res.w)   // same size on screen, better pixels
-            : view.fitScale;                              // an unpinned preview re-fits
+            : view.fitScale;
 
         reflow();
         view.ox = view.frameW / 2 - fx * view.imgW;
@@ -1727,9 +1852,9 @@
         // the frame's last position: it shows the move cursor, swallows every click through
         // its own onBoxDown, and makes onOver's `ours(e.target)` true so no image under it
         // can ever preview again. Reported as "a phantom window where the preview used to
-        // be"; it appeared only after a preview had been detached or pinned at least once.
+        // be"; it appeared only after a preview had been placed at least once.
         box.classList.remove('on', 'hot', 'pan', 'drag');
-        dimEl.classList.remove('on');
+        box.style.cursor = '';      // onMove writes this inline over the bands; see hitRegion
         // Release the decoded image, or stop the clip, so long sessions accumulate
         // neither bitmaps nor a video quietly buffering behind a hidden element.
         setTimeout(function () {
@@ -1742,9 +1867,9 @@
         }, cfg.fadeMs + 60);
     }
 
-    // ------------------------------------------------------------- pinned mode
+    // ------------------------------------------------------------- placed mode
 
-    // Every pinned-mode key and wheel listener lives on this one node, in capture, so
+    // Every placed-mode key and wheel listener lives on this one node, in capture, so
     // teardown cannot drift and so we outrank document-level listeners belonging to the
     // page or to a sibling userscript (the capture path reaches window first).
     const CAP_TARGET = window;
@@ -1783,10 +1908,13 @@
         } catch (e) { /* no document element yet */ }
     }
 
-    // Wheel-to-zoom belongs to any PLACED window — pinned or merely detached. Having gone to
-    // the trouble of dragging a preview somewhere, a wheel over it means "make this bigger",
-    // not "scroll the page" — and scrolling the page would take the preview down (K2), so the
-    // gesture destroyed the thing it was aimed at.
+    // ONE rule, both states: a wheel over the frame is the frame's, a wheel anywhere else
+    // scrolls the page. What it DOES differs — it grows a hover preview and zooms inside a
+    // placed one — but who owns it does not, and that is what makes it predictable.
+    //
+    // The cost, and it is real: a hover preview is nudged to sit under the cursor, so while
+    // one is up the wheel almost never reaches the page. Scrolling means moving off the
+    // image first, which takes the preview down instantly, and then scrolling.
     //
     // Bound on demand rather than for the life of the script: this is a non-passive capture
     // listener on window, and leaving one attached on every page makes every wheel event on
@@ -1806,35 +1934,42 @@
         CAP_TARGET.removeEventListener('wheel', onPinWheel, WHEEL_OPTS);
     }
 
-    // The one place `detached` is set, so the wheel binding cannot fall out of step with it.
-    function detach() {
-        if (detached) return;
-        detached = true;
-        enableWheelZoom();
-    }
-
-    function pin() {
-        if (pinned || !view) return;
-        pinned = true;
+    // Hovering becomes placed, and there is nothing in between. The old middle rung —
+    // dragged aside but still dying the moment the pointer left it — was the thing that
+    // made a deliberately positioned window disappear on its own, which is the opposite of
+    // what positioning it means.
+    //
+    // Entered by any deliberate act on the frame: a click, a drag, or a corner. The press
+    // does it, not the release, so click-to-place and drag-to-place are the same code path
+    // and there is no travel threshold to get wrong.
+    //
+    // FREEZING THE FRAME is the other half. Until now the wheel has been growing the frame
+    // with the picture; from here the frame is an aperture the picture zooms inside, and
+    // only a corner drag changes it again.
+    function place() {
+        if (placed || !view) return;
+        placed = true;
+        view.fixedW = view.frameW;
+        view.fixedH = view.frameH;
+        view.fitScale = fitScaleFor(view.natW, view.natH);
         clearTimeout(timer);
-        // The in-flight resolve is deliberately NOT cancelled: pinning is a reason to keep
-        // looking for a better original, not to stop. upgradeViewer() preserves the pinned
+        // The in-flight resolve is deliberately NOT cancelled: placing is a reason to keep
+        // looking for a better original, not to stop. upgradeViewer() preserves the placed
         // geometry when one arrives.
-        box.classList.add('pinned');
+        box.classList.add('placed');
         dimEl.classList.add('catch');
         CAP_TARGET.addEventListener('keydown', onPinKey, true);
-        enableWheelZoom();
         layout();
     }
 
-    function unpin() {
-        if (!pinned) return;
-        pinned = false;
+    function unplace() {
+        if (!placed) return;
+        placed = false;
         drag = null;
-        box.classList.remove('pinned', 'drag');
+        box.classList.remove('placed', 'drag');
+        box.style.cursor = '';
         dimEl.classList.remove('catch');
         CAP_TARGET.removeEventListener('keydown', onPinKey, true);
-        disableWheelZoom();
         cancel();
     }
 
@@ -1867,46 +2002,100 @@
         dismiss();
     }
 
+    // Placing happens on the PRESS, so by the time a click arrives the window is already
+    // placed and there is nothing left for this to do but keep the click off the page.
     function onBoxClick(e) {
         if (isBoxControl(e.target)) return;
-        // A drag that actually moved something ends in a click too. Pinning on it would
-        // make the frame impossible to shove aside without committing to a pin.
-        if (justDragged) { justDragged = false; e.stopPropagation(); return; }
-        if (pinned) { e.stopPropagation(); return; }   // a pinned box only closes via X / backdrop / Esc
-        if (!view) return;
         e.preventDefault();
         e.stopPropagation();
-        if (cfg.pinButton === 'left') pin(); else dismiss();
     }
 
     function onBoxDown(e) {
-        if (e.button === 2) { altButton(e); return; }
-        if (e.button !== 0) return;
         if (isBoxControl(e.target)) return;
-        // Swallow it either way: this is the press half of the pin click and must not
-        // reach the page, and it may also turn into a drag.
+        if (e.button !== 0 && e.button !== 2) return;
+
+        // A PLACED window hands the right button to the browser: its own context menu is the
+        // only thing that can Save or Copy the picture, because ours would run in page
+        // JavaScript and need the host's CORS headers. The left button always drives the
+        // window, whichever way pinButton points, or a window could end up with no way to
+        // be moved at all.
+        if (placed) {
+            if (e.button !== 0) return;
+        } else if (e.button !== (cfg.pinButton === 'right' ? 2 : 0)) {
+            altButton(e);           // the other button dismisses a hover preview
+            return;
+        }
+
+        // Swallow it either way: on a hover preview the press really does land on the page
+        // beneath, and a link there would otherwise be followed.
         e.preventDefault();
         e.stopPropagation();
-        justDragged = false;
         if (!view) return;
-        // One rule for every state: the status bar always moves the frame, and anywhere else
-        // pans when there is something to pan and moves the frame when there is not. Before
-        // this a pinned frame at fitScale answered a drag on the picture with nothing at all
-        // — mode came out 'pan', pannable() was false, and the press was dropped. pannable()
-        // is read per press, so zooming in and back out restores dragging by itself, with no
-        // state to keep in step.
-        const mode = (capEl.contains(e.target) || !pannable()) ? 'move' : 'pan';
-        drag = { x: e.clientX, y: e.clientY, mode: mode, dist: 0, moved: false };
+        swallowNextClick = true;    // the click half of this press is ours too
+        if (!placed) place();
+
+        // Three regions, outside in. The corners resize; a band just inside every edge
+        // always moves, whatever the zoom — that band is what stops a window dragged
+        // half off the screen from being stranded, and it is why the status bar is no
+        // longer the only handle a zoomed-in frame has.
+        //
+        // The interior keeps the older rule: pan when there is something to pan, move the
+        // frame when there is not. pannable() is read per press, so zooming in and back
+        // out restores dragging by itself with no state to keep in step.
+        const reg = hitRegion(e.clientX, e.clientY);
+        if (reg && reg.kind === 'resize') {
+            drag = {
+                mode: 'resize', cx: reg.cx, cy: reg.cy,
+                x0: e.clientX, y0: e.clientY,
+                w0: view.frameW, h0: view.frameH, l0: view.left, t0: view.top,
+                aspect: view.frameH ? view.frameW / view.frameH : 1,
+                // Captured at grab time: a frame whose picture already spills is an
+                // aperture, and widening it should reveal more rather than undo the zoom.
+                spilling: pannable(),
+            };
+        } else {
+            const mode = (reg && reg.kind === 'move') || capEl.contains(e.target) || !pannable()
+                ? 'move' : 'pan';
+            drag = { x: e.clientX, y: e.clientY, mode: mode };
+        }
         box.classList.add('drag');
     }
 
+    // A corner drag. The frame is set directly and frozen; what happens to the PICTURE
+    // depends on whether it was already spilling, which keeps one gesture honest in both
+    // cases: a picture at fit stays at fit, so the window gets bigger and so does the
+    // picture, and a picture already zoomed in keeps its zoom and simply shows more of
+    // itself. Aspect is locked to the frame as it was at grab time — locking it to the
+    // picture instead would snap the frame the instant it was grabbed — and Shift frees it.
+    function resizeBy(e) {
+        const g = growBox();
+        const sx = drag.cx === 'r' ? 1 : -1;
+        const sy = drag.cy === 'b' ? 1 : -1;
+        let w = drag.w0 + sx * (e.clientX - drag.x0);
+        let h = drag.h0 + sy * (e.clientY - drag.y0);
+        if (!e.shiftKey && drag.aspect > 0) {
+            if (Math.abs(w - drag.w0) >= Math.abs(h - drag.h0)) h = w / drag.aspect;
+            else w = h * drag.aspect;
+        }
+        w = Math.max(MIN_FRAME, Math.min(w, g.w));
+        h = Math.max(MIN_FRAME, Math.min(h, g.h));
+        if (drag.cx === 'l') view.left = drag.l0 + (drag.w0 - w);
+        if (drag.cy === 't') view.top = drag.t0 + (drag.h0 - h);
+        view.fixedW = w;
+        view.fixedH = h;
+        view.fitScale = fitScaleFor(view.natW, view.natH);
+        if (!drag.spilling) view.scale = view.fitScale;
+        reflow();
+        layout();
+    }
+
     function onPinKey(e) {
-        if (!pinned || !view) return;
+        if (!placed || !view) return;
         if (e.ctrlKey || e.metaKey || e.altKey) return;   // leave browser/page chords alone
         const step = e.shiftKey ? cfg.panStep * 3 : cfg.panStep;
         let handled = true;
         switch (e.key) {
-            case 'Escape': unpin(); break;
+            case 'Escape': unplace(); break;
             case 'ArrowLeft': panBy(step, 0); break;
             case 'ArrowRight': panBy(-step, 0); break;
             case 'ArrowUp': panBy(0, step); break;
@@ -1919,12 +2108,15 @@
         if (handled) { e.preventDefault(); e.stopPropagation(); }
     }
 
+    // A wheel over the frame is the frame's, in both states — see enableWheelZoom. What it
+    // does is decided by reflow(), not here: hovering, the frame is still free and grows
+    // with the picture; placed, the frame is frozen and the picture spills inside it.
+    //
+    // pointInPreview() rather than the hit test, because on a hover preview the frame is
+    // pointer-transparent and e.target is whatever is on the page underneath.
     function onPinWheel(e) {
         if (!view) return;
-        // Pinned, the wheel is ours wherever it lands — the window is modal. Merely detached,
-        // it is one of several things under the pointer, so only a wheel actually over the
-        // frame is claimed and everything else still scrolls the page.
-        if (!pinned && !(ours(e.target) || pointInPreview(e.clientX, e.clientY))) return;
+        if (!pointInPreview(e.clientX, e.clientY)) return;
         e.preventDefault();
         e.stopPropagation();
         const f = 1 + cfg.wheelZoomStep / 100;
@@ -1937,9 +2129,12 @@
     let activeShown = null; // what that element was displaying — the second URL ⊘ blocks
     let token = null;       // cancellation token for the in-flight resolve
     let timer = null;
-    let drag = null;        // { x, y, mode:'pan'|'move', dist, moved } while dragging
-    let justDragged = false;// the click that ends a real drag must not also pin
-    let detached = false;   // an unpinned preview that was dragged: hover no longer owns it
+    let drag = null;        // { mode:'pan'|'move'|'resize', … } while a button is held
+    // The press that places a window also produces a click, and by then the backdrop is
+    // catching — so without this the window would be dismissed by the very gesture that
+    // placed it, or the click would reach a link on the page. Set when a press is claimed,
+    // consumed by the next click, cleared by any press we do not claim.
+    let swallowNextClick = false;
     let suppressed = null;  // element whose preview was dismissed; skipped until re-entered
     // Whether `active` / `suppressed` were reached by looking THROUGH a cover. It changes
     // what "the pointer left the image" means: the pointer is never on the picture itself
@@ -1952,9 +2147,10 @@
     let mouseDown = false;
     let modifierDown = false;
 
-    // A press that wanders this far in total is a drag, not a click. Below it, the frame
-    // still moves, but the release is treated as a pin.
-    const DRAG_SLOP = 3;
+    // There is no drag threshold any more, and no `justDragged`. One existed because a drag
+    // and a click led to DIFFERENT states, so a wobble during a click had to be told from a
+    // real drag. They lead to the same state now — placed, on the press — so there is
+    // nothing left to distinguish.
 
     // There is no grace period on the hide any more, and no `hideTimer`. One existed so the
     // pointer could travel onto the preview before it vanished — which mattered only while
@@ -1962,7 +2158,7 @@
     // unambiguous and the preview goes at once. That is what makes scanning a row of
     // thumbnails give one preview per thumbnail.
 
-    // The unpinned preview cannot be hit-tested, so "is the pointer on it" is answered from
+    // A hover preview cannot be hit-tested, so "is the pointer on it" is answered from
     // `view` instead. Outer rect: the frame plus its border, which is what layout() writes.
     function pointInPreview(x, y) {
         if (!view || !box || !box.classList.contains('on')) return false;
@@ -2561,14 +2757,14 @@
     }
 
     function cancel() {
-        if (pinned) return;         // a pinned viewer outlives hover entirely
+        if (placed) return;         // a placed viewer outlives hover entirely
         clearTimeout(timer);
         if (token) token.cancelled = true;
         token = null;
         active = null;
         activeCovered = false;
         activeShown = null;
-        detached = false;
+        drag = null;
         disableWheelZoom();
         resetBar();
         hideSpinner();
@@ -2583,44 +2779,34 @@
     // it, which is the whole reason Escape alone was not enough.
 
     function dismiss() {
-        suppressed = active;            // read it before unpin()/cancel() clear it
+        suppressed = active;            // read it before unplace()/cancel() clear it
         suppressedCovered = activeCovered;
-        if (pinned) unpin(); else cancel();
+        if (placed) unplace(); else cancel();
     }
 
-    // The button that does NOT pin. Returns true when it acted, which is the signal to
+    // The button that does NOT place. Returns true when it acted, which is the signal to
     // swallow the context menu that a right press is about to raise.
     //
-    // A PINNED window deliberately does NOT act, so the browser raises its own context menu
-    // over our <img> — whose src is the resolved full-size URL. That is the only way "Save
-    // image as…" and "Copy image" work at all: ours ran in page JavaScript and needed the host
-    // to send Access-Control-Allow-Origin, which most do not, while the browser's use its own
-    // network stack and the bitmap it has already decoded. Verified in a real browser
-    // 2026-09-03 (via pinButton:'right', where a second right press already fell through to
-    // it) — native chrome does target an <img> inside an open shadow root, and Save gives the
-    // full-size file.
+    // A PLACED window deliberately does NOT act on the right button, so the browser raises
+    // its own context menu over our <img> — whose src is the resolved full-size URL. That is
+    // the only way "Save image as…" and "Copy image" work at all: ours ran in page
+    // JavaScript and needed the host to send Access-Control-Allow-Origin, which most do not,
+    // while the browser's use its own network stack and the bitmap it has already decoded.
+    // Verified in a real browser 2026-09-03 — native chrome does target an <img> inside an
+    // open shadow root, and Save gives the full-size file.
     //
-    // Only pinned. A HOVER preview is pointer-transparent, so the native menu there would come
-    // up for the thumbnail underneath and offer to save *that*; and a DETACHED window keeps
-    // dismiss because right-click-to-shove-it-away is worth more there than a menu that is one
-    // click (a pin) away. Pinning is the deliberate "I want to work with this image" gesture,
-    // which is exactly where the menu belongs.
+    // So dismiss-by-button belongs to the HOVER preview alone, which has no choice: it is
+    // pointer-transparent, so a native menu there would come up for the thumbnail underneath
+    // and offer to save *that*. A placed window is dismissed with the X, Escape, or a click
+    // outside it.
     function altButton(e) {
-        let acted = false;
-        if (cfg.pinButton === 'right') {
-            if (!pinned && view && box.classList.contains('on')) { pin(); acted = true; }
-        } else if (pinned) {
-            return false;               // hands the press to the browser; see above
-        } else if (active) {
-            dismiss();
-            acted = true;
-        }
-        if (acted) {
-            e.preventDefault();
-            e.stopPropagation();
-            swallowMenu = true;
-        }
-        return acted;
+        if (placed) return false;       // hands the press to the browser; see above
+        if (!active && !view) return false;
+        dismiss();
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.button === 2) swallowMenu = true;
+        return true;
     }
 
     function overOurs(e) {
@@ -2633,41 +2819,39 @@
         pointer.x = e.clientX;
         pointer.y = e.clientY;
         if (spinEl && spinEl.classList.contains('on')) moveSpinner();
+        const over = !!view && !!box && box.classList.contains('on') &&
+            pointInPreview(e.clientX, e.clientY);
         // The status bar comes back when the pointer moves OVER the window, and only then —
-        // moving anywhere else lets it fade, which is the whole point of it.
-        if (view && box && box.classList.contains('on') &&
-            (ours(e.target) || pointInPreview(e.clientX, e.clientY))) showBar();
-        if (!drag) return;
+        // moving anywhere else lets it fade, which is the whole point of it. Geometry, not
+        // ours(e.target): while a window is placed the backdrop is hit-testable across the
+        // whole viewport, so ours() is true everywhere and the bar would never fade again.
+        if (over) showBar();
+        // Which of the three regions the pointer is in, said in the cursor. Only readable
+        // once placed — a hover preview is pointer-transparent, so the page's own cursor is
+        // what shows there, for the same reason the X and the ⊘ are absent from one.
+        if (box && placed && !drag) box.style.cursor = over ? regionCursor(hitRegion(e.clientX, e.clientY)) : '';
+        if (!drag || !view) return;
+        if (drag.mode === 'resize') { resizeBy(e); return; }
         const dx = e.clientX - drag.x;
         const dy = e.clientY - drag.y;
         if (!dx && !dy) return;
         drag.x = e.clientX;
         drag.y = e.clientY;
-        drag.dist += Math.abs(dx) + Math.abs(dy);
-        if (drag.dist > DRAG_SLOP) drag.moved = true;
         if (drag.mode === 'move') {
-            // Dragging an unpinned preview detaches it: it has been deliberately placed, so
-            // it stops following the hover and now lives until the pointer leaves IT.
-            if (drag.moved && !pinned) detach();
             view.left += dx;
             view.top += dy;
-            layout();       // clampPosition() keeps the frame on screen
+            layout();       // clampPosition() keeps a grabbable strip of it on screen
         } else {
             panBy(dx, dy);
         }
     }
 
     function onOver(e) {
-        if (pinned) return;
+        if (placed) return;
         // A drag can outrun the frame it is moving; without this, the page elements
         // sliding under the pointer would cancel the very preview being dragged.
         if (drag) return;
-        if (ours(e.target)) return;         // on the preview — only reachable once detached
-        // The pointer is on the page, so it is off any detached preview. A placed preview is
-        // held by nothing else, so it goes now, and dismiss() suppresses the image it came
-        // from: moving back onto that image must not re-open it until the pointer has left
-        // and returned.
-        if (detached) dismiss();
+        if (ours(e.target)) return;         // on our own overlay
         if (!cfg.enabled || !siteEnabled()) return;
         if (cfg.skipWhileMouseDown && mouseDown) return;
         if (cfg.activation === 'modifier' && !modifierHeld(e) && !modifierDown) return;
@@ -2699,7 +2883,7 @@
                 await resolve(el, displayed, myToken,
                     function (hit) {
                         // First hit paints the preview; every later one is strictly bigger
-                        // and replaces it in place, pinned or not.
+                        // and replaces it in place, placed or not.
                         if (myToken.cancelled || active !== el) return;
                         if (view && box.classList.contains('on')) upgradeViewer(hit);
                         else { showViewer(hit, pointer); dockSpinner(); }
@@ -2725,7 +2909,7 @@
     }
 
     function onOut(e) {
-        if (pinned || drag) return;
+        if (placed || drag) return;
         const to = e.relatedTarget;
         if (suppressed) {
             const inside = (to && suppressed.contains && suppressed.contains(to)) ||
@@ -2738,12 +2922,6 @@
             }
         }
         if (!active) return;
-        if (detached) {
-            // Held by the preview alone. Leaving the source image is a non-event; leaving
-            // the PREVIEW takes it down and suppresses that image until it is re-entered.
-            if (ours(e.target) && !(to && ours(to))) dismiss();
-            return;
-        }
         if (to && active.contains && active.contains(to)) return;   // still inside the image
         // Under a lid, moving from one layer of the card to another — the cover anchor to
         // the caption to the badge — is not leaving the picture, and every such crossing
@@ -2765,11 +2943,12 @@
     // userscripts. On a pointer-transparent hover preview the press really does land on the
     // page beneath, and a link there would otherwise be followed.
     CAP_TARGET.addEventListener('mousedown', function (e) {
+        swallowNextClick = false;
         if (ours(e.target)) { claimClick(); return; }   // onBoxDown / the backdrop own this one
-        // An unpinned preview is pointer-transparent, so a press ON it lands on the page
-        // beneath and never reaches onBoxDown. Geometry decides ownership instead, and
-        // hands the press to that same handler so there is still only one state machine.
-        if (!pinned && view && box && box.classList.contains('on') &&
+        // A HOVER preview is pointer-transparent, so a press ON it lands on the page beneath
+        // and never reaches onBoxDown. Geometry decides ownership instead, and hands the
+        // press to that same handler so there is still only one state machine.
+        if (!placed && view && box && box.classList.contains('on') &&
             (e.button === 0 || e.button === 2) && pointInPreview(e.clientX, e.clientY)) {
             claimClick();
             onBoxDown(e);
@@ -2783,11 +2962,33 @@
         mouseDown = true;
         cancel();
     }, true);
-    // The click half of the same handoff. Without it a press on a pointer-transparent
-    // preview would move or pin nothing and the page beneath would take the click.
+    // The click half of the same handoff, and the reason placing on the PRESS needs one.
+    // Between that press and its click the window becomes placed and the backdrop starts
+    // catching, so the click lands on something new: on the backdrop, whose own handler
+    // would dismiss the window that press just placed, or on the page, where it could
+    // follow a link. Either way it is ours and it goes no further.
     CAP_TARGET.addEventListener('click', function (e) {
+        if (swallowNextClick) {
+            swallowNextClick = false;
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+        }
+        // The click that dismisses a placed window is caught HERE rather than being left to
+        // the backdrop's own handler. The backdrop sits inside the shadow host, so capture
+        // reaches document and body first, and a page listening for clicks there would see a
+        // phantom one — nothing on the page can act on it, since the event's target is the
+        // backdrop, but being observed at all is avoidable. composedPath()[0] because
+        // `e.target` is retargeted to the host once the event leaves the shadow tree.
+        if (dimEl && dimEl.classList.contains('catch') && e.composedPath &&
+            e.composedPath()[0] === dimEl) {
+            e.preventDefault();
+            e.stopPropagation();
+            dismiss();
+            return;
+        }
         if (ours(e.target)) return;             // onBoxClick owns it
-        if (pinned || !view || !box || !box.classList.contains('on')) return;
+        if (placed || !view || !box || !box.classList.contains('on')) return;
         if (!pointInPreview(e.clientX, e.clientY)) return;
         onBoxClick(e);
     }, true);
@@ -2800,24 +3001,26 @@
     document.addEventListener('mouseup', function () {
         mouseDown = false;
         if (drag) {
-            justDragged = drag.moved;   // read by onBoxClick, which fires right after this
             drag = null;
             if (box) box.classList.remove('drag');
         }
     }, true);
-    window.addEventListener('scroll', function () { if (!pinned) cancel(); }, true);
-    window.addEventListener('blur', function () { if (!pinned) cancel(); });
+    window.addEventListener('scroll', function () { if (!placed) cancel(); }, true);
+    window.addEventListener('blur', function () { if (!placed) cancel(); });
     window.addEventListener('resize', function () {
-        if (!pinned) { cancel(); return; }
-        // the window shrinking can leave the frame oversized and the pan out of bounds
-        view.fitScale = Math.min(cfg.zoomFactor, viewportBox().w / view.natW, viewportBox().h / view.natH);
+        if (!placed) { cancel(); return; }
+        if (!view) return;
+        // The frame the user sized is left exactly as it is — re-fitting it to the new
+        // window would throw away the size they chose. clampPosition() still runs, so a
+        // window narrowed to nothing cannot leave the frame stranded off the edge.
+        view.fitScale = fitScaleFor(view.natW, view.natH);
         if (view.scale < view.fitScale) view.scale = view.fitScale;
         reflow();
         layout();
     });
     document.addEventListener('keydown', function (e) {
         if (e.key === 'Escape') {
-            cancel();                           // onPinKey has already handled the pinned case
+            cancel();                           // onPinKey has already handled the placed case
         }
         if (cfg.activation === 'modifier' && modifierHeld(e)) modifierDown = true;
     }, true);
@@ -3210,20 +3413,25 @@
             { label: 'Clear all', cls: 'danger', onClick: function () { blocks.clear(); } },
         ]);
 
-        section('Pinned mode');
-        note('Drag the preview to keep it, click it to pin it',
-            'Dragging an unpinned preview moves it and detaches it from the hover: it then ' +
-            'stays until you move off the preview itself. Clicking pins it, and it stays until ' +
-            'the X, a click outside it, or Escape. While pinned: wheel or +/− to zoom, drag the ' +
-            'image or use the arrow keys to pan, 0 to reset, and drag the status bar to move ' +
-            'the frame.');
-        note('Right-click a pinned preview for the browser\'s own menu',
+        section('The placed window');
+        note('Scroll it bigger first, then click or drag to place it',
+            'While you are still hovering, the wheel grows the whole preview — which is how ' +
+            'a page full of small pictures gives usable previews without resizing every one ' +
+            'of them by hand. Clicking or dragging it then places it: it stays put, survives ' +
+            'scrolling, and its size is frozen.');
+        note('A placed window may hang off the edges of the screen',
+            'Move it by its status bar or by anywhere near its edges, and resize it by its ' +
+            'corners (Shift while dragging a corner to change its shape). Once placed, the ' +
+            'wheel and +/− zoom the picture inside the frame rather than the frame, and the ' +
+            'arrow keys pan it; 0 fits it back to the frame. Close it with the X, Escape, or ' +
+            'a click anywhere outside it.');
+        note('Right-click a placed window for the browser\'s own menu',
             'Save image as…, Copy image, Copy image address, Open image in new tab — all of ' +
             'them acting on the full-size original, because the browser fetches it itself. ' +
-            'Right-click on an unpinned preview still dismisses it.');
-        pick('pinButton', 'Pin with',
-            'the other button dismisses instead — the preview stays down until you move off ' +
-            'the image and back on', [
+            'On a preview you are only hovering, right-click dismisses it instead.');
+        pick('pinButton', 'Place with',
+            'the other button dismisses a preview you are hovering — it stays down until you ' +
+            'move off the image and back on', [
                 ['left', 'Left click  (right click dismisses)'],
                 ['right', 'Right click  (left click dismisses)']]);
         num('wheelZoomStep', 'Wheel zoom step', '% per notch — +/− steps by 25%', 2, 100, 1);
@@ -3232,8 +3440,12 @@
 
         section('How to display');
         num('zoomFactor', 'Zoom factor', 'scale applied before fitting to the window', 0.1, 8, 0.1);
-        num('maxWidthPct', 'Max width', '% of window', 10, 100, 1);
-        num('maxHeightPct', 'Max height', '% of window', 10, 100, 1);
+        num('maxSizeMultiple', 'Maximum size',
+            '× the browser window. A preview always OPENS fitting the window; this is how ' +
+            'far the wheel and the corners may then take it. Above 1 on purpose: a frame ' +
+            'larger than the window can be shoved aside or upwards and still reach the ' +
+            'screen edges, instead of leaving a strip of empty page behind it',
+            1, 4, 0.25);
         num('bottomReserve', 'Keep clear at the bottom',
             'px — the browser draws link addresses and its status text over the bottom of ' +
             'the window, so the preview stays above that strip', 0, 300, 5);
@@ -3246,9 +3458,8 @@
         color('borderColor', 'Border colour');
         num('cornerRadius', 'Corner radius', 'px', 0, 40, 1);
         check('shadow', 'Drop shadow');
-        num('dimOpacity', 'Dim the page behind', '% — 0 disables', 0, 90, 5);
         check('showStatusBar', 'Show the status bar',
-            'filename, format, dimensions, size — and the handle that moves a pinned frame. ' +
+            'filename, format, dimensions, size — and one more handle that moves a placed frame. ' +
             'It fades out after a second of a still pointer so it stops covering the ' +
             'bottom of the picture, and returns when you move the pointer over the preview');
         pick('spinnerTheme', 'Loading ring',

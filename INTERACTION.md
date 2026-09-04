@@ -3,7 +3,7 @@
 What the preview **window** does, as a state machine. Menus, buttons, the status bar contents and
 the loading ring are out of scope except where they change what the window itself accepts.
 
-Describes `Hover-Zoom.user.js` **v0.16.0**.
+Describes `Hover-Zoom.user.js` **v0.28.0**.
 
 ---
 
@@ -15,9 +15,9 @@ Every item has a short permanent ID. Say the ID instead of quoting:
 |---|---|---|
 | `R` | The governing rule | `R1` |
 | `P` | Preconditions — what must be true before anything opens | `P4` |
-| `S` | States | `S07` |
-| `T` | Transitions | `T12` |
-| `K` | Terminators — what closes an unpinned window | `K3` |
+| `S` | States | `S10` |
+| `T` | Transitions | `T17` |
+| `K` | Terminators — what closes a hover window | `K3` |
 | `B` | Button map rows | `B2` |
 | `E` | Known edges and consequences | `E1` |
 
@@ -25,6 +25,10 @@ Every item has a short permanent ID. Say the ID instead of quoting:
 never reused, so a reference in an old conversation never silently points at something else. If an
 item's *content* changes materially, the ID stays and the change is noted in `## Changes` at the
 bottom.
+
+**Retired, never to be reused:** `S07`, `S08`, `S09`, `S11`, `T08`, `T09`, `T11`, `T12`, `T13`,
+`T14`, `T20`, `E3`. All of them belonged to the detached state, which v0.28.0 removed — see the
+2026-09-04 row in `## Changes`.
 
 ---
 
@@ -38,20 +42,23 @@ bottom.
 | `S04` | resolving, visible | working | the source image |
 | `S05` | hover-held | open | the source image |
 | `S06` | hover-held, upgrading | open | the source image |
-| `S07` | detached | placed | the window |
-| `S08` | detached, upgrading | placed | the window |
-| `S09` | dragging (move), unpinned | transient | the held button |
-| `S10` | pinned | pinned | nothing |
-| `S11` | pinned, frame growing | pinned | nothing |
-| `S12` | pinned, image spilling | pinned | nothing |
-| `S13` | dragging (pan), pinned | transient | the held button |
-| `S14` | dragging (move), pinned | transient | the held button |
-| `S15` | pinned, upgrading | pinned | nothing |
+| `S10` | placed | placed | nothing |
+| `S12` | placed, image spilling | placed | nothing |
+| `S13` | dragging (pan), placed | transient | the held button |
+| `S14` | dragging (move), placed | transient | the held button |
+| `S15` | placed, upgrading | placed | nothing |
+| `S19` | dragging (resize), placed | transient | the held button |
 | `S16` | suppressed | gone | — |
 | `S17` | fading out | gone | — |
 
-The three states that matter most in conversation are `S05`, `S07` and `S10` — the escalation
-ladder. Everything else is a phase on the way in or out of one of them.
+**There are two states, and everything else is a phase on the way in or out of one of them:
+`S05`, which the image holds open, and `S10`, which nothing holds open.** One gesture separates
+them — a press on the window.
+
+The ladder used to have a third rung between them (`S07`, detached: dragged aside, but still
+dying the moment the pointer left it). It is gone. Its defining behaviour was that a window you
+had deliberately positioned would disappear on its own, which is the opposite of what
+positioning one means.
 
 ---
 
@@ -63,14 +70,25 @@ ladder. Everything else is a phase on the way in or out of one of them.
 
 - While it is a hover preview (`S05`, `S06`) that thing is **the source image**. Never the window —
   the window is invisible to the pointer and cannot hold itself open.
-- Once dragged (`S07`, `S08`) that thing becomes **the window**. The source image stops mattering
-  entirely.
-- Once pinned (`S10`) **nothing** holds it. It ends only on an explicit dismissal.
+- Once placed (`S10`) **nothing** holds it. It ends only on an explicit dismissal.
+
+There is no third answer any more. `S07` used to be held by the window itself, which is what made
+a deliberately positioned window vanish when the pointer wandered off it.
 
 Every hover bug this script has had came from two things holding it at once. Any proposed change
 that reintroduces a second holder should be treated as a regression until argued otherwise.
 
-*Code: `onOver`, `onOut`, `cancel`, `dismiss`.*
+### R2 · One window at a time
+
+**While a window is placed, no new preview opens.** Hovering is off until it is dismissed, which
+costs one click anywhere outside it.
+
+This is not a limitation working around the code; it is what keeps every other gesture
+unambiguous. Two windows on screen would have no answer to which one the wheel zooms, which one
+the arrow keys pan, or which one Escape closes — and the page is still readable and scrollable
+underneath, so the reason to want a second one is thin.
+
+*Code: `onOver`, `onOut`, `cancel`, `dismiss`, `place`, `unplace`.*
 
 ---
 
@@ -164,12 +182,17 @@ The window is up and transient.
     document-level capture listeners test the pointer against the window's rectangle and claim
     it before the page sees it. See `E1` — that is the price of click-to-pin.
 - **Held by:** the pointer being on the source image. Nothing else (`R1`).
-- **Accepts:** left press + release → pin (`T07`); left press + drag > 3 px → detach (`T08`);
-  right press → dismiss (`T10`), and the browser's own menu is suppressed with it. Default button
-  map `B1`. This is the one state that keeps right-click: the window is transparent here, so the
-  browser's menu would come up for the *thumbnail* underneath (`E9`).
+- **Accepts:** **the wheel, which makes the whole window bigger** (`T22`, `E22`) — the frame grows
+  with the picture, up to `maxSizeMultiple` (2×) of the browser window; left press → placed
+  (`T07`), on the press, whether or not it turns into a drag; right press → dismiss (`T10`), and
+  the browser's own menu is suppressed with it. Default button map `B1`. This is the one state
+  that keeps right-click: the window is transparent here, so the browser's menu would come up for
+  the *thumbnail* underneath (`E9`).
 - **Ends on:** leaving the image, **immediately** — no grace period, even though the window is
   sitting under the cursor.
+- **Note the wheel is no longer a way to scroll the page** while one of these is up — the window
+  is nudged to sit under the cursor, so the cursor is nearly always inside it. Move off the
+  image, which takes the preview down at once, and then scroll (`E22`).
 
 #### S06 · hover-held, upgrading
 `S05` while the search is still running, because a bigger original may exist (`keepSearching`, on
@@ -179,98 +202,79 @@ by default, up to 8 probes).
 - **On upgrade:** the frame keeps its centre; only the pixels change.
 - **Ends on:** as `S05`. Leaving mid-search does **not** abort loads already in flight (`E6`).
 
-### Placed — held by the window
+### Placed — held by nothing
 
-#### S07 · detached
-Reached by dragging `S05`/`S06` more than `DRAG_SLOP` (3 px). The window has been deliberately
-positioned, so it stops tracking the image and answers to the pointer directly.
-- **On screen:** the window, now **hit-testable** — it intercepts the pointer instead of passing it
-  through.
-- **Held by:** the pointer being on the window. The source image is now irrelevant to it (`R1`).
-- **Accepts:** click → pin (`T14`); drag → move it again; **wheel over it → zoom** about the
-  pointer, exactly as `S10` does (`T20`). Having dragged a window somewhere, a wheel over it
-  means "make this bigger" — and letting it scroll the page would close the window (`K2`), so
-  the gesture used to destroy what it was aimed at. A wheel anywhere *else* still scrolls.
-- **Zooming it** promotes it through the same `S11` → `S12` geometry as a pinned window, so a
-  detached window can end up spilling and pannable without ever being pinned.
-- **Right press → dismiss**, as on `S05`. The browser's menu is `S10`'s alone (`E9`): shoving a
-  detached window out of the way is worth more than a menu that is one click away.
-- **Ends on:** the pointer leaving the window — **and** the source image is put in `S16`, so moving
-  back onto it does not re-open anything (`T11`, `T13`).
-
-#### S08 · detached, upgrading
-`S07` with the search still running. Dragging never stops the search.
-- **On screen:** the window plus the docked ring.
-- **On upgrade:** frame centre held, so it does not jump under your hand.
-
-#### S09 · dragging (move), unpinned
-The button is down and the window is following the pointer 1:1.
-- **Suspends:** all hover logic, for the duration. A fast drag can outrun the frame, and the page
-  elements sliding underneath must not be allowed to cancel the thing being dragged.
-- **Bounds:** clamped to stay 4 px inside the viewport.
-- **Ends on:** release. Past 3 px of travel it lands in `S07` and the release does **not** pin.
-
-### Pinned — modal
-
-#### S10 · pinned
-A click promoted it. The backdrop now swallows clicks meant for the page, an X appears, and the
-keyboard and wheel belong to the window.
-- **On screen:** the window, the X, and the backdrop — dimmed only if `dimOpacity` is above 0.
+#### S10 · placed
+A press promoted it — a click, a drag, or a corner grab, all the same thing. The backdrop starts
+catching clicks meant for the page, an X appears, the keyboard belongs to the window, and **the
+frame's size is frozen** (`E22`).
+- **On screen:** the window, the X, and an invisible backdrop. Nothing is dimmed: the reason to
+  place a window is to compare it with what is behind it.
 - **Held by:** nothing. It outlives hover, scrolling and focus loss entirely.
-- **Accepts:** wheel → zoom about the pointer (`wheelZoomStep`, 15 % per notch); `+` / `−` → zoom
-  about the frame centre (1.25× per press); `0` → back to the opening scale; arrows → pan
-  (`panStep` 80 px, Shift for 3×); drag → **pan if the picture is spilling, otherwise move the
-  frame** (`S13` / `S14`); drag the status bar → always move the frame (`S14`).
-- **Ends on:** the X, a click on the backdrop, or Escape. **Right-click does not close it** under
-  either button map — it raises the browser's own menu over the picture instead (`T21`, `E9`).
+- **The page underneath stays alive to read.** It still scrolls — the window is fixed and stays
+  put while the page moves under it. What it does not do is act on clicks, and no new preview
+  opens while this one is up (`R2`).
+- **Accepts:** wheel **over the frame** → zoom the picture inside it about the pointer
+  (`wheelZoomStep`, 15 % per notch); a wheel anywhere else scrolls the page; `+` / `−` → zoom
+  about the frame centre (1.25× per press); `0` → fit the picture to the current frame; arrows →
+  pan (`panStep` 80 px, Shift for 3×); **corner → resize** (`S19`, `E23`); **a band just inside
+  any edge → move** (`S14`, `E21`); the status bar → move; anywhere else → **pan if the picture
+  is spilling, otherwise move the frame** (`S13` / `S14`).
+- **May hang off the edges of the screen** (`E21`), which is the point of the growth ceiling
+  being above 1×: shoved aside or upwards, the picture still reaches the screen edges instead of
+  leaving a strip of empty page behind it.
+- **Ends on:** the X, a click anywhere outside it, or Escape. **Right-click does not close it**
+  under either button map — it raises the browser's own menu over the picture instead (`T21`,
+  `E9`).
 - **Note:** the key and wheel listeners are bound on `window` in capture, so they outrank the page
-  and any sibling userscript while pinned.
+  and any sibling userscript.
 
-#### S11 · pinned, frame growing
-The image at the current scale is still smaller than the viewport cap, so zooming in enlarges **the
-frame**. The picture always fits; there is nothing to pan.
-- **Cursor:** `move`. There is nothing to pan, so dragging anywhere on it moves the frame
-  (`S14`) — including after zooming in and back out, because "can this pan" is asked afresh on
-  every press.
-- **Zoom floor:** the scale the window opened at. `0` returns there.
-- **Growth:** each axis grows independently up to its own cap, so the frame keeps widening after
-  its height has capped, and vice versa. It stops at `maxWidthPct` / `maxHeightPct` — **92 % by
-  default, which is why a fully zoomed frame still leaves a margin all round** (`E7`).
-- **Ends on:** the frame reaching that cap, which promotes it to `S12`.
-
-#### S12 · pinned, image spilling
-The frame has hit the viewport cap and is now fixed. Further zoom pushes the image out past the
-frame's edges, which is the moment panning starts to mean something.
+#### S12 · placed, image spilling
+The frame is frozen, so zooming in pushes the image out past its edges. That is the moment
+panning starts to mean something, and it now arrives the first time you zoom rather than after
+the frame has finished growing.
 - **Cursor:** `grab` over the image.
 - **Accepts:** drag the image to pan (`S13`); arrows to pan; wheel keeps the pixel under the pointer
   where it is.
 - **Zoom ceiling:** `maxZoom` (32×), hard-capped at 64×.
 
-#### S13 · dragging (pan), pinned
+#### S13 · dragging (pan), placed
 Press on the image while it is spilling — and only while it is spilling; with nothing to pan the
 same press moves the frame instead (`S14`). The picture moves inside a frame that stays put.
 - **Cursor:** `grabbing`.
 - **Bounds:** clamped so the frame never shows past the edges of the picture.
 
-#### S14 · dragging (move), pinned
-Press on the **status bar**, or anywhere on a frame whose picture is not spilling. The whole frame
-moves; the picture stays put inside it.
+#### S14 · dragging (move), placed
+Press on the **status bar**, on the **edge band** (`E21`), or anywhere on a frame whose picture is
+not spilling. The whole frame moves; the picture stays put inside it.
 - **Cursor:** `move`.
-- **The status bar always moves the frame**, whatever the zoom — it is the escape hatch once the
-  picture is spilling and every other press pans, which is why hiding the status bar leaves a
-  zoomed-in frame with no way to be moved.
+- **Bounds:** it may go off the edges of the screen, but never so far that less than 72 px of it
+  is left in view (`E21`).
+- **The edge band and the status bar both move the frame whatever the zoom.** The band is the
+  more important of the two, because it is always there — hiding the status bar used to leave a
+  zoomed-in frame with no way to be moved at all.
 
-#### S15 · pinned, upgrading
-Pinning is a reason to keep looking, not to stop, so the search runs on.
+#### S19 · dragging (resize), placed
+Press within a corner. The frame is resized with the opposite corner anchored, and the picture
+follows or does not depending on what it was doing (`E23`).
+- **Cursor:** `nwse-resize` / `nesw-resize`.
+- **Aspect:** locked to the frame's shape as it was when the corner was grabbed. **Shift** frees
+  it.
+- **Bounds:** no smaller than 80 px, no larger than the growth ceiling.
+
+#### S15 · placed, upgrading
+Placing is a reason to keep looking, not to stop, so the search runs on.
 - **On upgrade:** three things are held constant — the frame's centre, its on-screen size, and the
   fraction of the picture sitting at the frame's middle. Only the pixels improve.
+- The same holds for a hover preview the wheel has already grown (`E22`) — otherwise a late
+  upgrade would quietly undo the sizing just done by hand.
 
 ### Gone
 
 #### S16 · suppressed
 No window, and the image it came from is blocked from opening another one.
-- **Entered from:** a right-click dismiss (`T10`), or a detached window losing the pointer (`T11`,
-  `T13`).
+- **Entered from:** a right-click dismiss (`T10`), or dismissing a placed window with a click
+  outside it (`T16`) — which very often lands on the thumbnail it came from.
 - **Why it exists:** without it, the very next mouse movement over the same image would re-open what
   you had deliberately got rid of.
 - **Ends on:** the pointer leaving that image and coming back (`T15`). Other images are unaffected.
@@ -294,35 +298,32 @@ inert.
 | `T04` | `S03`/`S04` | Nothing bigger exists | `S01` — no window ever appears |
 | `T05` | `S05` | Move onto the next image | that image's `S02` |
 | `T06` | `S05` | Move onto blank page | `S01` |
-| `T07` | `S05` | Click | `S10` |
-| `T08` | `S05` | Drag > 3 px | `S07` |
-| `T09` | `S05` | Drag < 3 px, then release | `S10` — a wobble is still a click |
+| `T07` | `S05` | **Press** the window — click, drag or corner, all the same | `S10` |
 | `T10` | `S05` | Right-click | `S16` |
-| `T11` | `S07` | Move off the window | `S16` |
-| `T12` | `S07` | Move off the window onto a different image | that image's `S02` |
-| `T13` | `S07` | Move back onto the source image | `S16` — nothing re-opens |
-| `T14` | `S07` | Click | `S10` |
 | `T15` | `S16` | Leave that image, come back | `S02` |
-| `T16` | `S10` | Escape, the X, or click the backdrop | `S01` |
-| `T17` | `S10` | Wheel, or `+` / `−` | `S11` → `S12` as the frame reaches the cap |
-| `T18` | `S10` | Press `0` | `S11` at the opening scale |
-| `T19` | `S10` | Resize the browser window | `S10`, re-fitted — it does not close |
-| `T20` | `S07` | Wheel over the window | `S07`, zoomed — the page does not scroll and the window does not close |
+| `T16` | `S10` | Escape, the X, or click anywhere outside it | `S01` (`S16` for the click, `E2`) |
+| `T17` | `S10` | Wheel over the frame, or `+` / `−` | `S12` — the frame is frozen, so the picture spills at once |
+| `T18` | `S10` | Press `0` | `S10`, the picture fitted to the current frame |
+| `T19` | `S10` | Resize the browser window | `S10`, kept at the size you gave it — it does not close or re-fit |
 | `T21` | `S10` | Right-click the window | `S10` unchanged — the browser raises its own menu over the picture (`E9`) |
+| `T22` | `S05` | **Wheel over the window** | `S05`, bigger — frame and picture together, to the growth ceiling (`E22`) |
+| `T23` | `S10` | Drag a corner | `S19` → `S10` at the new size, frozen there (`E23`) |
+| `T24` | `S10` | Wheel anywhere **but** the frame | `S10` unchanged — the page scrolls under it |
 
 ---
 
 ## K — terminators
 
-Everything that closes an **unpinned** window. `S10` survives all of these except `K5` and the
-explicit dismissals in `T16`.
+Everything that closes a **hover** window (`S05`, `S06`). `S10` survives all of these except `K5`
+and the explicit dismissals in `T16` — which is now the whole of the difference between the two
+states.
 
 | ID | Trigger | Notes |
 |---|---|---|
-| `K1` | The pointer leaves its holder | The image for `S05`; the window for `S07`. Immediate, no grace. |
-| `K2` | Page scroll | A detached window dies too — only pinning survives scrolling (`E3`). A wheel *over* a detached window zooms it instead and never reaches the page (`T20`). |
+| `K1` | The pointer leaves the source image | Immediate, no grace. |
+| `K2` | Page scroll | A placed window survives it, and stays put while the page moves underneath. Note a wheel *over* a hover preview grows it rather than scrolling, so this fires only for a wheel somewhere else (`T22`, `E22`). |
 | `K3` | Browser window loses focus | — |
-| `K4` | Browser window resize | Pinned windows re-fit instead (`T19`). |
+| `K4` | Browser window resize | A placed window keeps the size it was given (`T19`). |
 | `K5` | Escape | Closes it, but does **not** suppress the image (`E2`). |
 | `K6` | `mousedown` on the page outside the window's rectangle | — |
 | `K7` | Releasing the modifier key | Modifier mode only. |
@@ -332,14 +333,14 @@ explicit dismissals in `T16`.
 
 ## B — button map
 
-| ID | Setting | On `S05` / `S07` | On `S10` |
+| ID | Setting | On `S05` | On `S10` |
 |---|---|---|---|
-| `B1` | Pin with **left** (default) | Left pins · right dismisses and suppresses | Left pans or moves · right raises the browser's own menu over the picture (`E9`) |
-| `B2` | Pin with **right** | Right pins · left dismisses and suppresses | Left pans or moves · right does nothing, so the browser's own context menu appears over the picture |
+| `B1` | Place with **left** (default) | Left places · right dismisses and suppresses | Left resizes, moves or pans by region · right raises the browser's own menu over the picture (`E9`) |
+| `B2` | Place with **right** | Right places · left dismisses and suppresses | Left resizes, moves or pans by region · right does nothing, so the browser's own context menu appears over the picture |
 
-The left button always pans or moves a pinned window, whichever way the setting points — otherwise
-a pinned frame could have no way to be moved. Under both settings the browser's own context menu is
-reachable over a **pinned** window, which is the only place `Save image as…` and `Copy image` work
+The left button always drives a placed window, whichever way the setting points — otherwise a
+placed frame could have no way to be moved. Under both settings the browser's own context menu is
+reachable over a **placed** window, which is the only place `Save image as…` and `Copy image` work
 at all (`E9`).
 
 ---
@@ -349,12 +350,77 @@ at all (`E9`).
 These are consequences of the design rather than decisions in their own right. Several are open to
 change if you want them changed.
 
-#### E1 · A click on a hovered image usually pins instead of following the link
-The window is invisible to the pointer, but a click inside its rectangle is still claimed by
+#### E22 · The wheel grows a hover preview, and placing it freezes the size
+On a page whose pictures are all small, every preview opens small, and resizing each one by hand
+is not a workflow. So the wheel does different things either side of the one gesture that
+separates the states:
+
+- **Hovering** (`S05`, `T22`): the frame grows *with* the picture, to the growth ceiling (`E7`).
+  It is still a hover preview throughout — transparent, and gone the moment you leave the image.
+  Growing it is not placing it.
+- **Placed** (`S10`, `T17`): the frame is frozen at whatever size it had reached, and the wheel
+  zooms the picture *inside* it, which spills and pans (`S12`). Only a corner changes the frame
+  from here (`E23`).
+
+So the intended sequence is: hover, wheel it to the size you want, then click or drag to place
+it. `0` fits the picture back to the frame rather than to the window, or it would throw away the
+size you chose.
+
+**The cost, and it is real: while a hover preview is up, the wheel no longer scrolls the page.**
+The window is nudged to sit under the cursor (`E1`), so the cursor is nearly always inside it and
+the wheel is nearly always claimed. To scroll, move off the image — which takes the preview down
+at once — and then scroll. This buys one rule covering both states, but it is the change most
+likely to be felt in ordinary use, and reverting it is a single condition in `onPinWheel`.
+
+An upgrade landing on a wheel-grown preview holds its on-screen size (`S15`), which is the same
+rule placed windows already had; without that a late upgrade would quietly undo the sizing.
+
+#### E21 · A placed window may hang off the edges of the screen
+Position is free once a window is placed — that is what the above-1× ceiling is for (`E7`). The
+old clamp kept the whole frame inside the viewport; the new one only guarantees that **72 px of
+it stays in view** on each axis, so it can never be dragged somewhere it cannot be dragged back
+from.
+
+That guarantee needs a handle, and the status bar is not enough — it can itself be off screen. So
+**a 20 px band just inside every edge always moves the frame**, whatever the zoom and whatever is
+under it, and the corners resize (`E23`). The three numbers have to be read together: whatever
+strip of a half-offscreen window is still visible runs along one of its edges, so it is always
+partly band. Raise the corner size past the 72 px kept in view and a window at the clamp could
+only be resized — from a corner anchored off screen — which is a trap.
+
+A hover preview is *not* free: it is placed by the script rather than by the user, so it is kept
+fully on screen while it fits, and once the wheel has grown it past the window it is merely
+stopped from sliding a gap in at an edge.
+
+This also retires half of `E10`'s warning. Hiding the status bar used to leave a zoomed-in frame
+with no way to be moved at all, because every other press panned.
+
+#### E23 · Corners resize, and what the picture does depends on what it was doing
+A corner drag sets the frame directly and freezes it there, with the opposite corner anchored.
+What happens to the picture is decided by whether it was spilling when the corner was grabbed,
+which keeps one gesture honest in both cases:
+
+- **Picture at fit** — it stays at fit, so the window gets bigger and so does the picture. This
+  is what "stretch it to whatever size I want" means, and it is why the frame does not simply
+  grow grey bars.
+- **Picture already spilling** — the zoom is kept and the frame simply shows more or less of it.
+  Rescaling here would undo a zoom that was asked for deliberately.
+
+Aspect is locked to the frame's shape *as it was when the corner was grabbed* — locking to the
+picture's shape instead would snap the frame the instant it was touched — and **Shift** frees it.
+Bounds are 80 px at the bottom and the growth ceiling at the top.
+
+#### E1 · A click on a hovered image usually places a window instead of following the link
+The window is invisible to the pointer, but a press inside its rectangle is still claimed by
 geometry — at **window** level, in capture (v0.16.0; it was document level before). With
 `position: cursor` the window is nudged to touch your cursor, so your cursor is nearly always
-inside it. This is the price of click-to-pin. `position: center` does not have this problem,
+inside it. This is the price of press-to-place. `position: center` does not have this problem,
 because the window opens away from the pointer.
+
+Since v0.28.0 the **press** places it, not the release, so the click that follows has nowhere to
+go and is swallowed at window capture. That is not tidiness: by the time it arrives the backdrop
+is catching, so an unclaimed click would either land on the backdrop and dismiss the window the
+press had just placed, or reach the page and follow a link.
 
 Window/capture is what keeps the claim ahead of the page's own click handling and of sibling
 userscripts on `document`. Against a sibling that also sits on window/capture, ordering is the
@@ -363,34 +429,51 @@ userscript manager's to decide, so the press additionally stamps `<html>` with
 Reported as a preview that pinned *and* followed the link on imgur, alongside Open Links in New
 Tab v1.19.0+.
 
-#### E2 · Escape is not the same as a right-click dismiss
-Escape (`K5`) hides the window but does not enter `S16`, so crossing into a child element of the
-image and back can re-open it. Right-click (`T10`) is the one that stays down.
+#### E2 · Escape is not the same as a dismiss
+Escape (`K5`) and the X hide the window but do not enter `S16`, so crossing into a child element
+of the image and back can re-open it. A right-click (`T10`) and a click outside a placed window
+(`T16`) are the ones that stay down — the latter because that click very often lands on the
+thumbnail the window came from, and a plain close would let the next mouse movement re-open the
+thing just thrown away.
 
-#### E3 · Scrolling kills a detached window
-Dragging a window aside to read the page under it does not survive a scroll (`K2`). Pinning is the
-only way to keep a window across a scroll. The one exception is a wheel with the pointer *on* the
-window, which zooms instead of scrolling (`T20`).
+#### E3 · *(retired in v0.28.0)*
+Scrolling used to kill a detached window, so a window dragged aside to read the page under it did
+not survive a scroll. There is no detached state; a placed window survives scrolling and stays
+put while the page moves underneath it.
 
 #### E4 · The window never follows the pointer
 Placement is decided once, when it opens. Moving around within the same image does not reposition
 it, and neither does an upgrade.
 
 #### E5 · A hover-held window cannot be clicked *on*
-Anything living inside `S05` is out of reach until you detach or pin, because moving toward it means
-leaving the image, which ends it (`R1`). Detaching (`T08`) or pinning (`T07`) makes the window
-hit-testable.
+Anything living inside `S05` is out of reach until you place it, because moving toward it means
+leaving the image, which ends it (`R1`). Pressing it (`T07`) makes the window hit-testable. The
+wheel is the exception and always was: it needs no pointer travel, which is what makes growing a
+preview before placing it possible at all (`T22`).
 
 #### E6 · Leaving mid-search does not cancel the network
 Probes already in flight finish and populate the cache, which is why an image that "did nothing" the
 first time can open instantly a moment later. That is a cache warming up, not a fixed bug.
 
-#### E7 · A fully zoomed frame stops 8 % short of the screen
-`S11` grows each axis to `maxWidthPct` / `maxHeightPct`, both **92** by default, so the frame
-stops with a margin all round and the picture starts spilling from there. Measured on a
-1265 × 784 viewport: a 4:3 picture opens height-capped at 960 × 720, widens over two wheel
-notches to 1162 × 720, and stops — 91.9 % and 91.8 % of the viewport. If you want it to reach the
-edges, both settings go to 100; nothing else is capping it.
+#### E7 · A preview opens filling the window, and may then grow past it
+`maxWidthPct` / `maxHeightPct` are gone (v0.28.0). They were 92 % each, which is why a fully
+zoomed frame used to stop with a margin all round; the margin bought reachability, and a window
+that can be moved anywhere does not need buying.
+
+There are now two numbers and they are deliberately different:
+
+| | |
+|---|---|
+| **Opening size** | fits the browser window, less `bottomReserve` (`E13`) and a 4 px gutter. Never larger, whatever the ceiling says — a preview appears without being asked for, and one that arrived taller than the screen would be a nuisance. |
+| **Growth ceiling** | `maxSizeMultiple` × that, **2× by default** — how far the wheel (`E22`) and the corners (`E23`) may take it. |
+
+Measured on a 1265 × 785 viewport: a 4:3 picture opens at 995 × 747 (it was 686 tall under the old
+92 %), and three wheel notches take it to 1513 × 1135.
+
+The ceiling is above 1× on purpose, and the reason is geometric rather than about size. A frame
+exactly the window's height, shoved upwards to see what is under it, leaves a strip of empty page
+along the bottom, and lining it back up is fiddly. A frame larger than the window in both axes
+reaches the screen edges from any position, so there is nothing to line up.
 
 #### E20 · The banner across the top of a page is never previewed
 A channel banner, a forum masthead, a site header image. It is an `<img>`, so none of `E17`'s
@@ -542,7 +625,7 @@ at 851 px, 34 px clear (the reserve plus the ordinary 4 px gutter), against 881 
 set to 0. Raising it shrinks the preview rather than pushing it off the bottom.
 
 #### E8 · An upgrade is almost never visible
-`S06` / `S08` / `S15` work, but the candidate list is ordered best-first, so the first hit is
+`S06` / `S15` work, but the candidate list is ordered best-first, so the first hit is
 usually already the largest and there is nothing to upgrade to. On top of that the docked ring
 only appears if the search is still running 150 ms after the first hit, which a fast site never
 reaches. Test-page case 20 is built to make one observable: it opens at 800 × 600, docks the ring,
@@ -556,15 +639,17 @@ permission on top. Most hosts send neither and nothing in a page context gets ar
 button was removed in v0.12.0.
 
 The browser's own menu has neither problem — its network stack, its already-decoded bitmap — so a
-**pinned** window hands right-click back to it (`T21`). The element under the pointer is our
+**placed** window hands right-click back to it (`T21`). The element under the pointer is our
 `<img>`, whose `src` is the resolved full-size URL, so *Save image as…*, *Copy image*, *Copy image
 address* and *Open image in new tab* all act on the original. Verified in a real browser
 2026-09-03, including that native chrome targets an `<img>` inside an open shadow root.
 
-`S05` and `S07` keep right-click-to-dismiss. `S05` has no choice — it is pointer-transparent, so
-the menu there comes up for the thumbnail underneath and offers to save *that*. `S07` is a
-judgement call: shoving a window out of the way is the more useful gesture there, and pinning is
-one click away when you want the menu.
+`S05` keeps right-click-to-dismiss, and has no choice — it is pointer-transparent, so the menu
+there comes up for the thumbnail underneath and offers to save *that*.
+
+The cost of the v0.28.0 collapse falls here: `S07` also dismissed on a right-click, so "shove it
+aside, then right-click to be rid of it" was a two-gesture disposal. A window dragged aside is now
+placed, so that press belongs to the browser, and disposal is the X, Escape, or a click outside.
 
 #### E10 · The status bar fades itself out
 It is drawn *on* the picture, so on a meme, a screenshot or a comic panel it covers the text at
@@ -583,7 +668,7 @@ where it was pans or moves by the ordinary rule (`S13`/`S14`), and moving the po
 the real handle back. `showStatusBar` still turns it off entirely.
 
 #### E11 · The ⊘ button, and why it is not on a hover preview
-The status bar of a **placed** window (`S07` or `S10`) carries a `⊘` beside the metadata: it adds
+The status bar of a **placed** window (`S10`) carries a `⊘` beside the metadata: it adds
 the image to the never-preview list (`P8`) and closes the window. It is the answer to a page whose
 tiled background or watermark opens a preview from every patch of blank space.
 
@@ -605,13 +690,13 @@ that rule cannot know about.
 | Area | Functions |
 |---|---|
 | Eligibility (`P1`–`P6`) | `eligible`, `inVideoContext`, `overVideoSurface`, `siteEnabled` |
-| Hover state machine (`R1`, `S01`–`S08`, `S16`) | `onOver`, `onOut`, `cancel`, `dismiss` |
+| Hover state machine (`R1`, `R2`, `S01`–`S06`, `S16`) | `onOver`, `onOut`, `cancel`, `dismiss` |
 | Press / click ownership (`E1`) | `pointInPreview`, `onBoxDown`, `onBoxClick`, the document `mousedown` and `click` listeners |
-| Dragging (`S09`, `S13`, `S14`) | `onMove`, `onBoxDown` |
-| Pinned mode (`S10`–`S15`) | `pin`, `unpin`, `onPinKey`, `onPinWheel` |
-| Wheel zoom on a placed window (`T20`) | `detach`, `enableWheelZoom`, `disableWheelZoom`, `onPinWheel` |
-| Geometry (`S11`, `S12`) | `view`, `reflow`, `layout`, `zoomAt`, `pannable` |
-| Upgrades (`S06`, `S08`, `S15`) | `resolve`, `upgradeViewer` |
+| Press regions and dragging (`S13`, `S14`, `S19`, `E21`, `E23`) | `hitRegion`, `regionCursor`, `onBoxDown`, `onMove`, `resizeBy` |
+| Placed mode (`S10`–`S15`, `S19`) | `place`, `unplace`, `onPinKey`, `onPinWheel` |
+| Wheel zoom, both states (`T17`, `T22`, `T24`) | `enableWheelZoom`, `disableWheelZoom`, `onPinWheel` |
+| Geometry (`S12`, `E7`, `E21`) | `view`, `reflow`, `layout`, `zoomAt`, `pannable`, `viewportBox`, `growBox`, `clampPosition`, `fitScaleFor` |
+| Upgrades (`S06`, `S15`) | `resolve`, `upgradeViewer` |
 
 Function names are used rather than line numbers, which rot.
 
@@ -621,6 +706,7 @@ Function names are used rather than line numbers, which rot.
 
 | Date | Change |
 |---|---|
+| 2026-09-04 | v0.28.0. **The detached state is gone, and with it the three-rung ladder.** There are two states now: hovering, held by the image, and placed, held by nothing. A press on the window — click, drag or corner, on the press rather than the release — is the whole of the difference. Retired: `S07`, `S08`, `S09`, `S11`, `T08`, `T09`, `T11`, `T12`, `T13`, `T14`, `T20`, `E3`. New: `R2` (one window at a time), `S19`, `T22`–`T24`, `E21` (a placed window may hang off the screen, and a 20 px edge band always moves it), `E22` (the wheel grows a hover preview, and placing freezes the size), `E23` (corner resize). Changed: `R1` loses its third answer; `S10` is no longer modal — the page under it still scrolls and can be read, only clicks and new previews are held off; `E7` — `maxWidthPct`/`maxHeightPct` are replaced by one `maxSizeMultiple`, so a preview opens filling the window and may grow to 2× it; `E2` — a click outside a placed window suppresses, because it usually lands on the thumbnail; `E9` — right-click no longer shoves a window aside, which is the cost of the collapse. `dimOpacity` is removed: the backdrop is now invisible and exists only to catch the dismissing click. |
 | 2026-09-04 | v0.27.0. `E20` no longer counts pictures nobody can see. A rotating banner is often a cross-fader — two stacked images of identical size, one at `opacity: 0` — and an invisible element still has a full-size rectangle, so the page held "two pictures of that width" while showing one. |
 | 2026-09-04 | v0.26.0. Two fixes for one reported page, a forum masthead. `E20` condition four now needs two other pictures of a width before calling it a set — the page had exactly one. And `showEvenIfNotLarger` no longer shows the displayed image back at its own size: that setting means "at natural size even though it is not much bigger", not "an identical copy", and it was the only thing producing a preview there at all. |
 | 2026-09-04 | v0.25.0. `E20` condition three now ignores a neighbour under a quarter of the candidate's width: measured in LibreWolf with YouTube's left guide open, a 24px subscription avatar sat in the banner's band and defeated the whole rule. The gate also reports every failing condition rather than the first, because naming only one guarantees a second round trip. |

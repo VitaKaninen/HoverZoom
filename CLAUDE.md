@@ -70,31 +70,164 @@ path has been touched twice ever, both times in 2021.
   Since v0.18.0 the frame has two possible faces and `layout()` writes to whichever `mediaEl`
   points at — the rule is unchanged, only what it writes *to* is.
 
-## Three viewer states: hover → detached → pinned
+## Two viewer states: hover → placed (v0.28.0)
 
-*Behaviour is specified in [`INTERACTION.md`](INTERACTION.md) (`S05`, `S07`, `S10` and the rule
-`R1`). What follows is why it is built that way — keep the two in step.*
-
-The preview escalates by gesture, and each step is one gesture, not a setting.
+*Behaviour is specified in [`INTERACTION.md`](INTERACTION.md) (`S05`, `S10`, and the rules `R1`
+and `R2`). What follows is why it is built that way — keep the two in step.*
 
 - **Hover** — transient. Opens beside the pointer. Held open by ONE thing: the pointer being
   over the source image. Leaving that image takes it down **at once**, with no grace period.
-- **Detached** — drag it anywhere and it stops tracking the source image. Now held open by
-  ONE thing: the pointer being over the preview. Leaving the preview takes it down *and*
-  `dismiss()` puts the source image in `suppressed`, so moving back onto that image does not
-  re-open it until the pointer has left the image and returned. A wheel over it zooms (v0.10.0):
-  having placed it deliberately, scrolling the page — which would close it — is not what the
-  gesture means.
-- **Pinned** — click. Modal: backdrop catches, X appears, wheel/keys/drag become zoom-and-pan.
+  A wheel over it grows the whole window (see below).
+- **Placed** — one press: a click, a drag, or a corner grab, all the same gesture. Held open by
+  NOTHING; it ends only on the X, Escape, or a click outside it. Position becomes free, the size
+  freezes, and the page underneath stays readable and scrollable.
 
 Read that as one rule: **exactly one thing holds the preview open at a time, and leaving it
 ends the preview.** Every earlier version blurred this — both the image and the preview held
 it — and every reported hover bug came from the blur.
 
-### The unpinned preview is POINTER-TRANSPARENT (v0.9.0) — this is the load-bearing decision
+**There used to be a third rung, `detached`, and removing it is the point of v0.28.0.** It was
+reached by dragging a hover preview, and it was held open by *the preview itself* — so a window
+you had deliberately positioned vanished the moment the pointer wandered off it. That is the
+opposite of what positioning something means, and it is why the rung had to carry `suppressed`
+bookkeeping (`T11`/`T13`) that nothing else needed.
+
+Three things fell out of the collapse for free, and they are the argument for it:
+
+- **`DRAG_SLOP` and `justDragged` are gone.** They existed only because a drag and a click led to
+  *different* states, so a 3px wobble during a click had to be told from a real drag. Both lead to
+  the same state now, decided on the **press**, so there is nothing left to distinguish.
+- **Scroll no longer kills a placed window** — `E3`'s standing complaint.
+- **`onOver`/`onOut` lose their `detached` branches**, which were the fiddliest part of the hover
+  machine.
+
+**The cost is real and was accepted deliberately: right-click no longer shoves a window aside.**
+On a placed window the right button belongs to the browser, because its context menu is the only
+thing that can Save or Copy the picture (see the image-actions section). So "drag it out of the
+way, then right-click to be rid of it" is now "drag it, then X / Escape / click outside". Do not
+"fix" this by giving right-click back to dismiss on a placed window — that trades a working Save
+for a shortcut that has three replacements.
+
+### Placed is NOT modal, and that is a change from pinned
+
+`dimOpacity` is removed and `.dim` is transparent. It exists for one job: catching the click that
+dismisses the window before the page can act on it. Specifically:
+
+- **The page still scrolls.** A wheel over the backdrop finds no scrollable ancestor until the
+  document, so it scrolls normally; only a wheel *over the frame* is claimed. Verified: a
+  synthetic wheel outside the frame comes back with `defaultPrevented: false`, one over the frame
+  `true`.
+- **The page cannot be clicked**, and `R2` keeps hovering off, so there is only ever one window.
+- **Dimming would fight the whole point.** You place a window in order to compare it with what is
+  behind it; dimming the comparison is backwards.
+
+The dismissing click is swallowed at **window capture**, not by the backdrop's own handler. The
+backdrop lives inside the shadow host, so capture reaches `document` and `body` first and a page
+listening there would see a phantom click — nothing on the page can act on it (the event's target
+is the backdrop), but being observed at all is avoidable. Note `e.composedPath()[0]`, not
+`e.target`: outside the shadow tree the target is retargeted to the host.
+
+### The wheel grows a hover preview, and placing freezes the size (v0.28.0)
+
+*Specified as `E22`.* The reported problem: on a page whose pictures are all small, every preview
+opens small, and "resize each one by hand" is not a workflow.
+
+So `reflow()` has two modes, switched by `view.fixedW`/`fixedH` being null or not:
+
+- **Hovering** — `frameW = min(imgW, growBox().w)`. The frame follows the picture, so the wheel
+  makes the whole window bigger, up to `maxSizeMultiple` (2×) of the browser window.
+- **Placed** — `frameW = view.fixedW`. `place()` freezes it at whatever size the wheel reached,
+  and the wheel then zooms the picture *inside* a fixed aperture, which spills and pans. Only
+  `resizeBy()` changes it after that.
+
+**`fitScaleFor()` exists because of this.** The zoom floor and what `0` returns to used to be
+"fit the window"; on a frozen frame it has to become "fit the FRAME", or `0` on a window the user
+sized by hand would spring it back to the window's shape and throw the size away.
+
+**`upgradeViewer()` reads `userSized` against the OLD fit, before recomputing it.** A hover
+preview that has been wheel-grown must hold its on-screen size exactly as a placed one does —
+missing that case means a late upgrade quietly undoing the sizing just done by hand. Getting the
+ordering wrong here compiles and silently does the wrong thing.
+
+**The known cost, and it is the change most likely to be felt:** while a hover preview is up, the
+wheel no longer scrolls the page. `nudgeIntoReach()` puts the cursor inside the frame, so the
+wheel is nearly always claimed. Scrolling means moving off the image — which takes the preview
+down at once — then scrolling. This buys one rule covering both states (*a wheel over the frame is
+the frame's, anywhere else is the page's*), and reverting it is one condition in `onPinWheel`.
+
+### Free positioning, the edge band, and why the three numbers are one decision (v0.28.0)
+
+*Specified as `E21`.* `clampPosition()` was not deleted, it was **loosened** — deleting it strands
+a window dragged fully off screen, and strands one at `left: 1500` the moment the browser is
+narrowed to 1200. It now guarantees only that `KEEP_ON_SCREEN` (72px) stays in view per axis.
+
+That guarantee is worthless without a handle, and the status bar is not one — it can itself be off
+screen. Hence `hitRegion()`: **`EDGE_BAND` (20px) just inside every edge always moves the frame**,
+`CORNER_BAND` (24px) resizes, and the interior keeps the old pan-or-move rule.
+
+**Read the three numbers together.** A window pushed to the clamp shows a 72px square of one
+corner; within it the corner is a resize handle and what is left over is the move strip. Raise
+`CORNER_BAND` past `KEEP_ON_SCREEN` and a window at the clamp can *only* be resized — from a
+corner anchored off screen, so resizing makes it less visible, not more. That is a trap, and the
+comment on those constants says so.
+
+**Geometry, not child elements.** Four corner divs and four edge divs is the obvious build and it
+lands straight in the documented `isBoxControl()` trap: `onBoxDown` is a capture listener on an
+ancestor, so it eats a child's events first and the symptom is silence. Deriving the regions from
+`view` also gives one code path for both states — on a hover preview there is nothing to hit-test
+at all.
+
+A hover preview is deliberately **not** free: it is positioned by the script rather than the user,
+so it is kept fully on screen while it fits, and only stopped from sliding a gap in at an edge
+once the wheel has grown it past the window.
+
+### `maxSizeMultiple` replaces the two percentages, and 2× is a geometric argument
+
+`maxWidthPct`/`maxHeightPct` (92 each) are gone. They bought an 8% margin for *reachability*, and
+a window that can be moved anywhere does not need buying. A preview now opens filling the window.
+
+The new setting caps **growth**, and the two numbers must not be the same one:
+
+```
+growW = viewportBox().w * m            // the ceiling the wheel and corners may reach
+openW = min(growW, viewportBox().w)    // never OPEN bigger than the screen
+```
+
+Without that `min`, a large picture on a 2× setting would *open* taller than the screen — and a
+preview appears without being asked for.
+
+**Why the default is above 1×, in the user's own framing:** a frame exactly the window's height,
+shoved upwards to see what is under it, leaves a strip of empty page along the bottom, and lining
+it back up is fiddly. A frame larger than the window in both axes reaches the screen edges from
+any position, so there is nothing to line up. That is the whole reason for 2 — it is not about
+wanting bigger pictures.
+
+`RETIRED` in `readSettings()` **deletes** the old keys rather than ignoring them: `cfg` is
+DEFAULTS merged with storage and the whole object is written back on Save, so a retired key
+survives every save forever. They are not converted — the old pair capped the size a preview
+*opened* at (below the window), the new one caps how far it may *grow* (above it), so there is no
+honest arithmetic between them.
+
+### Corner resize: what the picture does depends on what it was doing
+
+*Specified as `E23`.* `resizeBy()` sets the frame directly with the opposite corner anchored, and
+then:
+
+- **Picture at fit** → stays at fit, so the picture grows with the window. This is what "stretch
+  it to the size I want" means; letting the frame grow grey bars instead would be a worse answer.
+- **Picture spilling** → the scale is kept and the aperture simply shows more. Rescaling here
+  would undo a zoom asked for deliberately.
+
+`drag.spilling` is captured at **grab time**, not read per move, or the gesture would change
+character halfway through as the frame passed the picture's size.
+
+Aspect locks to `drag.aspect` — the frame's shape when the corner was grabbed — rather than to the
+picture's, which would snap the frame the instant it was touched. Shift frees it.
+
+### The HOVER preview is POINTER-TRANSPARENT (v0.9.0) — this is the load-bearing decision
 
 `.box` has `pointer-events:none`; `.box.hot` turns it back on, and `layout()` sets `hot` only
-when `pinned || detached`. Do not "simplify" this back to always-on.
+when `placed`. Do not "simplify" this back to always-on.
 
 The bug it fixes: with a hit-testable preview, scanning a row of five thumbnails gives ONE
 preview. The preview covers thumbnails 2–5, so the pointer never reaches them — no `mouseover`
@@ -123,14 +256,20 @@ The consequences, all of which have to be handled together:
   full contract is in `../CLAUDE.md`. Symptom it fixes, reported on imgur: the preview did not
   pin and the link was followed, and it went away if OLINT was disabled.
 - **`ours(e.target)` is only ever true once `hot` is set.** Both `onOver` and `onOut` rely on
-  that: `ours()` now means "on a placed preview", which is exactly the detached hold rule.
+  that: `ours()` means "on a placed window". Note that since v0.28.0 the backdrop is hit-testable
+  across the whole viewport while placed, so `ours()` is true *everywhere* then — which is why
+  `onMove` uses `pointInPreview()` geometry rather than `ours()` to decide whether to un-fade the
+  status bar. Using `ours()` there would mean the bar never faded again.
 - **Nothing inside the frame is clickable on a plain hover preview**, by design — it dies the
-  moment you move off the image toward it. Anything that needs clicking (the X, the browser's
-  context menu) belongs to a placed or pinned window.
+  moment you move off the image toward it. Anything that needs clicking (the X, the ⊘, the
+  browser's context menu, the resize corners' cursors) belongs to a placed window. The wheel is
+  the exception, and always was: it needs no pointer travel, which is exactly what makes
+  growing a preview before placing it possible (v0.28.0).
 
 Two guards keep a drag from destroying the thing being dragged: `onOver` and `onOut` both
-return early while `drag` is set. Scroll still cancels an unpinned preview, detached or not —
-except a wheel *over* a placed preview, which zooms it (see the pinned-mode section).
+return early while `drag` is set. Scroll still cancels a hover preview — but note that a wheel
+over the frame is claimed for zoom and never reaches the page, so in practice that fires only
+for a wheel somewhere else.
 
 **`hot` is set by `layout()` and must be cleared by `hideViewer()`** — v0.9.0 set it and never
 removed it, and the symptom is nasty out of all proportion to the fix. `layout()` stops running
@@ -138,7 +277,8 @@ once the frame is down, so the box kept `pointer-events:auto` and `cursor:move` 
 position and size: an invisible full-size rectangle that showed the move cursor, swallowed every
 click through its own `onBoxDown`, and made `onOver`'s `ours(e.target)` true so no image under it
 would ever preview again. Reported as "a phantom window where the preview used to be"; it needed
-one detach or pin to arm and then survived every close. **The general rule: a class that grants
+one placement to arm and then survived every close. `hideViewer()` clears `box.style.cursor` for
+the same reason since v0.28.0 — `onMove` writes it inline over the bands and corners. **The general rule: a class that grants
 `pointer-events` must be removed on the same path that hides the element, not on the path that
 lays it out.** Fixed in v0.10.0; the browser check is `elementFromPoint` inside the old rectangle
 after closing, which must return page content, not `hover-zoom-host`.
@@ -284,8 +424,9 @@ shadow root. `B2` (`pinButton:'right'`) already behaved this way and is the test
 mechanism before any of it was built — two right presses, no code.
 
 **Only pinned** (narrowed in v0.12.0). A hover preview is pointer-transparent, so the native menu
-there comes up for the thumbnail underneath and offers to save *that*; a detached window keeps
-dismiss because shoving it aside is worth more than a menu that is one click away. Pinning is the
+there comes up for the thumbnail underneath and offers to save *that*. Since v0.28.0 there is no
+middle state to argue about: dragging a window aside places it, so the menu is available the
+moment the window is somewhere deliberate. Pinning is the
 deliberate "I want to work with this image" gesture, and that is where the menu belongs.
 
 **The ⋮ menu was removed in v0.12.0**, along with `MENU_ITEMS`, `runMenu`, `openMenu`/`closeMenu`,
@@ -298,7 +439,7 @@ menu cannot reach, the two that work from page JS are "open in a new tab" and "c
 other two cannot be made to work from here at any price.
 
 The removal took some care, because the menu had hooks in eight places: `isBoxControl()` (now the
-X alone), `unpin()`, `onBoxDown()`, `onPinWheel()`, `onPinKey()`'s Escape, `cancel()`, and the
+X alone), `unplace()`, `onBoxDown()`, `onPinWheel()`, `onPinKey()`'s Escape, `cancel()`, and the
 document `mousedown`, `keydown` and `resize` listeners. `node --check` catches none of that — a
 leftover `closeMenu()` is a runtime `ReferenceError` in a handler, which fails silently.
 
@@ -766,13 +907,13 @@ continue) is what the gate uses now. This is a real gap regardless of which brow
 `collectCandidates` still uses plain `closest()` and is a candidate for the same treatment if an
 ancestor-link candidate ever comes back missing on a shadow-DOM site.
 
-## Pinned mode
+## Placed mode
 
-Click the preview → it pins. The backdrop (`.dim.catch`) starts swallowing clicks, an X appears
-(`.box.pinned .x`), and wheel / `+` `−` / arrows / drag become a zoom-and-pan surface. It closes
-on the X, a click on the backdrop, or Escape. **Not optional** — there is no other thing a click
-on a floating preview could mean, so it has no setting; the panel carries a `note()` row that
-explains the controls without offering a switch.
+Press the preview → it is placed. The backdrop (`.dim.catch`) starts swallowing clicks, an X
+appears (`.box.placed .x`), and `+` `−` / arrows / drag become a zoom-and-pan surface. It closes
+on the X, a click outside it, or Escape. **Not optional** — there is no other thing a press on a
+floating preview could mean, so it has no setting; the panel carries `note()` rows that explain
+the controls without offering a switch.
 
 - **Left click pins, right click dismisses a HOVER preview — and `pinButton` swaps them.**
   Dismiss is for "the preview is in my way but my cursor is staying on this image": it takes the
@@ -781,23 +922,23 @@ explains the controls without offering a switch.
   press is claimed in the document `mousedown` handler, not on `contextmenu` — mousedown fires
   first and would otherwise `cancel()` and clear `active` before the menu event could see what to
   dismiss; `swallowMenu` then suppresses the menu itself.
-- **On a PINNED window right-click is the browser's**, not ours — see the image-actions section
-  for why. `altButton()` returns false on `pinned`, which is what leaves `swallowMenu` off. Do
-  not "tidy" that early return into a dismiss: it is the whole feature. It was `pinned ||
-  detached` for one version; detached went back to dismissing in v0.12.0.
-- **While pinned, the left button always pans or moves**, whatever `pinButton` says, so a pinned
-  frame closes via the X, the backdrop, or Escape — under both button maps now, since right no
-  longer closes it either. Do not wire dismissal onto the pan button.
+- **On a PLACED window right-click is the browser's**, not ours — see the image-actions section
+  for why. `altButton()` returns false when `placed`, which is what leaves `swallowMenu` off. Do
+  not "tidy" that early return into a dismiss: it is the whole feature, and since v0.28.0 it is
+  also the only right-click behaviour a placed window has.
+- **While placed, the left button always drives the window**, whatever `pinButton` says, so a
+  placed frame closes via the X, a click outside, or Escape — under both button maps. Do not wire
+  dismissal onto the button that resizes, moves and pans.
 - **The preview opens beside the pointer, then is nudged just far enough to touch it**
   (`nudgeIntoReach`, `REACH_INSET` 10px). v0.4.0 centred it on the cursor, which solved
   reachability but moved the preview much further than needed. The nudge is ~34px with the
   default 24px gap, and only on the axis that needs it. (A frame clamped away from the cursor at
   a window edge used to be covered by `HIDE_GRACE`; there is no grace period since v0.9.0, and
   the preview being pointer-transparent is what makes that safe.)
-- **The status bar always moves the frame** (`drag.mode === 'move'`); everywhere else pans if
-  the picture is spilling and moves the frame if it is not. Both go through the same `drag`
-  object in `onMove`. Hiding the status bar therefore removes the only way to move a frame that
-  is zoomed in far enough to pan.
+- **The status bar always moves the frame** (`drag.mode === 'move'`), as does the edge band; the
+  corners resize; everywhere else pans if the picture is spilling and moves the frame if it is
+  not. All of them go through the same `drag` object in `onMove`. Since v0.28.0 hiding the status
+  bar no longer strands a zoomed-in frame — the edge band is always there.
 
 - **The bottom 30px of the window belong to the browser** (`bottomReserve`, v0.17.0). The link
   address under the pointer, "Waiting for…", the download bar — the browser paints those along the
@@ -805,32 +946,36 @@ explains the controls without offering a switch.
   true bottom has its last rows covered by chrome no script can see. The reserve is subtracted
   **once**, at the top of `viewportBox()`, so the size cap, the opening position, `clampPosition()`
   and the floating spinner all inherit it and cannot disagree about where the bottom is; a second
-  subtraction anywhere else would double it. `maxHeightPct` is therefore a percentage of the
+  subtraction anywhere else would double it. The opening size is therefore measured against the
   *usable* height, which is why raising the reserve shrinks the preview instead of pushing it off
-  the screen. `usableHeight()` floors at 64px: the Browser pane reports `clientHeight` **0** while
+  the screen. It survived the v0.28.0 free-positioning work deliberately: losing the clamp does
+  not remove the need to *place* a preview well, and the browser still paints there.
+  `usableHeight()` floors at 64px: the Browser pane reports `clientHeight` **0** while
   hidden, and without the floor the reserve would make the viewport negative.
-- **The frame grows before the image spills.** Zooming enlarges the frame until it reaches
-  `maxWidthPct`/`maxHeightPct` of the viewport; past that the frame is fixed and the image
-  overflows it, which is when `pannable()` (and the `grab` cursor) turn on. Zoom-out floors at
-  `fitScale`, the scale the preview opened at; `0` returns there.
+- **The frame grows before the image spills — but only while HOVERING** (changed in v0.28.0; see
+  the wheel section above). Zooming a hover preview enlarges the frame up to `maxSizeMultiple` ×
+  the viewport; placing freezes it, and from then on zoom overflows the frame, which is when
+  `pannable()` (and the `grab` cursor) turn on. Zoom-out floors at `fitScale`, which is
+  `fitScaleFor()` — fit-to-window while the frame is free, fit-to-frame once it is frozen.
 - **Key and wheel listeners live on `CAP_TARGET` (= `window`), in capture** — per
   `../CLAUDE.md`, that beats every document-level listener on the page and in sibling
-  userscripts, so arrows and `+`/`−` are ours while pinned and nobody else's. Keys are added in
-  `pin()` and removed in `unpin()` against that one constant; `wheel` uses the shared
+  userscripts, so arrows and `+`/`−` are ours while placed and nobody else's. Keys are added in
+  `place()` and removed in `unplace()` against that one constant; `wheel` uses the shared
   `WHEEL_OPTS` object for add *and* remove, or the removal silently no-ops.
-- **Wheel zoom belongs to any PLACED preview, pinned or merely detached** (v0.10.0). A wheel
-  over a detached preview used to scroll the page, and the scroll then cancelled the preview —
-  the gesture destroyed what it was aimed at. `enableWheelZoom()`/`disableWheelZoom()` guard one
-  flag so add and remove cannot drift, and `detach()` is the single place `detached` is set so
-  the binding cannot fall out of step with it. It is bound **on demand, not for the life of the
-  script**: this is a non-passive capture listener on `window`, and leaving one attached makes
-  every wheel event on every page cancellable for nothing. Unpinned, `onPinWheel` acts only when
-  the pointer is actually over the frame, so a wheel anywhere else still scrolls.
-- **A drag pans only while the picture is spilling; otherwise it moves the frame** (v0.10.0) —
-  one rule for every state, with the status bar always moving the frame. Before this the pinned
-  branch was `'pan'` unconditionally and the press was simply dropped when `pannable()` was
-  false, so a pinned frame at `fitScale` could not be dragged at all. `pannable()` is read per
-  press, so zooming in and back out restores dragging with no state to keep in step.
+- **The wheel belongs to the frame in BOTH states** (v0.28.0; it was placed-only before).
+  `enableWheelZoom()` is called from `showViewer()` and `disableWheelZoom()` from `cancel()`, one
+  flag so add and remove cannot drift. It is bound **on demand, not for the life of the script**:
+  this is a non-passive capture listener on `window`, and leaving one attached makes every wheel
+  event on every page cancellable for nothing. `onPinWheel` claims it only when the pointer is
+  actually over the frame — `pointInPreview()` geometry rather than the hit test, because on a
+  hover preview `e.target` is whatever is on the page underneath — so a wheel anywhere else
+  still scrolls, in both states.
+- **In the frame's INTERIOR a drag pans only while the picture is spilling; otherwise it moves
+  the frame** (v0.10.0) — with the status bar and, since v0.28.0, the edge band always moving it.
+  Before this the placed branch was `'pan'` unconditionally and the press was simply dropped when
+  `pannable()` was false, so a placed frame at `fitScale` could not be dragged at all.
+  `pannable()` is read per press, so zooming in and back out restores dragging with no state to
+  keep in step.
 
 ## The list editor matches the sibling scripts (v0.16.0)
 
@@ -933,10 +1078,23 @@ Browser test: `python test-server.py`, then open `http://localhost:8899/test-pag
   coordinate taken from `getBoundingClientRect()`.
 - **Driving the script with synthetic `MouseEvent`s works and is far cheaper than coordinates.**
   Nothing checks `isTrusted`, so `dispatchEvent` on the element (plus a `mousemove` on `document`
-  to set `pointer`) exercises the real handlers — including the pointer-transparent pin path, by
+  to set `pointer`) exercises the real handlers — including the pointer-transparent place path, by
   dispatching `mousedown`/`mouseup`/`click` at `document` inside the frame's rect. Do the whole
   sequence in **one** `javascript_tool` call: each round trip to the pane costs ~700 ms, which is
   longer than most of the timings being measured.
+  - **Once the window is PLACED, dispatch into the shadow root, not the document.** A placed
+    window is hit-testable, and `document.elementFromPoint` returns the shadow **host**, whose
+    events never propagate down to `.box` — so `onBoxDown` never runs and the drag silently does
+    nothing. Use `host.shadowRoot.elementFromPoint(x, y)` first and fall back to the document.
+    The geometry handoff in the window `mousedown` listener only covers the `!placed` case, by
+    design, so nothing catches this for you. Cost 20 minutes on 2026-09-04.
+  - **Check the grab point is actually on screen before dispatching.** A placed window may hang
+    off the edges now, so a point computed from its rect is routinely negative or past the
+    viewport; `elementFromPoint` returns null there, the event goes to `body`, and the test reads
+    as a broken feature. Assert `0 <= x < clientWidth` in the helper.
+  - **`dismiss()` sets `suppressed`, so the same case will not re-open.** Two consecutive tests
+    on case 1 make the second look like a regression. Use a different case, or move the pointer
+    off and back first.
 - **`.case` DOM order is NOT case-number order** — cases 15 and 16 are swapped in the markup. Find
   a case by its heading text, never by array index; an index-based probe reports the wrong case's
   result and case 15 stalls 3 s on purpose, so it reads as a failure at any shorter wait.
@@ -1277,7 +1435,7 @@ safe shape is: start all probes at once, then `await` them **in list order** —
 clock drops from the sum to the slowest one actually needed, at the cost of always issuing N
 requests. That is a bandwidth decision, not a correctness one.
 
-`pin()` deliberately does **not** cancel the in-flight resolve; pinning is a reason to keep
+`place()` deliberately does **not** cancel the in-flight resolve; placing is a reason to keep
 looking. `upgradeViewer()` holds the frame's centre, and for a pinned view also holds its
 on-screen size (`prevImgW / res.w`) and the fraction of the picture at the frame's middle, so a
 swap changes only the pixels, never what the eye is tracking.
