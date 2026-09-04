@@ -98,6 +98,24 @@ The board banner is *the* rotating-banner shape `CLAUDE.md` discusses, and it es
 alone. The 468x60 below it is one of the few display ads that is a real `<img>` in the top
 document rather than an iframe — see the ad section below.
 
+### `furaffinity.net/view/<id>` — the ad-as-banner case, finally caught (Chrome, ads unblocked)
+
+```
+IMG  728x90    @x234    66px down  -> previews: peer 320px beside   (leaderboard ad)
+IMG  320x50    @x1216   61px down  -> previews: under 400px wide    (skyscraper ad)
+IMG  320x50    @x1216  130px down  -> previews: under 400px wide    (skyscraper ad)
+IMG 1136x1136  @x30    175px down  -> REFUSED  id="submissionImg"   (the artwork — see below)
+```
+
+The one page in the corpus where advertising is served as **same-document `<img>` rather than in
+an iframe**, so the gate can see it. Three ad images at the top of the page all preview: the
+728x90 leaderboard is rescued by the 320x50 beside it acting as a peer, and the two skyscrapers
+escape on width. This is the shape the ad hunt was after, and it only appeared once the VPN-level
+blocking was turned off.
+
+Note what it does **not** show: an ad rescuing a *masthead*. Here the ad is itself the banner
+candidate. The masthead-plus-leaderboard shape is still unmeasured.
+
 ### Mastheads under `BANNER_MIN` — condition (2)
 
 ```
@@ -128,6 +146,7 @@ which is precisely the shape conditions (3) and (4) cannot tell apart from a mas
 | `pexels.com/photo/<slug>` | 1013x675 @x126, **168px down**, alone, 0 same-width | Pane |
 | `wallhaven.cc/w/<id>` | 950x633 @x305, **158px down**, `id="wallpaper"`, alone, 0 same-width | Pane |
 | `safebooru.org/index.php?page=post&s=view&id=<id>` | 850x850 @x233, **176px down**, `id="image"`, alone, 0 same-width | Pane |
+| `furaffinity.net/view/<id>` | 1136x1136 @x30, **175px down**, `id="submissionImg"`, alone, 0 same-width | Chrome |
 
 Samples: <https://unsplash.com/photos/hand-holding-smartphone-with-usb-drive-plugged-in-bSIKF9GnyPE>,
 <https://www.flickr.com/photos/138486769@N02/55502473822/>,
@@ -136,7 +155,9 @@ Samples: <https://unsplash.com/photos/hand-holding-smartphone-with-usb-drive-plu
 <https://safebooru.org/index.php?page=post&s=view&id=7116188>.
 
 Unsplash, Flickr and Pexels are the ones that matter: mainstream photo sites where the picture you
-navigated to is the thing that will not preview.
+navigated to is the thing that will not preview. FurAffinity is the sharpest single page in the
+corpus — **the artwork is refused while three ads above it preview**, which is the gate producing
+exactly the inverse of what a user wants, on one screen.
 
 Safebooru's engine is shared by gelbooru.com, rule34.xxx, xbooru.com and tbib.org, all with
 `id="image"` in the same position — **inferred from the shared codebase, not measured.**
@@ -229,6 +250,8 @@ A rewrite that breaks these has traded one bug for another.
 | `store.steampowered.com` (Chrome) | 1557x46 @x0, 104px down, alone | **REFUSED — correct.** A decorative page background shipped as an `<img>`. |
 | `twitch.tv/<channel>` (both) | 533x300 @ 142px down, alone | **REFUSED.** Offline/stream card; other video gates would catch it anyway. |
 | `artstation.com/artwork/<id>` (Chrome) | artwork 548x846 @ 104px down -> **previews: peer 334px beside** | **Correct, but by luck** — saved by a "more from this artist" sidebar thumbnail. An artwork page with an empty sidebar would be refused. |
+| **`500px.com/photo/<id>/<slug>`** (Chrome) | photo 1104x736 @ 84px down -> **previews: peer 276px beside** | **Correct by exactly zero margin.** 276 / 1104 = **0.250000**, and the test is `q.width >= w * 0.25`, so it passes on equality. A 275px avatar refuses the photo. The single most fragile row in the corpus. |
+| `pixiv.net/en/artworks/<id>` (Chrome, signed out) | artwork 911x643 @ **302px down** | **previews — correct.** Clears `BANNER_TOP` comfortably; pixiv's header is tall. |
 | `imgur.com/gallery/<slug>` (Chrome) | 480x741 @ **221px down** | **previews** — clears `BANNER_TOP` by 21px. |
 | `questionablecontent.net` (Pane) | 815x60 header @ 107px down, alone, **1** same-width | **REFUSED — correct**, one image from flipping. Comic at 333px down is safe. |
 | `alrincon.com/en/` (Pane) | 1000x557 @ 60px down, **set of 3** [621, 17189, 26919 down] | **previews — correct now.** Your reported case, fixed by `BANNER_SET_MIN` 2. Survives only because the page held three more 1000px posts; a short day's page would refuse it again. |
@@ -281,9 +304,15 @@ chased directly. It does not work, and the reason is structural rather than envi
 An earlier draft of this file claimed the ad blocker was hiding the evidence. That was wrong;
 the unblocked pane shows the same thing.
 
-**The exception is a same-document house banner**, and 4chan's 468x60 above is one — a real
-`<img>` served by the site itself. Those are the only ads this gate can see at all. Turning off a
-network-level ad blocker does not meaningfully widen the corpus.
+**The exception is an ad served as a same-document `<img>`, and it is not merely theoretical.**
+4chan's 468x60 is one; **FurAffinity is the full demonstration** — three ad images at the top of a
+submission page, one of them rescued from refusal by another ad acting as its peer. Those pages
+only measured this way once VPN-level blocking was off, so that change did widen the corpus,
+contrary to what this file said a revision ago.
+
+The distinction that survives: **iframe ads are invisible to the gate, same-document ad `<img>`s
+are ordinary candidates and behave like any other picture.** Sites that self-serve their
+advertising — image boards, older forums, art communities — are where ads enter the arithmetic.
 
 ---
 
@@ -314,7 +343,7 @@ to do.
 ## Blocked, and still unmeasured
 
 **Blocked by the Claude-in-Chrome extension's own safety policy** — not by the network, a VPN, or
-any ad blocker: `danbooru.donmai.us`, `gelbooru.com`, `patreon.com`. Tool-driven navigation is
+any ad blocker: `danbooru.donmai.us`, `gelbooru.com`, `e621.net`, `patreon.com`. Tool-driven navigation is
 refused with `This site is not allowed due to safety restrictions`, and while such a tab is *open*
 the extension refuses to enumerate tabs at all, so no other site can be reached either. Manual
 browsing is unaffected. To add any of them, run the probe below in the console on the page and
@@ -323,9 +352,8 @@ paste the output.
 This is why **the Gelbooru-engine family claim above rests on safebooru alone.** Both siblings
 that would have confirmed it are blocked.
 
-Not attempted: pixiv, 500px, e621, furaffinity, custom-theme Tumblr blogs. `behance.net` and
-`ko-fi.com` were tried with guessed URLs that did not resolve. All are the detail-page or
-profile-header shape already well covered above.
+Not attempted: custom-theme Tumblr blogs. `behance.net` and `ko-fi.com` were tried with guessed
+URLs that did not resolve — real ones would work.
 
 **The all-slides carousel was predicted to be a miss, and the evidence now says it is not.**
 Carousel-bearing pages were checked at Samsung (27 slides), Best Buy (27), Allbirds (23), Newegg,
@@ -402,11 +430,13 @@ Observations from the rows above, not a proposed design.
    page's content actually begins.
 2. **`BANNER_MIN` 400.** Lets narrow mastheads through — measured at 250, 300, 304 and 340px on
    four different sites, including 4chan's rotating board banner.
-3. **The peer test — no measured failure anywhere in this corpus.** Re-measured on the exact
-   YouTube case that motivated it: the blocking avatar comes in at `frac=0.019` against a floor of
-   0.25. The header-ad shape that might still break it turns out to be largely unreachable,
-   because ads live in iframes the gate cannot see. This is the one condition the evidence
-   supports keeping as-is.
+3. **The peer test — no measured failure, but the tightest margin in the corpus sits here.**
+   Re-measured on the exact YouTube case that motivated it: the blocking avatar comes in at
+   `frac=0.019` against a floor of 0.25, comfortably excluded. But **500px passes on exact
+   equality** — a 276px avatar against a 1104px photo is 0.250000, and `>=` is what saves it. One
+   pixel narrower and 500px joins the refused-content list. FurAffinity shows the other side: an
+   ad acting as a peer for another ad, letting a 728x90 leaderboard preview. The rule's *direction*
+   is right; its threshold is sitting exactly on a real site's geometry.
 4. **`BANNER_SET_MIN` 2 — the weakest, as `CLAUDE.md` already says, and every loud miss comes from
    it.** Membership is decided on width alone: no shared x, no regular spacing, no distance bound,
    and no check that the members are *content* rather than more banners. Home Depot's set is four
