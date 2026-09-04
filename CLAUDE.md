@@ -1248,6 +1248,13 @@ Browser test: `python test-server.py`, then open `http://localhost:8899/test-pag
   next measurement was of the changed config and read as "the new setting does nothing". Keep a
   call that mutates settings separate from the one that measures, and re-read the stored value in
   the same call that reports a number.
+- **`location.reload()` from `javascript_tool` frequently does NOT reload the pane's page.** The
+  call returns, the next call still sees the old script instance, and a settings change therefore
+  reads as "the new setting does nothing" — which cost twenty minutes on 2026-09-04 chasing a
+  `zoomFactor` that was in `localStorage`, was returned by `GM_getValue`, and still had no effect.
+  Navigate to the URL with a **changed query string** (`?v=2`, `?v=3`) instead; same-URL
+  `navigate` is also treated as a no-op. The tell is that `document.getElementById('hover-zoom-host')`
+  is still non-null on what should be a fresh page.
 - **A `computer{action:"hover"}` to a coordinate the pointer is already at fires no `mouseover`,**
   so a second test against the same element silently does nothing and reads as a script bug. Move
   the pointer somewhere else first, and re-derive coordinates from a fresh screenshot after any
