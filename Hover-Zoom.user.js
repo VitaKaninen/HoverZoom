@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.32.0
+// @version     0.33.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -9,6 +9,7 @@
 // @grant       GM_setValue
 // @grant       GM_addValueChangeListener
 // @grant       GM_registerMenuCommand
+// @grant       GM_unregisterMenuCommand
 // @run-at      document-idle
 // @downloadURL https://raw.githubusercontent.com/VitaKaninen/HoverZoom/master/Hover-Zoom.user.js
 // @updateURL   https://raw.githubusercontent.com/VitaKaninen/HoverZoom/master/Hover-Zoom.user.js
@@ -80,8 +81,6 @@
                                     // Above 1 on purpose: a frame bigger than the window can be
                                     // shoved aside or upwards and still reach the screen edges,
                                     // so it never leaves a strip of empty page behind it
-        bottomReserve: 30,          // px of the window's bottom edge kept clear — the browser
-                                    // paints its link/status text there, over the picture
         zoomFactor: 1.0,            // scale applied to natural size before clamping
         position: 'cursor',         // 'cursor' | 'center'
         cursorGap: 24,              // px between pointer and frame edge
@@ -103,7 +102,6 @@
     };
 
     const KEY = 'hoverZoomSettings';
-    let cfg = Object.assign({}, DEFAULTS, readSettings());
 
     // Settings that no longer exist are DELETED on read, not merely ignored. cfg is
     // DEFAULTS merged with what is stored and the whole object is written back on Save, so
@@ -112,7 +110,16 @@
     // the size a preview OPENED at (below the window), the new one caps how far it may GROW
     // (above it), so they do not measure the same thing and there is no honest arithmetic
     // between them. A preview now opens filling the window instead of 92% of it.
-    const RETIRED = ['maxWidthPct', 'maxHeightPct', 'dimOpacity'];
+    //
+    // THIS MUST BE DECLARED BEFORE `cfg`, and the reason is worth keeping. `readSettings()` is
+    // a hoisted function declaration, so the `cfg` initialiser below could call it while
+    // `const RETIRED` was still in its temporal dead zone — reading it threw a ReferenceError,
+    // the catch below swallowed it, and readSettings() returned {} on EVERY page load. Stored
+    // settings then took effect only after something called reloadSettings() (opening the
+    // panel, or another tab writing), so the script ran on defaults until the user opened
+    // its settings. Shipped broken in v0.28.0, found in v0.33.0 while testing a menu label
+    // that would not follow the stored site mode.
+    const RETIRED = ['maxWidthPct', 'maxHeightPct', 'dimOpacity', 'bottomReserve'];
 
     function readSettings() {
         try {
@@ -121,9 +128,16 @@
             RETIRED.forEach(function (k) { delete o[k]; });
             return o;
         } catch (e) {
+            // Corrupt stored JSON is a real possibility and defaults are the right answer to
+            // it. A programming error reaching here is NOT, and silence is what let the bug
+            // above live for five versions — dbg() cannot be used, since cfg does not exist yet.
+            try { console.warn('[Hover Zoom] settings could not be read, using defaults:', e); }
+            catch (e2) { /* no console */ }
             return {};
         }
     }
+
+    let cfg = Object.assign({}, DEFAULTS, readSettings());
 
     function saveSettings() {
         GM_setValue(KEY, JSON.stringify(cfg));
@@ -146,19 +160,73 @@
                 if (!remote) return;                // our own write; cfg already matches
                 reloadSettings();
                 probeCache.clear();
+                refreshSiteMenu();                  // the mode or the list may have changed
                 if (panelHost) openPanel();         // re-render an open panel onto fresh values
             });
         } catch (e) { /* not all managers implement it; reloadSettings() still covers the panel */ }
     }
 
-    function siteEnabled() {
+    // Does an entry cover this hostname? Suffix match, so example.com covers www.example.com.
+    function entryCovers(entry, host) {
+        const e = String(entry).trim().toLowerCase().replace(/^\*\./, '');
+        if (!e) return false;
+        return host === e || host.endsWith('.' + e);
+    }
+
+    function siteListed() {
         const host = location.hostname.toLowerCase();
-        const listed = cfg.siteList.some(function (entry) {
-            const e = entry.trim().toLowerCase().replace(/^\*\./, '');
-            if (!e) return false;
-            return host === e || host.endsWith('.' + e);
-        });
-        return cfg.siteMode === 'whitelist' ? listed : !listed;
+        return cfg.siteList.some(function (entry) { return entryCovers(entry, host); });
+    }
+
+    function siteEnabled() {
+        return cfg.siteMode === 'whitelist' ? siteListed() : !siteListed();
+    }
+
+    // ----------------------------------------------------- the manager's menu
+    //
+    // One command, whose label is the ACTION rather than the mode — "Enable for this site"
+    // when pressing it would enable, "Disable for this site" when it would disable — because
+    // the two site modes invert what being on the list means and a fixed label would be wrong
+    // in one of them. It saves opening the panel and scrolling to the site list for what is
+    // the most common single change there is.
+    let siteMenuId = null;
+
+    function siteMenuLabel() {
+        const on = siteEnabled();
+        return on ? 'Disable for this site' : 'Enable for this site';
+    }
+
+    // Re-registering is how the label is kept honest, so a manager without
+    // GM_unregisterMenuCommand gets the label it had at load rather than a second entry
+    // stacked under the first.
+    function refreshSiteMenu() {
+        if (typeof GM_registerMenuCommand !== 'function') return;
+        if (siteMenuId != null) {
+            if (typeof GM_unregisterMenuCommand !== 'function') return;
+            try { GM_unregisterMenuCommand(siteMenuId); } catch (e) { return; }
+            siteMenuId = null;
+        }
+        try {
+            siteMenuId = GM_registerMenuCommand(siteMenuLabel(), toggleSite);
+        } catch (e) { /* nothing to fall back to; the panel still has the list */ }
+    }
+
+    // reloadSettings() first for the same reason blockCurrent() does it: the site list is
+    // written from outside the panel, so a stale cfg here would silently drop another tab's
+    // entries when the whole object is written back.
+    function toggleSite() {
+        reloadSettings();
+        const host = location.hostname.toLowerCase();
+        // Remove EVERY entry that covers this host, not just an exact match — otherwise
+        // "disable for this site" on www.example.com would leave example.com listed and the
+        // menu would report that nothing had changed.
+        const kept = cfg.siteList.filter(function (entry) { return !entryCovers(entry, host); });
+        if (kept.length === cfg.siteList.length) kept.push(host);
+        cfg.siteList = kept;
+        saveSettings();
+        refreshSiteMenu();
+        if (!siteEnabled()) cancel();
+        dbg('site toggled', { host: host, list: cfg.siteList, enabledHere: siteEnabled() });
     }
 
     // ------------------------------------------------------------------- debug
@@ -1007,6 +1075,7 @@
     let dimEl = null, closeEl = null;
     let capEl = null, capNameEl = null, capMetaEl = null, blockEl = null;
     let edgeEls = null;         // [top, left, right, bottom] — the drawn frame margin
+    let gripEl = null;          // invisible collar that carries the outer half of the resize strip
     let spinEl = null, spinSvg = null;
 
     const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -1095,6 +1164,12 @@
             // until the document, so the page still moves under a placed window.
             '.dim{position:fixed;inset:0;background:transparent;pointer-events:none}',
             '.dim.catch{pointer-events:auto}',
+            // The window's outer resize strip. It sits above the backdrop and below the frame,
+            // so the only part of it anything can reach is the RESIZE_OUT collar sticking out
+            // past the frame's edges — which is exactly the region it exists to catch. Only
+            // hit-testable while placed, like everything else that can be clicked.
+            '.grip{position:fixed;background:transparent;pointer-events:none}',
+            '.grip.hot{pointer-events:auto}',
             '.box{position:fixed;opacity:0;pointer-events:none;transition:opacity var(--fade) ease;',
             'background:#1e1e2e;box-sizing:content-box;overflow:hidden}',
             '.box.on{opacity:1}',
@@ -1125,7 +1200,7 @@
             'display:flex;align-items:center;gap:10px;box-sizing:border-box;',
             'padding:0 8px;font:11px/16px system-ui,sans-serif;color:#cdd6f4;',
             'background:rgba(30,30,46,.86);letter-spacing:.02em;user-select:none}',
-            '.box.placed .cap{cursor:move}',
+
             '.cap .name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;',
             'font-family:ui-monospace,SFMono-Regular,Consolas,monospace;color:#a6adc8}',
             '.cap .meta{flex:none;white-space:nowrap}',
@@ -1190,6 +1265,12 @@
         dimEl.addEventListener('mousedown', function (e) { e.preventDefault(); e.stopPropagation(); }, true);
         dimEl.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); dismiss(); }, true);
         root.appendChild(dimEl);
+
+        gripEl = document.createElement('div');
+        gripEl.className = 'grip';
+        gripEl.addEventListener('mousedown', onBoxDown, true);
+        gripEl.addEventListener('click', onBoxClick, true);
+        root.appendChild(gripEl);
 
         box = document.createElement('div');
         box.className = 'box';
@@ -1283,13 +1364,16 @@
     // opening position, or a preview would open exactly 8px wider than it is allowed to sit.
     const EDGE_GAP = 4;
 
-    // The browser paints its own status text — the target of the link under the pointer,
-    // "Waiting for…", the download bar — along the BOTTOM edge of the content area, on top
-    // of the page and on top of anything we draw there. A frame clamped to the true bottom
-    // therefore has its last rows of pixels covered by browser chrome we cannot see from
-    // here. `bottomReserve` is taken off the height ONCE, at the top of viewportBox(), so
-    // the size cap, the opening position, clampPosition() and the floating spinner all
-    // inherit it from this single place and cannot disagree about where the bottom is.
+    // Where the bottom of the screen is, for everything that has to agree about it: the size
+    // cap, the opening position, clampPosition() and stickBar().
+    //
+    // It used to subtract `bottomReserve` (30px), because the browser paints its link and
+    // status text along the bottom edge of the content area, over anything we draw there.
+    // Retired in v0.33.0: that mattered when a preview was clamped inside the browser window
+    // and its status bar could end up permanently under that chrome with nothing to be done
+    // about it. A window can now be dragged anywhere and resized freely, so "the browser is
+    // covering the bar" is answered by moving the window — and the reserve's only remaining
+    // effect was to stop the bar from ever reaching the true bottom of the screen.
     // The frame around the picture, and the smallest window worth having.
     //
     // THE MARGIN IS DRAWN ON TOP OF THE PICTURE, exactly as the status bar always has been,
@@ -1318,8 +1402,8 @@
     function outerH() { return view.frameH + insetY() * 2; }
 
     function usableHeight() {
-        const vh = document.documentElement.clientHeight;
-        return Math.max(64, vh - Math.max(0, cfg.bottomReserve || 0));
+        // The floor is because the Browser pane reports clientHeight 0 while it is hidden.
+        return Math.max(64, document.documentElement.clientHeight);
     }
 
     // The box a preview OPENS into. Never larger than the window, whatever the growth
@@ -1500,7 +1584,14 @@
     // manager. That is the reason it always moves the frame regardless of zoom, and the
     // reason `showStatusBar` off is a real trade rather than a cosmetic one: a spilling
     // frame with no bar can be resized and panned but not moved, and Escape is the way out.
-    const RESIZE_BAND = 12;   // px of the outer edge that resizes along one axis
+    // The three grab bands, measured from the window's outer edge. The resize band straddles
+    // that edge — RESIZE_OUT of it lies OUTSIDE the window, on the invisible `.grip` that
+    // extends past the frame, so the cursor turns into a double arrow before the pointer has
+    // reached the border rather than only after it. That outer half only exists while the
+    // window is placed; there is nothing to resize on one you are merely hovering.
+    const RESIZE_OUT = 6;     // px outside the window edge that still resizes
+    const RESIZE_IN = 6;      // px inside it — together, a 12px strip centred on the edge
+    const MOVE_BAND = 13;     // px further in that moves the window
     const CORNER_REACH = 24;  // px from a corner where a drag resizes both axes at once
 
     function hitRegion(x, y) {
@@ -1508,12 +1599,16 @@
         const ow = outerW();
         const oh = outerH();
         const rx = x - view.left, ry = y - view.top;
-        if (rx < 0 || ry < 0 || rx > ow || ry > oh) return null;
+        // The tested rectangle is the window GROWN by RESIZE_OUT, so dl/dr/dt/db go negative
+        // in the outer half of the resize strip and every `<=` below reads the same way on
+        // both sides of the edge.
+        if (rx < -RESIZE_OUT || ry < -RESIZE_OUT ||
+            rx > ow + RESIZE_OUT || ry > oh + RESIZE_OUT) return null;
         const dl = rx, dr = ow - rx, dt = ry, db = oh - ry;
         // Both rings shrink on a small frame, or together they swallow the whole of it and
         // there is no middle left to grab.
         const corner = Math.min(CORNER_REACH, ow / 3, oh / 3);
-        const rb = Math.min(RESIZE_BAND, ow / 6, oh / 6);
+        const rb = Math.min(RESIZE_IN, ow / 6, oh / 6);
         const cl = dl <= corner, cr = dr <= corner, ct = dt <= corner, cb = db <= corner;
         if ((cl || cr) && (ct || cb)) {
             return { kind: 'resize', ex: cl ? 'l' : 'r', ey: ct ? 't' : 'b' };
@@ -1530,8 +1625,11 @@
         // always dropped its pointer-events so that a press there falls through to the
         // ordinary pan-or-move rule rather than being an invisible handle. The ring is drawn
         // rather than hit-tested, so the same rule has to be applied here by hand.
-        if (!chromeVisible()) return null;
-        const m = chromeThickness() + cfg.borderWidth;
+        if (!chromeVisible() || !chromeThickness()) return null;
+        // At least MOVE_BAND past the resize strip, and never less than the ring that is
+        // actually drawn — a painted handle with a dead strip along its inside edge would be
+        // the worst of both.
+        const m = Math.max(rb + MOVE_BAND, chromeThickness() + cfg.borderWidth);
         if (dl < m || dr < m || dt < m || db < m) return { kind: 'move' };
         return null;    // the middle — the pan-or-move rule decides
     }
@@ -1808,6 +1906,11 @@
         clampPosition();
         box.style.left = Math.round(view.left) + 'px';
         box.style.top = Math.round(view.top) + 'px';
+        gripEl.style.left = Math.round(view.left - RESIZE_OUT) + 'px';
+        gripEl.style.top = Math.round(view.top - RESIZE_OUT) + 'px';
+        gripEl.style.width = Math.round(outerW() + RESIZE_OUT * 2) + 'px';
+        gripEl.style.height = Math.round(outerH() + RESIZE_OUT * 2) + 'px';
+        gripEl.classList.toggle('hot', placed);
         box.style.width = view.frameW + 'px';
         box.style.height = view.frameH + 'px';
         layoutChrome();
@@ -2057,6 +2160,9 @@
         // be"; it appeared only after a preview had been placed at least once.
         box.classList.remove('on', 'hot', 'pan', 'drag');
         box.style.cursor = '';      // onMove writes this inline over the bands; see hitRegion
+        // Same reasoning as `hot` on the box: this grants pointer-events, so it comes off on
+        // the path that hides the window, not on the one that lays it out.
+        if (gripEl) { gripEl.classList.remove('hot'); gripEl.style.cursor = ''; }
         // Release the decoded image, or stop the clip, so long sessions accumulate
         // neither bitmaps nor a video quietly buffering behind a hidden element.
         setTimeout(function () {
@@ -2266,22 +2372,22 @@
 
         // Edges and corners resize; everything else is the middle — see hitRegion(). The
         // middle keeps the older rule: pan when there is something to pan, move the frame
-        // when there is not, with the status bar always moving it. pannable() is read per
-        // press, so zooming in and back out restores dragging by itself with no state to
-        // keep in step.
-        // THE STATUS BAR OUTRANKS THE EDGE REGIONS, and it has to. It normally sits along the
-        // frame's bottom edge, inside the bottom resize strip, so without this precedence its
-        // lower half would resize and only its top few pixels would move — on the one control
-        // whose whole job is moving the window. The cost is that the bottom EDGE cannot be
-        // grabbed to resize where the bar covers it; the two bottom corners and the other
-        // three edges still can, which is the same trade any window with a docked title bar
-        // makes.
+        // when there is not. pannable() is read per press, so zooming in and back out
+        // restores dragging by itself with no state to keep in step.
+        //
+        // THE STATUS BAR NO LONGER OUTRANKS A RESIZE (v0.33.0). It used to outrank the edge
+        // regions outright, from when it was the only move handle there was; once the whole
+        // frame margin became one (E25) that made the bar a dead spot for resizing, and the
+        // two BOTTOM CORNERS in particular answered a grab with a move cursor instead of a
+        // resize one. It still outranks the *middle*, which is not redundant: stickBar() can
+        // park the bar well up the picture on a frame taller than the screen, and there the
+        // ring is off-screen and the bar is the only handle left.
         //
         // contains(e.target), not geometry: a faded bar has `pointer-events: none` (E10), so
         // this is false and the press falls through to the ordinary rule — which is exactly
         // the "a faded bar is not an invisible handle" behaviour.
-        const onBar = capEl.contains(e.target);
-        const reg = onBar ? null : hitRegion(e.clientX, e.clientY);
+        const reg = hitRegion(e.clientX, e.clientY);
+        const onBar = capEl.contains(e.target) && !(reg && reg.kind === 'resize');
         if (reg && reg.kind === 'resize') {
             drag = {
                 mode: 'resize', ex: reg.ex, ey: reg.ey,
@@ -2300,7 +2406,7 @@
             // The frame margin moves the window for the same reason the bar does, and it is
             // what makes the bar optional again: a spilling frame is now movable by any of
             // its four sides rather than by the bar alone.
-            const onFrame = onBar || (reg && reg.kind === 'move');
+            const onFrame = onBar || (reg && reg.kind === 'move');   // reg is never 'resize' here
             const mode = onFrame || !pannable() ? 'move' : 'pan';
             drag = { x: e.clientX, y: e.clientY, mode: mode, dist: 0 };
         }
@@ -3105,8 +3211,15 @@
         // hover preview is pointer-transparent, so the page's own cursor is what shows
         // there, for the same reason the X and the ⊘ are absent from one.
         if (box && placed && !drag) {
-            box.style.cursor = over && !(capEl && capEl.contains(e.target))
-                ? regionCursor(hitRegion(e.clientX, e.clientY)) : '';
+            // Mirrors onBoxDown exactly, including the bar's narrowed precedence: a resize
+            // region wins over the bar, and the bar only claims what is left. Geometry rather
+            // than e.target, because a mousemove seen on `document` has been retargeted to the
+            // shadow host and can never name the bar.
+            const reg = hitRegion(e.clientX, e.clientY);
+            const c = reg && reg.kind === 'resize' ? regionCursor(reg)
+                : (chromeVisible() && pointerOverBar() ? 'move' : regionCursor(reg));
+            box.style.cursor = c;
+            if (gripEl) gripEl.style.cursor = c;
         }
         if (!drag || !view) return;
         // A drag OUTLIVES the frame's edges and the browser's: this listener is on
@@ -3358,7 +3471,11 @@
             'input[type=color]{width:40px;height:26px;padding:0;border:1px solid ' + C.surface2 + ';',
             'border-radius:5px;background:' + C.surface + ';cursor:pointer}',
             'textarea{width:100%;height:64px;resize:vertical;font-family:ui-monospace,monospace}',
-            '.foot{display:flex;gap:8px;justify-content:flex-end;margin-top:18px;padding-top:14px;',
+            // Sticky, so Save is reachable without scrolling to the end of a long panel. The
+            // negative margins pull it out to the panel's own edges and down into its bottom
+            // padding, so nothing shows underneath it when it is stuck.
+            '.foot{position:sticky;bottom:0;z-index:2;display:flex;gap:8px;justify-content:flex-end;',
+            'margin:18px -20px -18px;padding:14px 20px 18px;background:' + C.base + ';',
             'border-top:1px solid ' + C.surface + '}',
             'button{background:' + C.surface + ';color:' + C.text + ';border:1px solid ' + C.surface2 + ';',
             'border-radius:6px;padding:6px 14px;font-size:12px;cursor:pointer}',
@@ -3737,9 +3854,6 @@
             'larger than the window can be shoved aside or upwards and still reach the ' +
             'screen edges, instead of leaving a strip of empty page behind it',
             1, 4, 0.25);
-        num('bottomReserve', 'Keep clear at the bottom',
-            'px — the browser draws link addresses and its status text over the bottom of ' +
-            'the window, so the preview stays above that strip', 0, 300, 5);
         pick('position', 'Position', null, [
             ['cursor', 'Beside the cursor'], ['center', 'Centred in the window']]);
         num('cursorGap', 'Gap from cursor', 'px — the frame is still nudged to stay reachable',
@@ -3785,6 +3899,7 @@
         reset.addEventListener('click', function () {
             cfg = Object.assign({}, DEFAULTS);
             saveSettings();
+            refreshSiteMenu();
             openPanel();
         });
 
@@ -3799,6 +3914,7 @@
             controls.forEach(function (fn) { fn(); });
             saveSettings();
             probeCache.clear();
+            refreshSiteMenu();
             closePanel();
         });
 
@@ -3812,6 +3928,7 @@
 
     if (typeof GM_registerMenuCommand === 'function') {
         GM_registerMenuCommand('Hover Zoom settings', openPanel);
+        refreshSiteMenu();
     }
 
     // First line in the console when debug is on: which copy of the script is actually

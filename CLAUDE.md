@@ -203,11 +203,24 @@ ordering wrong here compiles and silently does the wrong thing.
 a window dragged fully off screen, and strands one at `left: 1500` the moment the browser is
 narrowed to 1200. It now guarantees only that `KEEP_ON_SCREEN` (72px) stays in view per axis.
 
-`hitRegion()` is three rings since v0.30.0: **corners and a `RESIZE_BAND` (12px) edge strip
-resize, the rest of the frame margin moves, and everything inside that is the middle**, which
-moves the frame or pans the picture by the old rule. The move ring only exists **while the frame
-margin is visible** (`chromeVisible()`); faded, a press there falls through to the middle's rule,
-which is what keeps an overlaid ring from being the invisible band all over again.
+`hitRegion()` is three rings since v0.30.0: **a resize strip along the edge, a move band inside
+it, and everything further in is the middle**, which moves the frame or pans the picture by the
+old rule. The move ring only exists **while the frame margin is visible** (`chromeVisible()`);
+faded, a press there falls through to the middle's rule, which is what keeps an overlaid ring
+from being the invisible band all over again.
+
+**The resize strip STRADDLES the window edge** (v0.33.0): `RESIZE_OUT` (6px) outside plus
+`RESIZE_IN` (6px) inside, so the cursor changes as the pointer arrives rather than after it has
+crossed the border. `hitRegion()` tests the window grown by `RESIZE_OUT`, which lets `dl`/`dr`/
+`dt`/`db` go negative and leaves every comparison below reading the same on both sides of the
+edge. The outer half is carried by `gripEl`, an invisible collar between the backdrop and the
+frame — the only part of it anything can reach is the ring sticking out past the box. It gets
+`hot` in `layout()` and loses it in `hideViewer()`, for the documented reason the box does.
+
+Then `MOVE_BAND` (13px) further in, floored at the drawn ring's own thickness
+(`max(rb + MOVE_BAND, chromeThickness() + borderWidth)`) — a painted handle with a dead strip
+along its inner edge would be the worst of both. At the defaults that works out to 25px, so the
+13 is the number that matters only when `frameMargin` is set small.
 
 **The middle ring is the move band that v0.29.0 removed, and the difference is that this one is
 drawn.** v0.28.0 put an *invisible* move-only band just inside the resize strip so a window
@@ -231,14 +244,26 @@ against the bottom of the frame's *visible* part rather than its own bottom, whi
 guarantee a window manager makes about a title bar. Measured: a 2512 × 1492 frame at (−637, −368)
 on a 1265 × 785 viewport, own bottom edge at 1124, bar held at 726.
 
-**Two precedence problems came with it, and both are in `onBoxDown`.** The bar normally sits
-inside the bottom `RESIZE_BAND`, so `hitRegion()` would claim its lower half for a resize — on
-the one control whose entire job is moving the window. `onBar` is therefore tested FIRST and
-suppresses `hitRegion()` entirely, and `onMove` skips the resize cursor over it for the same
-reason. The cost is that the bottom edge cannot be resized where the bar covers it; the bottom
-corners and the other three edges still can, which is what any window with a docked title bar
-does. `resetBar()` clears the offset, or the next preview opens with its bar floating up the
-picture.
+**The bar's precedence in `onBoxDown` was narrowed in v0.33.0, and the narrowing is the point.**
+It used to be tested FIRST and suppress `hitRegion()` entirely, from when it was the only move
+handle there was. Once the whole frame margin became one (`E25`) that made the bar a dead spot
+for resizing — and the two BOTTOM CORNERS in particular answered a grab with a move cursor,
+reported as "I can't resize the window by grabbing either of the bottom corners". It is now
+`capEl.contains(e.target) && !(reg && reg.kind === 'resize')`, so a resize region wins and the
+bar claims only what is left.
+
+**Do not delete the rest of it as redundant** — that was the first instinct and it is wrong.
+`stickBar()` can park the bar well up the picture on a frame taller than the screen, and there
+the frame margin is off-screen and the bar is the only handle in reach. The redundant half was
+the overlap with the resize strip; the non-redundant half is everything else.
+
+`onMove` mirrors the same rule for the cursor, but with **geometry** (`pointerOverBar()`) rather
+than `e.target`: a mousemove seen on `document` has been retargeted to the shadow host and can
+never name the bar. It is gated on `chromeVisible()` so a faded bar shows the cursor its press
+would actually produce. `.box.placed .cap{cursor:move}` was removed with it, or the bar would
+claim `move` over its own resize strip.
+
+`resetBar()` clears the offset, or the next preview opens with its bar floating up the picture.
 
 **Edges resize, not just corners, because corners are not always reachable.** The growth ceiling
 is above 1×, so a frame can be larger than the browser window and have no corner on screen at all
@@ -1125,18 +1150,16 @@ the controls without offering a switch.
   spills it is the only thing left that moves the window, which is why `showStatusBar: false` is
   a real trade.
 
-- **The bottom 30px of the window belong to the browser** (`bottomReserve`, v0.17.0). The link
-  address under the pointer, "Waiting for…", the download bar — the browser paints those along the
-  bottom edge of the content area, on top of everything the page draws, so a frame clamped to the
-  true bottom has its last rows covered by chrome no script can see. The reserve is subtracted
-  **once**, at the top of `viewportBox()`, so the size cap, the opening position, `clampPosition()`
-  and the floating spinner all inherit it and cannot disagree about where the bottom is; a second
-  subtraction anywhere else would double it. The opening size is therefore measured against the
-  *usable* height, which is why raising the reserve shrinks the preview instead of pushing it off
-  the screen. It survived the v0.28.0 free-positioning work deliberately: losing the clamp does
-  not remove the need to *place* a preview well, and the browser still paints there.
-  `usableHeight()` floors at 64px: the Browser pane reports `clientHeight` **0** while
-  hidden, and without the floor the reserve would make the viewport negative.
+- **`bottomReserve` is retired (v0.33.0), and `usableHeight()` is now just the viewport.** The
+  browser paints link addresses and "Waiting for…" along the bottom of the content area, over
+  anything we draw, and 30px were kept clear for it from v0.17.0. That earned its place while a
+  preview was clamped inside the browser window: the status bar could end up permanently under
+  that chrome with nothing the user could do. A window can be dragged anywhere and resized freely
+  now, so the answer is to move it — and the reserve's only remaining effect was to stop the bar
+  reaching the true bottom of the screen, reported as the bar not following the window down.
+  `usableHeight()` survives as the single place that answers "where is the bottom", because the
+  size cap, the opening position, `clampPosition()` and `stickBar()` must not disagree. It floors
+  at 64px: the Browser pane reports `clientHeight` **0** while hidden.
 - **The frame grows before the image spills — until the window is MOVED** (see the wheel section
   above). Zooming a placed-but-unmoved window enlarges the frame up to `maxSizeMultiple` × the
   viewport; moving it freezes the frame, and from then on zoom overflows it, which is when
@@ -1178,6 +1201,33 @@ right there because it has no Save button; copying that here would make Cancel a
 calls `blocks.clear()`. `addLine()` is gone. Removal is **by value, not index** — entries are
 unique because `add()` dedupes, and an index would be wrong the moment display and storage order
 disagree.
+
+## The manager's menu, and the panel's Save row (v0.33.0)
+
+**"Enable / Disable for this site"** sits beside "Hover Zoom settings" in the userscript
+manager's menu. Adding or removing the current host is by far the most common single change
+anyone makes, and doing it through the panel means opening it and scrolling to the site list.
+
+- **The label is the ACTION, not the mode.** `siteMode` inverts what being on the list means —
+  `whitelist` lists the sites where it runs, `blacklist` the sites where it does not — so a fixed
+  label would be wrong in one of them. `siteMenuLabel()` just reads `siteEnabled()`: enabled here
+  means the command would disable, and the other way round.
+- **The label is kept honest by unregistering and re-registering**, from `refreshSiteMenu()`,
+  called at boot, from `toggleSite()`, from the panel's Save and Reset, and from the
+  `GM_addValueChangeListener` handler. `GM_unregisterMenuCommand` is feature-detected and needs
+  its own `@grant`; a manager without it keeps the label it had at load rather than growing a
+  second entry underneath the first.
+- **`toggleSite()` removes EVERY entry that covers the host, not an exact match.** `siteEnabled()`
+  matches by suffix, so on `www.example.com` a listed `example.com` is what is in force —
+  removing only an exact `www.example.com` would leave the site listed and the menu would report
+  that nothing had happened.
+- **`reloadSettings()` first**, for the same reason `blockCurrent()` does it: this writes the
+  whole `cfg` object back, and it is written from outside the panel.
+
+**The panel's Save row is `position: sticky`.** The negative margins (`margin:18px -20px -18px`)
+pull it out to the panel's own edges and down into its bottom padding, so nothing shows under it
+while it is stuck. The panel is ~3300px of scroll against a ~700px viewport, which is why hunting
+for Save was worth a fix.
 
 ## Settings are per-tab snapshots — always re-read before rendering the panel
 

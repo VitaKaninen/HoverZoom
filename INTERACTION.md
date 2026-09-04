@@ -439,9 +439,17 @@ The ring is a move handle, so the three gestures are readable off the window its
 
 | Where | What it does |
 |---|---|
-| the outer 12 px, and 24 px of a corner | resize (`S19`, `E23`) |
-| the rest of the margin, and the status bar | move the window, at any zoom (`S14`) |
+| 6 px OUTSIDE the window, and 6 px inside it | resize (`S19`, `E23`) — a 12 px strip straddling the edge |
+| 24 px of a corner, inside or out | resize both axes |
+| the next 13 px in, and the status bar | move the window, at any zoom (`S14`) |
 | the picture | move the window, or pan it once it is spilling (`S14` / `S13`) |
+
+**The resize strip reaches 6 px OUTSIDE the window** (v0.33.0), so the cursor becomes a double
+arrow as the pointer arrives rather than only after it has crossed the border. It is carried by
+an invisible `.grip` collar that extends past the frame and sits above the backdrop; like every
+other control it is hit-testable only while placed, because there is nothing to resize on a
+preview you are merely hovering. Beyond that 6 px there is no control at all — the page owns the
+cursor and we cannot reach it.
 
 **It fades with the bar** (`E10`) — one second of a still pointer — and **while faded it stops
 being a handle**, so a press there falls through to the ordinary pan-or-move rule. That is the
@@ -642,13 +650,19 @@ to be wrong. What this cannot judge is the destination: a muted, playing, contro
 video site's listing page is pixel-for-pixel the Imgur shape, and only the ancestor link
 separates them. Test-page cases 21 and 22 are the same card twice, differing only in `controls`.
 
-#### E13 · The frame stops short of the bottom of the window
+#### E13 · The frame reaches the bottom of the window — RETIRED in v0.33.0
 The browser paints its own status text — the address of the link under the pointer, "Waiting
 for…" — along the bottom edge of the content area, over everything the page draws. `bottomReserve`
-(30 px) is taken off the usable height before any other geometry, so the size cap, the opening
-position and the clamp all stay above that strip. Measured on an 885 px viewport: the frame closes
-at 851 px, 34 px clear (the reserve plus the ordinary 4 px gutter), against 881 px with the reserve
-set to 0. Raising it shrinks the preview rather than pushing it off the bottom.
+(30 px) used to be taken off the usable height before any other geometry so that nothing was ever
+drawn under it.
+
+**That was worth having when a preview was clamped inside the browser window**: the status bar
+could end up permanently beneath the browser's own chrome with nothing the user could do about
+it. A window can now be dragged anywhere and resized freely, so "the browser is covering the bar"
+is answered by moving the window — and the reserve's only remaining effect was to stop the bar
+from ever reaching the true bottom of the screen, which is where a window's title bar belongs.
+The setting is gone and the key is deleted on read. Measured on a 785 px viewport: the frame now
+closes at 781 px, the ordinary 4 px gutter, against 751 px before.
 
 #### E8 · An upgrade is almost never visible
 `S06` / `S15` work, but the candidate list is ordered best-first, so the first hit is
@@ -732,6 +746,7 @@ Function names are used rather than line numbers, which rot.
 
 | Date | Change |
 |---|---|
+| 2026-09-04 | v0.33.0. **Stored settings were being discarded on every page load** and the script ran on defaults until something opened the panel — `readSettings()` is hoisted and the `cfg` initialiser called it while `const RETIRED` was still in its temporal dead zone, so the ReferenceError was swallowed by its own catch. Broken since v0.28.0. Also: the resize strip now straddles the window edge, **6 px outside and 6 px in**, with 13 px of move band beyond it (`E25`); the status bar **no longer outranks a resize**, so the bottom corners and the bottom edge resize like every other edge, and it keeps precedence only over the middle, which is what still matters when `stickBar()` has parked it up the picture (`E21`); `bottomReserve` is retired (`E13`); the manager's menu gains **Enable/Disable for this site**, labelled by what pressing it would do; and the settings panel's Save row is sticky. |
 | 2026-09-04 | v0.32.0. **Moving a window now sets a size CEILING rather than a fixed size** (`T25`, `E22`): zoom out afterwards and the whole window shrinks with the picture the way it did before the move, zoom back in and it stops at the size it was given. `reflow()` gains a third mode for it — `sizeLock` is free, `'max'`, or `'exact'`. **A hand resize is the `'exact'` one** (`E23`) and is the only thing that pins the edges. **And a hand resize is now free-aspect, with Shift to keep the shape** — the reverse of before; the lock existed because a one-axis drag grew bands of background, which `E26` has since made an ordinary state rather than an incoherent one. |
 | 2026-09-04 | v0.31.0. Two corrections to v0.30.0, both reversing something it had just decided. **The wheel is the page's again while you are only hovering** (`E22`, `T22`, `K2`) — it scrolls and the scroll closes the preview; growing the window is a placed-window gesture now, one click away. v0.30.0's version stole the scroll wheel from every hover to buy one gesture, which was a bad trade. **The frame margin is drawn ON the picture** (`E25`), the way the status bar always was, rather than laid out around it: the window costs no extra size, the minimum drops from 98 px to 50 px, the ring is mostly transparent, and it fades with the bar — and stops being a handle while faded, which is what makes an overlaid ring safe where an invisible band was not. |
 | 2026-09-04 | v0.30.0. The window grew a frame. New `E25` — a `frameMargin` (24 px) ring on all four sides, drawn, that moves the window at any zoom; the status bar fills the bottom one. It is the invisible move band of v0.28.0 done properly, and it retires the `showStatusBar`-off trade in `E21`. With it: a 48 px minimum aperture (~98 px window), because `minDisplayed: 0` was producing previews too small to hold their own controls; the ⊘ moved to a fixed 20 px from the right edge, absolutely positioned so a long filename can no longer push it off the bar; the X moved inside the picture, clear of the resize corner. New `E26` — the picture may now be smaller than the frame: the zoom floor is an absolute 32 px rather than the fit, and a frozen frame keeps its size while the picture shrinks inside it. `E23` gains the matching case, and a resize no longer snaps a deliberately zoomed-out picture back to fit. |

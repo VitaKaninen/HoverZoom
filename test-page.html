@@ -458,14 +458,33 @@
       if (e.key === key) fn(key, e.oldValue, e.newValue, true);
     });
   };
+  // The manager's menu, stood up as a stack of buttons in the corner. Ids and
+  // GM_unregisterMenuCommand are both real here, because the "Enable/Disable for this site"
+  // command keeps its label honest by unregistering and re-registering itself.
+  var gmMenuSeq = 0;
+  var gmMenuHost = null;
   var GM_registerMenuCommand = function (label, fn) {
+    if (!gmMenuHost) {
+      gmMenuHost = document.createElement('div');
+      gmMenuHost.id = 'gm-menu';
+      gmMenuHost.style.cssText = 'position:fixed;right:12px;bottom:12px;z-index:99;display:flex;' +
+        'flex-direction:column;gap:6px;align-items:flex-end';
+      document.body.appendChild(gmMenuHost);
+    }
+    var id = 'gm-cmd-' + (++gmMenuSeq);
     var b = document.createElement('button');
-    b.id = 'menu-settings';
+    b.id = id;
+    b.className = 'gm-cmd';
     b.textContent = label;
-    b.style.cssText = 'position:fixed;right:12px;bottom:12px;z-index:99;padding:6px 12px;' +
-      'background:#313244;color:#cdd6f4;border:1px solid #45475a;border-radius:6px;cursor:pointer';
+    b.style.cssText = 'padding:6px 12px;background:#313244;color:#cdd6f4;' +
+      'border:1px solid #45475a;border-radius:6px;cursor:pointer';
     b.addEventListener('click', fn);
-    document.body.appendChild(b);
+    gmMenuHost.appendChild(b);
+    return id;
+  };
+  var GM_unregisterMenuCommand = function (id) {
+    var b = document.getElementById(id);
+    if (b) b.remove();
   };
 </script>
 
