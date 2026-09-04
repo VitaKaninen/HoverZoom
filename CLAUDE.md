@@ -127,18 +127,30 @@ listening there would see a phantom click — nothing on the page can act on it 
 is the backdrop), but being observed at all is avoidable. Note `e.composedPath()[0]`, not
 `e.target`: outside the shadow tree the target is retargeted to the host.
 
-### The wheel grows a hover preview, and placing freezes the size (v0.28.0)
+### The wheel PLACES it and grows it; MOVING it freezes the size (v0.28.0, refined v0.29.0)
 
 *Specified as `E22`.* The reported problem: on a page whose pictures are all small, every preview
 opens small, and "resize each one by hand" is not a workflow.
 
 So `reflow()` has two modes, switched by `view.fixedW`/`fixedH` being null or not:
 
-- **Hovering** — `frameW = min(imgW, growBox().w)`. The frame follows the picture, so the wheel
+- **Frame free** — `frameW = min(imgW, growBox().w)`. The frame follows the picture, so the wheel
   makes the whole window bigger, up to `maxSizeMultiple` (2×) of the browser window.
-- **Placed** — `frameW = view.fixedW`. `place()` freezes it at whatever size the wheel reached,
-  and the wheel then zooms the picture *inside* a fixed aperture, which spills and pans. Only
-  `resizeBy()` changes it after that.
+- **Frame frozen** — `frameW = view.fixedW`. The wheel then zooms the picture *inside* a fixed
+  aperture, which spills and pans. Only `resizeBy()` changes it after that.
+
+**Two things switch that, and v0.29.0 separated them deliberately.**
+
+- **`onPinWheel` calls `place()`.** A wheel over the frame is a deliberate act on it, so it earns
+  the same promotion a press does. Without this, growing a preview was a gesture nobody could
+  finish: it was still hover-held, so moving the pointer *towards the window you had just
+  enlarged* killed it.
+- **`freezeSize()` is called from the MOVE, not from `place()`.** Putting the window somewhere is
+  the moment its size is settled; until then the wheel keeps growing it. `MOVE_SLOP` (3px) so a
+  hand shaking during a click does not count as putting it somewhere.
+
+A window placed by a click and never moved keeps growing on the wheel until it reaches the
+ceiling, where the frame stops and the picture spills anyway — a longer road, not a dead end.
 
 **`fitScaleFor()` exists because of this.** The zoom floor and what `0` returns to used to be
 "fit the window"; on a frozen frame it has to become "fit the FRAME", or `0` on a window the user
@@ -155,21 +167,49 @@ wheel is nearly always claimed. Scrolling means moving off the image — which t
 down at once — then scrolling. This buys one rule covering both states (*a wheel over the frame is
 the frame's, anywhere else is the page's*), and reverting it is one condition in `onPinWheel`.
 
-### Free positioning, the edge band, and why the three numbers are one decision (v0.28.0)
+### Free positioning, and the status bar as the title bar (v0.28.0, settled v0.29.0)
 
 *Specified as `E21`.* `clampPosition()` was not deleted, it was **loosened** — deleting it strands
 a window dragged fully off screen, and strands one at `left: 1500` the moment the browser is
 narrowed to 1200. It now guarantees only that `KEEP_ON_SCREEN` (72px) stays in view per axis.
 
-That guarantee is worthless without a handle, and the status bar is not one — it can itself be off
-screen. Hence `hitRegion()`: **`EDGE_BAND` (20px) just inside every edge always moves the frame**,
-`CORNER_BAND` (24px) resizes, and the interior keeps the old pan-or-move rule.
+`hitRegion()` is two rings and nothing cleverer, which is the v0.29.0 correction: **corners and a
+`RESIZE_BAND` (12px) edge strip resize; everything else is the middle**, which moves the frame or
+pans the picture by the old rule.
 
-**Read the three numbers together.** A window pushed to the clamp shows a 72px square of one
-corner; within it the corner is a resize handle and what is left over is the move strip. Raise
-`CORNER_BAND` past `KEEP_ON_SCREEN` and a window at the clamp can *only* be resized — from a
-corner anchored off screen, so resizing makes it less visible, not more. That is a trap, and the
-comment on those constants says so.
+**The move band is gone, and it is worth knowing why it existed.** v0.28.0 put a second,
+move-only band just inside the resize strip so a window dragged half off screen always had
+something to drag it back by. Two bands within 30px of each other is a mis-grab waiting to happen,
+and it made the edge mean two different things depending on a number nobody can see. **The status
+bar is the answer instead** — it moves the frame whatever the zoom, which is exactly a title bar's
+job, and once the picture spills it is the only handle that moves rather than pans or resizes.
+
+So `showStatusBar: false` is a real trade, not a cosmetic one: a spilling frame with no bar can be
+resized and panned but not moved, and Escape is the way out. Say that in the setting's
+description; do not quietly re-add a move band to paper over it.
+
+**`stickBar()` exists because the bar being the only handle is otherwise not enough.** Found while
+verifying v0.29.0: grow the frame past the viewport, then keep zooming until the picture spills,
+and the frame covers the entire screen — no edge, no corner, the middle pans, and the bar is
+below the bottom of the window. Every gesture available is a pan; only Escape gets out. It is
+reachable by doing nothing but scrolling, which is the intended flow. So the bar is positioned
+against the bottom of the frame's *visible* part rather than its own bottom, which is the same
+guarantee a window manager makes about a title bar. Measured: a 2512 × 1492 frame at (−637, −368)
+on a 1265 × 785 viewport, own bottom edge at 1124, bar held at 726.
+
+**Two precedence problems came with it, and both are in `onBoxDown`.** The bar normally sits
+inside the bottom `RESIZE_BAND`, so `hitRegion()` would claim its lower half for a resize — on
+the one control whose entire job is moving the window. `onBar` is therefore tested FIRST and
+suppresses `hitRegion()` entirely, and `onMove` skips the resize cursor over it for the same
+reason. The cost is that the bottom edge cannot be resized where the bar covers it; the bottom
+corners and the other three edges still can, which is what any window with a docked title bar
+does. `resetBar()` clears the offset, or the next preview opens with its bar floating up the
+picture.
+
+**Edges resize, not just corners, because corners are not always reachable.** The growth ceiling
+is above 1×, so a frame can be larger than the browser window and have no corner on screen at all
+— measured while testing: a 1513px frame on a 1265px viewport had no vertical edge in view until
+it was dragged. An edge is a whole strip and there is nearly always one of those visible.
 
 **Geometry, not child elements.** Four corner divs and four edge divs is the obvious build and it
 lands straight in the documented `isBoxControl()` trap: `onBoxDown` is a capture listener on an
@@ -180,6 +220,20 @@ at all.
 A hover preview is deliberately **not** free: it is positioned by the script rather than the user,
 so it is kept fully on screen while it fits, and only stopped from sliding a gap in at an edge
 once the wheel has grown it past the window.
+
+### A drag outlives the frame and the browser (v0.29.0)
+
+*Specified as `E24`.* Mostly free, and worth knowing it is free: `onMove` is on `document`, and
+while a button is held the browser keeps delivering `mousemove` with coordinates outside the
+viewport. So a pan started inside the frame follows the pointer across the frame's edge, across
+the page and off the browser without any special casing.
+
+The one thing that does NOT arrive is the `mouseup`, when the button is released out there. The
+drag then stays live and the picture follows the pointer back in with no button held — a window
+apparently glued to the mouse. **`e.buttons === 0` on the next move is the only thing that can
+notice**, and it ends the drag through the same `endDrag()` the ordinary release uses, so the two
+paths cannot drift. Verified by dispatching moves at `buttons: 0` after a press: the picture stops
+dead and `.drag` comes off.
 
 ### `maxSizeMultiple` replaces the two percentages, and 2× is a geometric argument
 
@@ -208,9 +262,9 @@ survives every save forever. They are not converted — the old pair capped the 
 *opened* at (below the window), the new one caps how far it may *grow* (above it), so there is no
 honest arithmetic between them.
 
-### Corner resize: what the picture does depends on what it was doing
+### Edge and corner resize: what the picture does depends on what it was doing
 
-*Specified as `E23`.* `resizeBy()` sets the frame directly with the opposite corner anchored, and
+*Specified as `E23`.* `resizeBy()` sets the frame directly with the opposite edge anchored, and
 then:
 
 - **Picture at fit** → stays at fit, so the picture grows with the window. This is what "stretch
@@ -221,8 +275,15 @@ then:
 `drag.spilling` is captured at **grab time**, not read per move, or the gesture would change
 character halfway through as the frame passed the picture's size.
 
-Aspect locks to `drag.aspect` — the frame's shape when the corner was grabbed — rather than to the
+Aspect locks to `drag.aspect` — the frame's shape when the edge was grabbed — rather than to the
 picture's, which would snap the frame the instant it was touched. Shift frees it.
+
+**`ex`/`ey` may each be null, and that is what makes an edge a one-axis corner** rather than a
+separate gesture: a `null` axis is left alone by the mouse and then filled in by the aspect lock.
+Without the lock an edge drag would just grow grey bars, which is why locked is the default here
+and Shift is the escape. On the axis not being dragged the frame grows about its **centre** —
+anchoring it to top or left instead makes the window crawl diagonally while you pull one edge
+straight.
 
 ### The HOVER preview is POINTER-TRANSPARENT (v0.9.0) — this is the load-bearing decision
 
@@ -935,10 +996,11 @@ the controls without offering a switch.
   default 24px gap, and only on the axis that needs it. (A frame clamped away from the cursor at
   a window edge used to be covered by `HIDE_GRACE`; there is no grace period since v0.9.0, and
   the preview being pointer-transparent is what makes that safe.)
-- **The status bar always moves the frame** (`drag.mode === 'move'`), as does the edge band; the
-  corners resize; everywhere else pans if the picture is spilling and moves the frame if it is
-  not. All of them go through the same `drag` object in `onMove`. Since v0.28.0 hiding the status
-  bar no longer strands a zoomed-in frame — the edge band is always there.
+- **The status bar always moves the frame** (`drag.mode === 'move'`); the edges and corners
+  resize; the middle pans if the picture is spilling and moves the frame if it is not. All of
+  them go through the same `drag` object in `onMove`. The bar is the title bar: once the picture
+  spills it is the only thing left that moves the window, which is why `showStatusBar: false` is
+  a real trade.
 
 - **The bottom 30px of the window belong to the browser** (`bottomReserve`, v0.17.0). The link
   address under the pointer, "Waiting for…", the download bar — the browser paints those along the
@@ -970,8 +1032,8 @@ the controls without offering a switch.
   actually over the frame — `pointInPreview()` geometry rather than the hit test, because on a
   hover preview `e.target` is whatever is on the page underneath — so a wheel anywhere else
   still scrolls, in both states.
-- **In the frame's INTERIOR a drag pans only while the picture is spilling; otherwise it moves
-  the frame** (v0.10.0) — with the status bar and, since v0.28.0, the edge band always moving it.
+- **In the frame's MIDDLE a drag pans only while the picture is spilling; otherwise it moves
+  the frame** (v0.10.0) — with the status bar always moving it whatever the zoom.
   Before this the placed branch was `'pan'` unconditionally and the press was simply dropped when
   `pannable()` was false, so a placed frame at `fitScale` could not be dragged at all.
   `pannable()` is read per press, so zooming in and back out restores dragging with no state to

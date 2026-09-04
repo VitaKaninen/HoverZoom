@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.28.0
+// @version     0.29.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -1099,7 +1099,7 @@
             // level instead — see pointInPreview() and hitRegion().
             '.box.hot{pointer-events:auto}',
             // With nothing to pan the frame moves, so it says so. onMove overrides this with
-            // an inline cursor over the edge band and the corners.
+            // an inline cursor over the edges and the corners.
             '.box.placed:not(.pan){cursor:move}',
             '.box.pan{cursor:grab}',
             '.box.pan.drag{cursor:grabbing}',
@@ -1393,15 +1393,29 @@
     // `view` also means one code path for both states — on a hover preview the frame is
     // pointer-transparent and there is nothing to hit-test at all.
     //
-    // The bands are what make a half-offscreen window recoverable, so the three numbers
-    // below have to be read together with KEEP_ON_SCREEN. A window pushed to the clamp shows
-    // a KEEP_ON_SCREEN square of one of its corners; within that square the corner itself is
-    // a resize handle, and what is left over — KEEP_ON_SCREEN minus CORNER_BAND along each
-    // edge — is the strip that drags it back. Raise CORNER_BAND past KEEP_ON_SCREEN and a
-    // window at the clamp can only be resized, never moved, which is a trap: the corner it
-    // would resize from is anchored off screen.
-    const EDGE_BAND = 20;     // px inside each edge: always moves the frame
-    const CORNER_BAND = 24;   // px square at each corner: resizes
+    // An ordinary desktop window, and deliberately nothing cleverer:
+    //
+    //   corner       resize both axes
+    //   edge strip   resize that one axis
+    //   the middle   move the frame, or pan the picture once it is spilling
+    //   status bar   move the frame, always — this is the title bar (see below)
+    //
+    // EDGES RESIZE, not move. An earlier cut had a move band sitting just inside the resize
+    // strip, so that a window dragged half off the screen always had something to drag it
+    // back by. Two bands within 30px of each other is a mis-grab waiting to happen, and it
+    // made the edge mean two things depending on a number nobody can see.
+    //
+    // Corners AND edges both resize because corners are not always reachable: the growth
+    // ceiling is above 1x, so a frame can be larger than the window and have no corner on
+    // screen at all, while an edge is a whole strip and there is nearly always one in view.
+    //
+    // WHAT MOVES A SPILLING FRAME IS THE STATUS BAR. Once the picture spills, the middle
+    // pans, so the bar is the only handle left — exactly as a title bar is on any window
+    // manager. That is the reason it always moves the frame regardless of zoom, and the
+    // reason `showStatusBar` off is a real trade rather than a cosmetic one: a spilling
+    // frame with no bar can be resized and panned but not moved, and Escape is the way out.
+    const RESIZE_BAND = 12;   // px of the outer edge that resizes along one axis
+    const CORNER_REACH = 24;  // px from a corner where a drag resizes both axes at once
     const MIN_FRAME = 80;     // a frame smaller than this cannot be grabbed at all
 
     function hitRegion(x, y) {
@@ -1410,21 +1424,27 @@
         const oh = view.frameH + cfg.borderWidth * 2;
         const rx = x - view.left, ry = y - view.top;
         if (rx < 0 || ry < 0 || rx > ow || ry > oh) return null;
-        // Bands shrink on a small frame, or they swallow the whole of it and there is no
-        // interior left to pan.
-        const corner = Math.min(CORNER_BAND, ow / 3, oh / 3);
-        const band = Math.min(EDGE_BAND, ow / 4, oh / 4);
-        const l = rx <= corner, r = rx >= ow - corner;
-        const t = ry <= corner, b = ry >= oh - corner;
-        if ((l || r) && (t || b)) return { kind: 'resize', cx: l ? 'l' : 'r', cy: t ? 't' : 'b' };
-        if (rx <= band || rx >= ow - band || ry <= band || ry >= oh - band) return { kind: 'move' };
-        return null;    // interior — the pan-or-move rule decides
+        const dl = rx, dr = ow - rx, dt = ry, db = oh - ry;
+        // Both rings shrink on a small frame, or together they swallow the whole of it and
+        // there is no middle left to grab.
+        const corner = Math.min(CORNER_REACH, ow / 3, oh / 3);
+        const rb = Math.min(RESIZE_BAND, ow / 6, oh / 6);
+        const cl = dl <= corner, cr = dr <= corner, ct = dt <= corner, cb = db <= corner;
+        if ((cl || cr) && (ct || cb)) {
+            return { kind: 'resize', ex: cl ? 'l' : 'r', ey: ct ? 't' : 'b' };
+        }
+        if (dl <= rb) return { kind: 'resize', ex: 'l', ey: null };
+        if (dr <= rb) return { kind: 'resize', ex: 'r', ey: null };
+        if (dt <= rb) return { kind: 'resize', ex: null, ey: 't' };
+        if (db <= rb) return { kind: 'resize', ex: null, ey: 'b' };
+        return null;    // the middle — the pan-or-move rule decides
     }
 
     function regionCursor(reg) {
-        if (!reg) return '';
-        if (reg.kind === 'move') return 'move';
-        return (reg.cx === 'l') === (reg.cy === 't') ? 'nwse-resize' : 'nesw-resize';
+        if (!reg) return '';        // the middle: leave it to the .pan / .placed CSS rules
+        if (!reg.ey) return 'ew-resize';
+        if (!reg.ex) return 'ns-resize';
+        return (reg.ex === 'l') === (reg.ey === 't') ? 'nwse-resize' : 'nesw-resize';
     }
 
     // ------------------------------------------------------------- status bar
@@ -1544,7 +1564,9 @@
     function resetBar() {
         clearTimeout(barTimer);
         barTimer = 0;
-        if (capEl) capEl.classList.remove('idle');
+        // The offset stickBar() wrote belongs to the frame that just closed; leaving it on
+        // would open the next preview with its bar floating somewhere up the picture.
+        if (capEl) { capEl.classList.remove('idle'); capEl.style.bottom = '0px'; }
     }
 
     // Point the frame at a resolved candidate, picking the face that can display it. The
@@ -1601,6 +1623,25 @@
         layout();
     }
 
+    // The status bar rides the bottom of the VISIBLE part of the frame, not the bottom of the
+    // frame. Without this there is a state you can zoom yourself into and not get out of: a
+    // frame grown past the viewport and then zoomed until the picture spills covers the whole
+    // screen, so no edge and no corner is reachable to resize by, the middle pans, and the bar
+    // — the one thing that always moves the window — is somewhere below the bottom of the
+    // screen. Every gesture is then a pan and only Escape gets you out.
+    //
+    // Keeping the bar against the visible bottom edge is the same guarantee a window manager
+    // makes about a title bar, and it is the reason the move handle can live there alone. It
+    // also means the filename and dimensions stay readable on a frame far bigger than the
+    // window. The offset is clamped so the bar can never climb above the frame's own top.
+    function stickBar() {
+        if (!capEl || !cfg.showStatusBar) return;
+        const oh = view.frameH + cfg.borderWidth * 2;
+        const overhang = (view.top + oh) - usableHeight();
+        const room = Math.max(0, view.frameH - capEl.offsetHeight);
+        capEl.style.bottom = Math.round(Math.max(0, Math.min(overhang, room))) + 'px';
+    }
+
     function layout() {
         if (!view || !mediaEl) return;
         clampPosition();
@@ -1612,6 +1653,7 @@
         mediaEl.style.height = Math.round(view.imgH) + 'px';
         mediaEl.style.left = Math.round(view.ox) + 'px';
         mediaEl.style.top = Math.round(view.oy) + 'px';
+        stickBar();
         box.classList.toggle('hot', placed);
         box.classList.toggle('pan', placed && pannable());
         caption();
@@ -1939,19 +1981,21 @@
     // made a deliberately positioned window disappear on its own, which is the opposite of
     // what positioning it means.
     //
-    // Entered by any deliberate act on the frame: a click, a drag, or a corner. The press
-    // does it, not the release, so click-to-place and drag-to-place are the same code path
-    // and there is no travel threshold to get wrong.
+    // Entered by any deliberate act on the frame: a wheel notch, a click, a drag, or a
+    // resize. The press does it, not the release, so click-to-place and drag-to-place are
+    // the same code path and there is no travel threshold to get wrong.
     //
-    // FREEZING THE FRAME is the other half. Until now the wheel has been growing the frame
-    // with the picture; from here the frame is an aperture the picture zooms inside, and
-    // only a corner drag changes it again.
+    // THE WHEEL PLACES IT TOO, which is what makes growing a preview a stable gesture: while
+    // it was still hover-held, growing one and then moving the pointer anywhere — including
+    // towards the window you had just enlarged — killed it. The cost is that an idle scroll
+    // over a picture now leaves a window that has to be dismissed, where before it merely
+    // grew and then died on its own.
+    //
+    // Placing does NOT freeze the size. That is freezeSize(), and it is MOVING the window
+    // that triggers it — putting it somewhere is the moment its size is settled.
     function place() {
         if (placed || !view) return;
         placed = true;
-        view.fixedW = view.frameW;
-        view.fixedH = view.frameH;
-        view.fitScale = fitScaleFor(view.natW, view.natH);
         clearTimeout(timer);
         // The in-flight resolve is deliberately NOT cancelled: placing is a reason to keep
         // looking for a better original, not to stop. upgradeViewer() preserves the placed
@@ -1960,6 +2004,21 @@
         dimEl.classList.add('catch');
         CAP_TARGET.addEventListener('keydown', onPinKey, true);
         layout();
+    }
+
+    // The frame stops following the picture and becomes an aperture it zooms inside. Called
+    // when the window is MOVED and when it is resized by hand — both are the user settling
+    // the question of how big it should be. Until then the wheel keeps growing it, so the
+    // sequence is: scroll it to the size you want, then put it where you want it.
+    //
+    // fitScale has to be recomputed here: it is the zoom floor and what `0` returns to, and
+    // on a frozen frame that has to mean "fit the FRAME" rather than "fit the window", or
+    // `0` would spring a hand-sized window back to the window's shape.
+    function freezeSize() {
+        if (!view || view.fixedW != null) return;
+        view.fixedW = view.frameW;
+        view.fixedH = view.frameH;
+        view.fitScale = fitScaleFor(view.natW, view.natH);
     }
 
     function unplace() {
@@ -2034,18 +2093,27 @@
         swallowNextClick = true;    // the click half of this press is ours too
         if (!placed) place();
 
-        // Three regions, outside in. The corners resize; a band just inside every edge
-        // always moves, whatever the zoom — that band is what stops a window dragged
-        // half off the screen from being stranded, and it is why the status bar is no
-        // longer the only handle a zoomed-in frame has.
+        // Edges and corners resize; everything else is the middle — see hitRegion(). The
+        // middle keeps the older rule: pan when there is something to pan, move the frame
+        // when there is not, with the status bar always moving it. pannable() is read per
+        // press, so zooming in and back out restores dragging by itself with no state to
+        // keep in step.
+        // THE STATUS BAR OUTRANKS THE EDGE REGIONS, and it has to. It normally sits along the
+        // frame's bottom edge, inside the bottom resize strip, so without this precedence its
+        // lower half would resize and only its top few pixels would move — on the one control
+        // whose whole job is moving the window. The cost is that the bottom EDGE cannot be
+        // grabbed to resize where the bar covers it; the two bottom corners and the other
+        // three edges still can, which is the same trade any window with a docked title bar
+        // makes.
         //
-        // The interior keeps the older rule: pan when there is something to pan, move the
-        // frame when there is not. pannable() is read per press, so zooming in and back
-        // out restores dragging by itself with no state to keep in step.
-        const reg = hitRegion(e.clientX, e.clientY);
+        // contains(e.target), not geometry: a faded bar has `pointer-events: none` (E10), so
+        // this is false and the press falls through to the ordinary rule — which is exactly
+        // the "a faded bar is not an invisible handle" behaviour.
+        const onBar = capEl.contains(e.target);
+        const reg = onBar ? null : hitRegion(e.clientX, e.clientY);
         if (reg && reg.kind === 'resize') {
             drag = {
-                mode: 'resize', cx: reg.cx, cy: reg.cy,
+                mode: 'resize', ex: reg.ex, ey: reg.ey,
                 x0: e.clientX, y0: e.clientY,
                 w0: view.frameW, h0: view.frameH, l0: view.left, t0: view.top,
                 aspect: view.frameH ? view.frameW / view.frameH : 1,
@@ -2054,33 +2122,48 @@
                 spilling: pannable(),
             };
         } else {
-            const mode = (reg && reg.kind === 'move') || capEl.contains(e.target) || !pannable()
-                ? 'move' : 'pan';
-            drag = { x: e.clientX, y: e.clientY, mode: mode };
+            const mode = onBar || !pannable() ? 'move' : 'pan';
+            drag = { x: e.clientX, y: e.clientY, mode: mode, dist: 0 };
         }
         box.classList.add('drag');
     }
 
-    // A corner drag. The frame is set directly and frozen; what happens to the PICTURE
-    // depends on whether it was already spilling, which keeps one gesture honest in both
-    // cases: a picture at fit stays at fit, so the window gets bigger and so does the
-    // picture, and a picture already zoomed in keeps its zoom and simply shows more of
-    // itself. Aspect is locked to the frame as it was at grab time — locking it to the
-    // picture instead would snap the frame the instant it was grabbed — and Shift frees it.
+    // A corner or an edge drag. `ex`/`ey` name which edges are being pulled, and either may
+    // be null — that is what makes an edge a one-axis version of a corner rather than a
+    // separate gesture.
+    //
+    // Aspect is locked to the frame as it was at GRAB TIME — locking it to the picture's
+    // shape instead would snap the frame the instant it was touched — and Shift frees it.
+    // The lock is what makes an edge drag useful rather than a way to grow grey bars: pull
+    // the right edge and the frame widens AND heightens, staying the shape it was. Freed,
+    // an edge drag changes one dimension only, which is what you want on a spilling frame
+    // being used as an aperture.
+    //
+    // On the axis NOT being dragged, the frame grows about its centre. Anchoring that axis
+    // to its top or left instead would make the window crawl diagonally while you pull one
+    // edge straight.
+    //
+    // What happens to the PICTURE depends on whether it was already spilling, which keeps
+    // one gesture honest in both cases: a picture at fit stays at fit, so the window gets
+    // bigger and so does the picture, and a picture already zoomed in keeps its zoom and
+    // simply shows more of itself.
     function resizeBy(e) {
         const g = growBox();
-        const sx = drag.cx === 'r' ? 1 : -1;
-        const sy = drag.cy === 'b' ? 1 : -1;
-        let w = drag.w0 + sx * (e.clientX - drag.x0);
-        let h = drag.h0 + sy * (e.clientY - drag.y0);
+        let w = drag.w0, h = drag.h0;
+        if (drag.ex) w = drag.w0 + (drag.ex === 'r' ? 1 : -1) * (e.clientX - drag.x0);
+        if (drag.ey) h = drag.h0 + (drag.ey === 'b' ? 1 : -1) * (e.clientY - drag.y0);
         if (!e.shiftKey && drag.aspect > 0) {
-            if (Math.abs(w - drag.w0) >= Math.abs(h - drag.h0)) h = w / drag.aspect;
+            if (!drag.ey) h = w / drag.aspect;                                  // vertical edge
+            else if (!drag.ex) w = h * drag.aspect;                             // horizontal edge
+            else if (Math.abs(w - drag.w0) >= Math.abs(h - drag.h0)) h = w / drag.aspect;
             else w = h * drag.aspect;
         }
         w = Math.max(MIN_FRAME, Math.min(w, g.w));
         h = Math.max(MIN_FRAME, Math.min(h, g.h));
-        if (drag.cx === 'l') view.left = drag.l0 + (drag.w0 - w);
-        if (drag.cy === 't') view.top = drag.t0 + (drag.h0 - h);
+        if (drag.ex === 'l') view.left = drag.l0 + (drag.w0 - w);
+        else if (!drag.ex) view.left = drag.l0 - (w - drag.w0) / 2;
+        if (drag.ey === 't') view.top = drag.t0 + (drag.h0 - h);
+        else if (!drag.ey) view.top = drag.t0 - (h - drag.h0) / 2;
         view.fixedW = w;
         view.fixedH = h;
         view.fitScale = fitScaleFor(view.natW, view.natH);
@@ -2109,8 +2192,13 @@
     }
 
     // A wheel over the frame is the frame's, in both states — see enableWheelZoom. What it
-    // does is decided by reflow(), not here: hovering, the frame is still free and grows
-    // with the picture; placed, the frame is frozen and the picture spills inside it.
+    // DOES is decided by reflow(), not here: while the frame is still free it grows with the
+    // picture, and once frozen the picture spills inside it.
+    //
+    // The wheel also PLACES the window, because growing something that dies as soon as you
+    // move the pointer is not a gesture anyone can finish. Freezing is left to freezeSize(),
+    // which the move triggers — so scrolling enlarges it for as long as you like, and
+    // putting it somewhere settles the size.
     //
     // pointInPreview() rather than the hit test, because on a hover preview the frame is
     // pointer-transparent and e.target is whatever is on the page underneath.
@@ -2119,6 +2207,7 @@
         if (!pointInPreview(e.clientX, e.clientY)) return;
         e.preventDefault();
         e.stopPropagation();
+        if (!placed) place();
         const f = 1 + cfg.wheelZoomStep / 100;
         zoomAt(view.scale * (e.deltaY < 0 ? f : 1 / f), e.clientX, e.clientY);
     }
@@ -2147,10 +2236,10 @@
     let mouseDown = false;
     let modifierDown = false;
 
-    // There is no drag threshold any more, and no `justDragged`. One existed because a drag
-    // and a click led to DIFFERENT states, so a wobble during a click had to be told from a
-    // real drag. They lead to the same state now — placed, on the press — so there is
-    // nothing left to distinguish.
+    // A press that wanders this far counts as MOVING the window, which is what freezes its
+    // size (freezeSize). It no longer decides any state — a drag and a click both place the
+    // window, on the press — so `justDragged` is gone with the state it used to pick.
+    const MOVE_SLOP = 3;
 
     // There is no grace period on the hide any more, and no `hideTimer`. One existed so the
     // pointer could travel onto the preview before it vanished — which mattered only while
@@ -2815,6 +2904,13 @@
         return !!active && (active === e.target || (active.contains && active.contains(e.target)));
     }
 
+    // One place, so the mouseup path and the released-outside-the-window path cannot drift.
+    function endDrag() {
+        if (!drag) return;
+        drag = null;
+        if (box) box.classList.remove('drag');
+    }
+
     function onMove(e) {
         pointer.x = e.clientX;
         pointer.y = e.clientY;
@@ -2826,11 +2922,21 @@
         // ours(e.target): while a window is placed the backdrop is hit-testable across the
         // whole viewport, so ours() is true everywhere and the bar would never fade again.
         if (over) showBar();
-        // Which of the three regions the pointer is in, said in the cursor. Only readable
-        // once placed — a hover preview is pointer-transparent, so the page's own cursor is
-        // what shows there, for the same reason the X and the ⊘ are absent from one.
-        if (box && placed && !drag) box.style.cursor = over ? regionCursor(hitRegion(e.clientX, e.clientY)) : '';
+        // Which region the pointer is in, said in the cursor. Only readable once placed — a
+        // hover preview is pointer-transparent, so the page's own cursor is what shows
+        // there, for the same reason the X and the ⊘ are absent from one.
+        if (box && placed && !drag) {
+            box.style.cursor = over && !(capEl && capEl.contains(e.target))
+                ? regionCursor(hitRegion(e.clientX, e.clientY)) : '';
+        }
         if (!drag || !view) return;
+        // A drag OUTLIVES the frame's edges and the browser's: this listener is on
+        // `document`, and while a button is held the browser keeps delivering mousemove with
+        // coordinates outside the viewport, so a pan started inside carries on wherever the
+        // pointer goes. What does NOT arrive is the mouseup, if the button is released out
+        // there — so the drag would stay live and the picture would follow the pointer back
+        // with no button held. `buttons` is the only thing that can notice.
+        if (e.buttons === 0) { endDrag(); return; }
         if (drag.mode === 'resize') { resizeBy(e); return; }
         const dx = e.clientX - drag.x;
         const dy = e.clientY - drag.y;
@@ -2838,6 +2944,11 @@
         drag.x = e.clientX;
         drag.y = e.clientY;
         if (drag.mode === 'move') {
+            // Moving it settles how big it should be. MOVE_SLOP so that a hand shaking
+            // during a click does not count as putting it somewhere — the frame still
+            // follows those first pixels, it just does not commit on them.
+            drag.dist += Math.abs(dx) + Math.abs(dy);
+            if (drag.dist > MOVE_SLOP) freezeSize();
             view.left += dx;
             view.top += dy;
             layout();       // clampPosition() keeps a grabbable strip of it on screen
@@ -3000,10 +3111,7 @@
     }, true);
     document.addEventListener('mouseup', function () {
         mouseDown = false;
-        if (drag) {
-            drag = null;
-            if (box) box.classList.remove('drag');
-        }
+        endDrag();
     }, true);
     window.addEventListener('scroll', function () { if (!placed) cancel(); }, true);
     window.addEventListener('blur', function () { if (!placed) cancel(); });
@@ -3414,17 +3522,18 @@
         ]);
 
         section('The placed window');
-        note('Scroll it bigger first, then click or drag to place it',
-            'While you are still hovering, the wheel grows the whole preview — which is how ' +
-            'a page full of small pictures gives usable previews without resizing every one ' +
-            'of them by hand. Clicking or dragging it then places it: it stays put, survives ' +
-            'scrolling, and its size is frozen.');
-        note('A placed window may hang off the edges of the screen',
-            'Move it by its status bar or by anywhere near its edges, and resize it by its ' +
-            'corners (Shift while dragging a corner to change its shape). Once placed, the ' +
-            'wheel and +/− zoom the picture inside the frame rather than the frame, and the ' +
-            'arrow keys pan it; 0 fits it back to the frame. Close it with the X, Escape, or ' +
-            'a click anywhere outside it.');
+        note('Scroll the preview to make it bigger, then move it where you want it',
+            'The wheel over a preview keeps it on screen and grows the whole window — which is ' +
+            'how a page full of small pictures gives usable previews without resizing every one ' +
+            'of them by hand. Moving the window then settles its size: from that point the ' +
+            'wheel and +/− zoom the picture inside the frame instead, the arrow keys pan it, ' +
+            'and 0 fits it back to the frame.');
+        note('It behaves like an ordinary window, and may hang off the screen',
+            'Drag the middle to move it, or the status bar at any time. Drag an edge or a ' +
+            'corner to resize (hold Shift to change its shape rather than keep it). Once you ' +
+            'have zoomed in past the frame, dragging the middle pans the picture instead — the ' +
+            'status bar is then what moves the window. Close it with the X, Escape, or a click ' +
+            'anywhere outside it.');
         note('Right-click a placed window for the browser\'s own menu',
             'Save image as…, Copy image, Copy image address, Open image in new tab — all of ' +
             'them acting on the full-size original, because the browser fetches it itself. ' +
@@ -3459,7 +3568,11 @@
         num('cornerRadius', 'Corner radius', 'px', 0, 40, 1);
         check('shadow', 'Drop shadow');
         check('showStatusBar', 'Show the status bar',
-            'filename, format, dimensions, size — and one more handle that moves a placed frame. ' +
+            'filename, format, dimensions, size — and the handle that moves a placed window, the '
+            + 'way a title bar does. Once you have zoomed in past the frame, dragging the middle '
+            + 'pans the picture and the edges resize, so the bar is the only thing left that '
+            + 'moves it: turn this off and a zoomed-in window can be resized and panned but not '
+            + 'moved. ' +
             'It fades out after a second of a still pointer so it stops covering the ' +
             'bottom of the picture, and returns when you move the pointer over the preview');
         pick('spinnerTheme', 'Loading ring',
