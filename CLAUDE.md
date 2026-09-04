@@ -258,8 +258,21 @@ and the frame covers the entire screen — no edge, no corner, the middle pans, 
 below the bottom of the window. Every gesture available is a pan; only Escape gets out. It is
 reachable by doing nothing but scrolling, which is the intended flow. So the bar is positioned
 against the bottom of the frame's *visible* part rather than its own bottom, which is the same
-guarantee a window manager makes about a title bar. Measured: a 2512 × 1492 frame at (−637, −368)
-on a 1265 × 785 viewport, own bottom edge at 1124, bar held at 726.
+guarantee a window manager makes about a title bar. Measured: a 2512 × 1392 frame at (−671, −444)
+on a 1265 × 705 viewport, own bottom edge at 948, bar held at 704.
+
+**It only applies while `view.top < 0`, and that narrowing is v0.35.0.** Drag a placed window
+down past the bottom of the browser and the bar floated back up into the picture, so it could
+never leave the screen — reported as exactly that, and it is a rescue overriding a deliberate
+act. The two cases are told apart by the frame's own TOP edge: if it is on screen then the top of
+the frame margin is in reach, the window can always be dragged back, and there is nothing to
+rescue. The trap above is only reachable when the frame covers the viewport from top to bottom,
+and there `view.top` is negative. Measured both: dragged down to `top: 504` on a 705px viewport
+the bar sits at `bottom: 0` and its rect bottom reaches 1200, well off screen; grown to
+2512 × 1392 at `top: −444` it still floats to `bottom: 243px`, rect bottom 704.
+
+**Do not "simplify" this to `clampPosition()`'s `KEEP_ON_SCREEN`.** That guarantees 72px of the
+FRAME stays in view, which the top strip satisfies; it says nothing about the bar.
 
 **The bar's precedence in `onBoxDown` was narrowed in v0.33.0, and the narrowing is the point.**
 It used to be tested FIRST and suppress `hitRegion()` entirely, from when it was the only move
@@ -270,8 +283,8 @@ reported as "I can't resize the window by grabbing either of the bottom corners"
 bar claims only what is left.
 
 **Do not delete the rest of it as redundant** — that was the first instinct and it is wrong.
-`stickBar()` can park the bar well up the picture on a frame taller than the screen, and there
-the frame margin is off-screen and the bar is the only handle in reach. The redundant half was
+`stickBar()` can still park the bar well up the picture on a frame taller than the screen, and
+there the frame margin is off-screen and the bar is the only handle in reach. The redundant half was
 the overlap with the resize strip; the non-redundant half is everything else.
 
 `onMove` mirrors the same rule for the cursor, but with **geometry** (`pointerOverBar()`) rather

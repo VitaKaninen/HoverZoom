@@ -3,7 +3,7 @@
 What the preview **window** does, as a state machine. Menus, buttons, the status bar contents and
 the loading ring are out of scope except where they change what the window itself accepts.
 
-Describes `Hover-Zoom.user.js` **v0.34.0**.
+Describes `Hover-Zoom.user.js` **v0.35.0**.
 
 ---
 
@@ -422,12 +422,20 @@ along the frame's bottom edge, inside the bottom resize strip, so without that p
 lower half would resize. The price is that the bottom edge cannot be grabbed to resize where the
 bar covers it — the two bottom corners and the other three edges still can.
 
-**And the bar rides the bottom of the VISIBLE part of the frame, not the frame's own bottom.**
-Without that there is a state you can zoom yourself into and not get out of: grow the frame past
-the browser window, keep zooming until the picture spills, and the frame covers the whole screen
-— no edge or corner to resize by, the middle pans, and the bar somewhere below the bottom of the
-screen. Every gesture is a pan and only Escape gets you out. Measured: a 2512 × 1492 frame at
-(−637, −368) on a 1265 × 785 viewport, its own bottom edge at 1124 and the bar held at 726.
+**And the bar rides the bottom of the VISIBLE part of the frame — but only while the frame's own
+top edge is off screen too.** Without it at all there is a state you can zoom yourself into and
+not get out of: grow the frame past the browser window, keep zooming until the picture spills,
+and the frame covers the whole screen — no edge or corner to resize by, the middle pans, and the
+bar somewhere below the bottom of the screen. Every gesture is a pan and only Escape gets you
+out. Measured: a 2512 × 1392 frame at (−671, −444) on a 1265 × 705 viewport, its own bottom edge
+at 948 and the bar held at 704.
+
+**The `view.top < 0` half is v0.35.0, and it is what stops the rescue overriding you.** Drag a
+placed window down past the bottom of the browser and the bar used to float back up inside the
+picture, so it could never leave the screen. If the frame's top edge is on screen the top of the
+margin is in reach and the window can always be dragged back, so nothing needs rescuing and the
+bar stays where it was put; the trap is only reachable when the frame covers the viewport top to
+bottom. Measured: dragged to `top: 504` on a 705 px viewport, the bar's rect bottom is 1200.
 
 A faded bar still drops its `pointer-events` (`E10`), so it is not an invisible handle — but that
 also means a press there falls through to a pan. Move the pointer first and it comes back.
@@ -762,6 +770,7 @@ Function names are used rather than line numbers, which rot.
 
 | Date | Change |
 |---|---|
+| 2026-09-04 | v0.35.0. **The status bar only floats up the frame while the frame's top edge is off screen too** (`E21`). It rides the visible bottom so a frame grown past the viewport still has a title bar in reach — but a window deliberately dragged down past the bottom of the browser is not that case, and the bar floating back into the picture rather than leaving with the window was reported as a bug. `view.top < 0` separates the rescue from the override. |
 | 2026-09-04 | v0.34.0. Three changes to the placed window, all of them reported together. **Moving it no longer freezes its size** (`T25` retired, `E22`): the frame follows the picture up to the growth ceiling for as long as the window is alive, and only a hand resize pins it (`E23`). The freeze was v0.29.0's, and v0.31.0 quietly made it fatal — once the wheel belongs to the page while hovering, zooming means placing first, placing is a press, and a press that wandered three pixels was a move, so every window was frozen at its opening size before it could be grown and `maxSizeMultiple` was unreachable. **Zoom is anchored on the pointer** rather than on the frame's centre (`E22`, `T17`), so a growing window expands away from the cursor and a shrinking one collapses towards it instead of walking its edges past the pointer and handing the wheel back to the page. **The X button is gone** (`T16`, `E25`, `E9`, `E11`) — Escape and a click outside already close a placed window, and the button sat in the corner the hand reaches for to resize. |
 | 2026-09-04 | v0.33.0. **Stored settings were being discarded on every page load** and the script ran on defaults until something opened the panel — `readSettings()` is hoisted and the `cfg` initialiser called it while `const RETIRED` was still in its temporal dead zone, so the ReferenceError was swallowed by its own catch. Broken since v0.28.0. Also: the resize strip now straddles the window edge, **6 px outside and 6 px in**, with 13 px of move band beyond it (`E25`); the status bar **no longer outranks a resize**, so the bottom corners and the bottom edge resize like every other edge, and it keeps precedence only over the middle, which is what still matters when `stickBar()` has parked it up the picture (`E21`); `bottomReserve` is retired (`E13`); the manager's menu gains **Enable/Disable for this site**, labelled by what pressing it would do; and the settings panel's Save row is sticky. |
 | 2026-09-04 | v0.32.0. **Moving a window now sets a size CEILING rather than a fixed size** (`T25`, `E22`): zoom out afterwards and the whole window shrinks with the picture the way it did before the move, zoom back in and it stops at the size it was given. `reflow()` gains a third mode for it — `sizeLock` is free, `'max'`, or `'exact'`. **A hand resize is the `'exact'` one** (`E23`) and is the only thing that pins the edges. **And a hand resize is now free-aspect, with Shift to keep the shape** — the reverse of before; the lock existed because a one-axis drag grew bands of background, which `E26` has since made an ordinary state rather than an incoherent one. |

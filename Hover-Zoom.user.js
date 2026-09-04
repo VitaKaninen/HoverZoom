@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.34.0
+// @version     0.35.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -1833,21 +1833,30 @@
         layout();
     }
 
-    // The status bar rides the bottom of the VISIBLE part of the frame, not the bottom of the
-    // frame. Without this there is a state you can zoom yourself into and not get out of: a
-    // frame grown past the viewport and then zoomed until the picture spills covers the whole
+    // The status bar rides the bottom of the VISIBLE part of the frame — but ONLY while the
+    // frame's top edge is off screen too, which is the narrowing v0.35.0 makes.
+    //
+    // What it is for: there is a state you can zoom yourself into and not get out of. A frame
+    // grown past the viewport and then zoomed until the picture spills covers the whole
     // screen, so no edge and no corner is reachable to resize by, the middle pans, and the bar
     // — the one thing that always moves the window — is somewhere below the bottom of the
-    // screen. Every gesture is then a pan and only Escape gets you out.
+    // screen. Every gesture is then a pan and only Escape gets you out. Holding the bar
+    // against the visible bottom edge is the same guarantee a window manager makes about a
+    // title bar, and it also keeps the filename and dimensions readable on a huge frame.
     //
-    // Keeping the bar against the visible bottom edge is the same guarantee a window manager
-    // makes about a title bar, and it is the reason the move handle can live there alone. It
-    // also means the filename and dimensions stay readable on a frame far bigger than the
-    // window. The offset is clamped so the bar can never climb above the frame's own top.
+    // What it must NOT do is override a deliberate move. Drag a window down past the bottom of
+    // the browser and the bar floated back up inside the picture, so the bar could never leave
+    // the screen — reported as exactly that. `view.top >= 0` is the difference between the two
+    // cases: if the frame's own top edge is on screen then the top of the frame margin is
+    // reachable and the window can always be dragged back, so nothing needs rescuing and the
+    // bar belongs at the bottom of the window where it was put. The trap above is reachable
+    // only when the frame covers the viewport top to bottom, and there `view.top` is negative.
+    //
+    // The offset is still clamped so the bar can never climb above the frame's own top.
     function stickBar() {
         if (!capEl || !cfg.showStatusBar) return;
         const oh = outerH();
-        const overhang = (view.top + oh) - usableHeight();
+        const overhang = view.top < 0 ? (view.top + oh) - usableHeight() : 0;
         const room = Math.max(0, oh - cfg.borderWidth * 2 - capEl.offsetHeight);
         capEl.style.bottom = Math.round(Math.max(0, Math.min(overhang, room))) + 'px';
     }
