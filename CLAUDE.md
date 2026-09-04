@@ -186,11 +186,11 @@ attribute — 21 must preview, 22 must not. The fixture is a real 2-second silen
 clone without ffmpeg still has it) because the gate reads `duration` and an empty `<video>`
 reports `NaN`.
 
-**Not done, and worth naming:** an imgur-style `<video>` grid item is still refused as a *source*
-by `NEVER`, so hovering the clip itself opens nothing. Making that work means letting a `<video>`
-be a hover source and rewriting its `.mp4` to an animated-image URL (`i.imgur.com/ID.jpg` returns
-`image/gif` — measured, see the imgur section), which is a real feature and a real departure from
-"images only". Ask before building it.
+**This paragraph used to say an imgur-style `<video>` grid item was still refused as a *source* by
+`NEVER`, and to ask before changing it. Fixed in v0.20.0 — and it is left here as the record of
+how it went wrong: that limitation made the whole of v0.18.0 and v0.19.0 unreachable on the exact
+site they were built for, it was written down rather than fixed, and the user found it by hovering
+a gif and getting nothing. See "A playing clip is a hoverable picture" below.**
 
 ## Videos are never previewed (v0.9.0)
 
@@ -546,7 +546,7 @@ node test-resolver.js               # 111 assertions on the pure URL and video-l
 python make-test-images.py          # regenerate fixtures into test-images/
 ```
 
-Browser test: `python test-server.py`, then open `http://localhost:8899/test-page.html`. 26 cases,
+Browser test: `python test-server.py`, then open `http://localhost:8899/test-page.html`. 28 cases,
 10 of which HZ+ rejects outright. (`.claude/launch.json` wraps the same command as
 `hover-zoom-test`, but `.claude/` is gitignored — a fresh clone has only the direct command.)
 
@@ -853,6 +853,41 @@ assumed, because it is the one stated design rule this project was built around.
   `document.getElementsByTagName('video')`, which does not cross a shadow boundary, so the
   preview's clip is invisible to it. It would read as `gifLike` anyway — muted, looping, no
   controls — which is a second, independent reason it is harmless.
+
+### A playing clip is a hoverable picture (v0.20.0) — the gap that made all of this invisible
+
+Reported as "when I hover over a gif, it does not open the preview window", and the diagnosis is
+the embarrassing kind: **on imgur's gallery and gifwow's grid the animation IS a `<video>`
+element**, so the thing under the pointer was never an `<img>`, and `eligible()`'s third line —
+`if (NEVER[el.tagName]) return null;` — refused it outright. No preview, no spinner, nothing,
+while every still beside it worked perfectly.
+
+So v0.18.0 taught the frame to *display* video and v0.19.0 taught the resolver to *ask the linked
+page*, and neither could ever be reached from the one element that needed them. Both features
+were real and both were unreachable. **The lesson is about the shape of the mistake, not the
+line:** a capability was added at the end of a pipeline whose entrance still rejected the input
+that capability existed for. It was even written down — v0.18.0's notes said "an imgur-style
+`<video>` grid item is still refused as a source by `NEVER`" — and then not revisited when the
+user asked for the rest. A known limitation recorded in the docs is not a limitation the user
+agreed to.
+
+`eligible()` now takes a `VIDEO` branch **before** the `NEVER` test:
+
+- **Only a `gifLike()` clip**, so a real player is still refused and a watch page is unaffected.
+- **`playVideos` gates it**, because a clip that the frame cannot display is not worth hovering.
+- **Only the LINK gate applies** (`videoLinkReason()`, split out of `videoReason()` for this).
+  The other three video tests cannot be used on a video: it is trivially "inside a `<video>`",
+  its own ancestor walk finds it, and it sits inside its own rectangle — all three self-match and
+  would refuse every clip on every page. The link is the one signal that still means something,
+  and it is what keeps case 28 (the same clip under a `/watch?` link) refused.
+- **`shownUrl()` reads `currentSrc` for a video**, not `src`: a clip is often given `<source>`
+  children and then `src` is the empty string.
+
+For an imgur grid clip the resolution path is then the *linked page*, not a URL rule — its
+`_lq`-style basename does not match `imgurId()`, but the `/gallery/…` link does resolve. Which is
+exactly the mechanism asked for: go to the next page and bring back what is there.
+
+Cases 27 and 28 are that shape with **no `<img>` in the card at all**.
 
 **Known cost, stated because it is real:** on a *static* imgur post the mp4 candidate is probed
 and cannot succeed, spending one request per hover. Nothing in a thumbnail URL says whether the

@@ -81,7 +81,7 @@ arrives — nothing is decided in advance.
 
 | ID | Precondition | Default |
 |---|---|---|
-| `P1` | The element is an `<img>`, or has a CSS background image and contains no `<img>` of its own | — |
+| `P1` | The element is an `<img>`, a **playing gif-style `<video>`** (`E16`), or has a CSS background image and contains no `<img>` of its own | — |
 | `P2` | Displayed at least `minDisplayed` on screen | 48 px |
 | `P3` | Displayed no larger than `maxDisplayed` | 0 = no cap |
 | `P4` | Not a video: not a media/plugin tag, not sitting inside a **video surface** (a laid-out **player**'s rectangle, or the player box derived from it), no **player** in it or within three ancestors, and not inside a link matching the video-URL shapes. A `<video>` that is muted, controls-less, looping or autoplaying, and under a minute long is an animated picture rather than a player — it is none of those things (`E12`) | `skipVideos` on |
@@ -384,6 +384,18 @@ stops with a margin all round and the picture starts spilling from there. Measur
 notches to 1162 × 720, and stops — 91.9 % and 91.8 % of the viewport. If you want it to reach the
 edges, both settings go to 100; nothing else is capping it.
 
+#### E16 · The thing you hover can be the clip itself
+On Imgur's gallery and gifwow's grid the animation in the grid is a `<video>`, not an `<img>` —
+there is no still image under the pointer at all. Until v0.20.0 that was refused outright, so
+hovering a gif produced nothing: no preview, no spinner. It now previews like any other picture,
+resolving through `E15`'s linked page.
+
+Only a gif-style clip (`E12`: muted, controls-less, looping or autoplaying, under a minute) can be
+hovered this way, and of the four video tests only the **link** one applies to it — a clip is
+trivially inside itself, so the rest would refuse every clip on every page. That link test is what
+keeps a video site's listing refused: test-page cases 27 and 28 are the same clip, and only the
+one under a `/watch?` link stays silent.
+
 #### E15 · The original can come from the page the thumbnail links to
 Since v0.19.0 a hover also fetches the linked page — same site only — and reads what it declares
 as its own media (`og:video`, then `og:image`). That is the picture or clip you would have got by
@@ -513,6 +525,7 @@ Function names are used rather than line numbers, which rot.
 
 | Date | Change |
 |---|---|
+| 2026-09-03 | v0.20.0. `P1` widened and new `E16` — a playing gif-style `<video>` can now be the hovered element. It could not be before, which meant that on Imgur's gallery, the site all of this was built for, hovering a gif did nothing at all and both `E14` and `E15` were unreachable. |
 | 2026-09-03 | v0.19.0. New `E15` — the linked page is fetched and what it declares as its media is used directly, without a size check, because the item page's media *is* what the thumbnail stands for. Guarded by an `og:url` identity check, same-origin only, `followLinks`. |
 | 2026-09-03 | v0.18.0. New `E14` — the preview may itself be a muted, looping video, because an Imgur video post's only moving form is an `.mp4` and "images only" meant "no answer" for it. `P1` unchanged: what is *hovered* is still a picture; this is about what the frame can *display*. |
 | 2026-09-03 | v0.17.0. New `E12` — `P4` now asks whether a `<video>` is a *player* or a *gif*: a short, muted, controls-less clip that is already playing is an animated picture, suppresses nothing, and no player box is derived from it, so Imgur's gallery and gifwow's grid preview normally while video sites stay refused. New `E13` — `bottomReserve`, a 30 px strip kept clear at the bottom of the window where the browser paints link addresses over the picture. |

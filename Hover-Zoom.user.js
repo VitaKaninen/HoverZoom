@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.19.0
+// @version     0.20.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -558,7 +558,11 @@
     // without a probe. Three places wanted this expression; it is one function so a change
     // to how "displayed" is read cannot land in two of them and miss the third.
     function shownUrl(el) {
-        return el.tagName === 'IMG' ? (el.currentSrc || el.src) : backgroundUrl(el);
+        if (el.tagName === 'IMG') return el.currentSrc || el.src;
+        // currentSrc rather than src: a clip is often given <source> children with no src
+        // attribute of its own, and then src is the empty string.
+        if (el.tagName === 'VIDEO') return el.currentSrc || el.src || null;
+        return backgroundUrl(el);
     }
 
     function blocked(url) {
@@ -1976,6 +1980,18 @@
             if (up > 0 && n.querySelectorAll && n.querySelectorAll('img').length > 1) break;
             if (playerIn(n)) return '<video> in ancestor #' + up;
         }
+        const linked = videoLinkReason(el);
+        if (linked) return linked;
+        return null;
+    }
+
+    // Split out of videoReason() because a gif-style clip that is ITSELF the hover target
+    // needs this gate and none of the others: it is trivially "inside a <video>" and sits
+    // inside its own rectangle, so the structural and geometric tests self-match and would
+    // refuse every clip on every page. The link is the one signal that still means
+    // something there — it is what separates a wall of animations from a video site's
+    // listing page, where the clips look identical and previews are not wanted.
+    function videoLinkReason(el) {
         const a = closestAcross(el, 'a[href]');
         const href = a ? (a.getAttribute('href') || '') : '';
         if (href && VIDEO_LINK_RE.test(href)) return 'video link: ' + href;
@@ -2003,6 +2019,22 @@
 
     function eligible(el) {
         if (!el) return null;
+        // A PLAYING GIF IS THE PICTURE. On imgur's gallery and gifwow's grid the animation
+        // in the grid is a <video> element, so the thing under the pointer is not an <img>
+        // at all and `NEVER` below refused it outright — hovering a gif did nothing, no
+        // preview and no spinner, while every still beside it worked. That was the whole of
+        // "it does not work on gifs": v0.18.0 taught the FRAME to show video and v0.19.0
+        // taught the resolver to ask the linked page, but the entry point stayed shut, so
+        // neither could ever be reached from the one element that needed them.
+        //
+        // Only a gif-like clip, and only the link gate applies to it — see videoLinkReason()
+        // for why the other three video tests cannot be used on a video. A real player is
+        // still refused, so a watch page is unaffected.
+        if (el.tagName === 'VIDEO') {
+            if (!cfg.playVideos || !gifLike(el)) return null;
+            if (cfg.skipVideos && videoLinkReason(el)) return null;
+            return blocked(shownUrl(el)) ? null : el;
+        }
         if (NEVER[el.tagName]) return null;
         if (cfg.skipVideos && inVideoContext(el)) return null;
         if (el.tagName === 'IMG') return blocked(shownUrl(el)) ? null : el;

@@ -202,6 +202,33 @@
     </a>
   </div>
 
+  <!--
+    27 and 28 are the imgur gallery shape: THE THING UNDER THE POINTER IS THE CLIP. There is
+    no <img> here at all, which is what made "hovering a gif does nothing" — <video> was
+    refused outright by NEVER, so the frame's video support and the linked-page lookup were
+    both unreachable from the one element that needed them.
+
+    27 resolves through its link, exactly as an imgur grid item does. 28 is the same clip
+    under a /watch? link, which is a video site's listing page and must stay refused.
+  -->
+  <div class="case" data-expect="640 (video)">
+    <h2>27. hovering the playing clip itself</h2>
+    <p class="hz bad">HZ+: no equivalent — no &lt;img&gt; exists, the grid item IS the video</p>
+    <a href="test-pages/post-video.html">
+      <video id="v27" width="160" height="120" src="test-images/clip-2s.mp4"
+             muted autoplay loop playsinline></video>
+    </a>
+  </div>
+
+  <div class="case" data-expect="none">
+    <h2>28. the same clip on a video site's listing</h2>
+    <p class="hz good">must NOT preview: /watch? means a player page is behind it</p>
+    <a href="/watch?v=dQw4w9WgXcQ">
+      <video id="v28" width="160" height="120" src="test-images/clip-2s.mp4"
+             muted autoplay loop playsinline></video>
+    </a>
+  </div>
+
   <div class="case" data-expect="1600">
     <h2>19. control for 17/18 — an ordinary link</h2>
     <p class="hz good">must still preview: /gallery/ is not a video shape</p>
