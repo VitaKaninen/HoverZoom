@@ -470,6 +470,60 @@ known whether that is a CSS background or an `<img>`, and the two need different
 "large background near the top of the document is a masthead" rule would be pure invention
 without the page. Ask before building it.
 
+## The banner across the top of a page (v0.23.0)
+
+Reported: v0.21.0 and v0.22.0 did not fix the two sites they were built for, with a test anyone
+can repeat — **youtube.com/@TheOnion**, whose channel banner previews.
+
+**The reason is a boundary I drew and stated too confidently.** v0.21.0's page-furniture rules
+were written "CSS backgrounds ONLY, never an `<img>` — a full-width photo with a caption over it
+is still a photo". That sentence is right about a photo in the body of a page and wrong about
+the one thing above all the content. Every banner that matters is an `<img>`, so every rule was
+looking in the wrong place. The measurement was never done; the boundary was reasoned from a
+single example and then written down as settled.
+
+Measured on that page, 2026-09-03:
+
+| | |
+|---|---|
+| element | `<img>` 1193×192, natural 1707×282, inside `#page-header-banner` |
+| position | **56 px from the top of the document** |
+| `role` / `aria-hidden` | none |
+| `alt` | `""` — and so is every video thumbnail's, so it separates nothing |
+
+`alt=""` deserves the note: it is the standard decorative convention and it was rejected in
+v0.21.0 as unsafe. This page is why — YouTube ships `alt=""` on the banner *and* on all 23
+content thumbnails. There is nothing in the markup. **The geometry is all there is.**
+
+`bannerReason()` is four conditions, and each of the last three exists to kill a false positive
+that can be named. Together they flagged exactly one of the 24 images on that page, and zero
+after scrolling 1200 px down:
+
+1. **Top within `BANNER_TOP` (200 px) of the top of the DOCUMENT** — above where content
+   begins. Document, not viewport, or every picture drifts into the band as you scroll.
+2. **At least `BANNER_MIN` (400 px) wide on screen** — kills logos, icons, and YouTube's
+   160 px avatar (which sits at 282 and fails this too).
+3. **Nothing sits beside it.** A picture with another to its left or right is one item in a
+   row. A gallery's first row is near the top of the document and can be wide; this is what
+   saves it. A banner is a band — it is alone on its line.
+4. **No other picture on the page is its width** (within `BANNER_SIMILAR`, 10 %). The one that
+   saves a **single-column** gallery, where (3) is useless: tiles in a column all share a
+   width, and a banner is unique on its page.
+
+The page-wide scan is only reached once (1) and (2) hold, so an ordinary hover never pays for
+it — a large picture at the very top of the document is rare.
+
+**Cases 39 and 40 share one `.case` box on purpose, and 40 must stay inside it.** The rule is
+position-sensitive: 40 is the single-column-gallery false positive, and it only tests condition
+(4) if its first image starts within 200 px of the document top (measured: 183). Giving it its
+own bordered box pushes it past that and the test silently stops testing anything. The banner
+above it is forced to `height:60px` for the same reason — its natural 125 px does not leave
+room. Verified: 39 refused with the reason printed, 40 still previews.
+
+**`BANNER_TOP` is the knob if a site is missed.** A page with a tall header can put its banner
+lower than 200 px, and then nothing fires. The `bannerGate` field in the hover log says which
+of the conditions the element failed to reach.
+
 ## What counts as a page background (v0.21.0)
 
 `isWallpaper()` → `wallpaperReason()`, a string like `videoReason()` so `hoverReport` can print
@@ -486,9 +540,13 @@ three are new, and each is a **measurement**, not a guess at intent:
   so it is a backdrop. The threshold is what lets a tile's caption ("Sunset, 2019") through. Only
   reachable by hovering the element's own blank space, since the text hit-tests first.
 
-**These apply to CSS backgrounds ONLY, and that boundary is deliberate.** A full-width `<img>`, an
-`<img>` with a caption over it, an `<img>` in a `<header>` — all ordinary shapes for a picture
-that genuinely is the content. The reported bug was a background bug.
+**These apply to CSS backgrounds ONLY.** A full-width `<img>`, an `<img>` with a caption over it,
+an `<img>` in a `<header>` — all ordinary shapes for a picture that genuinely is the content.
+
+**That boundary was stated as settled and it was too broad — see the banner section above.** It
+holds for a picture in the body of a page and does not hold for the one thing above all the
+content, which is an `<img>` on every site that has one. `bannerReason()` is the narrow
+exception, and it earns it by being four conditions rather than one.
 
 `decorativeReason()` is separate (`skipDecorative`, on) and does apply to `<img>`: `aria-hidden="true"`
 and `role="presentation"`/`"none"` are the page stating outright that something is not content.
@@ -713,7 +771,7 @@ node test-resolver.js               # 114 assertions on the pure URL and video-l
 python make-test-images.py          # regenerate fixtures into test-images/
 ```
 
-Browser test: `python test-server.py`, then open `http://localhost:8899/test-page.html`. 37 cases,
+Browser test: `python test-server.py`, then open `http://localhost:8899/test-page.html`. 39 cases,
 11 of which HZ+ rejects outright. (`.claude/launch.json` wraps the same command as
 `hover-zoom-test`, but `.claude/` is gitignored — a fresh clone has only the direct command.)
 

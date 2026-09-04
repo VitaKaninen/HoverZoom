@@ -90,16 +90,17 @@ arrives — nothing is decided in advance.
 | `P7` | Not page furniture — a CSS background that is part of the page rather than a picture on it (`E17`) | `skipPageBackgrounds` on |
 | `P8` | Neither the displayed URL nor any candidate is on the never-preview list | `blockList` empty |
 | `P9` | Not marked decoration by the page itself: no `aria-hidden="true"`, no `role="presentation"`/`"none"` on the element | `skipDecorative` on |
+| `P10` | Not the banner across the top of the page (`E20`) — the one furniture rule that applies to an `<img>` as well | `skipBanners` on |
 
 The element tested is not always the one under the pointer. When the hover target fails `P1`, a
 single picture directly beneath it in the same card is tried instead (`E18`), and that picture
 then faces every precondition here in its own right.
 
-A candidate that passes all nine still shows nothing unless a probe finds an image at least
+A candidate that passes all ten still shows nothing unless a probe finds an image at least
 `minRatio` (1.2×) bigger than what is displayed **and shaped like it** (`E19`) — see `T04`.
 
-`P7` is five separate tests, listed in `E17`. It applies to CSS backgrounds only — never to an
-`<img>`, which is a picture whatever its size, position or surroundings.
+`P7` is five separate tests, listed in `E17`. It applies to CSS backgrounds only; the one rule
+that also judges an `<img>` is `P10`, and it is deliberately much narrower.
 
 `P8` is checked in three places — before the spinner (`eligible`), before any candidate is probed
 (`collectCandidates`), and in the not-larger fallback — so a blocked image costs no request and
@@ -391,6 +392,24 @@ stops with a margin all round and the picture starts spilling from there. Measur
 notches to 1162 × 720, and stops — 91.9 % and 91.8 % of the viewport. If you want it to reach the
 edges, both settings go to 100; nothing else is capping it.
 
+#### E20 · The banner across the top of a page is never previewed
+A channel banner, a forum masthead, a site header image. It is an `<img>`, so none of `E17`'s
+background rules can see it, and it is often rotated daily so the never-preview list cannot hold
+it either. Measured on youtube.com/@TheOnion: `<img>` 1193 × 192, **56 px from the top of the
+document**, no `role`, no `aria-hidden`, and `alt=""` — which is also on all 23 video thumbnails,
+so the markup says nothing. Recognised by shape instead, four conditions together:
+
+| Condition | What it rules out |
+|---|---|
+| Top within 200 px of the top of the **document** | anything below where content begins |
+| At least 400 px wide on screen | logos, icons, avatars (YouTube's is 160 px) |
+| Nothing beside it | a gallery's first row, which is also near the top and can be wide |
+| No other picture on the page shares its width (±10 %) | a single-column gallery, where the row test is useless |
+
+On that page it refused exactly one of 24 images, and none at all once scrolled. `skipBanners`
+turns it off; if a site's banner sits lower than 200 px it is missed, and the hover log's
+`bannerGate` line says so.
+
 #### E19 · An upgrade has to be the same picture, not just a bigger file
 A bigger version of a picture keeps its proportions. Since v0.22.0 a candidate whose aspect
 ratio is more than **4×** away from the thumbnail's own is refused: it is a different image, not
@@ -592,6 +611,7 @@ Function names are used rather than line numbers, which rot.
 
 | Date | Change |
 |---|---|
+| 2026-09-04 | v0.23.0. New `P10`/`E20` — the banner across the top of a page. v0.21.0 declared that no furniture rule would ever judge an `<img>`, which was reasoned from one example rather than measured, and it made both `E17` and `E19` unable to see the thing the user was actually reporting: a YouTube channel banner is an `<img>`, with nothing in its markup to distinguish it from a video thumbnail. |
 | 2026-09-03 | v0.22.0. New `E19` — an upgrade must be roughly the same shape as the thumbnail, because a rotating forum banner was answering a 1200×125 masthead with an unrelated 600×600 picture. Also, and this is the actual fix rather than the backstop: the generic query-strip rule no longer fires on a path with no media extension, since `?loc=header` is the request rather than a resize. Not visible here: the debug log now names which of the six mechanisms produced the preview. |
 | 2026-09-03 | v0.21.0. New `E18` — a cover laid across a card is looked through to the picture under it, which is what made gifwow's grid (and many others) do nothing on hover. `P7` widened into `E17`: a CSS background is also refused when it is fixed, spans the window's width, or carries the page's own text — and the whole gate is now stated as applying to backgrounds only, never to an `<img>`. New `P9`/`skipDecorative` for `aria-hidden` and `role="presentation"`. |
 | 2026-09-03 | v0.20.0. `P1` widened and new `E16` — a playing gif-style `<video>` can now be the hovered element. It could not be before, which meant that on Imgur's gallery, the site all of this was built for, hovering a gif did nothing at all and both `E14` and `E15` were unreachable. |

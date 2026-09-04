@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.22.0
+// @version     0.23.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -60,6 +60,9 @@
                                     // page's own text sits on
         skipDecorative: true,       // skip what the page itself marks as not content
                                     // (aria-hidden, role=presentation/none)
+        skipBanners: true,          // the picture across the top of a page — masthead, channel
+                                    // banner, forum header. The one furniture rule that also
+                                    // applies to an <img>, so it is kept narrow
         keepSearching: true,        // show the first hit at once, then keep probing and upgrade in place
         skipWhileMouseDown: true,   // don't fire mid drag/selection
         siteMode: 'blacklist',      // 'blacklist' | 'whitelist'
@@ -2222,6 +2225,62 @@
         return null;
     }
 
+    // THE PICTURE ACROSS THE TOP OF THE PAGE. A channel banner, a forum masthead, a site
+    // header image — an <img>, so none of the background rules above can see it, and often
+    // linked and often rotated daily so the never-preview list cannot hold it either.
+    //
+    // Measured on youtube.com/@TheOnion, 2026-09-03: `<img>` 1193×192 at 56 px from the top
+    // of the document, natural 1707×282, inside `#page-header-banner`. Nothing usable in
+    // the markup — no role, no aria-hidden, and alt="" is on every image YouTube renders
+    // including the video thumbnails, so it separates nothing. The geometry is all there is.
+    //
+    // FOUR conditions, and each of the last three exists to kill a false positive that can
+    // be named. Together they flagged exactly one of the 24 images on that page.
+    //
+    //  1. Its top is within BANNER_TOP of the top of the DOCUMENT — above where a page's
+    //     content begins. Document, not viewport: scrolled down, an ordinary picture would
+    //     otherwise drift into the band.
+    //  2. At least BANNER_MIN wide on screen. Kills logos, avatars (YouTube's is 160 px and
+    //     sits at 282), and every icon.
+    //  3. NOTHING SITS BESIDE IT. A picture with another one to its left or right is one
+    //     item in a row — a gallery's first row is near the top of the document and can be
+    //     wide, and this is what saves it. A banner is a band; it is alone on its line.
+    //  4. NO OTHER PICTURE ON THE PAGE IS ITS WIDTH. This is the one that saves a
+    //     single-column gallery, where (3) is useless: tiles in a column are all the same
+    //     width, and a banner is unique on the page. Ten per cent counts as the same.
+    //
+    // The page-wide scan is only reached once (1) and (2) hold, so it costs nothing on an
+    // ordinary hover — a large picture at the very top of the document is rare.
+    //
+    // Unlike the background rules this DOES apply to an <img>, which is a deliberate
+    // narrowing of "a full-width photo is still a photo": that stays true of a photo in the
+    // body of a page, and stops being true of the one thing above all the content that is
+    // as wide as the page and resembles nothing else on it.
+    const BANNER_TOP = 200;         // px from the top of the document
+    const BANNER_MIN = 400;         // px wide on screen
+    const BANNER_SIMILAR = 0.1;     // widths within 10% are "the same width"
+
+    function bannerReason(el) {
+        const r = el.getBoundingClientRect();
+        if (r.width < BANNER_MIN || r.height < 2) return null;
+        if (r.top + (window.scrollY || 0) > BANNER_TOP) return null;
+        const lists = [document.getElementsByTagName('img'), document.getElementsByTagName('video')];
+        for (let l = 0; l < lists.length; l++) {
+            for (let i = 0; i < lists[l].length; i++) {
+                const n = lists[l][i];
+                if (n === el) continue;
+                const q = n.getBoundingClientRect();
+                if (q.width < 2 || q.height < 2) continue;
+                const mid = q.top + q.height / 2;
+                if (mid >= r.top && mid <= r.bottom && (q.right <= r.left || q.left >= r.right))
+                    return null;    // something beside it: one item in a row, not a band
+                if (Math.abs(q.width - r.width) <= r.width * BANNER_SIMILAR)
+                    return null;    // one of a set the same width: a column of items
+            }
+        }
+        return 'across the top of the page, alone, and unlike every other picture on it';
+    }
+
     // What the page itself says is not content. ARIA is the one place an author states this
     // outright rather than us inferring it, so it is worth reading — but only on the element
     // itself, never inherited: carousels routinely mark cloned slides aria-hidden, and those
@@ -2325,6 +2384,8 @@
         if (NEVER[el.tagName]) return null;
         if (cfg.skipVideos && inVideoContext(el)) return null;
         if (cfg.skipDecorative && decorativeReason(el)) return null;
+        // Before the <img> branch, because this is the one furniture rule that applies to one.
+        if (cfg.skipBanners && bannerReason(el)) return null;
         if (el.tagName === 'IMG') return blocked(shownUrl(el)) ? null : el;
         // element with a background image and no img of its own
         if (el.querySelector && el.querySelector('img')) return null;
@@ -2380,6 +2441,7 @@
                 : !backgroundUrl(t) ? 'n/a — no background image'
                     : (wallpaperReason(t) || 'none — NOT treated as page furniture'),
             decorativeGate: decorativeReason(t) || 'none — not marked decorative',
+            bannerGate: bannerReason(t) || 'none — not a page banner',
             videosOnPage: sizes.length ? sizes.join(', ') : 'none',
             ancestorLink: a ? (a.getAttribute('href') || '(empty href)').slice(0, 160)
                 : 'NO <a href> ancestor, even across shadow roots',
@@ -3002,6 +3064,13 @@
             'scroll, one spanning the full width of the window, and one the page\'s own ' +
             'text is sitting on. Never applies to an <img> — a full-width photo with a ' +
             'caption over it is still a photo');
+        check('skipBanners', 'Never preview the banner across the top of a page',
+            'a channel banner, a forum masthead, a site header image. Recognised by shape ' +
+            'rather than by name: it sits above where the page\'s content begins, is at ' +
+            'least 400px wide, has nothing beside it, and no other picture on the page is ' +
+            'its width. The last two are what keep a gallery\'s first row — and a ' +
+            'single-column gallery — out of it. This is the only rule of its kind that ' +
+            'applies to an <img> as well as to a background');
         check('skipDecorative', 'Skip images the page marks as decoration',
             'aria-hidden="true" and role="presentation" are the page saying outright that ' +
             'something is not content. Read only on the image itself, never inherited — ' +
@@ -3139,6 +3208,7 @@
         followLinks: cfg.followLinks,
         hoverThroughOverlays: cfg.hoverThroughOverlays,
         skipPageBackgrounds: cfg.skipPageBackgrounds,
+        skipBanners: cfg.skipBanners,
         skipDecorative: cfg.skipDecorative,
         blockList: cfg.blockList.length,
         // These three decide whether a probed candidate becomes a preview, so a log without

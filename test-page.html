@@ -14,6 +14,37 @@
   img { display:block; border-radius:3px; }
 </style>
 
+<!--
+  Case 39, and it has to live HERE rather than in the grid: the rule it tests is "above where
+  the page's content begins", measured from the top of the DOCUMENT. Copied in shape from
+  youtube.com/@TheOnion, measured 2026-09-03 — an <img> 1193x192 at 56px from the top, natural
+  1707x282, alone on its line and unlike every other picture on the page.
+
+  It must NOT preview, while all 37 cases below still do exactly what they did before: the
+  grid's thumbnails are 200px (under the 400px floor), sit in rows (something is beside them),
+  and share their width with each other.
+-->
+<div class="case" data-expect="none" style="margin:0 0 12px">
+  <h2>39. the banner across the top of the page</h2>
+  <p class="hz good">must NOT preview: above the content, alone, and unlike anything else here</p>
+  <img id="c39" src="test-images/banner-1200x125.jpg"
+       style="width:100%;height:60px;object-fit:cover;display:block">
+  <!--
+    40 is the false positive the rule has to avoid, and it has to sit HERE, inside the top
+    band, or the test proves nothing. A single-column gallery: wide pictures, high on the
+    page, with nothing beside them — three of the four banner conditions hold. The fourth is
+    the only thing between it and being wrongly refused, and it is that a banner is UNIQUE:
+    these two share a width, the banner above them shares it with nothing.
+
+    The banner is 60px tall rather than its natural 125 for exactly this reason — it has to
+    end high enough that 40's first image still starts within 200px of the document top.
+  -->
+  <h2 style="margin-top:10px">40. control for 39 — a one-column gallery, also at the top</h2>
+  <p class="hz good">must still preview: wide and alone on its line, but not unique — they match each other</p>
+  <img id="c40a" src="test-images/photo-800x600.jpg" style="width:600px;height:80px;object-fit:cover;display:block">
+  <img id="c40b" src="test-images/photo-800x600.jpg" style="width:600px;height:80px;object-fit:cover;display:block;margin-top:6px">
+</div>
+
 <h1>Hover Zoom — test cases</h1>
 <p class="note">Red = Hover Zoom+ rejects this outright. Every thumbnail here has a 1600&times;1200 original.</p>
 
