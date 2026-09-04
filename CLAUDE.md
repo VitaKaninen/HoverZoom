@@ -94,8 +94,8 @@ and `R2`). What follows is why it is built that way — keep the two in step.*
   over the source image. Leaving that image takes it down **at once**, with no grace period.
   A wheel over it belongs to the PAGE: it scrolls, and the scroll takes the preview down.
 - **Placed** — one press: a click, a drag, or a corner grab, all the same gesture. Held open by
-  NOTHING; it ends only on the X, Escape, or a click outside it. Position becomes free, the size
-  freezes, and the page underneath stays readable and scrollable.
+  NOTHING; it ends only on Escape or a click outside it. Position becomes free, the wheel becomes
+  the window's, and the page underneath stays readable and scrollable.
 
 Read that as one rule: **exactly one thing holds the preview open at a time, and leaving it
 ends the preview.** Every earlier version blurred this — both the image and the preview held
@@ -142,33 +142,50 @@ listening there would see a phantom click — nothing on the page can act on it 
 is the backdrop), but being observed at all is avoidable. Note `e.composedPath()[0]`, not
 `e.target`: outside the shadow tree the target is retargeted to the host.
 
-### The wheel grows a PLACED window; MOVING it freezes the size (v0.28.0, reverted to placed-only in v0.31.0)
+### The wheel grows a PLACED window, about the POINTER, and only a hand resize stops it (v0.34.0)
 
-*Specified as `E22`.* The reported problem: on a page whose pictures are all small, every preview
-opens small, and "resize each one by hand" is not a workflow.
+*Specified as `E22`.* The reported problem it started from: on a page whose pictures are all
+small, every preview opens small, and "resize each one by hand" is not a workflow.
 
-So `reflow()` has THREE modes, named by `view.sizeLock` (v0.32.0 — there were two):
+So `reflow()` has TWO modes, and `view.fixedW` is the whole of the state:
 
-| `sizeLock` | set by | `frameW` |
+| `view.fixedW` | set by | `frameW` |
 |---|---|---|
-| `null` | nothing yet | `max(MIN_FRAME, min(imgW, growBox().w))` — follows the picture to the ceiling |
-| `'max'` | `freezeSize()`, i.e. the MOVE | `max(MIN_FRAME, min(imgW, fixedW))` — still follows it, but no further than the size it had when it was moved |
-| `'exact'` | `resizeBy()`, i.e. a hand resize | `fixedW` — pinned, whatever the picture does inside it |
+| `null` | nothing yet | `max(MIN_FRAME, min(imgW, growBox().w))` — follows the picture to the growth ceiling |
+| a number | `resizeBy()`, i.e. a hand resize | `fixedW` — pinned, whatever the picture does inside it |
 
-**The middle one is what the user asked for and it is the whole of v0.32.0.** Moving a window
-says where it goes, not what shape it is: zoom out after a move and the window shrinks with the
-picture the way it did before, zoom back in and it stops where it stopped last time. Measured:
-995×747 → move → zoom out → 327×246 → zoom in → back to 995×747 and the picture spills from
-there. Only dragging an edge is a statement about the edges, and that is the `'exact'` one.
+**There used to be a third, and removing it is the point of v0.34.0.** v0.29.0 froze the size on
+the MOVE, on the reasoning that putting a window somewhere is the moment its size is settled;
+v0.32.0 softened that from a fixed size to a ceiling (`sizeLock: 'max'`), so zooming out after a
+move shrank the window again and zooming in stopped where it had stopped before. Both were asked
+for, and the arguments for them are still good ones read on their own.
 
-**`freezeSize()` is called from the MOVE, not from `place()`.** Putting the window somewhere is
-the moment its size gets a ceiling; until then the wheel keeps growing it. `MOVE_SLOP` (3px) so a
-hand shaking during a click does not count as putting it somewhere. That separation is what
-leaves room for the wheel to grow a window that has been placed but not yet positioned.
+**What killed it is that v0.31.0 made it unreachable, and nobody noticed for two versions.** Once
+the wheel belongs to the page while you are only hovering, zooming *requires* placing first —
+placing is a press, a press that wandered `MOVE_SLOP` (3px) was a move, and a click almost always
+wanders 3px. So in practice every window was frozen at its opening size, which is never larger
+than the browser window, before it had any chance to be grown. `maxSizeMultiple` could not be
+reached at all. Reported as "it stops at the edges of the browser window" and diagnosed as a
+v0.33.0 regression, which it was not — v0.33.0 was simply the first version whose other changes
+sent the user looking.
 
-**`fitScaleFor()` measures against the LOCKED box, not the current frame.** Under a `'max'` lock
-the frame may be hugging a zoomed-out picture, and `0` has to take the window back up to the size
-it was given rather than freezing it at whatever it has shrunk to.
+**The general shape is worth keeping:** a rule that is correct in isolation can be made vacuous
+by a change somewhere else, and the symptom is not an error but a capability that silently stops
+being reachable. The same shape as v0.20.0's `NEVER` gate, two sections down.
+
+**Zoom is anchored on the POINTER, and that is what makes a never-frozen frame comfortable.**
+`zoomAt()` holds the pointer at a constant FRACTION of the frame (`fx`/`fy`), so a growing window
+expands away from the cursor and a shrinking one collapses towards it. It used to hold the
+frame's centre, which is fine while the frame is pinned and wrong while it is following the
+picture: zooming out walked the edges inward past the pointer, `onPinWheel`'s `pointInPreview()`
+then stopped claiming the wheel, and zooming out further meant chasing the window across the
+screen with the mouse. Reported in the same message. `zoomCentre()` passes the frame's own
+centre, so `+`/`−`/`0` get `fx = fy = 0.5` and behave exactly as they always did — there is no
+pointer in a keypress.
+
+**`fitScaleFor()` measures against `fixedW` when there is one, not the current frame**, so `0` on
+a hand-sized window fits the picture to the size that was chosen rather than to the browser
+window.
 
 **A wheel over a HOVER preview is the page's, and that is the v0.31.0 correction.** v0.29.0 had
 `onPinWheel` call `place()`, so one notch promoted the window and grew it — which made
@@ -176,20 +193,20 @@ grow-then-position a gesture you could finish without clicking first. The cost w
 wheel stopped scrolling the page whenever a preview was up, and since `nudgeIntoReach()` puts the
 cursor inside the frame, that was nearly always. Asked for and reverted the same day it shipped:
 scrolling a page is a thing people do constantly and previewing is incidental to it, so the
-common gesture wins. The bought gesture survives one click later — placing still does not freeze
-the size, so a placed-but-unmoved window grows on the wheel exactly as before.
+common gesture wins. The bought gesture survives one click later — nothing but a hand resize
+freezes the size, so a placed window grows on the wheel exactly as before.
 
 **`enableWheelZoom()` is therefore called from `place()`, not `showViewer()`**, and
 `disableWheelZoom()` from `cancel()`. Binding it on show and gating inside the handler would work
 too, and is worse: this is a non-passive capture listener on `window`, so while it is attached
 every wheel event on the page is cancellable for nothing.
 
-A window placed by a click and never moved keeps growing on the wheel until it reaches the
-ceiling, where the frame stops and the picture spills anyway — a longer road, not a dead end.
+A placed window keeps growing on the wheel until it reaches the ceiling, where the frame stops
+and the picture spills inside it.
 
 **`fitScaleFor()` exists because of this.** What `0` returns to used to be "fit the window"; on a
-frozen frame it has to become "fit the FRAME", or `0` on a window the user sized by hand would
-spring it back to the window's shape and throw the size away. It was also the zoom *floor* until
+hand-resized frame it has to become "fit the FRAME", or `0` on a window the user sized by hand
+would spring it back to the window's shape and throw the size away. It was also the zoom *floor* until
 v0.30.0 — that job is `minScaleFor()`'s now, see "The picture may be smaller than the frame".
 
 **`upgradeViewer()` reads `userSized` against the OLD fit, before recomputing it.** A hover
@@ -467,8 +484,8 @@ The consequences, all of which have to be handled together:
   `onMove` uses `pointInPreview()` geometry rather than `ours()` to decide whether to un-fade the
   status bar. Using `ours()` there would mean the bar never faded again.
 - **Nothing inside the frame is clickable on a plain hover preview**, by design — it dies the
-  moment you move off the image toward it. Anything that needs clicking (the X, the ⊘, the
-  browser's context menu, the resize corners' cursors) belongs to a placed window. **The wheel is
+  moment you move off the image toward it. Anything that needs clicking (the ⊘, the browser's
+  context menu, the resize corners' cursors) belongs to a placed window. **The wheel is
   not an exception either, since v0.31.0**: it goes to the page, which scrolls and takes the
   preview with it. v0.28.0–v0.30.0 made it the frame's on the argument that a wheel needs no
   pointer travel; true, but it meant a preview being up silently disabled scrolling.
@@ -1054,8 +1071,8 @@ cannot know about: a watermark, a sprite sheet, one specific image that is simpl
   source element's own src). They differ whenever the preview is an upgrade, and blocking only
   the resolved one leaves the thumbnail still opening a preview that then fails to upgrade.
   `activeShown` exists solely for this and is cleared in `cancel()`.
-- **The button is only on a PLACED window** (`.box.hot .cap .block`), for the same reason the X
-  is: a hover preview is pointer-transparent, so a button on it cannot be clicked at all. The
+- **The button is only on a PLACED window** (`.box.hot .cap .block`): a hover preview is
+  pointer-transparent, so a button on it cannot be clicked at all. The
   flow is hover → click to pin → ⊘. The panel's `note()` row says so, because it is not guessable.
 - **It is absolutely positioned, 20px in from the right edge** (v0.30.0). As a flex item it was
   clipped off the end of a narrow bar; see "The window has a frame" for why that failed exactly
@@ -1118,9 +1135,9 @@ ancestor-link candidate ever comes back missing on a shadow-DOM site.
 
 ## Placed mode
 
-Press the preview → it is placed. The backdrop (`.dim.catch`) starts swallowing clicks, an X
-appears (`.box.placed .x`), and `+` `−` / arrows / drag become a zoom-and-pan surface. It closes
-on the X, a click outside it, or Escape. **Not optional** — there is no other thing a press on a
+Press the preview → it is placed. The backdrop (`.dim.catch`) starts swallowing clicks and
+`+` `−` / arrows / drag become a zoom-and-pan surface. It closes on a click outside it or on
+Escape. **Not optional** — there is no other thing a press on a
 floating preview could mean, so it has no setting; the panel carries `note()` rows that explain
 the controls without offering a switch.
 
@@ -1136,8 +1153,12 @@ the controls without offering a switch.
   not "tidy" that early return into a dismiss: it is the whole feature, and since v0.28.0 it is
   also the only right-click behaviour a placed window has.
 - **While placed, the left button always drives the window**, whatever `pinButton` says, so a
-  placed frame closes via the X, a click outside, or Escape — under both button maps. Do not wire
+  placed frame closes via a click outside or Escape — under both button maps. Do not wire
   dismissal onto the button that resizes, moves and pans.
+- **There is no close BUTTON** (v0.34.0). The X was removed because a placed window already has
+  two ways out that need no aim, and the button sat in the top-right corner — the corner the hand
+  reaches for to resize or move. `closeEl`, the `.x` CSS, its `layoutChrome()` placement and its
+  entry in `isBoxControl()` all went together; the ⊘ is the only control left inside the box.
 - **The preview opens beside the pointer, then is nudged just far enough to touch it**
   (`nudgeIntoReach`, `REACH_INSET` 10px). v0.4.0 centred it on the cursor, which solved
   reachability but moved the preview much further than needed. The nudge is ~34px with the
@@ -1160,12 +1181,13 @@ the controls without offering a switch.
   `usableHeight()` survives as the single place that answers "where is the bottom", because the
   size cap, the opening position, `clampPosition()` and `stickBar()` must not disagree. It floors
   at 64px: the Browser pane reports `clientHeight` **0** while hidden.
-- **The frame grows before the image spills — until the window is MOVED** (see the wheel section
-  above). Zooming a placed-but-unmoved window enlarges the frame up to `maxSizeMultiple` × the
-  viewport; moving it freezes the frame, and from then on zoom overflows it, which is when
-  `pannable()` (and the `grab` cursor) turn on. Zoom-out floors at `minScaleFor()` since v0.30.0,
-  not at the fit; `fitScaleFor()` is still what `0` returns to — fit-to-window while the frame is
-  free, fit-to-frame once it is frozen.
+- **The frame grows before the image spills — until a hand resize pins it** (see the wheel
+  section above). Zooming a placed window enlarges the frame, about the pointer, up to
+  `maxSizeMultiple` × the viewport; past that the zoom overflows it, which is when `pannable()`
+  (and the `grab` cursor) turn on. Dragging an edge pins the frame there and every later zoom
+  overflows it instead. Zoom-out floors at `minScaleFor()` since v0.30.0, not at the fit;
+  `fitScaleFor()` is still what `0` returns to — fit-to-window while the frame is free,
+  fit-to-frame once it has been resized by hand.
 - **Key and wheel listeners live on `CAP_TARGET` (= `window`), in capture** — per
   `../CLAUDE.md`, that beats every document-level listener on the page and in sibling
   userscripts, so arrows and `+`/`−` are ours while placed and nobody else's. Keys are added in
@@ -1251,12 +1273,13 @@ tab's values instead of clobbering them.
 
 ## Gotcha: a capture listener on the box eats its own children's events
 
-`onBoxDown`/`onBoxClick` are capture listeners on `.box`, and the X button is a *child* of the
-box — capture descends from the ancestor, so those two run first and their `stopPropagation()`
-kept `closeEl`'s own handlers from ever firing. The X looked correct, hovered correctly, and did
-nothing. Both handlers now `return` early on **`isBoxControl(e.target)`**, which is the one list
-of exempt controls — just the X now that the ⋮ button is gone. Any new control placed inside it goes in
-there — it is not optional, and the symptom is silence. Found 2026-09-03 in browser testing; nothing
+`onBoxDown`/`onBoxClick` are capture listeners on `.box`, and a control inside the box is a
+*child* of it — capture descends from the ancestor, so those two run first and their
+`stopPropagation()` keeps the child's own handlers from ever firing. Found on the X button, which
+looked correct, hovered correctly, and did nothing. Both handlers now `return` early on
+**`isBoxControl(e.target)`**, which is the one list of exempt controls — just the ⊘ now that the
+⋮ button is gone (v0.12.0) and the X with it (v0.34.0). Any new control placed inside the box
+goes in there — it is not optional, and the symptom is silence. Found 2026-09-03 in browser testing; nothing
 static catches it — `node --check` passes and the markup is fine.
 
 ## Testing

@@ -3,7 +3,7 @@
 What the preview **window** does, as a state machine. Menus, buttons, the status bar contents and
 the loading ring are out of scope except where they change what the window itself accepts.
 
-Describes `Hover-Zoom.user.js` **v0.29.0**.
+Describes `Hover-Zoom.user.js` **v0.34.0**.
 
 ---
 
@@ -27,8 +27,8 @@ item's *content* changes materially, the ID stays and the change is noted in `##
 bottom.
 
 **Retired, never to be reused:** `S07`, `S08`, `S09`, `S11`, `T08`, `T09`, `T11`, `T12`, `T13`,
-`T14`, `T20`, `E3`. All of them belonged to the detached state, which v0.28.0 removed — see the
-2026-09-04 row in `## Changes`.
+`T14`, `T20`, `E3` — all of them belonged to the detached state, which v0.28.0 removed — and
+`T25`, the move-freeze, removed in v0.34.0. See the 2026-09-04 rows in `## Changes`.
 
 ---
 
@@ -205,17 +205,18 @@ by default, up to 8 probes).
 
 #### S10 · placed
 A wheel notch or a press promoted it — a scroll, a click, a drag, or a resize, all the same
-thing. The backdrop starts catching clicks meant for the page, an X appears, and the keyboard
-belongs to the window. **The size is not settled yet: moving it gives the window a ceiling**
-(`T25`, `E22`), and only a hand resize pins its edges (`E23`).
-- **On screen:** the window, the X, and an invisible backdrop. Nothing is dimmed: the reason to
+thing. The backdrop starts catching clicks meant for the page, and the keyboard belongs to the
+window. **The size is still not settled: the frame goes on following the picture up to the
+growth ceiling, and only a hand resize pins its edges** (`E22`, `E23`).
+- **On screen:** the window and an invisible backdrop. Nothing is dimmed: the reason to
   place a window is to compare it with what is behind it.
 - **Held by:** nothing. It outlives hover, scrolling and focus loss entirely.
 - **The page underneath stays alive to read.** It still scrolls — the window is fixed and stays
   put while the page moves under it. What it does not do is act on clicks, and no new preview
   opens while this one is up (`R2`).
-- **Accepts:** wheel **over the frame** → grow it until it has been moved, then zoom the picture
-  inside it about the pointer (`wheelZoomStep`, 15 % per notch, `E22`); a wheel anywhere else
+- **Accepts:** wheel **over the frame** → grow the whole window about the pointer to the growth
+  ceiling, then zoom the picture inside it, also about the pointer (`wheelZoomStep`, 15 % per
+  notch, `E22`); a wheel anywhere else
   scrolls the page; `+` / `−` → zoom about the frame centre (1.25× per press), **down past the
   fit and into the frame's background** (`E26`); `0` → fit the picture to the current frame;
   arrows → pan (`panStep` 80 px, Shift for 3×); **a corner or an edge → resize** (`S19`, `E23`);
@@ -224,15 +225,15 @@ belongs to the window. **The size is not settled yet: moving it gives the window
 - **May hang off the edges of the screen** (`E21`), which is the point of the growth ceiling
   being above 1×: shoved aside or upwards, the picture still reaches the screen edges instead of
   leaving a strip of empty page behind it.
-- **Ends on:** the X, a click anywhere outside it, or Escape. **Right-click does not close it**
+- **Ends on:** a click anywhere outside it, or Escape. **Right-click does not close it**
   under either button map — it raises the browser's own menu over the picture instead (`T21`,
   `E9`).
 - **Note:** the key and wheel listeners are bound on `window` in capture, so they outrank the page
   and any sibling userscript.
 
 #### S12 · placed, image spilling
-The frame has been capped by a move or pinned by a resize, so zooming in pushes the image out past its
-edges. That is the moment panning starts to mean something — and the moment the frame around the
+The frame has reached the growth ceiling, or has been pinned by a hand resize, so zooming in
+pushes the image out past its edges. That is the moment panning starts to mean something — and the moment the frame around the
 picture becomes what moves the window, because the middle is now the pan surface (`E25`, `E21`).
 - **Cursor:** `grab` over the image.
 - **Accepts:** drag the image to pan (`S13`); arrows to pan; wheel keeps the pixel under the pointer
@@ -251,8 +252,8 @@ stays put.
 
 #### S14 · dragging (move), placed
 Press on the **frame margin** or the **status bar** (`E25`), or anywhere in the **middle** of a
-frame whose picture is not spilling. The whole frame moves; the picture stays put inside it. **The first 3 px freeze the
-frame's size as a ceiling** (`T25`, `E22`).
+frame whose picture is not spilling. The whole frame moves; the picture stays put inside it, and
+its size is not touched — moving used to freeze it, and no longer does (`E22`).
 - **Cursor:** `move`.
 - **Bounds:** it may go off the edges of the screen, but never so far that less than 72 px of it
   is left in view (`E21`).
@@ -308,15 +309,15 @@ inert.
 | `T07` | `S05` | **Press** the window — click, drag or corner, all the same | `S10` |
 | `T10` | `S05` | Right-click | `S16` |
 | `T15` | `S16` | Leave that image, come back | `S02` |
-| `T16` | `S10` | Escape, the X, or click anywhere outside it | `S01` (`S16` for the click, `E2`) |
-| `T17` | `S10` | Wheel over the frame, or `+` / `−` | Grows the frame to the ceiling — the growth ceiling, or the smaller one `T25` set; past that `S12`, the picture spilling inside it. Zooming back out shrinks the frame again unless a resize has pinned it (`E23`) |
+| `T16` | `S10` | Escape, or click anywhere outside it | `S01` (`S16` for the click, `E2`) |
+| `T17` | `S10` | Wheel over the frame, or `+` / `−` | Grows the whole window to the growth ceiling, about the pointer for a wheel and about the frame's centre for a key; past that `S12`, the picture spilling inside it. Zooming back out shrinks the frame again unless a hand resize has pinned it (`E23`) |
 | `T18` | `S10` | Press `0` | `S10`, the picture fitted to the current frame |
 | `T19` | `S10` | Resize the browser window | `S10`, kept at the size you gave it — it does not close or re-fit |
 | `T21` | `S10` | Right-click the window | `S10` unchanged — the browser raises its own menu over the picture (`E9`) |
 | `T22` | `S05` | Wheel over the window | `S01` — the wheel is the page's here; it scrolls, and the scroll closes the preview (`K2`, `E22`) |
 | `T23` | `S10` | Drag a corner or an edge | `S19` → `S10` at the new size, frozen there (`E23`) |
 | `T24` | `S10` | Wheel anywhere **but** the frame | `S10` unchanged — the page scrolls under it |
-| `T25` | `S10` | **Move it more than 3 px** | `S10` with its current size as a CEILING — the frame still shrinks with the picture, but stops growing here (`E22`) |
+| `T25` | — | *Retired in v0.34.0.* Moving the window used to freeze its size as a ceiling; it no longer touches the size at all (`E22`) |
 
 ---
 
@@ -358,7 +359,7 @@ at all (`E9`).
 These are consequences of the design rather than decisions in their own right. Several are open to
 change if you want them changed.
 
-#### E22 · The wheel is the page's until the window is placed; MOVING it freezes the size
+#### E22 · The wheel is the page's until the window is placed, and then it grows the window
 **A wheel over a preview you are only hovering belongs to the page.** It scrolls, and the scroll
 takes the preview down with it (`K2`). Nothing about the window is claimed, and nothing about
 scrolling a page changes because a preview happens to be up.
@@ -373,20 +374,33 @@ click later.
 whole window, frame and picture together, to the growth ceiling (`E7`). A wheel anywhere else
 still scrolls the page (`T24`).
 
-**Placing does not settle the size. Moving gives it a ceiling** (`T25`). So the sequence is:
-hover, click, scroll it to the size you want, then put it where you want it — and from that
-moment the wheel cannot make the window any bigger, so zooming in spills the picture and pans
-(`S12`). A press that wanders under 3 px does not count as moving it, so a shaky click does not
-settle anything.
+**Nothing settles the size except a hand resize** (v0.34.0). Placing does not, and neither does
+moving: the frame follows the picture up to the growth ceiling (`E7`, 2× the browser window by
+default) for as long as the window is alive, and only dragging an edge or a corner pins it
+(`E23`).
 
-**A ceiling, not a size** (v0.32.0). Zoom back out afterwards and the whole window shrinks with
-the picture exactly as it did before the move; zoom in again and it grows back to the ceiling and
-stops. Moving a window says where it goes, not what shape it is. Only a hand resize pins the
-edges outright (`E23`) — there are three states, and `reflow()` names them `sizeLock`: free, a
-`'max'` ceiling, an `'exact'` size.
+v0.29.0 to v0.33.0 froze the size on the move — `T25`, since retired — on the reasoning that
+putting a window somewhere is the moment its size is settled, so the sequence would be scroll it
+to size, then put it where you want it. v0.32.0 softened the freeze from a fixed size to a
+ceiling for the same reason: moving a window says where it goes, not what shape it is.
+
+**What killed it was v0.31.0's own correction.** Once the wheel belongs to the page while you are
+only hovering, zooming requires placing first — and placing is a press, and a press that wanders
+three pixels was a move. So in practice every window was frozen at its opening size, which is
+never larger than the browser window, before it could ever be grown. The ceiling was not a
+ceiling on deliberate growth, it was a ban on it, and it made `maxSizeMultiple` unreachable.
+Reported as "it stops at the edges of the browser window".
+
+**Zoom is anchored on the POINTER, and that is what makes an unfrozen frame comfortable**
+(v0.34.0). `zoomAt()` holds the pointer at a constant fraction of the frame, so a growing window
+expands *away* from the cursor and a shrinking one collapses *towards* it. Holding the centre
+instead — which is what it did before — walked the frame's edges past the pointer on the way
+down until the pointer was outside the window, at which point the wheel went back to the page and
+zooming out further meant chasing the window across the screen with the mouse. `+` / `−` and `0`
+still work about the frame's centre, because there is no pointer in a keypress.
 
 `0` fits the picture to the current frame rather than to the browser window, or it would throw
-away the size you chose. An upgrade landing on a wheel-grown window holds its on-screen size
+away a size chosen by hand. An upgrade landing on a wheel-grown window holds its on-screen size
 (`S15`) for the same reason.
 
 #### E21 · A placed window may hang off the edges of the screen
@@ -469,8 +483,10 @@ not entirely chrome.
 **The ⊘ is positioned 20 px in from the right edge and no longer depends on the rest of the bar.**
 As an ordinary flex item it sat after a `flex:none` dimensions field, so on a narrow bar it was
 pushed past the end and clipped away entirely — on a small preview, which is exactly where it is
-most wanted. The 20 px keeps it off the corner, where the hand goes to resize. The **X** moved in
-by the same reasoning: it sits just inside the ring rather than in the frame's corner.
+most wanted. The 20 px keeps it off the corner, where the hand goes to resize. (v0.30.0 moved
+the **X** inside the ring for the same reason; v0.34.0 removed the button altogether — a placed
+window already closes on Escape and on a click anywhere outside it, and a third way to do it was
+occupying the corner the hand reaches for.)
 
 `frameMargin: 0` leaves the status bar as the only handle, which is the pre-v0.30.0 shape.
 
@@ -480,11 +496,11 @@ are gone. Zoom out past the fit and the picture keeps shrinking, centred, with t
 background (`#1e1e2e`) around it — the way any image viewer behaves. The floor is now an absolute
 32 px on the picture's long side, never above the scale it opened at.
 
-Which of the two shrinks depends on whether the frame is frozen (`E22`):
+Which of the two shrinks depends on whether the frame has been pinned by hand (`E22`):
 
-- **Frame still free** (placed but never moved) → the frame follows the picture down, to the
+- **Frame still free** (never resized by hand) → the frame follows the picture down, to the
   48 px minimum (`E25`).
-- **Frame frozen** (moved or resized by hand) → the frame stays and the picture shrinks inside
+- **Frame pinned** (an edge or a corner dragged) → the frame stays and the picture shrinks inside
   it, leaving background on all four sides.
 
 `0` still fits the picture to the frame, so there is always one keypress back.
@@ -531,10 +547,10 @@ different shape from the picture. It is an ordinary one now. **Shift** locks the
 frame's shape *as it was when the edge was grabbed* — locking to the picture's shape instead
 would snap the frame the instant it was touched.
 
-**A hand resize PINS the edges** (`sizeLock: 'exact'`), which is the difference between it and a
-move (`E22`). From then on the frame is exactly what was dragged and the picture letterboxes or
-spills inside it; zooming no longer changes the window at all. Bounds are 48 px at the bottom and
-the growth ceiling at the top.
+**A hand resize PINS the edges** (`view.fixedW`/`fixedH`), and since v0.34.0 it is the only thing
+that does — moving the window leaves the size alone (`E22`). From then on the frame is exactly
+what was dragged and the picture letterboxes or spills inside it; zooming no longer changes the
+window at all. Bounds are 48 px at the bottom and the growth ceiling at the top.
 
 
 #### E19 · An upgrade has to be the same picture, not just a bigger file
@@ -689,7 +705,7 @@ there comes up for the thumbnail underneath and offers to save *that*.
 
 The cost of the v0.28.0 collapse falls here: `S07` also dismissed on a right-click, so "shove it
 aside, then right-click to be rid of it" was a two-gesture disposal. A window dragged aside is now
-placed, so that press belongs to the browser, and disposal is the X, Escape, or a click outside.
+placed, so that press belongs to the browser, and disposal is Escape or a click outside.
 
 #### E10 · The status bar fades itself out
 It is drawn *on* the picture, so on a meme, a screenshot or a comic panel it covers the text at
@@ -712,8 +728,8 @@ The status bar of a **placed** window (`S10`) carries a `⊘` beside the metadat
 the image to the never-preview list (`P8`) and closes the window. It is the answer to a page whose
 tiled background or watermark opens a preview from every patch of blank space.
 
-It is absent from `S05` for the same reason the X is: a hover preview is pointer-transparent, so a
-button drawn on it cannot be clicked at all. The gesture is therefore hover → click to pin → `⊘`,
+It is absent from `S05` because a hover preview is pointer-transparent, so a button drawn on it
+cannot be clicked at all. The gesture is therefore hover → click to pin → `⊘`,
 which the settings panel states outright, because it is not guessable from the UI.
 
 It records **two** URLs — the one on screen and the source element's own `src`. Those differ
@@ -746,6 +762,7 @@ Function names are used rather than line numbers, which rot.
 
 | Date | Change |
 |---|---|
+| 2026-09-04 | v0.34.0. Three changes to the placed window, all of them reported together. **Moving it no longer freezes its size** (`T25` retired, `E22`): the frame follows the picture up to the growth ceiling for as long as the window is alive, and only a hand resize pins it (`E23`). The freeze was v0.29.0's, and v0.31.0 quietly made it fatal — once the wheel belongs to the page while hovering, zooming means placing first, placing is a press, and a press that wandered three pixels was a move, so every window was frozen at its opening size before it could be grown and `maxSizeMultiple` was unreachable. **Zoom is anchored on the pointer** rather than on the frame's centre (`E22`, `T17`), so a growing window expands away from the cursor and a shrinking one collapses towards it instead of walking its edges past the pointer and handing the wheel back to the page. **The X button is gone** (`T16`, `E25`, `E9`, `E11`) — Escape and a click outside already close a placed window, and the button sat in the corner the hand reaches for to resize. |
 | 2026-09-04 | v0.33.0. **Stored settings were being discarded on every page load** and the script ran on defaults until something opened the panel — `readSettings()` is hoisted and the `cfg` initialiser called it while `const RETIRED` was still in its temporal dead zone, so the ReferenceError was swallowed by its own catch. Broken since v0.28.0. Also: the resize strip now straddles the window edge, **6 px outside and 6 px in**, with 13 px of move band beyond it (`E25`); the status bar **no longer outranks a resize**, so the bottom corners and the bottom edge resize like every other edge, and it keeps precedence only over the middle, which is what still matters when `stickBar()` has parked it up the picture (`E21`); `bottomReserve` is retired (`E13`); the manager's menu gains **Enable/Disable for this site**, labelled by what pressing it would do; and the settings panel's Save row is sticky. |
 | 2026-09-04 | v0.32.0. **Moving a window now sets a size CEILING rather than a fixed size** (`T25`, `E22`): zoom out afterwards and the whole window shrinks with the picture the way it did before the move, zoom back in and it stops at the size it was given. `reflow()` gains a third mode for it — `sizeLock` is free, `'max'`, or `'exact'`. **A hand resize is the `'exact'` one** (`E23`) and is the only thing that pins the edges. **And a hand resize is now free-aspect, with Shift to keep the shape** — the reverse of before; the lock existed because a one-axis drag grew bands of background, which `E26` has since made an ordinary state rather than an incoherent one. |
 | 2026-09-04 | v0.31.0. Two corrections to v0.30.0, both reversing something it had just decided. **The wheel is the page's again while you are only hovering** (`E22`, `T22`, `K2`) — it scrolls and the scroll closes the preview; growing the window is a placed-window gesture now, one click away. v0.30.0's version stole the scroll wheel from every hover to buy one gesture, which was a bad trade. **The frame margin is drawn ON the picture** (`E25`), the way the status bar always was, rather than laid out around it: the window costs no extra size, the minimum drops from 98 px to 50 px, the ring is mostly transparent, and it fades with the bar — and stops being a handle while faded, which is what makes an overlaid ring safe where an invisible band was not. |

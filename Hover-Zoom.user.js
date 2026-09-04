@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.33.0
+// @version     0.34.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -1072,7 +1072,7 @@
     // only function that reassigns it, and it is also the only place either element's src
     // is set, so the two can never both be loaded at once.
     let host = null, root = null, box = null, imgEl = null, vidEl = null, mediaEl = null;
-    let dimEl = null, closeEl = null;
+    let dimEl = null;
     let capEl = null, capNameEl = null, capMetaEl = null, blockEl = null;
     let edgeEls = null;         // [top, left, right, bottom] — the drawn frame margin
     let gripEl = null;          // invisible collar that carries the outer half of the resize strip
@@ -1204,9 +1204,9 @@
             '.cap .name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;',
             'font-family:ui-monospace,SFMono-Regular,Consolas,monospace;color:#a6adc8}',
             '.cap .meta{flex:none;white-space:nowrap}',
-            // "Never this image again". Only on a PLACED window, for the same reason the X
-            // is: a hover preview is pointer-transparent, so a button on it cannot be
-            // clicked at all. Hover it, click to pin, then press this.
+            // "Never this image again". Only on a PLACED window: a hover preview is
+            // pointer-transparent, so a button on it cannot be clicked at all. Hover it,
+            // click to pin, then press this.
             // ABSOLUTE, not a flex item, plus a reserved gutter on the bar. As a flex item it
             // sat after a `flex:none` dimensions field, so on a narrow bar it was pushed past
             // the end and clipped away entirely - on a preview of a small picture, which is
@@ -1244,12 +1244,6 @@
             '.spin .track,.spin .arc{fill:none;stroke-width:4.5;stroke-linecap:round}',
             '.spin .track{stroke:var(--spin-track)}',
             '.spin .arc{stroke:var(--spin-arc)}',
-            '.x{position:absolute;width:26px;height:26px;display:none;',
-            'align-items:center;justify-content:center;border-radius:50%;border:1px solid #45475a;',
-            'background:rgba(30,30,46,.88);color:#cdd6f4;font:17px/1 system-ui,sans-serif;',
-            'cursor:pointer;user-select:none}',
-            '.box.placed .x{display:flex}',
-            '.x:hover{background:#f38ba8;border-color:#f38ba8;color:#1e1e2e}',
         ].join('');
         root.appendChild(style);
 
@@ -1317,13 +1311,6 @@
         capEl.appendChild(capMetaEl);
         capEl.appendChild(blockEl);
 
-        closeEl = document.createElement('div');
-        closeEl.className = 'x';
-        closeEl.title = 'Close (Esc)';
-        closeEl.textContent = '×';
-        closeEl.addEventListener('mousedown', function (e) { e.preventDefault(); e.stopPropagation(); }, true);
-        closeEl.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); unplace(); }, true);
-
         // After the picture and before the bar, so the bar is drawn over the bottom strip
         // where the two overlap.
         edgeEls = ['t', 'l', 'r', 'b'].map(function (k) {
@@ -1336,7 +1323,6 @@
         box.appendChild(vidEl);
         edgeEls.forEach(function (d) { box.appendChild(d); });
         box.appendChild(capEl);
-        box.appendChild(closeEl);
         box.addEventListener('mousedown', onBoxDown, true);
         box.addEventListener('click', onBoxClick, true);
         root.appendChild(box);
@@ -1442,9 +1428,8 @@
     // and throw away the size they chose.
     function fitScaleFor(w, h) {
         if (!w || !h) return 1;
-        // Against the LOCKED box rather than the frame's current size: under a 'max' lock the
-        // frame may be hugging a zoomed-out picture, and `0` should take the window back up to
-        // the size it was given, not freeze it at whatever it has shrunk to.
+        // Against the hand-set box rather than the frame's current size, which on a free
+        // frame is only ever whatever the picture happens to need at this zoom.
         if (view && view.fixedW != null) return Math.min(view.fixedW / w, view.fixedH / h);
         const m = viewportBox();
         return Math.min(cfg.zoomFactor, m.w / w, m.h / h);
@@ -1463,35 +1448,35 @@
         return Math.min(MIN_MEDIA / Math.max(w, h), fitScaleFor(w, h));
     }
 
-    // While it is still a hover preview the frame grows with the image, up to the growth
-    // ceiling: zooming a small picture is how you get a preview big enough to be worth
-    // placing, and having to resize every one of them by hand on a page full of small
-    // images is the thing that made this necessary.
+    // The frame follows the picture, up to the growth ceiling: zooming a small picture is
+    // how you get a preview big enough to be worth placing, and having to resize every one
+    // of them by hand on a page full of small images is the thing that made this necessary.
     //
-    // THREE modes, not two (v0.32.0), because moving a window and resizing it by hand are
-    // different statements about how big it should be:
+    // ONE thing stops it, and since v0.34.0 only one: a hand resize (view.fixedW, written by
+    // resizeBy). Moving the window used to freeze the size as well — v0.32.0's `sizeLock`
+    // 'max' — on the reasoning that putting a window somewhere is the moment its size is
+    // settled, so zooming out afterwards shrank it back and zooming in stopped where it had
+    // stopped before.
     //
-    //   sizeLock null     free      the frame follows the picture, up to the growth ceiling
-    //   sizeLock 'max'    a ceiling the frame still follows the picture, but no further than
-    //                               the size it had when it was moved
-    //   sizeLock 'exact'  fixed     the frame is exactly what was dragged, whatever the
-    //                               picture does inside it
+    // That reasoning did not survive v0.31.0 handing the wheel back to the page on a hover
+    // preview. Zooming now requires placing first; placing is a press, and a press that
+    // wanders three pixels was a move — so in practice every window was frozen at its opening
+    // size, which is never larger than the browser window, before it could ever be grown. The
+    // ceiling was not a ceiling on deliberate growth, it was a ban on it, and it is what made
+    // maxSizeMultiple unreachable. Reported as "it stops at the edges of the browser window".
     //
-    // The middle one is the point of the change. Moving a window says where it goes, not what
-    // shape it is, so zooming out afterwards should shrink the whole window the way it did
-    // before the move — and zooming back in should stop where it stopped before, rather than
-    // growing on forever. Only a deliberate resize pins the edges.
+    // What replaces it is zoomAt() anchoring on the POINTER: a window that grows expands away
+    // from the cursor rather than about its own centre, so growing one no longer walks its
+    // edges over the thing being pointed at, which is most of what the freeze was protecting.
     function reflow() {
         if (!view) return;
         const g = growBox();
         view.imgW = view.natW * view.scale;
         view.imgH = view.natH * view.scale;
-        const capW = view.fixedW == null ? g.w : (view.sizeLock === 'max' ? view.fixedW : null);
-        const capH = view.fixedH == null ? g.h : (view.sizeLock === 'max' ? view.fixedH : null);
-        view.frameW = Math.round(capW == null ? view.fixedW
-            : Math.max(MIN_FRAME, Math.min(view.imgW, capW)));
-        view.frameH = Math.round(capH == null ? view.fixedH
-            : Math.max(MIN_FRAME, Math.min(view.imgH, capH)));
+        view.frameW = Math.round(view.fixedW != null ? view.fixedW
+            : Math.max(MIN_FRAME, Math.min(view.imgW, g.w)));
+        view.frameH = Math.round(view.fixedH != null ? view.fixedH
+            : Math.max(MIN_FRAME, Math.min(view.imgH, g.h)));
         view.ox = view.imgW <= view.frameW
             ? (view.frameW - view.imgW) / 2
             : Math.min(0, Math.max(view.frameW - view.imgW, view.ox));
@@ -1875,8 +1860,8 @@
         return Math.round(Math.min(chrome(), view.frameW / 3, view.frameH / 3));
     }
 
-    // The margin strips and the X, all of which float over the picture and therefore have to
-    // be re-placed whenever the frame changes size.
+    // The margin strips, which float over the picture and therefore have to be re-placed
+    // whenever the frame changes size.
     //
     // The sides run the full height under the bar rather than stopping at it: stopping at
     // whichever of the two is thicker leaves a gap in the ring just above the bar whenever
@@ -1896,9 +1881,6 @@
         // shrink the text, it forces the whole bar wider than the window it is in.
         capEl.style.paddingRight =
             px(placed ? Math.min(BLOCK_RIGHT + 26, Math.max(8, view.frameW - 8)) : 8);
-        // Pulled in from the corner only as far as there is room for it.
-        const inset = Math.max(4, Math.min(m + 6, Math.min(view.frameW, view.frameH) - 32));
-        closeEl.style.top = closeEl.style.right = px(inset);
     }
 
     function layout() {
@@ -1926,9 +1908,17 @@
     }
 
     // Zoom about a point given in SCREEN coordinates, keeping whatever pixel of the image
-    // sits under it there afterwards. The frame may resize and be re-centred in between,
-    // so the anchor's frame-relative position is derived twice: once against the old
-    // frame to find the image pixel, once against the new one to place it back.
+    // sits under it there afterwards. The frame may resize in between, so the anchor's
+    // frame-relative position is derived twice: once against the old frame to find the image
+    // pixel, once against the new one to put it back.
+    //
+    // The FRAME is anchored on the same point, as a fraction of its own size (v0.34.0). It
+    // used to hold its centre instead, which meant a frame still free to grow walked its
+    // edges outward past the pointer on the way in and inward past it on the way out — and
+    // once the pointer is outside the frame, onPinWheel stops claiming the wheel, so zooming
+    // out repeatedly meant chasing the window across the screen with the mouse. zoomCentre()
+    // passes the frame's own centre, so the fraction is 0.5 there and the keyboard still gets
+    // exactly the old hold-the-centre behaviour.
     function zoomAt(nextScale, screenX, screenY) {
         if (!view) return;
         const lo = minScaleFor(view.natW, view.natH);
@@ -1941,13 +1931,13 @@
         const ix = (ax - view.ox) / view.scale;
         const iy = (ay - view.oy) / view.scale;
 
-        const cx = view.left + outerW() / 2;
-        const cy = view.top + outerH() / 2;
+        const fx = view.frameW ? ax / view.frameW : 0.5;
+        const fy = view.frameH ? ay / view.frameH : 0.5;
 
         view.scale = nextScale;
         reflow();                       // new frame size; offsets are re-derived below
-        view.left = cx - outerW() / 2;
-        view.top = cy - outerH() / 2;
+        view.left = screenX - insetX() - fx * view.frameW;
+        view.top = screenY - insetY() - fy * view.frameH;
         clampPosition();
 
         const ax2 = Math.max(0, Math.min(view.frameW, screenX - (view.left + insetX())));
@@ -2067,9 +2057,8 @@
             url: res.url, natW: res.w, natH: res.h,
             scale: fit, fitScale: fit,
             imgW: 0, imgH: 0, frameW: 0, frameH: 0, ox: 0, oy: 0, left: 0, top: 0,
-            // null while nothing has settled the size. freezeSize() (the move) fills them in
-            // as a CEILING, resizeBy() as an exact size — see sizeLock and reflow().
-            fixedW: null, fixedH: null, sizeLock: null,
+            // null until a hand resize pins the edges; resizeBy() is the only writer.
+            fixedW: null, fixedH: null,
         };
         reflow();
 
@@ -2263,8 +2252,9 @@
     // over a picture now leaves a window that has to be dismissed, where before it merely
     // grew and then died on its own.
     //
-    // Placing does NOT freeze the size. That is freezeSize(), and it is MOVING the window
-    // that triggers it — putting it somewhere is the moment its size is settled.
+    // Placing does not settle the size, and since v0.34.0 neither does moving: the frame
+    // keeps following the picture up to the growth ceiling until an edge is dragged by hand.
+    // See reflow() for why the move-freeze went.
     function place() {
         if (placed || !view) return;
         placed = true;
@@ -2278,24 +2268,6 @@
         // The wheel becomes the window's only now — see enableWheelZoom.
         enableWheelZoom();
         layout();
-    }
-
-    // The frame stops following the picture and becomes an aperture it zooms inside. Called
-    // when the window is MOVED and when it is resized by hand — both are the user settling
-    // the question of how big it should be. Until then the wheel keeps growing it, so the
-    // sequence is: scroll it to the size you want, then put it where you want it.
-    //
-    // fitScale has to be recomputed here: it is the zoom floor and what `0` returns to, and
-    // on a frozen frame that has to mean "fit the FRAME" rather than "fit the window", or
-    // `0` would spring a hand-sized window back to the window's shape.
-    function freezeSize() {
-        if (!view || view.fixedW != null) return;
-        view.fixedW = view.frameW;
-        view.fixedH = view.frameH;
-        // A CEILING, not a size. The window keeps shrinking with the picture on the way down
-        // and stops here on the way back up; only resizeBy() pins the edges outright.
-        view.sizeLock = 'max';
-        view.fitScale = fitScaleFor(view.natW, view.natH);
     }
 
     function unplace() {
@@ -2312,10 +2284,13 @@
     // Controls that live INSIDE the box. onBoxDown/onBoxClick are capture listeners on the
     // box, and capture descends from the ancestor, so without an explicit exemption their
     // stopPropagation() runs before a child's own handlers and the control does nothing —
-    // the X looked correct, hovered correctly and did nothing until this existed. Any new
-    // control added inside the box goes in here; the symptom of forgetting is silence.
+    // the old X button looked correct, hovered correctly and did nothing until this existed.
+    // Any new control added inside the box goes in here; the symptom of forgetting is
+    // silence. The ⊘ is the only one left: the X was removed in v0.34.0, because a placed
+    // window already closes on Escape and on a click anywhere outside it, and the button sat
+    // in the corner where the hand goes to resize.
     function isBoxControl(t) {
-        return closeEl.contains(t) || blockEl.contains(t);
+        return blockEl.contains(t);
     }
 
     // "Never preview this image again", from the ⊘ in the status bar. Records the URL on
@@ -2408,7 +2383,7 @@
             // its four sides rather than by the bar alone.
             const onFrame = onBar || (reg && reg.kind === 'move');   // reg is never 'resize' here
             const mode = onFrame || !pannable() ? 'move' : 'pan';
-            drag = { x: e.clientX, y: e.clientY, mode: mode, dist: 0 };
+            drag = { x: e.clientX, y: e.clientY, mode: mode };
         }
         box.classList.add('drag');
     }
@@ -2451,11 +2426,12 @@
         else if (!drag.ex) view.left = drag.l0 - (w - drag.w0) / 2;
         if (drag.ey === 't') view.top = drag.t0 + (drag.h0 - h);
         else if (!drag.ey) view.top = drag.t0 - (h - drag.h0) / 2;
+        // Fixed from here on: these edges were put where they are on purpose, so the frame
+        // stops following the picture. fitScale is recomputed with them because it is the
+        // zoom floor and what `0` returns to, and on a fixed frame that has to mean "fit the
+        // FRAME" or `0` would spring a hand-sized window back to the window's shape.
         view.fixedW = w;
         view.fixedH = h;
-        // EXACT from here on: these edges were put where they are on purpose, so they stop
-        // following the picture. A move-lock is only a ceiling; see reflow().
-        view.sizeLock = 'exact';
         view.fitScale = fitScaleFor(view.natW, view.natH);
         if (drag.refit) view.scale = view.fitScale;
         reflow();
@@ -2520,11 +2496,6 @@
     let pointer = { x: 0, y: 0 };
     let mouseDown = false;
     let modifierDown = false;
-
-    // A press that wanders this far counts as MOVING the window, which is what freezes its
-    // size (freezeSize). It no longer decides any state — a drag and a click both place the
-    // window, on the press — so `justDragged` is gone with the state it used to pick.
-    const MOVE_SLOP = 3;
 
     // There is no grace period on the hide any more, and no `hideTimer`. One existed so the
     // pointer could travel onto the preview before it vanished — which mattered only while
@@ -3171,8 +3142,8 @@
     //
     // So dismiss-by-button belongs to the HOVER preview alone, which has no choice: it is
     // pointer-transparent, so a native menu there would come up for the thumbnail underneath
-    // and offer to save *that*. A placed window is dismissed with the X, Escape, or a click
-    // outside it.
+    // and offer to save *that*. A placed window is dismissed with Escape or a click outside
+    // it.
     function altButton(e) {
         if (placed) return false;       // hands the press to the browser; see above
         if (!active && !view) return false;
@@ -3209,7 +3180,7 @@
         if (over) showBar();
         // Which region the pointer is in, said in the cursor. Only readable once placed — a
         // hover preview is pointer-transparent, so the page's own cursor is what shows
-        // there, for the same reason the X and the ⊘ are absent from one.
+        // there, for the same reason the ⊘ is absent from one.
         if (box && placed && !drag) {
             // Mirrors onBoxDown exactly, including the bar's narrowed precedence: a resize
             // region wins over the bar, and the bar only claims what is left. Geometry rather
@@ -3236,11 +3207,6 @@
         drag.x = e.clientX;
         drag.y = e.clientY;
         if (drag.mode === 'move') {
-            // Moving it settles how big it should be. MOVE_SLOP so that a hand shaking
-            // during a click does not count as putting it somewhere — the frame still
-            // follows those first pixels, it just does not commit on them.
-            drag.dist += Math.abs(dx) + Math.abs(dy);
-            if (drag.dist > MOVE_SLOP) freezeSize();
             view.left += dx;
             view.top += dy;
             layout();       // clampPosition() keeps a grabbable strip of it on screen
@@ -3832,7 +3798,7 @@
             'rather than keep it). Dragging the middle moves it too, until you have zoomed in ' +
             'past the frame, at which point the middle pans the picture instead. Zoom out past ' +
             'the fit and the picture shrinks inside the frame rather than stopping. Close it ' +
-            'with the X, Escape, or a click anywhere outside it.');
+            'with Escape or a click anywhere outside it.');
         note('Right-click a placed window for the browser\'s own menu',
             'Save image as…, Copy image, Copy image address, Open image in new tab — all of ' +
             'them acting on the full-size original, because the browser fetches it itself. ' +
