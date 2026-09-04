@@ -715,6 +715,20 @@ Two imgur facts, neither guessable:
   `zFAj8eD.webp?tb` is 240×210 animated, `zFAj8eD.webp` is 412×360 and frozen, `zFAj8eD.jpg` is
   412×360 and moving. That is why the rule rewrites `.webp` → `.jpg` even when the id is already
   bare — the size is unchanged and the picture starts moving.
+- **There are TWO kinds of animated imgur post and only one of them has an image form at all.**
+  Measured 2026-09-03, both ids live:
+
+  | id | `.jpg` | `.mp4` |
+  |---|---|---|
+  | `T22ZUhZ` — legacy GIF post | `image/gif`, 3.1 MB, **animated** | 1.8 MB |
+  | `EDiKb3d` — video post (`og:type` `video.other`) | `image/jpeg`, 36 KB, **a still frame** | 2.6 MB |
+
+  The row above this one is still true; it is just not the whole story. For a video post the
+  moving original exists **only** as `.mp4`, so no URL rule of any kind can make the preview
+  animate — the ceiling is a still, and the gate passes it (480×854 against a 292px thumbnail,
+  ratio 1.64) so it looks like it worked. This is the real limit behind "it is not working for
+  gifs", not the resolver, and lifting it means the viewer displaying video. See the next
+  section.
 
 **The restraint is the load-bearing part.** Imgur ids are 5 or 7 characters, so `_d` and a single
 trailing `[sbtmlhg]` on a 6- or 8-character basename are unambiguous suffixes, but a **bare** 5- or
@@ -732,6 +746,38 @@ is animated without fetching it, so this is a settings answer (`minRatio` ≈ 1.
 **On an imgur post page there is nothing to fix**: an animated post renders as `<video>` with an
 `.mp4` src (`DIV.PostVideo-video-wrapper`), and `P4`/`NEVER` refuse it correctly. "Images only" is
 the design; the grid thumbnail is the only place a gif is an `<img>` at all.
+
+## "Go to the next page and bring the original back" — the script does NOT do this
+
+Asked directly 2026-09-03, and worth writing down because the mental model matters more than the
+answer. **There is no `fetch`, no `XMLHttpRequest`, no `GM_xmlhttpRequest` and no `DOMParser`
+anywhere in this script.** It never loads the destination page. Every candidate is a *string
+already visible on the page you are standing on* — `data-*` attributes, `srcset`/`<picture>`, the
+ancestor `<a href>` **only when that href itself looks like an image URL or carries one in a query
+parameter**, and `UPGRADES` rewrites of the thumbnail's own URL — and each one is then verified by
+loading it into an `<img>` and measuring it. Guess, then confirm; never browse.
+
+**On the two sites this was asked about, fetching the page would return the same URL the rewrite
+already produces, at zero extra requests.** Measured: imgur post `EDiKb3d`'s `og:image` is
+`https://i.imgur.com/EDiKb3d.jpg`, which is exactly what the `_d`-strip rule derives from the
+thumbnail `i.imgur.com/EDiKb3d_d.jpg?maxwidth=520`. Gifwow is the same shape by extension swap:
+grid thumbnail `/gifs/gp-1tnq3g.jpg`, item-page media `/gifs/gp-1tnq3g.mp4`. A second imgur
+gallery URL fetched in the same session came back as a **generic fallback page** with no post
+metadata at all, so page-fetching is not even reliably better.
+
+So a page fetch is worth building only for a site where the media URL genuinely cannot be derived
+from the thumbnail URL. If it ever is, the generic hook is `og:image`/`og:video` (and
+`twitter:player:stream`), it needs `GM_xmlhttpRequest` + a `@grant` for cross-origin destinations,
+a cache, and a hover-delay gate — one HTML request per hover is not free.
+
+**The thing that actually blocks "same treatment for gifs" is the viewer, not the resolver.** For
+an imgur video post the moving original is only ever `.mp4` (table above), and gifwow's is only
+ever `.mp4`. Both URLs are derivable with a pure string rule the existing machinery could hold
+today. What cannot happen today is displaying the result: `probe()` measures with `new Image()`
+and the frame is a single `<img>`. Playing video means a `<video>` in the viewer, `probe()`
+learning a second way to measure (`loadedmetadata` → `videoWidth`/`videoHeight`), and the
+"images only" invariant at the top of this file being deliberately retired rather than eroded.
+Not built as of v0.17.0 — the user's call, asked and pending.
 
 ## Known limits
 
