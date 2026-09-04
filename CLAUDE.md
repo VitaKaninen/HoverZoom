@@ -560,6 +560,35 @@ summary of one of them.**
 That names the failing condition and the number it failed on, so a cross-browser difference is
 one paste rather than a round trip. `bannerReason()` is a thin wrapper for the gate itself.
 
+### One picture, two elements — a cross-fader (v0.27.0)
+
+Pushed back on, and correctly: *"There is only one image at the top of the page. If it is seeing
+2 images, then it must be counting the same image twice."*
+
+It cannot count the same element twice — `if (n === el) continue`, and the `img` and `video`
+lists are disjoint. But **one picture really can be two elements**, and the way it happens is
+specific to the thing this gate judges: a rotating banner is very often a **cross-fader**, two
+stacked `<img>` of identical size with the outgoing one at `opacity: 0`. Different URLs, so the
+same-src exemption misses them, and:
+
+**`opacity: 0` and `visibility: hidden` both leave a FULL-SIZE rectangle.** The only filter here
+was `width >= 2 && height >= 2`, which they pass. So the page holds two 1000px pictures and shows
+one, which is exactly what a user looking at their own page will tell you is impossible.
+
+`reallyVisible()` uses `Element.checkVisibility({opacityProperty, visibilityProperty})` where it
+exists, falling back to computed style plus a four-level ancestor walk — **opacity does not
+inherit**, so a faded *wrapper* leaves the image's own computed opacity at 1. It is called
+lazily, only for a picture that would otherwise count, so the computed-style read happens once or
+twice rather than for every image on the page.
+
+Case 39 carries two invisible slides (one `opacity:0`, one `visibility:hidden`, different
+pictures, banner width). Two of them, so removing the visibility test fails the case outright
+rather than merely weakening it — with `BANNER_SET_MIN` at 2, one phantom would not have blocked.
+
+**Also fixed in passing:** `hoverReport` ran `bannerCheck(t)` on the hover *target* while
+`eligibleDirect` ran it on `el`. Where a cover had been looked through (`E18`) those are
+different elements, so the log described geometry no decision was made about. It is `el || t` now.
+
 **It reports the blocking neighbour's POSITION, not just its width** (v0.26.0). "another
 picture on the page is 1000px wide too" cost a full round trip: whether that neighbour is a
 column-mate below or a second masthead is the entire question, and the width alone cannot answer

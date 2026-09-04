@@ -406,7 +406,11 @@ so the markup says nothing. Recognised by shape instead, four conditions togethe
 | No picture at least a quarter of its width sits beside it | a gallery's first row, which is also near the top and can be wide. A 24px sidebar avatar is not an item in a row with a masthead |
 | Fewer than two other pictures share its width (±10 %) | a single-column gallery, where the row test is useless. Two pictures of a width are a coincidence, not a set |
 
-A picture with the **same URL** as the candidate is exempt from the last two: banners are often
+A picture nobody can see is exempt from the last two: `opacity: 0` and `visibility: hidden` both
+leave a full-size rectangle, and a rotating banner is often a cross-fader holding two stacked
+images of identical size.
+
+A picture with the **same URL** as the candidate is also exempt: banners are often
 rendered twice — a blurred backdrop, a low-res placeholder — and a copy is the same width, so
 uniqueness was being defeated by the banner's own reflection.
 
@@ -617,6 +621,7 @@ Function names are used rather than line numbers, which rot.
 
 | Date | Change |
 |---|---|
+| 2026-09-04 | v0.27.0. `E20` no longer counts pictures nobody can see. A rotating banner is often a cross-fader — two stacked images of identical size, one at `opacity: 0` — and an invisible element still has a full-size rectangle, so the page held "two pictures of that width" while showing one. |
 | 2026-09-04 | v0.26.0. Two fixes for one reported page, a forum masthead. `E20` condition four now needs two other pictures of a width before calling it a set — the page had exactly one. And `showEvenIfNotLarger` no longer shows the displayed image back at its own size: that setting means "at natural size even though it is not much bigger", not "an identical copy", and it was the only thing producing a preview there at all. |
 | 2026-09-04 | v0.25.0. `E20` condition three now ignores a neighbour under a quarter of the candidate's width: measured in LibreWolf with YouTube's left guide open, a 24px subscription avatar sat in the banner's band and defeated the whole rule. The gate also reports every failing condition rather than the first, because naming only one guarantees a second round trip. |
 | 2026-09-04 | v0.24.0. `E20` unchanged in behaviour except that a copy of the banner no longer counts against its uniqueness; what changed is the reporting — `bannerGate` now names the deciding condition and its numbers whichever way it goes, because the first report after v0.23.0 was "excluded in Chrome and Firefox, not in LibreWolf" and a bare "not a banner" cannot answer that. |

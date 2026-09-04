@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.26.0
+// @version     0.27.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -2292,6 +2292,31 @@
     // exists for is "it works in your browser and not in mine", where the only thing that
     // can settle it is the operands the gate actually saw on the machine showing the bug.
     // Same rule as the video log: print the operands, not a summary of one of them.
+    // A PICTURE NOBODY CAN SEE IS NOT BESIDE ANYTHING, AND IS NOT A MEMBER OF A SET.
+    //
+    // `opacity: 0` and `visibility: hidden` both leave a full-size rectangle behind, so a
+    // zero-size filter does not catch them. That matters here more than anywhere else,
+    // because the elements this gate judges are BANNERS and a rotating banner is very often
+    // a cross-fader: two stacked <img> of identical size, one fading out. Different URLs, so
+    // the same-src exemption below misses it, and the page then holds "two 1000px pictures"
+    // while showing one — which is exactly what a user looking at their own page will
+    // (correctly) tell you is impossible.
+    //
+    // Called lazily, only for a picture that would otherwise count, so the computed-style
+    // read happens once or twice rather than for every image on the page.
+    function reallyVisible(n) {
+        if (n.checkVisibility)
+            return n.checkVisibility({ opacityProperty: true, visibilityProperty: true });
+        const s = getComputedStyle(n);
+        if (s.visibility === 'hidden' || parseFloat(s.opacity) < 0.05) return false;
+        // opacity does not inherit, so a faded WRAPPER leaves the image's own opacity at 1.
+        let p = n.parentElement;
+        for (let up = 0; p && up < 4; up++, p = p.parentElement) {
+            if (parseFloat(getComputedStyle(p).opacity) < 0.05) return false;
+        }
+        return true;
+    }
+
     function bannerCheck(el) {
         const r = el.getBoundingClientRect();
         const w = Math.round(r.width);
@@ -2320,11 +2345,17 @@
                 // left in the tree — and the copy is by definition the same width, which
                 // would defeat the uniqueness test with the banner's own reflection.
                 if (src && (shownUrl(n) || '') === src) continue;
+                let vis = null;
+                const onScreen = function () {
+                    if (vis === null) vis = reallyVisible(n);
+                    return vis;
+                };
                 const mid = q.top + q.height / 2;
                 if (!beside && q.width >= r.width * BESIDE_PEER &&
-                    mid >= r.top && mid <= r.bottom && (q.right <= r.left || q.left >= r.right))
+                    mid >= r.top && mid <= r.bottom && (q.right <= r.left || q.left >= r.right) &&
+                    onScreen())
                     beside = q.width;
-                if (Math.abs(q.width - r.width) <= r.width * BANNER_SIMILAR)
+                if (Math.abs(q.width - r.width) <= r.width * BANNER_SIMILAR && onScreen())
                     // WHERE it is, not just that it exists. "another picture is 1000px wide
                     // too" cost a whole round trip on 2026-09-04 — whether that neighbour is
                     // a column-mate below or a second masthead is the entire question, and
@@ -2510,8 +2541,11 @@
                 : !backgroundUrl(t) ? 'n/a — no background image'
                     : (wallpaperReason(t) || 'none — NOT treated as page furniture'),
             decorativeGate: decorativeReason(t) || 'none — not marked decorative',
+            // `el || t`, not `t`: when a cover was looked through (E18) the gate judged the
+            // picture underneath, and reporting the lid's geometry instead would describe an
+            // element no decision was made about.
             bannerGate: (function () {
-                const c = bannerCheck(t);
+                const c = bannerCheck(el || t);
                 return (c.banner ? 'BANNER, refused: ' : 'not a banner: ') + c.why;
             })(),
             videosOnPage: sizes.length ? sizes.join(', ') : 'none',
