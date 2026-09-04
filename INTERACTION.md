@@ -406,9 +406,15 @@ so the markup says nothing. Recognised by shape instead, four conditions togethe
 | Nothing beside it | a gallery's first row, which is also near the top and can be wide |
 | No other picture on the page shares its width (±10 %) | a single-column gallery, where the row test is useless |
 
+A picture with the **same URL** as the candidate is exempt from the last two: banners are often
+rendered twice — a blurred backdrop, a low-res placeholder — and a copy is the same width, so
+uniqueness was being defeated by the banner's own reflection.
+
 On that page it refused exactly one of 24 images, and none at all once scrolled. `skipBanners`
-turns it off; if a site's banner sits lower than 200 px it is missed, and the hover log's
-`bannerGate` line says so.
+turns it off; if a site's banner sits lower than 200 px it is missed. The hover log's
+`bannerGate` line names the condition that decided **and the number it decided on**, for both
+answers — the gate is pure geometry, so a "works in your browser, not mine" report can only be
+settled by what it saw on that machine.
 
 #### E19 · An upgrade has to be the same picture, not just a bigger file
 A bigger version of a picture keeps its proportions. Since v0.22.0 a candidate whose aspect
@@ -611,6 +617,7 @@ Function names are used rather than line numbers, which rot.
 
 | Date | Change |
 |---|---|
+| 2026-09-04 | v0.24.0. `E20` unchanged in behaviour except that a copy of the banner no longer counts against its uniqueness; what changed is the reporting — `bannerGate` now names the deciding condition and its numbers whichever way it goes, because the first report after v0.23.0 was "excluded in Chrome and Firefox, not in LibreWolf" and a bare "not a banner" cannot answer that. |
 | 2026-09-04 | v0.23.0. New `P10`/`E20` — the banner across the top of a page. v0.21.0 declared that no furniture rule would ever judge an `<img>`, which was reasoned from one example rather than measured, and it made both `E17` and `E19` unable to see the thing the user was actually reporting: a YouTube channel banner is an `<img>`, with nothing in its markup to distinguish it from a video thumbnail. |
 | 2026-09-03 | v0.22.0. New `E19` — an upgrade must be roughly the same shape as the thumbnail, because a rotating forum banner was answering a 1200×125 masthead with an unrelated 600×600 picture. Also, and this is the actual fix rather than the backstop: the generic query-strip rule no longer fires on a path with no media extension, since `?loc=header` is the request rather than a resize. Not visible here: the debug log now names which of the six mechanisms produced the preview. |
 | 2026-09-03 | v0.21.0. New `E18` — a cover laid across a card is looked through to the picture under it, which is what made gifwow's grid (and many others) do nothing on hover. `P7` widened into `E17`: a CSS background is also refused when it is fixed, spans the window's width, or carries the page's own text — and the whole gate is now stated as applying to backgrounds only, never to an `<img>`. New `P9`/`skipDecorative` for `aria-hidden` and `role="presentation"`. |

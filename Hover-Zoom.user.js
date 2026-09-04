@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.23.0
+// @version     0.24.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -2260,10 +2260,21 @@
     const BANNER_MIN = 400;         // px wide on screen
     const BANNER_SIMILAR = 0.1;     // widths within 10% are "the same width"
 
-    function bannerReason(el) {
+    // Returns WHICH condition decided and the numbers it decided on, for both answers.
+    // A bare "not a banner" is useless in a bug report — the whole class of report this
+    // exists for is "it works in your browser and not in mine", where the only thing that
+    // can settle it is the operands the gate actually saw on the machine showing the bug.
+    // Same rule as the video log: print the operands, not a summary of one of them.
+    function bannerCheck(el) {
         const r = el.getBoundingClientRect();
-        if (r.width < BANNER_MIN || r.height < 2) return null;
-        if (r.top + (window.scrollY || 0) > BANNER_TOP) return null;
+        const w = Math.round(r.width);
+        const docTop = Math.round(r.top + (window.scrollY || 0));
+        const where = w + '×' + Math.round(r.height) + ' at ' + docTop + 'px from the top of the document';
+        if (r.width < BANNER_MIN || r.height < 2)
+            return { banner: false, why: where + '; a banner is at least ' + BANNER_MIN + 'px wide' };
+        if (docTop > BANNER_TOP)
+            return { banner: false, why: where + '; a banner starts within ' + BANNER_TOP + 'px of the top' };
+        const src = shownUrl(el) || '';
         const lists = [document.getElementsByTagName('img'), document.getElementsByTagName('video')];
         for (let l = 0; l < lists.length; l++) {
             for (let i = 0; i < lists[l].length; i++) {
@@ -2271,14 +2282,27 @@
                 if (n === el) continue;
                 const q = n.getBoundingClientRect();
                 if (q.width < 2 || q.height < 2) continue;
+                // A COPY OF ITSELF IS NOT A SIBLING ITEM. Banners are routinely rendered
+                // twice — a blurred backdrop behind the sharp one, or a low-res placeholder
+                // left in the tree — and the copy is by definition the same width, which
+                // would defeat the uniqueness test with the banner's own reflection.
+                if (src && (shownUrl(n) || '') === src) continue;
                 const mid = q.top + q.height / 2;
                 if (mid >= r.top && mid <= r.bottom && (q.right <= r.left || q.left >= r.right))
-                    return null;    // something beside it: one item in a row, not a band
+                    return { banner: false, why: where + ', but a ' + Math.round(q.width) + 'px picture ' +
+                        'sits beside it, so this is one item in a row' };
                 if (Math.abs(q.width - r.width) <= r.width * BANNER_SIMILAR)
-                    return null;    // one of a set the same width: a column of items
+                    return { banner: false, why: where + ', but another picture on the page is ' +
+                        Math.round(q.width) + 'px wide too, so this is one of a set' };
             }
         }
-        return 'across the top of the page, alone, and unlike every other picture on it';
+        return { banner: true, why: where + ', alone on its line, and no other picture on the page ' +
+            'is its width' };
+    }
+
+    function bannerReason(el) {
+        const c = bannerCheck(el);
+        return c.banner ? c.why : null;
     }
 
     // What the page itself says is not content. ARIA is the one place an author states this
@@ -2441,7 +2465,10 @@
                 : !backgroundUrl(t) ? 'n/a — no background image'
                     : (wallpaperReason(t) || 'none — NOT treated as page furniture'),
             decorativeGate: decorativeReason(t) || 'none — not marked decorative',
-            bannerGate: bannerReason(t) || 'none — not a page banner',
+            bannerGate: (function () {
+                const c = bannerCheck(t);
+                return (c.banner ? 'BANNER, refused: ' : 'not a banner: ') + c.why;
+            })(),
             videosOnPage: sizes.length ? sizes.join(', ') : 'none',
             ancestorLink: a ? (a.getAttribute('href') || '(empty href)').slice(0, 160)
                 : 'NO <a href> ancestor, even across shadow roots',

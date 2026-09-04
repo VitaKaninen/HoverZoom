@@ -27,8 +27,19 @@
 <div class="case" data-expect="none" style="margin:0 0 12px">
   <h2>39. the banner across the top of the page</h2>
   <p class="hz good">must NOT preview: above the content, alone, and unlike anything else here</p>
-  <img id="c39" src="test-images/banner-1200x125.jpg"
-       style="width:100%;height:60px;object-fit:cover;display:block">
+  <!--
+    The blurred backdrop copy behind the banner is not decoration on this fixture — it is the
+    test. Banners are routinely rendered twice (a soft copy behind the sharp one, or a
+    low-res placeholder left in the tree), and a copy is by definition the SAME WIDTH, so
+    without the same-src exemption the uniqueness condition is defeated by the banner's own
+    reflection and nothing is ever refused.
+  -->
+  <div style="position:relative">
+    <img id="c39dup" src="test-images/banner-1200x125.jpg" aria-hidden="true"
+         style="position:absolute;inset:0;width:100%;height:60px;object-fit:cover;filter:blur(8px)">
+    <img id="c39" src="test-images/banner-1200x125.jpg"
+         style="position:relative;width:100%;height:60px;object-fit:cover;display:block">
+  </div>
   <!--
     40 is the false positive the rule has to avoid, and it has to sit HERE, inside the top
     band, or the test proves nothing. A single-column gallery: wide pictures, high on the
@@ -41,8 +52,14 @@
   -->
   <h2 style="margin-top:10px">40. control for 39 — a one-column gallery, also at the top</h2>
   <p class="hz good">must still preview: wide and alone on its line, but not unique — they match each other</p>
+  <!--
+    Two DIFFERENT pictures, which is not incidental: a copy of itself is exempt from the
+    uniqueness test (see c39dup above), so a column of the same file repeated would be
+    refused. Real galleries show different pictures; a banner's twin is the same file. That
+    is the trade, and using one file twice here hid it until this fixture was run.
+  -->
   <img id="c40a" src="test-images/photo-800x600.jpg" style="width:600px;height:80px;object-fit:cover;display:block">
-  <img id="c40b" src="test-images/photo-800x600.jpg" style="width:600px;height:80px;object-fit:cover;display:block;margin-top:6px">
+  <img id="c40b" src="test-images/scene.jpg" style="width:600px;height:80px;object-fit:cover;display:block;margin-top:6px">
 </div>
 
 <h1>Hover Zoom — test cases</h1>

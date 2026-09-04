@@ -521,8 +521,38 @@ above it is forced to `height:60px` for the same reason — its natural 125 px d
 room. Verified: 39 refused with the reason printed, 40 still previews.
 
 **`BANNER_TOP` is the knob if a site is missed.** A page with a tall header can put its banner
-lower than 200 px, and then nothing fires. The `bannerGate` field in the hover log says which
-of the conditions the element failed to reach.
+lower than 200 px, and then nothing fires.
+
+### The gate has to say WHICH condition decided, and on what numbers (v0.24.0)
+
+Reported immediately after v0.23.0: the banners are excluded in Chrome and Firefox and **not in
+LibreWolf**. Every condition above is a geometry read of the user's own page, so the only thing
+that can settle a report like that is the operands the gate actually saw on the machine showing
+it — and `bannerGate` said `none — not a page banner`, which is exactly the useless answer this
+project has run into twice before. Same rule as the video log: **print the operands, not a
+summary of one of them.**
+
+`bannerCheck()` now returns `{ banner, why }` for both answers, and one hover line reads:
+
+```
+"bannerGate": "not a banner: 1193×192 at 812px from the top of the document; a banner starts within 200px of the top"
+```
+
+That names the failing condition and the number it failed on, so a cross-browser difference is
+one paste rather than a round trip. `bannerReason()` is a thin wrapper for the gate itself.
+
+### A copy of itself is not a sibling item
+
+Banners are routinely rendered **twice** — a blurred backdrop behind the sharp one, or a low-res
+placeholder left in the tree — and a copy is by definition the same width, so condition (4) was
+being defeated by the banner's own reflection. Pictures with the same `shownUrl()` are skipped in
+both (3) and (4).
+
+**The trade, and the fixture found it rather than the reasoning:** a single-column gallery of the
+*same file repeated* is now refused. Case 40 originally used one image twice out of laziness and
+started failing the moment the exemption landed; it uses two different pictures now, because a
+real gallery shows different pictures and a banner's twin is the same file. Do not "tidy" case 40
+back to one src.
 
 ## What counts as a page background (v0.21.0)
 
