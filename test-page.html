@@ -307,6 +307,39 @@
          src="test-images/photo-200x150.jpg" data-src="test-images/photo.jpg">
   </div>
 
+  <!--
+    36 and 37 are the ROTATING FORUM BANNER, reported 2026-09-03 as "hovering the 1200x125
+    banner gives me the 600x600 sidebar picture, and it varies". /rotate.php is a forum's
+    random-image endpoint: `?loc=header` is the masthead, bare is the site's general picture.
+
+    The measurement that shaped the fix: Chrome does NOT re-request a url the document is
+    already displaying, no-store or not (four `new Image()` loads of one url produced ONE
+    request). So per-request variation is not what bites — a DIFFERENT url is, one the
+    query-strip rule invented, which then looks perfectly consistent to every later check.
+    Two answers, and 36 and 37 are one each.
+
+    36: the query is the REQUEST, not a resize, so the strip rule must not fire on a path
+    with no media extension. Its only candidate is then the banner itself, which is a real
+    upgrade of the 200px thumbnail — so it previews, and it is the BANNER, never the 600x600.
+    37: the backstop for every other route to a wrong picture — a candidate shaped nothing
+    like the thumbnail is a different image, not a bigger one. 9.6:1 against 1:1. It carries
+    its own control: the square data-src must be refused while the banner's own original,
+    probed second, still wins. A gate that simply killed wide pictures would pass a
+    "shows nothing" test and be useless.
+  -->
+  <div class="case" data-expect="1200×125, never 600×600">
+    <h2>36. a rotating banner endpoint</h2>
+    <p class="hz good">?loc= is the request, not a resize — stripping it asks for a different picture</p>
+    <img id="c36" width="200" src="/rotate.php?loc=header&amp;w=1200">
+  </div>
+
+  <div class="case" data-expect="1200×125, never 600×600">
+    <h2>37. the candidate is a different shape</h2>
+    <p class="hz good">a 9.6:1 masthead does not upgrade to a 1:1 picture — its own original still does</p>
+    <img id="c37" width="200" src="test-images/banner-1200x125.jpg"
+         data-src="test-images/sidebar-600x600.jpg">
+  </div>
+
   <div class="case" data-expect="1600">
     <h2>20. upgrade in place, slowly</h2>
     <p class="hz bad">HZ+: no equivalent — opens 800&times;600, then swaps to 1600&times;1200</p>

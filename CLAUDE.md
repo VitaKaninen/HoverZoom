@@ -403,6 +403,73 @@ Measured: `https://gifwow.com/go/gp-7xx2k` declares `og:url` = `https://gifpit.c
 — a different host and a different path from the one requested — so `pageMediaFrom()` trusts
 nothing on it. The URL rule is what carries this site.
 
+## The preview is a completely different picture (v0.22.0)
+
+Reported: a forum whose masthead is a **1200×125 banner** and whose sidebar carries a
+**~600×600** picture, both drawn from a pool that rotates daily. Hovering the banner gave the
+sidebar image — "and it varies, probably depending on the dimensions that they happen to roll".
+
+**The obvious diagnosis is wrong, and following it cost a round.** "The URL hands out a
+different picture each request" is the intuitive story, so the first fix compared the probe
+against the element's own `naturalWidth`. Then the fixture would not reproduce the bug, which
+is how this got measured, in Chrome 2026-09-03:
+
+```js
+for (let i=0;i<4;i++) { const im=new Image(); await load(im,'/rotate.php'); }
+// four loads, Cache-Control: no-store  ->  ONE network request, four identical pictures
+```
+
+**A browser does not re-request a URL the document is already displaying.** So an unstable
+*displayed src* cannot mislead: probe and frame both get the copy already in memory, and the
+preview is the same picture the thumbnail is. The case that actually bites is a **different
+URL** — `/banner.php` derived from `/banner.php?loc=header` by the generic query-strip rule.
+That rolls once, and every later check then agrees with it perfectly while it shows something
+unrelated. **General lesson: when a bug story requires the network to be hit twice, measure
+that it is.**
+
+Three answers, deliberately at three different depths:
+
+- **The query-strip rule only fires on a path that names a media file.** On `photo.jpg?w=400`
+  the query is decoration over a file that exists either way, so dropping it asks for the same
+  picture bigger. On `/banner.php?loc=header` the query *is* the request, and dropping it asks
+  a different question. This is the fix; the rest are backstops.
+- **`sameShape()` — an upgrade has the same shape as the picture it upgrades.** The only cheap
+  handle on "is this the thing I pointed at". `ASPECT_TOL` is **4**, and it is loose on purpose:
+  a thumbnail is often a *crop* of its original (a square thumb of a 3:2 photo is 1.5× off, a
+  16:9 crop of 4:3 is 1.34×) and all of those must pass, while the reported case is 9.6:1
+  against 1:1 — 9.6× apart. There is a wide gap between "cropped differently" and "not the same
+  picture", and 4 sits in it. A wrong refusal here is silent, so the number errs toward letting
+  things through. Applied to guesses **and** to the linked-page answer, which otherwise skips
+  every gate — a banner links to the section it heads, and that section's `og:image` is its own
+  artwork, a different picture rather than a smaller one.
+  Only where a **natural** size exists (`nativeSize()`): a CSS background has none, and its box
+  aspect is not the image's, so backgrounds are not judged.
+- **`markUnstable()` — a URL caught contradicting itself is refused for the tab.** Two points,
+  both free: the probe against the element's own `naturalWidth`, and the frame's own load
+  against the probe. Given the measurement above these do **not** fire in Chrome, and they are
+  kept for browsers that do re-request (Firefox honours `no-store` more strictly, and this
+  project's reports come from LibreWolf). Do not delete them believing they are dead, and do
+  not expect the test page to exercise them under Chromium — say so in any note that touches
+  them.
+
+**`collectCandidates()` now returns `{ url, from }`, and `from` is the whole point.** There are
+six mechanisms that can produce a preview and the log used to print only the winning URL, which
+says nothing about which one to go and look at. "The preview is the wrong picture" is
+unanswerable without it; with it, one hover with `debug` on names the mechanism
+(`"from":"url rule on the displayed src"`, `"the page the thumbnail links to (og: media)"`, …).
+
+Cases 36 and 37 are the two shapes, and both are **verified to fail without the fix**: 37 with
+`sameShapeOnly` off shows 600×600, and 36's candidate list contains `/rotate.php` before the
+strip rule was narrowed. `test-server.py`'s `/rotate.php` is deterministic on the query rather
+than actually random, because a test has to assert which picture came back — per-request
+variation is not what makes the bug.
+
+**Still open, and NOT guessed at:** a second report in the same message described a 1000×557
+background image near the top of a page, under a bar of links, also rotating daily. It is not
+known whether that is a CSS background or an `<img>`, and the two need different answers — a
+"large background near the top of the document is a masthead" rule would be pure invention
+without the page. Ask before building it.
+
 ## What counts as a page background (v0.21.0)
 
 `isWallpaper()` → `wallpaperReason()`, a string like `videoReason()` so `hoverReport` can print
@@ -642,11 +709,11 @@ static catches it — `node --check` passes and the markup is fine.
 
 ```bash
 node --check Hover-Zoom.user.js     # syntax
-node test-resolver.js               # 111 assertions on the pure URL and video-link logic
+node test-resolver.js               # 114 assertions on the pure URL and video-link logic
 python make-test-images.py          # regenerate fixtures into test-images/
 ```
 
-Browser test: `python test-server.py`, then open `http://localhost:8899/test-page.html`. 35 cases,
+Browser test: `python test-server.py`, then open `http://localhost:8899/test-page.html`. 37 cases,
 11 of which HZ+ rejects outright. (`.claude/launch.json` wraps the same command as
 `hover-zoom-test`, but `.claude/` is gitignored — a fresh clone has only the direct command.)
 

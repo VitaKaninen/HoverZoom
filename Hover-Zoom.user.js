@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.21.0
+// @version     0.22.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -49,6 +49,8 @@
         maxDisplayed: 0,            // ignore images displayed larger than this (0 = no cap)
         minRatio: 1.2,              // full size must be at least this much bigger
         showEvenIfNotLarger: false, // show at natural size even when it isn't an upgrade
+        sameShapeOnly: true,        // an upgrade must be roughly the same shape — a wildly
+                                    // different aspect is a different picture, not a bigger one
         skipVideos: true,           // never preview a video thumbnail or a player surface
         playVideos: true,           // the preview may BE a video — the only form some gifs have
         followLinks: true,          // read the linked page's own og: media — same origin only
@@ -362,7 +364,15 @@
             return u.href === was ? null : u.href;
         },
         // strip common resize/quality query parameters
+        //
+        // ONLY when the path names a media file. On `photo.jpg?w=400` the query is decoration
+        // over a file that exists either way, and dropping it asks for the same picture
+        // bigger. On `/banner.php?loc=header` or `/image?id=7` the query is the REQUEST —
+        // dropping it asks a different question, and a rotator answers with an unrelated
+        // picture that probe and frame then agree on perfectly. Measured against the reported
+        // forum banner shape 2026-09-03; the shape gate is the backstop, this is the fix.
         function (u) {
+            if (!MEDIA_RE.test(u.pathname) && !VIDEO_EXT_RE.test(u.pathname)) return null;
             const drop = ['w', 'h', 'width', 'height', 'size', 's', 'fit', 'resize', 'crop',
                 'quality', 'q', 'strip', 'thumb', 'thumbnail', 'scale', 'max', 'maxwidth',
                 'maxheight', 'downsize', 'compress', 'dpr'];
@@ -483,32 +493,38 @@
         'data-lazy', 'data-lazy-src', 'data-defer-src', 'data-echo', 'data-url',
         'data-hoverzoom', 'data-actualsrc'];
 
-    // Ordered best-first list of URLs worth trying for this element.
+    // Ordered best-first list of candidates worth trying for this element, each as
+    // `{ url, from }`. `from` is carried purely so the debug log can name the mechanism
+    // that produced the preview: "the preview is the wrong picture" is unanswerable without
+    // it — there are six mechanisms here and the log used to print only the winning URL,
+    // which says nothing about which one to go and look at.
     function collectCandidates(el) {
         const seen = new Set();
         const out = [];
-        const add = function (u) {
+        const add = function (u, from) {
             if (!u) return;
             let abs;
             try { abs = new URL(u, location.href).href; } catch (e) { return; }
             if (abs.startsWith('data:') || abs.startsWith('blob:')) return;
             if (blocked(abs)) return;       // never probe something the user has ruled out
+            if (unstable.has(abs)) return;  // it has already been caught changing under us
             // `playVideos` off means the frame cannot display one, so a video candidate is
             // not merely useless — probing it would spend one of MAX_PROBES on a result
             // that has to be thrown away, ahead of the image candidate behind it.
             if (!cfg.playVideos && isVideoUrl(abs)) return;
             if (seen.has(abs)) return;
             seen.add(abs);
-            out.push(abs);
+            out.push({ url: abs, from: from });
         };
+        const adder = function (from) { return function (u) { add(u, from); }; };
 
         // 1. explicit high-res attributes
         DATA_ATTRS.forEach(function (a) {
             const v = el.getAttribute && el.getAttribute(a);
-            if (v && !/\s/.test(v.trim())) add(v.trim());
+            if (v && !/\s/.test(v.trim())) add(v.trim(), a);
         });
         const dataSrcset = el.getAttribute && el.getAttribute('data-srcset');
-        if (dataSrcset) parseSrcset(dataSrcset).forEach(add);
+        if (dataSrcset) parseSrcset(dataSrcset).forEach(adder('data-srcset'));
 
         // 2. srcset on the image and on any <picture><source>
         let bestSrcset = null;
@@ -516,38 +532,40 @@
             if (el.srcset) {
                 const list = parseSrcset(el.srcset);
                 if (list.length) bestSrcset = list[0];
-                list.forEach(add);
+                list.forEach(adder('srcset'));
             }
             const pic = el.closest && el.closest('picture');
             if (pic) {
                 pic.querySelectorAll('source[srcset]').forEach(function (s) {
                     const list = parseSrcset(s.srcset);
                     if (!bestSrcset && list.length) bestSrcset = list[0];
-                    list.forEach(add);
+                    list.forEach(adder('<picture> <source srcset>'));
                 });
             }
         }
 
         // 2b. the widest srcset entry is itself often a resized derivative
-        if (bestSrcset) upgradeCandidates(bestSrcset).forEach(add);
+        if (bestSrcset) upgradeCandidates(bestSrcset).forEach(adder('url rule on the widest srcset entry'));
 
         // 3. an ancestor link pointing at media — directly, via a query parameter, or
         //    after a rewrite
         const a = el.closest && el.closest('a[href]');
         if (a && a.href) {
-            if (looksLikeImage(a.href) || (cfg.playVideos && isVideoUrl(a.href))) add(a.href);
+            if (looksLikeImage(a.href) || (cfg.playVideos && isVideoUrl(a.href))) add(a.href, 'the ancestor link itself');
             else {
-                linkParamCandidates(a.href).forEach(add);
-                upgradeCandidates(a.href).forEach(function (u) { if (looksLikeImage(u)) add(u); });
+                linkParamCandidates(a.href).forEach(adder('a url inside the ancestor link\'s query'));
+                upgradeCandidates(a.href).forEach(function (u) {
+                    if (looksLikeImage(u)) add(u, 'url rule on the ancestor link');
+                });
             }
         }
 
         // 4. rewrites of the displayed src
         const shown = shownUrl(el);
-        if (shown) upgradeCandidates(shown).forEach(add);
+        if (shown) upgradeCandidates(shown).forEach(adder('url rule on the displayed src'));
 
         // 5. the displayed src itself, last — it is the fallback, never the upgrade
-        if (shown) add(shown);
+        if (shown) add(shown, 'the displayed src itself');
 
         return out;
     }
@@ -572,6 +590,82 @@
 
     function blocked(url) {
         return blockMatch(url, cfg.blockList);
+    }
+
+    // ---------------------------------------------------------- unstable URLs
+    //
+    // A URL THAT ANSWERS WITH A DIFFERENT PICTURE EACH REQUEST breaks the one assumption
+    // every part of this script rests on: that the thing measured and the thing displayed
+    // are the same picture. Rotating forum banners, "random image" endpoints, ad slots and
+    // daily-header scripts are all this shape, and the failure is silent and bizarre —
+    // measure 1200×125, display 600×600, and the preview is a picture the user never
+    // pointed at. Reported 2026-09-03 as "hovering the banner gives me the sidebar image,
+    // and it varies".
+    //
+    // Nothing about the URL says it will do this, so it is caught by CONTRADICTION, at two
+    // points where the answer is already known and costs nothing:
+    //
+    //  1. Against the browser's own copy. For an <img> on screen, naturalWidth/Height are
+    //     the exact bytes being displayed. Re-probing that same URL must return the same
+    //     numbers. This is an identity test — no tolerance, no false positives — and it
+    //     needs no extra request, because the probe was going to happen anyway.
+    //  2. Against the probe, when the frame loads it. Catches the same thing for a
+    //     candidate that is NOT the displayed URL — a rewrite of a rotator, or a linked
+    //     page's og:image — which (1) cannot see. Also free: the frame loads it regardless.
+    //
+    // Once a URL has contradicted itself it is refused for the life of the tab, so the
+    // preview does not come back on the next hover with yet another wrong picture.
+    const unstable = new Set();
+
+    function markUnstable(url, was, got) {
+        if (!url || unstable.has(url)) return;
+        unstable.add(url);
+        probeCache.delete(url);     // its cached size describes a picture that is now gone
+        dbg('unstable url — refused for this tab', {
+            url: url,
+            measured: was ? was.w + '×' + was.h : '(unknown)',
+            loaded: got ? got.w + '×' + got.h : '(unknown)',
+            why: 'the same URL answered with two different pictures, so nothing it returns ' +
+                'can be trusted to be the thing under the pointer',
+        });
+    }
+
+    // ------------------------------------------------------- is it the same picture?
+    //
+    // A bigger version of a picture has the SAME SHAPE as the picture. That is the one
+    // property a genuine upgrade cannot lose, and it is the only cheap handle on the
+    // question the user is really asking — "is this the thing I pointed at?".
+    //
+    // It is what catches a rotator that the two tests above cannot see. Measured in Chrome
+    // 2026-09-03 and it is the crux: a second load of an ALREADY-DISPLAYED url does not hit
+    // the network at all — four `new Image()` loads of one no-store URL produced ONE request
+    // and one identical picture. So an unstable *displayed* src cannot mislead in that
+    // browser, and the case that actually bites is a DIFFERENT url — `/banner.php` derived
+    // from `/banner.php?loc=header` by the query-strip rule, or a linked page's `og:image`.
+    // Those roll once, and probe and frame then agree with each other perfectly while
+    // showing something unrelated. Nothing about the URL says so; the shape does.
+    //
+    // The tolerance is deliberately loose. A thumbnail is often a CROP of its original — a
+    // square thumb of a 3:2 photo is 1.5× off, a 16:9 crop of 4:3 is 1.34× — and those must
+    // all pass. The reported case is a 1200×125 masthead (9.6:1) answering with a 600×600
+    // sidebar picture (1:1): 9.6× apart. There is a wide gap between "cropped differently"
+    // and "not the same picture", and 4 sits in it. A wrong refusal here is silent, so the
+    // number errs toward letting things through.
+    const ASPECT_TOL = 4;
+
+    function sameShape(a, b) {
+        if (!a || !b || !a.w || !a.h || !b.w || !b.h) return true;   // unknown: do not judge
+        const r1 = a.w / a.h, r2 = b.w / b.h;
+        return Math.max(r1, r2) / Math.min(r1, r2) <= ASPECT_TOL;
+    }
+
+    // The size of the bytes the page ALREADY has for this element — free, and exact.
+    function nativeSize(el) {
+        if (el.tagName === 'IMG' && el.naturalWidth > 0)
+            return { w: el.naturalWidth, h: el.naturalHeight };
+        if (el.tagName === 'VIDEO' && el.videoWidth > 0)
+            return { w: el.videoWidth, h: el.videoHeight };
+        return null;    // a background image, or nothing decoded yet — nothing to check
     }
 
     // ------------------------------------------------------------------ probing
@@ -751,6 +845,7 @@
     async function resolve(el, displayed, token, onHit) {
         const candidates = collectCandidates(el).slice(0, MAX_PROBES);
         const shown = shownUrl(el);
+        const native = nativeSize(el);      // the bytes on screen, for the stability test
         dbg('candidates', candidates);
         let best = null;
         let trusted = null;
@@ -764,7 +859,21 @@
             if (!hit || token.cancelled || blocked(hit.url)) return null;
             const dim = await probe(hit.url);
             if (!dim || token.cancelled) return null;
-            trusted = { url: hit.url, w: dim.w, h: dim.h, video: !!dim.video, duration: dim.duration };
+            // The one gate that still applies to the authoritative answer. It skips the
+            // RATIO check because the page is the site telling us what this thumbnail
+            // stands for — but a forum banner links to the section it heads, and that
+            // page's og:image is the section's own artwork, which is a different picture
+            // rather than a smaller one. Shape is what separates those two cases.
+            if (cfg.sameShapeOnly && !sameShape(native, dim)) {
+                dbg('linked page rejected — a different shape, so a different picture', {
+                    url: hit.url,
+                    onScreen: native ? native.w + '×' + native.h : '(unknown)',
+                    declared: dim.w + '×' + dim.h,
+                });
+                return null;
+            }
+            trusted = { url: hit.url, w: dim.w, h: dim.h, video: !!dim.video, duration: dim.duration,
+                from: 'the page the thumbnail links to (og: media)' };
             // No ratio gate, no comparison with `best`: the linked page is the site telling
             // us what this thumbnail stands for, and a smaller answer from it still beats a
             // bigger guess.
@@ -773,12 +882,29 @@
             return trusted;
         }, function () { return null; });
 
-        for (const url of candidates) {
+        for (const c of candidates) {
+            const url = c.url;
             if (token.cancelled) return trusted || best;
             if (trusted) break;             // the authoritative answer landed; stop guessing
             const dim = await probe(url);
             if (!dim) continue;
             const isSameAsShown = (url === shown);
+            // THE URL IS NOT STABLE. Re-fetching what is already on screen came back a
+            // different size, so this URL hands out a different picture each request and
+            // nothing it returns is the thing under the pointer. See markUnstable().
+            if (isSameAsShown && native && (dim.w !== native.w || dim.h !== native.h)) {
+                markUnstable(url, native, dim);
+                continue;
+            }
+            // NOT THE SAME PICTURE. See sameShape() — a candidate shaped nothing like the
+            // thumbnail is a different image, not a bigger one, whatever its pixel count.
+            if (cfg.sameShapeOnly && !sameShape(native, dim)) {
+                dbg('rejected — a different shape, so a different picture', {
+                    url: url, from: c.from,
+                    onScreen: native.w + '×' + native.h, candidate: dim.w + '×' + dim.h,
+                });
+                continue;
+            }
             const bigEnough = dim.w >= displayed.w * cfg.minRatio || dim.h >= displayed.h * cfg.minRatio;
             const usable = bigEnough || (cfg.showEvenIfNotLarger && !isSameAsShown);
             if (!usable) continue;
@@ -790,7 +916,8 @@
             // two happen to be the same pixel size so probe order settles it; this is what
             // settles it everywhere else. A bigger VIDEO still replaces a smaller one.
             if (best && best.video && !dim.video) continue;
-            best = { url: url, w: dim.w, h: dim.h, video: !!dim.video, duration: dim.duration };
+            best = { url: url, w: dim.w, h: dim.h, video: !!dim.video, duration: dim.duration,
+                from: c.from };
             dbg('hit', best);
             if (onHit && !token.cancelled) onHit(best);
             if (!cfg.keepSearching) break;
@@ -803,8 +930,11 @@
         if (best) return best;
         if (cfg.showEvenIfNotLarger && shown && !blocked(shown) && !token.cancelled) {
             const dim = await probe(shown);
-            if (dim) {
-                best = { url: shown, w: dim.w, h: dim.h, video: !!dim.video, duration: dim.duration };
+            if (dim && native && (dim.w !== native.w || dim.h !== native.h)) {
+                markUnstable(shown, native, dim);
+            } else if (dim) {
+                best = { url: shown, w: dim.w, h: dim.h, video: !!dim.video, duration: dim.duration,
+                    from: 'the displayed src itself (shown anyway — not larger)' };
                 // This branch paints a preview too, so it MUST log one. Without it a hover
                 // that showed something produced no 'hit' line at all, and a debug log with
                 // a silent success path is worse than none — it reads as proof that nothing
@@ -1025,6 +1155,12 @@
         vidEl.playsInline = true;
         vidEl.draggable = false;
         vidEl.hidden = true;
+
+        // The second half of the unstable-URL test. Permanent listeners on the two faces
+        // rather than a per-load handler, so there is nothing to attach, detach or leak;
+        // verifyMedia() is a no-op whenever the sizes agree, which is every ordinary load.
+        imgEl.addEventListener('load', verifyMedia);
+        vidEl.addEventListener('loadedmetadata', verifyMedia);
 
         capEl = document.createElement('div');
         capEl.className = 'cap';
@@ -1306,6 +1442,33 @@
         if (!el) return;
         if (el === vidEl) { vidEl.pause(); vidEl.removeAttribute('src'); vidEl.load(); }
         else el.removeAttribute('src');
+    }
+
+    // WHAT LOADED IS NOT WHAT WAS MEASURED. The probe and the frame fetch the same URL under
+    // the same referrer policy, so the only thing that produces a disagreement is a URL that
+    // answers with different bytes each time — see markUnstable(). The picture in the frame
+    // is then one the user never pointed at, and the honest thing is to take it down rather
+    // than relabel it.
+    //
+    // A PINNED window is not yanked away: the user deliberately kept it, and closing a
+    // window under a click is worse than showing an unexpected picture. Its geometry is
+    // corrected to the size that actually loaded instead, and the URL is still refused from
+    // then on, so the next hover does not produce yet another wrong picture.
+    function verifyMedia() {
+        if (!view || !mediaEl) return;
+        const w = mediaEl === vidEl ? vidEl.videoWidth : imgEl.naturalWidth;
+        const h = mediaEl === vidEl ? vidEl.videoHeight : imgEl.naturalHeight;
+        if (!w || !h) return;
+        if (w === view.natW && h === view.natH) return;
+        markUnstable(view.url, { w: view.natW, h: view.natH }, { w: w, h: h });
+        if (!pinned) { cancel(); return; }
+        const m = viewportBox();
+        view.natW = w;
+        view.natH = h;
+        view.fitScale = Math.min(cfg.zoomFactor, m.w / w, m.h / h);
+        view.scale = Math.max(view.scale, view.fitScale);
+        reflow();
+        layout();
     }
 
     function layout() {
@@ -2801,6 +2964,12 @@
         num('maxDisplayed', 'Ignore images larger than', 'px on screen — 0 means no limit', 0, 10000, 1);
         num('minRatio', 'Required upsize', 'full size must be this many times the thumbnail', 1, 10, 0.1);
         check('showEvenIfNotLarger', 'Show even when not larger', 'display at natural size anyway');
+        check('sameShapeOnly', 'Only upgrade to the same shape',
+            'a bigger version of a picture has the same proportions. A candidate shaped ' +
+            'nothing like the thumbnail — a 1200×125 banner answering with a 600×600 ' +
+            'picture — is a different image, not a bigger one, which is what rotating ' +
+            '“random image” endpoints on forums produce. The tolerance is loose (4×) so ' +
+            'that a thumbnail cropped differently from its original still counts');
         check('keepSearching', 'Keep looking after the first hit',
             'shows the first match immediately, then upgrades the preview in place as bigger ' +
             'originals turn up — costs up to 8 requests per hover instead of usually one');
@@ -2976,6 +3145,7 @@
         // them cannot be read: 'no hit line' means "nothing was big enough" under the
         // defaults, but showEvenIfNotLarger turns the ratio gate off entirely.
         showEvenIfNotLarger: cfg.showEvenIfNotLarger,
+        sameShapeOnly: cfg.sameShapeOnly,
         minRatio: cfg.minRatio,
         minDisplayed: cfg.minDisplayed,
     });

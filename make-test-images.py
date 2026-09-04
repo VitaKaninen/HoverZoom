@@ -99,6 +99,12 @@ def main():
 
     save(make(24, 18, "i", 4), "icon.png")
 
+    # A forum masthead and a sidebar picture: 9.6:1 against 1:1. Nothing else here is
+    # anything but 4:3, and these two exist so "the preview is a completely different
+    # picture" has a shape a test can assert on. See cases 36-38.
+    save(make(1200, 125, "BANNER", 2), "banner-1200x125.jpg")
+    save(make(600, 600, "SIDEBAR", 5), "sidebar-600x600.jpg")
+
     make_clip()
 
     print("done")

@@ -62,6 +62,18 @@ has('strips resize query params',
     upgradeCandidates('https://cdn.example.com/a.jpg?w=400&h=300&quality=70'),
     'https://cdn.example.com/a.jpg');
 
+// The query on a media path is decoration over a file that exists either way, so
+// dropping it asks for the same picture bigger. The query on a SCRIPT path is the
+// request itself — a rotating forum banner answers `/banner.php` with an unrelated
+// picture, and probe and frame then agree on it perfectly. Reported 2026-09-03.
+none('no query strip on a path with no media extension',
+    'https://forum.example.com/banner.php?loc=header&w=1200');
+none('no query strip on an extensionless endpoint',
+    'https://forum.example.com/images/random?section=4&size=large');
+has('query strip still applies to a media path',
+    upgradeCandidates('https://cdn.example.com/b.png?width=200&thumb=1'),
+    'https://cdn.example.com/b.png');
+
 has('twitter name=small -> orig',
     upgradeCandidates('https://pbs.twimg.com/media/ABC.jpg?format=jpg&name=small'),
     'https://pbs.twimg.com/media/ABC.jpg?format=jpg&name=orig');

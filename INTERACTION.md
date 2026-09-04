@@ -96,7 +96,7 @@ single picture directly beneath it in the same card is tried instead (`E18`), an
 then faces every precondition here in its own right.
 
 A candidate that passes all nine still shows nothing unless a probe finds an image at least
-`minRatio` (1.2×) bigger than what is displayed — see `T04`.
+`minRatio` (1.2×) bigger than what is displayed **and shaped like it** (`E19`) — see `T04`.
 
 `P7` is five separate tests, listed in `E17`. It applies to CSS backgrounds only — never to an
 `<img>`, which is a picture whatever its size, position or surroundings.
@@ -391,6 +391,25 @@ stops with a margin all round and the picture starts spilling from there. Measur
 notches to 1162 × 720, and stops — 91.9 % and 91.8 % of the viewport. If you want it to reach the
 edges, both settings go to 100; nothing else is capping it.
 
+#### E19 · An upgrade has to be the same picture, not just a bigger file
+A bigger version of a picture keeps its proportions. Since v0.22.0 a candidate whose aspect
+ratio is more than **4×** away from the thumbnail's own is refused: it is a different image, not
+a bigger one. The tolerance is loose because a thumbnail is often a *crop* — a square thumb of a
+3:2 photo is 1.5× off — and all of those still pass. The case it exists for is a 1200 × 125
+forum masthead answering with a 600 × 600 sidebar picture: 9.6× apart.
+
+It applies to the linked page's declared media too (`E15`), which is otherwise trusted
+unconditionally: a banner links to the section it heads, and that section's `og:image` is its
+own artwork, a different picture rather than a smaller one.
+
+Only pictures with a **natural** size are judged — an `<img>` or a `<video>`. A CSS background
+has none, and the shape of its box is not the shape of its image. `sameShapeOnly` turns it off.
+
+Two related guards, invisible unless they fire: a URL caught returning two different pictures is
+refused for the rest of the tab, checked against the browser's own copy of the thumbnail and
+again when the frame loads it. Note that a browser generally does **not** re-request a URL the
+page already displays, so these are quiet in practice; the shape test is what carries this.
+
 #### E18 · The pointer may never touch the picture at all
 Thumbnail grids very often lay something across the whole card — an absolutely positioned `<a>`,
 a caption layer, a hover overlay, a click-catcher. The pointer then lands on that cover and the
@@ -573,6 +592,7 @@ Function names are used rather than line numbers, which rot.
 
 | Date | Change |
 |---|---|
+| 2026-09-03 | v0.22.0. New `E19` — an upgrade must be roughly the same shape as the thumbnail, because a rotating forum banner was answering a 1200×125 masthead with an unrelated 600×600 picture. Also, and this is the actual fix rather than the backstop: the generic query-strip rule no longer fires on a path with no media extension, since `?loc=header` is the request rather than a resize. Not visible here: the debug log now names which of the six mechanisms produced the preview. |
 | 2026-09-03 | v0.21.0. New `E18` — a cover laid across a card is looked through to the picture under it, which is what made gifwow's grid (and many others) do nothing on hover. `P7` widened into `E17`: a CSS background is also refused when it is fixed, spans the window's width, or carries the page's own text — and the whole gate is now stated as applying to backgrounds only, never to an `<img>`. New `P9`/`skipDecorative` for `aria-hidden` and `role="presentation"`. |
 | 2026-09-03 | v0.20.0. `P1` widened and new `E16` — a playing gif-style `<video>` can now be the hovered element. It could not be before, which meant that on Imgur's gallery, the site all of this was built for, hovering a gif did nothing at all and both `E14` and `E15` were unreachable. |
 | 2026-09-03 | v0.19.0. New `E15` — the linked page is fetched and what it declares as its media is used directly, without a size check, because the item page's media *is* what the thumbnail stands for. Guarded by an `og:url` identity check, same-origin only, `followLinks`. |
