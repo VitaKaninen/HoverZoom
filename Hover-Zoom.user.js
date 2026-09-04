@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.36.0
+// @version     0.37.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -1363,7 +1363,7 @@
     const EDGE_GAP = 4;
 
     // Where the bottom of the screen is, for everything that has to agree about it: the size
-    // cap, the opening position, clampPosition() and stickBar().
+    // cap, the opening position and clampPosition().
     //
     // It used to subtract `bottomReserve` (30px), because the browser paints its link and
     // status text along the bottom edge of the content area, over anything we draw there.
@@ -1785,10 +1785,7 @@
     function resetBar() {
         clearTimeout(barTimer);
         barTimer = 0;
-        // The offset stickBar() wrote belongs to the frame that just closed; leaving it on
-        // would open the next preview with its bar floating somewhere up the picture.
         if (box) box.classList.remove('idle');
-        if (capEl) capEl.style.bottom = '0px';
     }
 
     // Point the frame at a resolved candidate, picking the face that can display it. The
@@ -1845,53 +1842,6 @@
         layout();
     }
 
-    // Is any part of the frame's own margin on screen? The ring runs along all four edges and
-    // moves the window at any zoom (E25), so it is the OTHER move handle — and as long as one
-    // strip of it is in view, the window can always be dragged back and nothing needs rescuing.
-    //
-    // `frameMargin: 0` draws no ring at all, and then the bar really is the only handle there
-    // is; chromeThickness() is 0 there and this is false whatever the geometry says.
-    function ringOnScreen() {
-        const m = chromeThickness();
-        if (!m) return false;
-        const vw = document.documentElement.clientWidth;
-        const vh = usableHeight();
-        if (!vw || !vh) return true;        // the Browser pane reports 0 while hidden
-        return view.left > -m || view.top > -m ||
-            view.left + outerW() < vw + m || view.top + outerH() < vh + m;
-    }
-
-    // The status bar rides the bottom of the VISIBLE part of the frame, but ONLY when there is
-    // nothing else left to grab the window by.
-    //
-    // What it is for: there is a state you can zoom yourself into and not get out of. A frame
-    // grown to the ceiling covers the whole screen, so no edge and no corner is reachable to
-    // resize by, no strip of the frame margin is in view, the middle pans, and the bar — the
-    // one thing that always moves the window — is somewhere below the bottom of the screen.
-    // Every gesture is then a pan and only Escape gets you out. Holding the bar against the
-    // visible bottom edge is the same guarantee a window manager makes about a title bar.
-    //
-    // What it must NOT do is override a deliberate move. Drag a placed window down past the
-    // bottom of the browser and the bar floated back up into the picture, so it could never
-    // leave the screen — reported twice, the second time with the tell that made it clear:
-    // *once the window has been resized by hand the bar behaves*, because a hand-resized frame
-    // is usually small enough that a corner is still in view.
-    //
-    // So the test is `ringOnScreen()`, not the frame's own position. Any visible strip of the
-    // margin means there is a handle, so the bar belongs at the bottom of the window where it
-    // was put. v0.35.0 tried `view.top < 0` for this and it was too coarse: a frame taller than
-    // the viewport still has its top off screen after being dragged down, so the rescue fired
-    // on exactly the gesture it was supposed to leave alone.
-    //
-    // The offset is still clamped so the bar can never climb above the frame's own top.
-    function stickBar() {
-        if (!capEl || !cfg.showStatusBar) return;
-        const oh = outerH();
-        const overhang = ringOnScreen() ? 0 : (view.top + oh) - usableHeight();
-        const room = Math.max(0, oh - cfg.borderWidth * 2 - capEl.offsetHeight);
-        capEl.style.bottom = Math.round(Math.max(0, Math.min(overhang, room))) + 'px';
-    }
-
     // How thick the drawn margin actually is. Capped at a third of the frame so the smallest
     // window is not entirely chrome. hitRegion() reads the same number, or the ring you can
     // see and the ring you can grab would not be the same ring.
@@ -1940,7 +1890,6 @@
         mediaEl.style.height = Math.round(view.imgH) + 'px';
         mediaEl.style.left = Math.round(view.ox) + 'px';
         mediaEl.style.top = Math.round(view.oy) + 'px';
-        stickBar();
         box.classList.toggle('hot', placed);
         box.classList.toggle('pan', placed && pannable());
         caption();
@@ -2394,9 +2343,9 @@
         // regions outright, from when it was the only move handle there was; once the whole
         // frame margin became one (E25) that made the bar a dead spot for resizing, and the
         // two BOTTOM CORNERS in particular answered a grab with a move cursor instead of a
-        // resize one. It still outranks the *middle*, which is not redundant: stickBar() can
-        // park the bar well up the picture on a frame taller than the screen, and there the
-        // ring is off-screen and the bar is the only handle left.
+        // resize one. It still outranks the *middle*, which is not redundant either: with
+        // `frameMargin: 0` hitRegion() has no move ring to return at all, and with a small one
+        // the ring is thinner than the bar, so without this the bar's upper rows would pan.
         //
         // contains(e.target), not geometry: a faded bar has `pointer-events: none` (E10), so
         // this is false and the press falls through to the ordinary rule — which is exactly

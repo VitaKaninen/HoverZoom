@@ -260,41 +260,49 @@ nothing about it invites a click, and every control that would advertise the fac
 browser's own menu) only appears *after* the click. It is `flex:0 1 auto` with an ellipsis, so on
 a narrow bar it gives way before the dimensions do.
 
-**`stickBar()` exists because the bar being the only handle is otherwise not enough.** Found while
-verifying v0.29.0: grow the frame past the viewport, then keep zooming until the picture spills,
-and the frame covers the entire screen — no edge, no corner, the middle pans, and the bar is
-below the bottom of the window. Every gesture available is a pan; only Escape gets out. It is
-reachable by doing nothing but scrolling, which is the intended flow. So the bar is positioned
-against the bottom of the frame's *visible* part rather than its own bottom, which is the same
-guarantee a window manager makes about a title bar. Measured: a 2512 × 1392 frame at (−671, −444)
-on a 1265 × 705 viewport, own bottom edge at 948, bar held at 704.
+### The status bar is part of the window — `stickBar()` is gone (v0.37.0)
 
-**It only applies while `ringOnScreen()` is false, and that narrowing is v0.36.0.** Drag a placed
-window down past the bottom of the browser and the bar floated back up into the picture, so it
-could never leave the screen — a rescue overriding a deliberate act.
+The bar sits at the bottom of the frame. Always, at every size and position, including off the
+bottom of the screen. `.cap` is `bottom:0` in CSS and nothing writes an offset over it.
 
-**The right test is "is there another handle", not "where is the frame".** The frame margin moves
-the window at any zoom (`E25`), and its four strips run the whole way round, so one visible strip
-of it means the window can always be dragged back and nothing needs rescuing. The trap is only
-reachable when the frame covers the ENTIRE viewport — no strip in view, the middle pans, and the
-bar below the bottom of the screen.
+**It took three versions to get here and the reason is worth keeping, because the mistake was
+structural rather than arithmetic.** `stickBar()` floated the bar up to the bottom of the frame's
+*visible* part, to answer a real trap found while verifying v0.29.0: a frame grown past the
+viewport covers the whole screen, so no edge and no corner is reachable to resize by, the middle
+pans, and the bar — then the only thing that moved the window — is below the bottom of the
+screen. Only Escape got you out.
 
-**v0.35.0 tried `view.top < 0` for this and it was too coarse.** A frame taller than the viewport
-still has its top off screen after being dragged down, so the rescue fired on exactly the gesture
-it was meant to leave alone. The user's own tell is what named it: *once the window has been
-resized by hand the bar behaves* — a hand-resized frame is usually small enough to have an edge
-in view, which is `ringOnScreen()` in different words.
+Then it was narrowed twice, and each narrowing was reported as still wrong:
 
-Measured on a 1265 × 705 viewport: a 1228 × 921 frame at `top: −108` (top off screen, right strip
-in view) keeps `bottom: 0` and its bar rides down to 1312 when dragged; a 2512 × 1392 frame at
-(−671, −344), which covers everything, still floats to `bottom: 343px`, bar bottom 704.
+- **v0.35.0, `view.top < 0`** — too coarse. A frame taller than the viewport still has its top off
+  screen after being dragged down, so the rescue fired on the very gesture it was meant to leave
+  alone.
+- **v0.36.0, `ringOnScreen()`** — "is any strip of the frame margin in view", which is the right
+  question about handles and the wrong thing to attach to the bar. Sliding a windowleft/right made
+  the bar hop up and down as the side strips crossed the viewport edges: *"as I move the window
+  from left to right, the bar drops back down when either side is visible."* Correct by the rule
+  and unexplainable to anyone watching it.
 
-**`frameMargin: 0` draws no ring**, so `chromeThickness()` is 0, `ringOnScreen()` is false
-whatever the geometry says, and the bar keeps the old unconditional rescue — correctly, because
-there it really is the only handle.
+**The finding that ends it: the trap state and the deliberate state are the same geometry.** "A
+window nobody can reach" and "a window I have deliberately pushed off the bottom" differ only in
+intent, so no rule written in terms of `view.left`/`view.top` can separate them, and every attempt
+becomes a rescue that overrides the user some of the time.
 
-**Do not "simplify" this to `clampPosition()`'s `KEEP_ON_SCREEN`.** That guarantees 72px of the
-FRAME stays in view, which a strip of bare picture satisfies; it says nothing about a handle.
+**What made the rescue disposable is v0.34.0, one change earlier.** The trap needed the frame to
+be frozen at screen size, which is what the move-freeze did — zooming out then shrank the picture
+inside a frame that stayed put. A free frame follows the picture down, so scrolling back out is
+now a complete escape from the state scrolling in created. Measured from a 2512 × 1392 frame
+covering a 1265 × 705 viewport: eight notches out and an edge is back in view, at 403 × 302.
+
+**What is left, stated plainly:** a HAND-RESIZED frame is pinned, so zoom-out does not shrink it,
+and one dragged bigger than the screen and then moved until all four edges are off it can only be
+closed with Escape. It takes two deliberate acts to build, the second of which is exactly the one
+that must not be overridden, and Escape is a documented terminator (`K5`). That trade was made
+knowingly.
+
+**Do not reintroduce a float based on `clampPosition()`'s `KEEP_ON_SCREEN` either.** That
+guarantees 72px of the FRAME stays in view, which a strip of bare picture satisfies; it says
+nothing about a handle, and it is a position test, which is the family of test that failed.
 
 **The bar's precedence in `onBoxDown` was narrowed in v0.33.0, and the narrowing is the point.**
 It used to be tested FIRST and suppress `hitRegion()` entirely, from when it was the only move
@@ -305,9 +313,10 @@ reported as "I can't resize the window by grabbing either of the bottom corners"
 bar claims only what is left.
 
 **Do not delete the rest of it as redundant** — that was the first instinct and it is wrong.
-`stickBar()` can still park the bar well up the picture on a frame taller than the screen, and
-there the frame margin is off-screen and the bar is the only handle in reach. The redundant half was
-the overlap with the resize strip; the non-redundant half is everything else.
+With `frameMargin: 0` there is no move ring for `hitRegion()` to return at all, and with a small
+one the ring is thinner than the bar, so without the precedence the bar's upper rows would pan.
+The redundant half was the overlap with the resize strip; the non-redundant half is everything
+else.
 
 `onMove` mirrors the same rule for the cursor, but with **geometry** (`pointerOverBar()`) rather
 than `e.target`: a mousemove seen on `document` has been retargeted to the shadow host and can
@@ -1214,8 +1223,8 @@ the controls without offering a switch.
   now, so the answer is to move it — and the reserve's only remaining effect was to stop the bar
   reaching the true bottom of the screen, reported as the bar not following the window down.
   `usableHeight()` survives as the single place that answers "where is the bottom", because the
-  size cap, the opening position, `clampPosition()` and `stickBar()` must not disagree. It floors
-  at 64px: the Browser pane reports `clientHeight` **0** while hidden.
+  size cap, the opening position and `clampPosition()` must not disagree. It floors at 64px: the
+  Browser pane reports `clientHeight` **0** while hidden.
 - **The frame grows before the image spills — until a hand resize pins it** (see the wheel
   section above). Zooming a placed window enlarges the frame, about the pointer, up to
   `maxSizeMultiple` × the viewport; past that the zoom overflows it, which is when `pannable()`
