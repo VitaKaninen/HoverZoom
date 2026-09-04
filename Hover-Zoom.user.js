@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.20.0
+// @version     0.21.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -52,7 +52,12 @@
         skipVideos: true,           // never preview a video thumbnail or a player surface
         playVideos: true,           // the preview may BE a video — the only form some gifs have
         followLinks: true,          // read the linked page's own og: media — same origin only
-        skipPageBackgrounds: true,  // never preview a page's own background, or a tiled one
+        hoverThroughOverlays: true, // a lid over a picture — hover the picture, not the lid
+        skipPageBackgrounds: true,  // never preview page furniture: the page's own background,
+                                    // a tiled one, a fixed one, a full-width band, or one the
+                                    // page's own text sits on
+        skipDecorative: true,       // skip what the page itself marks as not content
+                                    // (aria-hidden, role=presentation/none)
         keepSearching: true,        // show the first hit at once, then keep probing and upgrade in place
         skipWhileMouseDown: true,   // don't fire mid drag/selection
         siteMode: 'blacklist',      // 'blacklist' | 'whitelist'
@@ -1757,6 +1762,12 @@
     let justDragged = false;// the click that ends a real drag must not also pin
     let detached = false;   // an unpinned preview that was dragged: hover no longer owns it
     let suppressed = null;  // element whose preview was dismissed; skipped until re-entered
+    // Whether `active` / `suppressed` were reached by looking THROUGH a cover. It changes
+    // what "the pointer left the image" means: the pointer is never on the picture itself
+    // in that case, so mouseout's element containment test — which is what makes a scan
+    // across a row give one preview per image — cannot answer it and the stack has to.
+    let activeCovered = false;
+    let suppressedCovered = false;
     let swallowMenu = false;
     let pointer = { x: 0, y: 0 };
     let mouseDown = false;
@@ -2002,22 +2013,135 @@
         return !!videoReason(el);
     }
 
-    // A page's own background, and any background laid end to end, are wallpaper rather
-    // than pictures: hovering blank space on such a page opened a preview of the tile, and
-    // on a tiled page there is blank space everywhere.
+    // PAGE FURNITURE — a CSS background that is part of the page rather than a picture on
+    // it. Returns WHY, or null, for the same reason videoReason() does: the decision is a
+    // read of the user's own DOM and a silent exclusion is the worst kind of bug here — a
+    // wrongly-skipped image just stops previewing, with nothing on screen to say so.
     //
-    // `background-repeat: repeat` alone does NOT mean tiled — it is the CSS default, so a
-    // hero image with `background-size: cover` computes to it too and would be caught. It is
-    // repeat AND an auto size together that mean the image is being laid out at its natural
-    // size and stepped across the element, which is the thing being described.
-    function isWallpaper(el) {
-        if (el === document.body || el === document.documentElement) return true;
+    // Every test below is a MEASUREMENT, not a guess at intent. Deliberately absent: class
+    // and id matching (/hero|banner|bg|masthead/), filename patterns, and "require a
+    // positive signal before previewing" — those are the guesses, and this script's whole
+    // premise is that it decides nothing before hover time and keeps no allowlist.
+    //
+    // NOTE these apply to CSS backgrounds ONLY, never to an <img>. A full-width <img>, an
+    // <img> with text over it, an <img> in a header — those are all ordinary shapes for a
+    // picture that is genuinely the content, and the reported bug ("blank space previews
+    // the tile") is a background bug.
+    const BAND_WIDTH = 0.98;    // of the viewport — a full-bleed band reaches both edges
+    const CONTENT_CHARS = 40;   // text this long is a paragraph, not a tile's caption
+
+    function wallpaperReason(el) {
+        if (el === document.body || el === document.documentElement) return 'the page background';
         const s = getComputedStyle(el);
-        if (/no-repeat/.test(s.backgroundRepeat)) return false;
-        return /^auto/.test(s.backgroundSize);
+        // Does not scroll with the page. A parallax or fixed backdrop is decoration by
+        // construction — a picture you are meant to look at moves with the text beside it.
+        if (s.backgroundAttachment.indexOf('fixed') >= 0)
+            return 'background-attachment: fixed — it does not scroll with the page';
+        // Laid end to end. `background-repeat: repeat` alone does NOT mean tiled — it is the
+        // CSS default, so a hero with `background-size: cover` computes to it too and would
+        // be caught (test case 9 is exactly that shape). It is repeat AND an auto size
+        // together that mean the image is being stepped across the element at natural size.
+        if (!/no-repeat/.test(s.backgroundRepeat) && /^auto/.test(s.backgroundSize))
+            return 'tiled end to end';
+        const r = el.getBoundingClientRect();
+        // Full-bleed band: masthead, hero, section stripe, footer. 98% rather than something
+        // looser because a gallery tile inside a centred container never reaches the window
+        // edges, while a band does by definition. (clientWidth is 0 in a hidden Browser pane,
+        // hence the guard — without it every element would span a zero-width viewport.)
+        const vw = document.documentElement.clientWidth;
+        if (vw > 0 && r.width >= vw * BAND_WIDTH) return 'spans the full width of the page';
+        // The page's own content is sitting ON it, so it is a backdrop, not a picture. The
+        // threshold keeps a tile's caption ("Sunset, 2019") from counting; a hero carries
+        // real copy. Only reachable by hovering the element's own blank space, since the
+        // text itself is a different element and hit-tests first.
+        if ((el.textContent || '').trim().length >= CONTENT_CHARS)
+            return 'the page\'s own text sits on it';
+        return null;
     }
 
-    function eligible(el) {
+    // What the page itself says is not content. ARIA is the one place an author states this
+    // outright rather than us inferring it, so it is worth reading — but only on the element
+    // itself, never inherited: carousels routinely mark cloned slides aria-hidden, and those
+    // are real pictures a user can see and will hover.
+    //
+    // `alt=""` is NOT used, though it is the same convention. Too many sites ship real
+    // content images with an empty or missing alt for it to be safe, and the cost of being
+    // wrong is a picture that silently never previews.
+    function decorativeReason(el) {
+        if (!el.getAttribute) return null;
+        if (el.getAttribute('aria-hidden') === 'true') return 'aria-hidden="true"';
+        const role = (el.getAttribute('role') || '').toLowerCase();
+        if (role === 'presentation' || role === 'none') return 'role="' + role + '"';
+        return null;
+    }
+
+    // THE PICTURE UNDER A LID. A card whose whole face is covered by an absolutely
+    // positioned <a>, a caption layer, a hover overlay or a click-catcher hands us that
+    // cover as the hover target, and the picture beneath is never considered — gifwow's
+    // grid, measured 2026-09-03: `figcaption > a[href="/go/…"]`, 393x510, exactly over the
+    // <img> it belongs to. Nothing about that is site-specific; it is one of the most
+    // common ways a thumbnail grid is built.
+    //
+    // Two bounds, and the second is the one that keeps this from being dangerous:
+    //
+    //  - ONLY an <img> or <video> is picked up this way, never a CSS background. Reaching
+    //    down through a paragraph onto the section behind it is precisely the hero/backdrop
+    //    case the gates above exist to refuse, and "content is stacked on top of it" is the
+    //    signal that it IS a backdrop. The same fact means opposite things for the two, and
+    //    which element type it is, is what separates them.
+    //  - SAME CARD: an ancestor of the cover, within COVER_UP levels, that holds the
+    //    picture and holds only that one laid-out picture. This is the "still one card"
+    //    bound the video gate already uses. Without it the walk reaches the grid or the
+    //    page and a full-page backdrop <img> — or an arbitrary neighbour — becomes the
+    //    answer to hovering anything.
+    //
+    // Hidden media does not count toward that one: gifwow's grid item also holds a
+    // `display:none` loader <img>, and counting it would bound the walk one level too early.
+    const COVER_UP = 4;
+
+    function laidOutMedia(n) {
+        if (!n.querySelectorAll) return 0;
+        const all = n.querySelectorAll('img,video');
+        let seen = 0;
+        for (let i = 0; i < all.length; i++) {
+            const r = all[i].getBoundingClientRect();
+            if (r.width >= 2 && r.height >= 2) seen++;
+        }
+        return seen;
+    }
+
+    function coveredMedia(el, x, y) {
+        if (!document.elementsFromPoint) return null;
+        const stack = document.elementsFromPoint(x, y);
+        const under = [];
+        let below = false;
+        for (let i = 0; i < stack.length; i++) {
+            if (!below) { if (stack[i] === el) below = true; continue; }
+            if (stack[i].tagName === 'IMG' || stack[i].tagName === 'VIDEO') under.push(stack[i]);
+        }
+        if (!under.length) return null;
+        let n = el;
+        for (let up = 0; n && up <= COVER_UP; up++, n = n.parentElement) {
+            if (laidOutMedia(n) > 1) return null;    // a grid or a page, not a card
+            for (let i = 0; i < under.length; i++) if (n.contains(under[i])) return under[i];
+        }
+        return null;
+    }
+
+    // `x`/`y` are the pointer, and are what makes the cover walk possible; called without
+    // them this is the plain element test and nothing is looked through.
+    function eligible(el, x, y) {
+        const direct = eligibleDirect(el);
+        if (direct) return direct;
+        if (!cfg.hoverThroughOverlays || typeof x !== 'number') return null;
+        const under = coveredMedia(el, x, y);
+        // The picture found under the lid faces every gate the lid did — video, blocked,
+        // decorative — so looking through a cover can never reach something a direct hover
+        // would have refused.
+        return under ? eligibleDirect(under) : null;
+    }
+
+    function eligibleDirect(el) {
         if (!el) return null;
         // A PLAYING GIF IS THE PICTURE. On imgur's gallery and gifwow's grid the animation
         // in the grid is a <video> element, so the thing under the pointer is not an <img>
@@ -2037,12 +2161,13 @@
         }
         if (NEVER[el.tagName]) return null;
         if (cfg.skipVideos && inVideoContext(el)) return null;
+        if (cfg.skipDecorative && decorativeReason(el)) return null;
         if (el.tagName === 'IMG') return blocked(shownUrl(el)) ? null : el;
         // element with a background image and no img of its own
         if (el.querySelector && el.querySelector('img')) return null;
         const bg = backgroundUrl(el);
         if (!bg || blocked(bg)) return null;
-        if (cfg.skipPageBackgrounds && isWallpaper(el)) return null;
+        if (cfg.skipPageBackgrounds && wallpaperReason(el)) return null;
         return el;
     }
 
@@ -2077,8 +2202,21 @@
             targetRect: rectStr(rect),
             showing: (shownUrl(t) || '(nothing)').slice(0, 160),
             eligible: !!el,
+            // Which element the preview is actually FOR. Not always the hover target: a
+            // cover over a card hands us the lid, and the answer is the picture under it.
+            resolvedFrom: !el ? '(nothing)'
+                : el === t ? 'the hover target itself'
+                    : 'looked through the cover to ' + el.tagName +
+                      (el.id ? '#' + el.id : '') + ' — ' + (shownUrl(el) || '').slice(0, 120),
             skipVideos: cfg.skipVideos,
             videoGate: videoReason(t) || 'none — NOT treated as video',
+            // Only meaningful for an element that HAS a CSS background image — an <img> is
+            // never page furniture, and reporting a reason for an element with no background
+            // at all reads as a gate that fired when nothing was ever tested.
+            backgroundGate: t.tagName === 'IMG' || t.tagName === 'VIDEO' ? 'n/a — not a background'
+                : !backgroundUrl(t) ? 'n/a — no background image'
+                    : (wallpaperReason(t) || 'none — NOT treated as page furniture'),
+            decorativeGate: decorativeReason(t) || 'none — not marked decorative',
             videosOnPage: sizes.length ? sizes.join(', ') : 'none',
             ancestorLink: a ? (a.getAttribute('href') || '(empty href)').slice(0, 160)
                 : 'NO <a href> ancestor, even across shadow roots',
@@ -2097,6 +2235,7 @@
         if (token) token.cancelled = true;
         token = null;
         active = null;
+        activeCovered = false;
         activeShown = null;
         detached = false;
         disableWheelZoom();
@@ -2114,6 +2253,7 @@
 
     function dismiss() {
         suppressed = active;            // read it before unpin()/cancel() clear it
+        suppressedCovered = activeCovered;
         if (pinned) unpin(); else cancel();
     }
 
@@ -2201,11 +2341,13 @@
         if (cfg.skipWhileMouseDown && mouseDown) return;
         if (cfg.activation === 'modifier' && !modifierHeld(e) && !modifierDown) return;
 
-        const el = eligible(e.target);
+        const el = eligible(e.target, e.clientX, e.clientY);
         if (cfg.debug) dbg('hover', hoverReport(e.target, el));
         if (!el) {
-            // moving onto the page background closes an open viewer
-            if (active && !active.contains(e.target)) cancel();
+            // moving onto the page background closes an open viewer — unless the picture is
+            // still under the pointer, one layer down, which is the covered-card case again.
+            if (active && !active.contains(e.target) &&
+                !(activeCovered && stillUnderPointer(active, e.clientX, e.clientY))) cancel();
             return;
         }
         if (el === suppressed) return;      // dismissed; stays down until the pointer leaves
@@ -2217,6 +2359,7 @@
         if (cfg.maxDisplayed > 0 && (displayed.w > cfg.maxDisplayed || displayed.h > cfg.maxDisplayed)) return;
 
         active = el;
+        activeCovered = (el !== e.target);
         activeShown = shownUrl(el);
         const myToken = token = { cancelled: false };
         timer = setTimeout(async function () {
@@ -2238,12 +2381,30 @@
         }, cfg.hoverDelay);
     }
 
+    // Is the picture still under the pointer? Only asked of a preview that was found under
+    // a cover, where the pointer is on the lid and never on the picture, so the containment
+    // test below cannot answer it. Not used for a direct hover: at the exact boundary pixel
+    // the stack still holds the image, which would hold the preview open a moment too long
+    // and cost the one-preview-per-image scan across a row.
+    function stillUnderPointer(el, x, y) {
+        if (!el || !document.elementsFromPoint) return false;
+        const stack = document.elementsFromPoint(x, y);
+        for (let i = 0; i < stack.length; i++) if (stack[i] === el) return true;
+        return false;
+    }
+
     function onOut(e) {
         if (pinned || drag) return;
         const to = e.relatedTarget;
-        if (suppressed && e.target === suppressed &&
-            !(to && suppressed.contains && suppressed.contains(to))) {
-            suppressed = null;      // left the image; hovering it again may preview again
+        if (suppressed) {
+            const inside = (to && suppressed.contains && suppressed.contains(to)) ||
+                (suppressedCovered && stillUnderPointer(suppressed, e.clientX, e.clientY));
+            // A covered picture is never the mouseout target itself, so the target test is
+            // only right for a direct hover; the stack answers for the other.
+            if (!inside && (suppressedCovered || e.target === suppressed)) {
+                suppressed = null;  // left the image; hovering it again may preview again
+                suppressedCovered = false;
+            }
         }
         if (!active) return;
         if (detached) {
@@ -2253,6 +2414,10 @@
             return;
         }
         if (to && active.contains && active.contains(to)) return;   // still inside the image
+        // Under a lid, moving from one layer of the card to another — the cover anchor to
+        // the caption to the badge — is not leaving the picture, and every such crossing
+        // would otherwise close and reopen the preview.
+        if (activeCovered && stillUnderPointer(active, e.clientX, e.clientY)) return;
         // Off the image — the preview goes at once, even though it is sitting under the
         // pointer. It cannot be hit-tested, so there is nothing to travel to and no reason
         // to wait, and this is what makes a scan across a row give one preview per image.
@@ -2656,10 +2821,22 @@
             '.jpg with a single frozen frame, and the moving original exists only as .mp4. ' +
             'With this on, the preview window plays it, muted and looping. Turn it off to ' +
             'keep previews to still pictures; you will get the frozen frame instead');
+        check('hoverThroughOverlays', 'Look through covers',
+            'many thumbnail grids lay an invisible link, a caption layer or a hover overlay ' +
+            'across the whole card, so the pointer never reaches the picture at all. With ' +
+            'this on, a cover with a single picture under it hovers that picture. Only ' +
+            'reaches an <img> or a video, and only within the same card — never the page ' +
+            'behind it');
         check('skipPageBackgrounds', 'Never preview page backgrounds',
-            'the page\'s own background, and any background tiled end to end — wallpaper ' +
-            'rather than a picture, and on a tiled page there is blank space everywhere to ' +
-            'trip over it');
+            'CSS background images that are part of the page rather than pictures on it: ' +
+            'the page\'s own background, one tiled end to end, one fixed so it does not ' +
+            'scroll, one spanning the full width of the window, and one the page\'s own ' +
+            'text is sitting on. Never applies to an <img> — a full-width photo with a ' +
+            'caption over it is still a photo');
+        check('skipDecorative', 'Skip images the page marks as decoration',
+            'aria-hidden="true" and role="presentation" are the page saying outright that ' +
+            'something is not content. Read only on the image itself, never inherited — ' +
+            'carousels mark cloned slides aria-hidden and those are real pictures');
         check('skipWhileMouseDown', 'Suppress while a mouse button is down');
         pick('siteMode', 'Site list mode', null, [
             ['blacklist', 'Disable on listed sites'], ['whitelist', 'Enable only on listed sites']]);
@@ -2791,7 +2968,9 @@
         skipVideos: cfg.skipVideos,
         playVideos: cfg.playVideos,
         followLinks: cfg.followLinks,
+        hoverThroughOverlays: cfg.hoverThroughOverlays,
         skipPageBackgrounds: cfg.skipPageBackgrounds,
+        skipDecorative: cfg.skipDecorative,
         blockList: cfg.blockList.length,
         // These three decide whether a probed candidate becomes a preview, so a log without
         // them cannot be read: 'no hit line' means "nothing was big enough" under the

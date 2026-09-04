@@ -87,22 +87,29 @@ arrives — nothing is decided in advance.
 | `P4` | Not a video: not a media/plugin tag, not sitting inside a **video surface** (a laid-out **player**'s rectangle, or the player box derived from it), no **player** in it or within three ancestors, and not inside a link matching the video-URL shapes. A `<video>` that is muted, controls-less, looping or autoplaying, and under a minute long is an animated picture rather than a player — it is none of those things (`E12`) | `skipVideos` on |
 | `P5` | The site passes the blacklist / whitelist test | blacklist, empty |
 | `P6` | In modifier mode, the modifier key is held | activation = hover |
-| `P7` | Not wallpaper: not the `<body>`/`<html>` background, and not a background that both repeats and has an `auto` size | `skipPageBackgrounds` on |
+| `P7` | Not page furniture — a CSS background that is part of the page rather than a picture on it (`E17`) | `skipPageBackgrounds` on |
 | `P8` | Neither the displayed URL nor any candidate is on the never-preview list | `blockList` empty |
+| `P9` | Not marked decoration by the page itself: no `aria-hidden="true"`, no `role="presentation"`/`"none"` on the element | `skipDecorative` on |
 
-A candidate that passes all eight still shows nothing unless a probe finds an image at least
+The element tested is not always the one under the pointer. When the hover target fails `P1`, a
+single picture directly beneath it in the same card is tried instead (`E18`), and that picture
+then faces every precondition here in its own right.
+
+A candidate that passes all nine still shows nothing unless a probe finds an image at least
 `minRatio` (1.2×) bigger than what is displayed — see `T04`.
 
-`P7` is deliberately *repeat **and** auto size*, not repeat alone: `background-repeat: repeat` is
-the CSS default, so a hero image setting only `background-size: cover` computes to it too and
-would be caught by the looser rule.
+`P7` is five separate tests, listed in `E17`. It applies to CSS backgrounds only — never to an
+`<img>`, which is a picture whatever its size, position or surroundings.
 
 `P8` is checked in three places — before the spinner (`eligible`), before any candidate is probed
 (`collectCandidates`), and in the not-larger fallback — so a blocked image costs no request and
 shows no ring.
 
-*Code: `eligible`, `isWallpaper`, `blockMatch`, `videoReason`, `overVideoSurface`, `siteEnabled`,
-`onOver`.*
+`P9` reads the element itself and never an ancestor: carousels routinely mark cloned slides
+`aria-hidden`, and those are real pictures on screen that a user will hover.
+
+*Code: `eligible`, `eligibleDirect`, `coveredMedia`, `wallpaperReason`, `decorativeReason`,
+`blockMatch`, `videoReason`, `overVideoSurface`, `siteEnabled`, `onOver`.*
 
 ---
 
@@ -384,6 +391,47 @@ stops with a margin all round and the picture starts spilling from there. Measur
 notches to 1162 × 720, and stops — 91.9 % and 91.8 % of the viewport. If you want it to reach the
 edges, both settings go to 100; nothing else is capping it.
 
+#### E18 · The pointer may never touch the picture at all
+Thumbnail grids very often lay something across the whole card — an absolutely positioned `<a>`,
+a caption layer, a hover overlay, a click-catcher. The pointer then lands on that cover and the
+picture beneath is never considered, so hovering the card does nothing at all. Measured on
+gifwow.com 2026-09-03: `figcaption > a[href="/go/…"]`, 393 × 510, exactly over the `<img>`.
+
+Since v0.21.0 the cover is looked through, and the preview is for the picture underneath. Two
+bounds keep that from reaching too far:
+
+- **Only an `<img>` or a `<video>`** is picked up this way, never a CSS background. Content
+  stacked on top of a background is the signal that the background is a *backdrop* (`E17`), so
+  the same fact means opposite things for the two, and the element type is what separates them.
+- **Same card only** — an ancestor of the cover, within four levels, that holds the picture and
+  holds exactly one laid-out picture. Two under one cover is a grid, and there is no answer to
+  which one. Hidden media is not counted: gifwow's card also holds a `display:none` loader
+  `<img>`.
+
+While such a preview is open, moving between layers of the same card — cover to caption to badge
+— is *not* leaving the picture, so it does not close and reopen. Leaving the card does close it,
+at once, as `T06` says. Turn it off with `hoverThroughOverlays`.
+
+#### E17 · What counts as a page background
+`P7` is five tests, any one of which refuses a CSS background image. All five are measurements,
+not guesses at intent:
+
+| Test | Why |
+|---|---|
+| It is `<body>` or `<html>` | the page's own background |
+| It repeats **and** has an `auto` size | laid end to end at natural size — a texture. Repeat *alone* is the CSS default, so a hero setting only `background-size: cover` computes to it too and would be caught by the looser rule |
+| `background-attachment: fixed` | it does not scroll with the page, so it is a backdrop by construction |
+| It spans ≥ 98 % of the window width | a masthead, hero, section stripe or footer. A tile inside a centred container never reaches both edges |
+| It carries ≥ 40 characters of the page's own text | the content is sitting on it. The threshold lets a tile's caption through and catches real copy |
+
+None of these apply to an `<img>`. A full-width photo, a photo with a caption over it, a photo in
+a header — those are ordinary shapes for a picture that genuinely is the content.
+
+Deliberately *not* used, and not to be added without a measurement: class and id matching
+(`/hero|banner|bg|masthead/`), filename patterns, `alt=""`, and "require a positive signal before
+previewing at all". Those are guesses about intent, and a wrong exclusion here is **silent** —
+the image simply stops previewing, with nothing on screen to say why.
+
 #### E16 · The thing you hover can be the clip itself
 On Imgur's gallery and gifwow's grid the animation in the grid is a `<video>`, not an `<img>` —
 there is no still image under the pointer at all. Until v0.20.0 that was refused outright, so
@@ -525,6 +573,7 @@ Function names are used rather than line numbers, which rot.
 
 | Date | Change |
 |---|---|
+| 2026-09-03 | v0.21.0. New `E18` — a cover laid across a card is looked through to the picture under it, which is what made gifwow's grid (and many others) do nothing on hover. `P7` widened into `E17`: a CSS background is also refused when it is fixed, spans the window's width, or carries the page's own text — and the whole gate is now stated as applying to backgrounds only, never to an `<img>`. New `P9`/`skipDecorative` for `aria-hidden` and `role="presentation"`. |
 | 2026-09-03 | v0.20.0. `P1` widened and new `E16` — a playing gif-style `<video>` can now be the hovered element. It could not be before, which meant that on Imgur's gallery, the site all of this was built for, hovering a gif did nothing at all and both `E14` and `E15` were unreachable. |
 | 2026-09-03 | v0.19.0. New `E15` — the linked page is fetched and what it declares as its media is used directly, without a size check, because the item page's media *is* what the thumbnail stands for. Guarded by an `og:url` identity check, same-origin only, `followLinks`. |
 | 2026-09-03 | v0.18.0. New `E14` — the preview may itself be a muted, looping video, because an Imgur video post's only moving form is an `.mp4` and "images only" meant "no answer" for it. `P1` unchanged: what is *hovered* is still a picture; this is about what the frame can *display*. |

@@ -52,7 +52,8 @@ path has been touched twice ever, both times in 2021.
   *(Previously worded "no DOM scanning, ever", which reads as a ban on ever querying the document
   and is broader than the thing being protected — a read performed AT hover time, binding
   nothing, has none of those failure modes. See the Google Images section for where the
-  distinction actually bites.)*
+  distinction actually bites, and `coveredMedia()` for one that is squarely inside the rule: a
+  hit-test of the pointer's own position, done at hover time, caching nothing.)*
 - **No format allowlist.** Extension never decides eligibility. The only gate is
   "is the candidate actually bigger than what's displayed", measured by loading it — with one
   deliberate exception since v0.19.0: a candidate the linked page *declares* is not a guess and
@@ -344,13 +345,112 @@ the flip with a `MutationObserver`, not a polling loop**: the pane's `setTimeout
 each round trip costs ~700 ms, so a poll cannot resolve 1000 ms from 2000 ms. The observer
 measured 1318 ms for the 1000 ms timer — the overshoot is the pane, not the code.
 
+## The pointer often never touches the picture — looking through a cover (v0.21.0)
+
+Reported as "gifwow.com does not work; there is some sort of overlay". Measured live on the grid,
+2026-09-03, and the overlay is the whole story:
+
+```
+div.grid-item > figure > a > picture > img          393×510   the picture
+              > figure > figcaption > a[href=/go/…] 393×510   position:absolute, ON TOP
+```
+
+`document.elementsFromPoint()` at the middle of the picture returns `[A, FIGCAPTION, IMG, …]` —
+the hover target is an **empty anchor covering the whole card**, `eligible()` saw an element with
+no `<img>` of its own and no background image, and returned null. No preview, no spinner, nothing
+to debug. This is not a gifwow quirk; an absolutely positioned link, a caption layer, a hover
+overlay or a click-catcher across the card face is one of the most common ways a thumbnail grid
+is built anywhere.
+
+`coveredMedia(el, x, y)` walks the hit-test stack below the target. **Two bounds, and the second
+is what keeps it from being dangerous:**
+
+- **Only an `<img>` or a `<video>` is picked up this way, never a CSS background.** This is the
+  load-bearing distinction, and it is the answer to "images that are under other images" as an
+  *exclusion* rule — which is what it looks like at first. Reaching down through a paragraph onto
+  the section behind it is precisely the hero/backdrop case; "content is stacked on top of it" is
+  the signal that a background IS a backdrop, and the signal that an `<img>` is a card's picture.
+  The same fact means opposite things for the two, and **the element type is the only thing that
+  separates them.**
+- **Same card:** an ancestor of the cover, within `COVER_UP` (4), that contains the picture and
+  contains exactly one *laid-out* picture. This is the "still one card" bound the video gate
+  already uses. Without it the walk reaches the grid or the page, and a full-page backdrop `<img>`
+  — or an arbitrary neighbour — becomes the answer to hovering anything.
+  **Laid-out, not `querySelectorAll(...).length`:** gifwow's card also holds a `display:none`
+  loader `<img>`, and counting it bounds the walk one level too early, at `FIGCAPTION`, which
+  finds nothing. Test case 30 is the positive side of the bound (two pictures under one cover →
+  no preview).
+
+Everything found under a cover then faces `eligibleDirect()` in its own right, so looking through
+a cover can never reach something a direct hover would have refused.
+
+**The hold rule needed a second answer** (`activeCovered` / `suppressedCovered`). "Leaving the
+image takes the preview down at once" is enforced by mouseout's `active.contains(to)` test — and
+the pointer is *never* on a covered picture, so that test says "left" on every crossing between
+layers of the same card, closing and reopening the preview. For a covered preview the question is
+answered by the stack instead (`stillUnderPointer`). **This is deliberately not used for a direct
+hover:** at the exact boundary pixel the stack still holds the image, which would keep the preview
+alive a moment too long and cost the one-preview-per-image row scan that pointer-transparency
+exists for.
+
+Verified end to end against the real gifwow URLs (the card rebuilt inside the local test page,
+because the Browser pane blocks a localhost script from an https origin): hover the cover →
+`resolvedFrom: looked through the cover to IMG#… gp-7xx2k.webp` → the existing `/gifs/<id>.mp4`
+upgrade rule → a playing 350×621 video in the frame.
+
+**gifwow's own `/go/` page is NOT what resolves it, and that is the `og:url` guard working.**
+Measured: `https://gifwow.com/go/gp-7xx2k` declares `og:url` = `https://gifpit.com/gifs/gp-7xx2k.gif`
+— a different host and a different path from the one requested — so `pageMediaFrom()` trusts
+nothing on it. The URL rule is what carries this site.
+
+## What counts as a page background (v0.21.0)
+
+`isWallpaper()` → `wallpaperReason()`, a string like `videoReason()` so `hoverReport` can print
+which of the five fired. Two tests were already there (`<body>`/`<html>`, repeat + auto size);
+three are new, and each is a **measurement**, not a guess at intent:
+
+- **`background-attachment: fixed`** — it does not scroll with the page. A picture you are meant
+  to look at moves with the text beside it; a parallax backdrop does not.
+- **Spans ≥ `BAND_WIDTH` (98 %) of the window width** — masthead, hero, section stripe, footer.
+  98 % rather than something looser because a gallery tile inside a centred container never
+  reaches both edges and a band does by definition. Guard `clientWidth > 0`: the Browser pane
+  reports 0 while hidden, and without it *every* element spans a zero-width viewport.
+- **Carries ≥ `CONTENT_CHARS` (40) characters of text** — the page's own content is sitting on it,
+  so it is a backdrop. The threshold is what lets a tile's caption ("Sunset, 2019") through. Only
+  reachable by hovering the element's own blank space, since the text hit-tests first.
+
+**These apply to CSS backgrounds ONLY, and that boundary is deliberate.** A full-width `<img>`, an
+`<img>` with a caption over it, an `<img>` in a `<header>` — all ordinary shapes for a picture
+that genuinely is the content. The reported bug was a background bug.
+
+`decorativeReason()` is separate (`skipDecorative`, on) and does apply to `<img>`: `aria-hidden="true"`
+and `role="presentation"`/`"none"` are the page stating outright that something is not content.
+**Read on the element itself, never inherited** — carousels routinely mark cloned slides
+`aria-hidden` and those are real pictures on screen. **`alt=""` is deliberately NOT used** even
+though it is the same convention: too many sites ship real content images with an empty or
+missing alt, and being wrong here is silent.
+
+**Considered and rejected, with reasons, so they are not re-proposed:**
+
+| Suggestion | Why not |
+|---|---|
+| class/id matching `/hero\|banner\|bg\|masthead/i` | a guess at intent dressed as a measurement. A wrong exclusion here is **silent** — the picture just stops previewing, with nothing on screen to say why — and this project keeps no allowlist |
+| filename patterns (`sprite`, `bg-`, `pixel`) | same, and weaker |
+| `alt=""` / missing alt | too many real content images ship without alt |
+| extreme aspect ratios (>5:1) | panoramas and comic strips are real pictures |
+| "ignore CSS backgrounds entirely" | test case 9 is a legitimate background thumbnail, and this would delete a working feature to fix a narrower bug |
+| "require a positive signal (figure, data-full, meaningful alt) before previewing" | inverts the project's premise. The gate here is *is it bigger than what is displayed*, measured by loading it; a positive-signal requirement is an allowlist by another name and would lose the long tail this exists to win |
+| minimum size, tracking pixels | already `minDisplayed` (48 px) |
+| `background-repeat: repeat` alone | breaks test case 9 — repeat is the CSS *default*, so `background-size: cover` computes to it. It is repeat **and** `auto` together that mean tiled |
+
 ## Images the user has ruled out — the ⊘ button and `blockList` (v0.13.0)
 
 Reported: a page whose background is one image **tiled** previews that tile from every patch of
 blank space on the page. Two mechanisms, because neither covers the other.
 
-**Automatic — `skipPageBackgrounds` (on).** `isWallpaper()` skips `<body>`/`<html>`, and any
-element whose background both repeats *and* has an `auto` size.
+**Automatic — `skipPageBackgrounds` (on).** `wallpaperReason()` skips `<body>`/`<html>`, and any
+element whose background both repeats *and* has an `auto` size — plus, since v0.21.0, three more
+tests listed in the "What counts as a page background" section above.
 
 - **Repeat alone is NOT the test, and getting this wrong breaks a shipped case.**
   `background-repeat: repeat` is the CSS *default*, so a hero image that sets only
@@ -546,10 +646,21 @@ node test-resolver.js               # 111 assertions on the pure URL and video-l
 python make-test-images.py          # regenerate fixtures into test-images/
 ```
 
-Browser test: `python test-server.py`, then open `http://localhost:8899/test-page.html`. 28 cases,
-10 of which HZ+ rejects outright. (`.claude/launch.json` wraps the same command as
+Browser test: `python test-server.py`, then open `http://localhost:8899/test-page.html`. 35 cases,
+11 of which HZ+ rejects outright. (`.claude/launch.json` wraps the same command as
 `hover-zoom-test`, but `.claude/` is gitignored — a fresh clone has only the direct command.)
 
+- **Cases 29–35 are the v0.21.0 gates**, and 30/31 are the ones that fail loudly if the cover
+  walk is loosened: 30 puts two pictures under one cover (must show nothing), 31 puts text over a
+  background (must not reach through to it). 35 lives **outside** the `.grid`, because the whole
+  point of it is spanning the window — inside a `.case` box its padding put it at 98.26 % of the
+  viewport, passing the 98 % test by 0.3 % and proving nothing.
+- **To test a real site's card shape without installing anything, rebuild it in the test page.**
+  The Browser pane blocks `http://localhost` requests from an `https` origin
+  (`ERR_BLOCKED_BY_CLIENT`), so the script cannot be injected into a live site from here.
+  Constructing the site's markup with its real cross-origin URLs inside `test-page.html` at
+  runtime exercises the entire pipeline — cover walk, `UPGRADES`, the video probe — against the
+  actual files. That is how gifwow was verified.
 - **`test-server.py`, not `python -m http.server`.** It is the same static server plus
   `?slow=<seconds>`, which stalls that one response. Nothing else can reproduce the symptom that
   motivated the resolve spinner: against localhost every probe finishes in single-digit ms, so

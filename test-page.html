@@ -247,6 +247,66 @@
     Every other upgrade on this page resolves inside one frame, which is why "it just grabs
     the first image and never changes" is what the feature looks like in normal use.
   -->
+  <!--
+    29-31 are the COVER shape, measured on gifwow.com 2026-09-03: an absolutely positioned
+    <a> laid across the whole card, so the pointer never once touches the <img> and the
+    hover target has no picture of its own. This is one of the most common ways a thumbnail
+    grid is built and nothing about it is site-specific.
+
+    30 is the bound that keeps it safe — two pictures under one cover is a grid, not a card,
+    and there is no answer to "which one". 31 is the other bound: reaching down through text
+    onto the section behind it is the hero/backdrop case, which is exactly what the
+    background gates refuse, so the walk only ever picks up an <img> or a <video>.
+  -->
+  <div class="case" data-expect="1600">
+    <h2>29. an invisible link laid over the whole card</h2>
+    <p class="hz bad">HZ+: no equivalent — the pointer never reaches the &lt;img&gt;</p>
+    <div style="position:relative">
+      <img id="c29" width="200" src="test-images/photo-200x150.jpg" data-src="test-images/photo.jpg">
+      <a href="/go/c29" style="position:absolute;inset:0"></a>
+    </div>
+  </div>
+
+  <div class="case" data-expect="none">
+    <h2>30. one cover over TWO pictures</h2>
+    <p class="hz good">must NOT preview: a grid, not a card — no answer to which picture</p>
+    <div style="position:relative;display:flex;gap:4px">
+      <img id="c30a" width="98" src="test-images/photo-200x150.jpg" data-src="test-images/photo.jpg">
+      <img id="c30b" width="98" src="test-images/photo-200x150.png" data-src="test-images/photo.png">
+      <a href="/go/c30" style="position:absolute;inset:0"></a>
+    </div>
+  </div>
+
+  <div class="case" data-expect="none">
+    <h2>31. text sitting on a background</h2>
+    <p class="hz good">must NOT preview: the walk only looks through to an &lt;img&gt;, never a background</p>
+    <div id="c31" class="bg" style="background-image:url(test-images/photo-200x150.jpg);display:flex;align-items:center;justify-content:center">
+      <span id="c31text" style="background:#0009;padding:4px">hover this text</span>
+    </div>
+  </div>
+
+  <div class="case" data-expect="none">
+    <h2>32. background the page's own text sits on</h2>
+    <p class="hz good">must NOT preview its blank space: a backdrop, not a picture</p>
+    <div id="c32" class="bg" style="background-image:url(test-images/photo-200x150.jpg);height:190px">
+      <p style="margin:0;padding:6px">A backdrop carries the page's own copy, which is what
+        separates it from a picture. Hover the blank space below this paragraph.</p>
+    </div>
+  </div>
+
+  <div class="case" data-expect="none">
+    <h2>33. background fixed to the window</h2>
+    <p class="hz good">must NOT preview: it does not scroll, so it is decoration</p>
+    <div id="c33" class="bg" style="background-image:url(test-images/photo-200x150.jpg);background-attachment:fixed"></div>
+  </div>
+
+  <div class="case" data-expect="none">
+    <h2>34. image the page marks as decoration</h2>
+    <p class="hz good">must NOT preview: aria-hidden="true" says it is not content</p>
+    <img id="c34" width="200" aria-hidden="true"
+         src="test-images/photo-200x150.jpg" data-src="test-images/photo.jpg">
+  </div>
+
   <div class="case" data-expect="1600">
     <h2>20. upgrade in place, slowly</h2>
     <p class="hz bad">HZ+: no equivalent — opens 800&times;600, then swaps to 1600&times;1200</p>
@@ -257,6 +317,19 @@
   </div>
 
 </div>
+
+<!--
+  Outside the grid because the whole point of it is the width: a band that reaches both
+  window edges is a masthead, a hero, a section stripe or a footer, and a gallery tile
+  inside a centred container never does. It has no text and does not repeat, so this is the
+  ONLY gate that can refuse it.
+-->
+<div class="case" data-expect="none" style="margin-top:16px;padding-bottom:0;border-bottom:0">
+  <h2>35. a full-bleed background band</h2>
+  <p class="hz good">must NOT preview: it spans the window, so it is page furniture</p>
+</div>
+<div id="c35" style="background-image:url(test-images/photo-200x150.jpg);background-size:cover;
+     background-repeat:no-repeat;height:120px;position:absolute;left:0;right:0"></div>
 
 <!--
   Tampermonkey stand-ins. Without them the settings panel is unreachable here (it is only
