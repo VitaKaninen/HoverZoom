@@ -63,6 +63,41 @@ the lower one through.
 The store-news banner previews only because two unrelated 520px images further down the page fall
 within `BANNER_SIMILAR` of 540. Nothing about the page changed; the arithmetic did.
 
+### `samsung.com/us` — a hero on a page of stacked full-width sections (Pane)
+
+```
+1280x960 hero @x-7  -7px down  vis=true  -> previews: set of 3 [1265@x0,969  1265@x0,2024  1265@x0,3083]
+```
+
+Same mechanism as Home Depot, on a page with **27 swiper slides**. Two things worth keeping:
+
+- The hero's document top is **-7px** (negative margin), which sails through condition (1).
+- Three hidden slides at the same position measured `vis=false` and were correctly excluded from
+  the set count — `reallyVisible()` and the v0.27.0 cross-fader fix are working exactly as
+  intended. The set members that *do* count are stacked full-width section banners further down.
+
+### `store.steampowered.com/app/<id>` — a miss by six pixels (Pane)
+
+```
+1266x712  @x0  206px down  -> previews: 206px down, past 200
+```
+
+Sample: <https://store.steampowered.com/app/620/Portal_2/> (pick a title with no age gate — an
+age-check interstitial replaces the page entirely). A full-bleed decorative backdrop `<img>` —
+page furniture by any reading — clears `BANNER_TOP` by six pixels. It is rendered twice with the
+same src, and the same-src exemption handles the duplicate correctly.
+
+### `boards.4chan.org/<board>` — two misses on one page (Pane)
+
+```
+300x100  @x483   39px down  -> previews: under 400px wide      (the rotating board banner)
+468x60   @x399  300px down  -> previews: 300px down, past 200  (a house ad, same-document <img>)
+```
+
+The board banner is *the* rotating-banner shape `CLAUDE.md` discusses, and it escapes on width
+alone. The 468x60 below it is one of the few display ads that is a real `<img>` in the top
+document rather than an iframe — see the ad section below.
+
 ### Mastheads under `BANNER_MIN` — condition (2)
 
 ```
@@ -90,15 +125,17 @@ which is precisely the shape conditions (3) and (4) cannot tell apart from a mas
 |---|---|---|
 | `unsplash.com/photos/<slug>` | 1082x721 @x269, **124px down**, alone, 0 same-width | Chrome |
 | `flickr.com/photos/<user>/<id>` | 1050x656 @x85, **98px down**, alone, 0 same-width | Chrome |
+| `pexels.com/photo/<slug>` | 1013x675 @x126, **168px down**, alone, 0 same-width | Pane |
 | `wallhaven.cc/w/<id>` | 950x633 @x305, **158px down**, `id="wallpaper"`, alone, 0 same-width | Pane |
 | `safebooru.org/index.php?page=post&s=view&id=<id>` | 850x850 @x233, **176px down**, `id="image"`, alone, 0 same-width | Pane |
 
 Samples: <https://unsplash.com/photos/hand-holding-smartphone-with-usb-drive-plugged-in-bSIKF9GnyPE>,
 <https://www.flickr.com/photos/138486769@N02/55502473822/>,
+<https://www.pexels.com/photo/blue-and-white-abstract-painting-1103970/>,
 <https://wallhaven.cc/w/og79gm> (ids rotate — grab a fresh one from <https://wallhaven.cc/latest>),
 <https://safebooru.org/index.php?page=post&s=view&id=7116188>.
 
-Unsplash and Flickr are the ones that matter: mainstream photo sites where the picture you
+Unsplash, Flickr and Pexels are the ones that matter: mainstream photo sites where the picture you
 navigated to is the thing that will not preview.
 
 Safebooru's engine is shared by gelbooru.com, rule34.xxx, xbooru.com and tbib.org, all with
@@ -130,17 +167,21 @@ A real featured-content thumbnail at **192px** down, eight pixels inside `BANNER
 identical tile eight pixels lower previews normally. A hard document-Y cutoff has no soft edge,
 and this is what that looks like in the wild.
 
-### `www.nasa.gov` — the hero, and the boundary the geometry cannot draw (Chrome)
+### The hero, and the boundary the geometry cannot draw
 
 ```
-1556x640  @x0  86px down  -> REFUSED (alone, 1 same-width)
+nasa.gov            1556x640  @x0    86px down  -> REFUSED (alone, 1 same-width)   (Chrome)
+<user>.itch.io/<game> 960x540  @x153   0px down  -> REFUSED (alone, 0 same-width)   (Pane)
 ```
 
-A full-bleed editorial hero photo with a headline over it. **Whether this is a false positive is a
-judgement call, and that is the point** — `CLAUDE.md` says a full-width `<img>` with text over it
-is "an ordinary shape for a picture that is genuinely the content", while `bannerReason()` refuses
-exactly that shape. NASA is the clean example of the two rules disagreeing, and it is one
-same-width neighbour away from flipping.
+Sample: <https://a1esska.itch.io/771-demo> (any itch.io game page is this shape).
+
+NASA's is a full-bleed editorial hero photo with a headline over it; itch.io's is the game's key
+art, the main thing the page is selling. **Whether these are false positives is a judgement call,
+and that is the point** — `CLAUDE.md` says a full-width `<img>` with text over it is "an ordinary
+shape for a picture that is genuinely the content", while `bannerReason()` refuses exactly that
+shape. These are the clean examples of the two rules disagreeing, and NASA's is one same-width
+neighbour away from flipping.
 
 ---
 
@@ -160,6 +201,7 @@ A rewrite that breaks these has traded one bug for another.
 | `questionablecontent.net` (Pane) | 815x60 header @ 107px down, alone, **1** same-width | **REFUSED — correct**, one image from flipping. Comic at 333px down is safe. |
 | `alrincon.com/en/` (Pane) | 1000x557 @ 60px down, **set of 3** [621, 17189, 26919 down] | **previews — correct now.** Your reported case, fixed by `BANNER_SET_MIN` 2. Survives only because the page held three more 1000px posts; a short day's page would refuse it again. |
 | `newegg.com` (Pane) | 1280x315 hero @ 140px down, alone | **REFUSED — correct.** Only one carousel slide mounts. |
+| `aliexpress.us` (Pane) | 539x38 promo strip @ 182px down, alone | **REFUSED — correct.** |
 | `phpbb.com/community/` (Pane) | header is a **CSS background**, 1152x129 @ 42px down, `textContent` length **43** | Caught by `wallpaperReason`'s `CONTENT_CHARS` 40 — by three characters. Different gate, same brittleness. |
 
 **No exposure at all** (nothing ≥250px wide within 900px of the document top, so the gate is never
@@ -182,13 +224,26 @@ One image sits in the banner's vertical band, and at 1.9% of the banner's width 
 case that motivated it. **Condition (3) has no measured failure in this corpus**, in either
 browser state.
 
-### Ad blocking changes the answer
+### Ads mostly cannot be peers, and it is not about ad blocking
 
-City-Data and MacRumors are ad-supported forums whose headers normally carry a leaderboard beside
-the logo — the classic shape for a condition (3) miss. With the user's ad blocker active, no ad
-image is in the DOM and both pages measured clean. **The gate therefore behaves differently for
-users with and without an ad blocker**, and a header-ad peer remains an unmeasured hypothesis
-rather than a confirmed miss. Worth re-running one of these with blocking off.
+The header leaderboard beside a logo is the classic shape for a condition (3) miss, so it was
+chased directly. It does not work, and the reason is structural rather than environmental:
+
+- **`bannerCheck()` reads `document.getElementsByTagName('img')`, which does not enter an
+  iframe.** Nearly all display advertising renders inside a cross-origin iframe, so an ad is not
+  an `<img>` in the top document and can never be counted as a peer or a set member.
+- Measured on tomshardware.com: **7 iframes on the page, none of them in the header band**, and
+  no ad `<img>` above 250px anywhere near the top.
+- Measured on city-data.com three ways — Chrome with the extension blocker on, Chrome with it off,
+  and the in-app pane which has **no blocking of any kind** — all three returned
+  **`iframesTotal: 0`** and the same lone 683x52 masthead. The page simply has no header ad.
+
+An earlier draft of this file claimed the ad blocker was hiding the evidence. That was wrong;
+the unblocked pane shows the same thing.
+
+**The exception is a same-document house banner**, and 4chan's 468x60 above is one — a real
+`<img>` served by the site itself. Those are the only ads this gate can see at all. Turning off a
+network-level ad blocker does not meaningfully widen the corpus.
 
 ---
 
@@ -218,15 +273,20 @@ to do.
 
 ## Blocked, and still unmeasured
 
-`danbooru.donmai.us` — refused by both browsers on safety grounds.
+**`danbooru.donmai.us` — blocked by the Claude-in-Chrome extension's own safety policy**, not by
+the network or by any blocker. Tool-driven navigation is refused with `This site is not allowed
+due to safety restrictions`, and while a Danbooru tab is open the extension refuses to enumerate
+tabs at all, so no other site can be reached either. Manual browsing is unaffected. To add it,
+run the probe below in the console on a post page and paste the output.
 
 Not attempted: pixiv, 500px, e621, behance, patreon, soundcloud, furaffinity, custom-theme Tumblr
 blogs. All are the detail-page or profile-header shape already well covered above.
 
-**One mechanism remains entirely unconfirmed: a carousel that mounts every slide.** Swiper and
-Slick sliders often keep all slides — and duplicate clones — in the DOM at the banner's width,
-which would read as a set and miss. Newegg and Steam both mount only one slide, so no positive
-example was found. Home Depot's stacked-banner set is the closest confirmed relative.
+**The all-slides carousel is now confirmed indirectly** (Samsung, 27 swiper slides). Note *how* it
+fails, because it is not the way it was predicted to: the hidden slides measured `vis=false` and
+were correctly discarded by `reallyVisible()`. What defeated the gate was the **stacked
+full-width section banners further down the page**, the same mechanism as Home Depot. A carousel
+whose clones are genuinely visible and same-width has still not been found.
 
 ---
 
@@ -269,22 +329,26 @@ Some hosts (The Verge) make the harness redact any output containing a query str
 
 Observations from the rows above, not a proposed design.
 
-1. **`BANNER_TOP` 200 — a hard document-Y cutoff with no soft edge.** Newgrounds refuses a content
-   tile at 192px and previews it at 208px. Home Depot's banner is caught at 197px, imgur's content
-   escapes at 221px. AVS Forum's second header image clears the cutoff at 319px purely because the
-   banner above it is tall. The threshold has no relation to where the page's content begins.
-2. **`BANNER_MIN` 400.** Lets narrow mastheads through — measured at 250, 304 and 340px on three
-   different forums.
-3. **The peer test — no measured failure, in either browser state.** Re-measured on the exact
+1. **`BANNER_TOP` 200 — a hard document-Y cutoff with no soft edge, and the corpus clusters right
+   on it.** Newgrounds refuses a content tile at 192px and previews it at 208px. Home Depot's
+   banner is caught at 197px; Steam's page backdrop escapes at 206px; imgur's content escapes at
+   221px. Samsung's hero sits at **-7px**. AVS Forum's second header image clears the cutoff at
+   319px purely because the banner above it is tall. The threshold has no relation to where the
+   page's content actually begins.
+2. **`BANNER_MIN` 400.** Lets narrow mastheads through — measured at 250, 300, 304 and 340px on
+   four different sites, including 4chan's rotating board banner.
+3. **The peer test — no measured failure anywhere in this corpus.** Re-measured on the exact
    YouTube case that motivated it: the blocking avatar comes in at `frac=0.019` against a floor of
-   0.25. The header-ad shape that could still break it was invisible behind an ad blocker, so it
-   is untested rather than disproved.
+   0.25. The header-ad shape that might still break it turns out to be largely unreachable,
+   because ads live in iframes the gate cannot see. This is the one condition the evidence
+   supports keeping as-is.
 4. **`BANNER_SET_MIN` 2 — the weakest, as `CLAUDE.md` already says, and every loud miss comes from
    it.** Membership is decided on width alone: no shared x, no regular spacing, no distance bound,
    and no check that the members are *content* rather than more banners. Home Depot's set is four
-   promo banners; AVS Forum's members are 319px and 4,257px down the page. Symmetrically, a feed of
-   differently-sized posts (Tumblr) forms no set at all and the top post is refused, and Alrincon
-   passes only because that day's page happened to hold three more 1000px posts.
+   promo banners; Samsung's is three stacked section bands; AVS Forum's members are 319px and
+   4,257px down the page. Symmetrically, a feed of differently-sized posts (Tumblr) forms no set at
+   all and the top post is refused, and Alrincon passes only because that day's page happened to
+   hold three more 1000px posts.
 
 The two directions have a common root: **the gate reasons about one picture's width against a bag
 of other widths, and never about layout.** Every miss is a coincidence of widths, and every false
