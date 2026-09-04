@@ -1,0 +1,18 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Post page declaring a video</title>
+<!--
+  Stands in for an item page: a listing thumbnail links here, and the only route to the
+  original is what this page declares about itself. Nothing in the thumbnail's URL leads
+  to the clip, so if case 24 previews at all, the page was fetched and read.
+
+  og:url is root-relative on purpose. The real thing is absolute, but pageMediaFrom()
+  compares pathnames only, and test-server.py honours $PORT — an absolute URL here would
+  hard-code 8899 and fail the identity check on any other port.
+-->
+<meta property="og:url" content="/test-pages/post-video.html">
+<meta property="og:type" content="video.other">
+<meta property="og:image" content="/test-images/photo-200x150.jpg">
+<meta property="og:video" content="/test-images/clip-2s.mp4">
+<h1>Post page declaring a video</h1>
+<p>og:video is the clip; og:image is a poster frame and must lose to it.</p>

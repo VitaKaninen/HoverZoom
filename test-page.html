@@ -172,6 +172,36 @@
     <img id="c23" width="200" src="test-images/photo-200x150.jpg" data-src="test-images/clip-2s.mp4">
   </div>
 
+  <!--
+    24-26 are the linked-page lookup. Every thumbnail here is icon.png, which has NO upgrade
+    candidates of any kind — no data-src, no srcset, no suffix rule matches it — so if a
+    preview appears at all, the linked page was fetched and read. Each page lives in
+    test-pages/ and declares its own media the way a real item page does.
+  -->
+  <div class="case" data-expect="640 (video)">
+    <h2>24. the linked page declares a video</h2>
+    <p class="hz bad">HZ+: no equivalent — the clip comes from the page, not from the URL</p>
+    <a href="test-pages/post-video.html">
+      <img id="c24" width="200" src="test-images/icon.png" style="width:200px">
+    </a>
+  </div>
+
+  <div class="case" data-expect="200 (not size-checked)">
+    <h2>25. the linked page's image is no bigger than the thumbnail</h2>
+    <p class="hz good">must still preview: the page is authoritative, so no ratio gate</p>
+    <a href="test-pages/post-small.html">
+      <img id="c25" width="200" src="test-images/icon.png" style="width:200px">
+    </a>
+  </div>
+
+  <div class="case" data-expect="none">
+    <h2>26. the linked page says it is a different page</h2>
+    <p class="hz good">must NOT preview: og:url disagrees, so nothing it declares is trusted</p>
+    <a href="test-pages/post-mismatch.html">
+      <img id="c26" width="200" src="test-images/icon.png" style="width:200px">
+    </a>
+  </div>
+
   <div class="case" data-expect="1600">
     <h2>19. control for 17/18 — an ordinary link</h2>
     <p class="hz good">must still preview: /gallery/ is not a video shape</p>

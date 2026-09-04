@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.18.0
+// @version     0.19.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -51,6 +51,7 @@
         showEvenIfNotLarger: false, // show at natural size even when it isn't an upgrade
         skipVideos: true,           // never preview a video thumbnail or a player surface
         playVideos: true,           // the preview may BE a video — the only form some gifs have
+        followLinks: true,          // read the linked page's own og: media — same origin only
         skipPageBackgrounds: true,  // never preview a page's own background, or a tiled one
         keepSearching: true,        // show the first hit at once, then keep probing and upgrade in place
         skipWhileMouseDown: true,   // don't fire mid drag/selection
@@ -641,13 +642,131 @@
     // favours the smallest file. Order is the selection rule, so order has to be kept.
     const MAX_PROBES = 8;
 
+    // ------------------------------------------------- the page behind the thumbnail
+    //
+    // Every other mechanism in this script GUESSES a full-size URL from strings already on
+    // the page and then verifies it by loading it. This one asks the site directly: fetch
+    // the page the thumbnail links to and read what it declares as its own media. That is
+    // authoritative in a way no guess can be — it is the page you would have landed on —
+    // so the result does NOT face the ratio gate and it ends the search. Some originals are
+    // not derivable from a thumbnail URL by any rule, and this is the only thing that
+    // reaches them.
+    //
+    // Bounded deliberately, because it is the one part of this script that makes a request
+    // for a document rather than for an image:
+    //
+    //  - SAME ORIGIN ONLY. A listing and its item pages are on the same site essentially by
+    //    definition; a cross-origin href is an outbound link, not "the page for this
+    //    thumbnail". It also means plain fetch() with the user's own cookies, so the HTML is
+    //    what they would see — no GM_xmlhttpRequest, no new @grant, no @connect prompt.
+    //  - Once per URL, cached for the tab, and only after `hoverDelay` has already elapsed.
+    //  - Never for a link that is already a media URL: that is an ordinary candidate and is
+    //    handled by collectCandidates().
+    //  - `followLinks` turns it off entirely.
+    const pageCache = new Map();    // page url -> Promise<{url, video}|null>
+
+    function metaContent(doc, names) {
+        for (let i = 0; i < names.length; i++) {
+            const m = doc.querySelector('meta[property="' + names[i] + '"], meta[name="' + names[i] + '"]');
+            const v = m && m.getAttribute('content');
+            if (v && v.trim()) return v.trim();
+        }
+        return null;
+    }
+
+    // What a fetched page says its media is. Separate from the fetch so it can be tested
+    // against a parsed document with no network involved.
+    function pageMediaFrom(doc, pageUrl) {
+        // THE PAGE YOU GET IS NOT ALWAYS THE PAGE YOU ASKED FOR, and the failure is silent.
+        // Measured 2026-09-03: fetching one imgur gallery URL returned another post's
+        // document entirely — same byte count, wrong id — and a second attempt returned a
+        // generic shell whose og:image is the imgur logo. Either would have put a confident,
+        // completely wrong picture on screen, and this candidate skips the ratio gate that
+        // would otherwise have caught the logo. So the page has to agree about which page it
+        // is: og:url must name the path we requested, or nothing here is trusted.
+        const declared = metaContent(doc, ['og:url']);
+        if (declared) {
+            let d = null;
+            try { d = new URL(declared, pageUrl.href); } catch (e) { d = null; }
+            if (!d || d.pathname.replace(/\/+$/, '') !== pageUrl.pathname.replace(/\/+$/, '')) return null;
+        }
+        // Video first: on a post that has both, the video IS the post and the og:image is
+        // its poster frame. isVideoUrl() is required because og:video is often a player
+        // PAGE (an embed url) rather than a media file, and that would never load.
+        const vid = metaContent(doc, ['og:video:secure_url', 'og:video:url', 'og:video',
+            'twitter:player:stream']);
+        if (vid && cfg.playVideos && isVideoUrl(vid)) {
+            try { return { url: new URL(vid, pageUrl.href).href, video: true }; } catch (e) { /* fall through */ }
+        }
+        const img = metaContent(doc, ['og:image:secure_url', 'og:image', 'twitter:image:src',
+            'twitter:image']);
+        if (img && looksLikeImage(img)) {
+            try { return { url: new URL(img, pageUrl.href).href, video: false }; } catch (e) { /* none */ }
+        }
+        return null;
+    }
+
+    async function fetchPageMedia(pageUrl) {
+        let doc;
+        try {
+            const res = await fetch(pageUrl.href, { credentials: 'same-origin', redirect: 'follow' });
+            if (!res.ok) return null;
+            // Only ever parse HTML. A link to a PDF or a zip would otherwise be pulled in
+            // full just to be thrown away.
+            if (!/text\/html|application\/xhtml/i.test(res.headers.get('content-type') || '')) return null;
+            doc = new DOMParser().parseFromString(await res.text(), 'text/html');
+        } catch (e) {
+            return null;                                  // offline, blocked, CSP, aborted
+        }
+        return pageMediaFrom(doc, pageUrl);
+    }
+
+    function linkedMedia(el) {
+        if (!cfg.followLinks) return Promise.resolve(null);
+        const a = closestAcross(el, 'a[href]');
+        const href = a && a.getAttribute('href');
+        if (!href) return Promise.resolve(null);
+        let u;
+        try { u = new URL(href, location.href); } catch (e) { return Promise.resolve(null); }
+        if (!/^https?:$/.test(u.protocol)) return Promise.resolve(null);
+        if (u.origin !== location.origin) return Promise.resolve(null);
+        u.hash = '';
+        if (u.href === location.href.split('#')[0]) return Promise.resolve(null);   // this page
+        if (looksLikeImage(u.href) || isVideoUrl(u.href)) return Promise.resolve(null);
+        if (pageCache.has(u.href)) return pageCache.get(u.href);
+        const p = fetchPageMedia(u);
+        pageCache.set(u.href, p);
+        return p;
+    }
+
     async function resolve(el, displayed, token, onHit) {
         const candidates = collectCandidates(el).slice(0, MAX_PROBES);
         const shown = shownUrl(el);
         dbg('candidates', candidates);
         let best = null;
+        let trusted = null;
+
+        // Started here, NOT awaited here. A document fetch is slow next to an image probe,
+        // and there is usually a decent local candidate that can be on screen meanwhile —
+        // so the ordinary sequence paints something immediately and this replaces it in
+        // place through the same progressive-upgrade path when it arrives. Awaiting it up
+        // front would turn every hover into a page load before anything appeared.
+        const linked = linkedMedia(el).then(async function (hit) {
+            if (!hit || token.cancelled || blocked(hit.url)) return null;
+            const dim = await probe(hit.url);
+            if (!dim || token.cancelled) return null;
+            trusted = { url: hit.url, w: dim.w, h: dim.h, video: !!dim.video, duration: dim.duration };
+            // No ratio gate, no comparison with `best`: the linked page is the site telling
+            // us what this thumbnail stands for, and a smaller answer from it still beats a
+            // bigger guess.
+            dbg('hit (declared by the linked page)', trusted);
+            if (onHit && !token.cancelled) onHit(trusted);
+            return trusted;
+        }, function () { return null; });
+
         for (const url of candidates) {
-            if (token.cancelled) return best;
+            if (token.cancelled) return trusted || best;
+            if (trusted) break;             // the authoritative answer landed; stop guessing
             const dim = await probe(url);
             if (!dim) continue;
             const isSameAsShown = (url === shown);
@@ -665,8 +784,13 @@
             best = { url: url, w: dim.w, h: dim.h, video: !!dim.video, duration: dim.duration };
             dbg('hit', best);
             if (onHit && !token.cancelled) onHit(best);
-            if (!cfg.keepSearching) return best;
+            if (!cfg.keepSearching) break;
         }
+        // The search is not over until the page lookup settles — the spinner keeps turning
+        // because something really is still running, and a late authoritative answer still
+        // replaces whatever the guesses produced.
+        await linked;
+        if (trusted) return trusted;
         if (best) return best;
         if (cfg.showEvenIfNotLarger && shown && !blocked(shown) && !token.cancelled) {
             const dim = await probe(shown);
@@ -2489,6 +2613,12 @@
             'youtu.be, .mp4 and friends) — turn off if it is skipping stills you want. ' +
             'A short muted clip already playing with no controls counts as an animated ' +
             'picture, not a player, so pages like Imgur’s gallery still preview normally');
+        check('followLinks', 'Look at the linked page for the original',
+            'when a thumbnail links to its own page on the same site, fetch that page and ' +
+            'use whatever it declares as its media — the picture or clip you would have got ' +
+            'by clicking through. It is taken as correct, so it is not size-checked. Costs ' +
+            'one page request per link you hover, cached for the tab; the site sees that ' +
+            'request. Same site only, never another domain');
         check('playVideos', 'Let the preview be a video',
             'some animated posts have no image form at all — an Imgur video post answers ' +
             '.jpg with a single frozen frame, and the moving original exists only as .mp4. ' +
@@ -2628,6 +2758,7 @@
         siteEnabled: siteEnabled(),
         skipVideos: cfg.skipVideos,
         playVideos: cfg.playVideos,
+        followLinks: cfg.followLinks,
         skipPageBackgrounds: cfg.skipPageBackgrounds,
         blockList: cfg.blockList.length,
         // These three decide whether a probed candidate becomes a preview, so a log without

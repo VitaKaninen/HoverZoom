@@ -1,0 +1,13 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Post page declaring a small image</title>
+<!--
+  The ratio-gate bypass. og:image here is 200x150, exactly the size case 25's thumbnail is
+  displayed at, so minRatio (1.2) would reject it out of hand as an ordinary candidate.
+  It must be shown anyway: the page is the site saying what this thumbnail stands for, and
+  that is not a guess to be size-checked.
+-->
+<meta property="og:url" content="/test-pages/post-small.html">
+<meta property="og:image" content="/test-images/photo-200x150.jpg">
+<h1>Post page declaring a small image</h1>
+<p>No bigger than the thumbnail, and shown regardless.</p>

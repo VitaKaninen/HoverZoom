@@ -54,7 +54,9 @@ path has been touched twice ever, both times in 2021.
   nothing, has none of those failure modes. See the Google Images section for where the
   distinction actually bites.)*
 - **No format allowlist.** Extension never decides eligibility. The only gate is
-  "is the candidate actually bigger than what's displayed", measured by loading it.
+  "is the candidate actually bigger than what's displayed", measured by loading it — with one
+  deliberate exception since v0.19.0: a candidate the linked page *declares* is not a guess and
+  is not size-checked. Everything the script infers for itself still faces the gate.
 - **No hardcoded size caps.** `minDisplayed` / `maxDisplayed` / `minRatio` are settings; the
   defaults are 48 / 0 (off) / 1.2.
 - **Per-element probe state.** No shared lock, no `.one()`. `probeCache` is keyed by URL and
@@ -544,7 +546,7 @@ node test-resolver.js               # 111 assertions on the pure URL and video-l
 python make-test-images.py          # regenerate fixtures into test-images/
 ```
 
-Browser test: `python test-server.py`, then open `http://localhost:8899/test-page.html`. 23 cases,
+Browser test: `python test-server.py`, then open `http://localhost:8899/test-page.html`. 26 cases,
 10 of which HZ+ rejects outright. (`.claude/launch.json` wraps the same command as
 `hover-zoom-test`, but `.claude/` is gitignored — a fresh clone has only the direct command.)
 
@@ -752,28 +754,52 @@ is animated without fetching it, so this is a settings answer (`minRatio` ≈ 1.
 `.mp4` src (`DIV.PostVideo-video-wrapper`), and `P4`/`NEVER` refuse it correctly. "Images only" is
 the design; the grid thumbnail is the only place a gif is an `<img>` at all.
 
-## "Go to the next page and bring the original back" — the script does NOT do this
+## Going to the next page for the original (v0.19.0)
 
-Asked directly 2026-09-03, and worth writing down because the mental model matters more than the
-answer. **There is no `fetch`, no `XMLHttpRequest`, no `GM_xmlhttpRequest` and no `DOMParser`
-anywhere in this script.** It never loads the destination page. Every candidate is a *string
-already visible on the page you are standing on* — `data-*` attributes, `srcset`/`<picture>`, the
-ancestor `<a href>` **only when that href itself looks like an image URL or carries one in a query
-parameter**, and `UPGRADES` rewrites of the thumbnail's own URL — and each one is then verified by
-loading it into an `<img>` and measuring it. Guess, then confirm; never browse.
+Every other mechanism here GUESSES a URL from strings already on the page and verifies it by
+loading it. This one asks the site: fetch the page the thumbnail links to and read what it
+declares as its own media. The user's framing, and it is the right one: **the media on the item
+page is by definition the thing the thumbnail stands for, so there is nothing to compare.**
+Hence `linkedMedia()` → `fetchPageMedia()` → `pageMediaFrom()`, and a hit from it **skips the
+ratio gate and ends the search**.
 
-**On the two sites this was asked about, fetching the page would return the same URL the rewrite
-already produces, at zero extra requests.** Measured: imgur post `EDiKb3d`'s `og:image` is
-`https://i.imgur.com/EDiKb3d.jpg`, which is exactly what the `_d`-strip rule derives from the
-thumbnail `i.imgur.com/EDiKb3d_d.jpg?maxwidth=520`. Gifwow is the same shape by extension swap:
-grid thumbnail `/gifs/gp-1tnq3g.jpg`, item-page media `/gifs/gp-1tnq3g.mp4`. A second imgur
-gallery URL fetched in the same session came back as a **generic fallback page** with no post
-metadata at all, so page-fetching is not even reliably better.
+- **It runs in PARALLEL with the ordinary probes, not before them.** A document fetch is slow
+  beside an image probe, and there is usually a local candidate worth showing meanwhile — so the
+  guesses paint something immediately and the authoritative answer replaces it in place through
+  the existing progressive-upgrade path. Awaiting it up front would turn every hover into a page
+  load before anything appeared. `resolve()` breaks out of the candidate loop the moment
+  `trusted` is set, and `await`s the lookup before returning so the spinner keeps turning while
+  something really is still running. Note `keepSearching: false` now `break`s rather than
+  returning, or a late authoritative answer would be dropped on the floor.
+- **`og:url` MUST name the path that was requested, or nothing on the page is trusted.** This is
+  not defensive tidiness — it is the reason the feature is safe. Measured against live imgur
+  2026-09-03: fetching one gallery URL returned *another post's document entirely* (same byte
+  count, wrong id), and a second attempt returned a generic shell whose `og:image` is the imgur
+  logo. Either would have put a confident, completely wrong picture on screen, and this candidate
+  skips the ratio gate that would otherwise have caught a 1200×630 logo. Test case 26 is that
+  page, and the correct outcome is no preview at all.
+- **`og:video` before `og:image`**, because on a post that has both the video IS the post and the
+  image is its poster frame. `isVideoUrl()` gates it: `og:video` is frequently a player *page*
+  (an embed URL), which would never load.
+- **Same origin only, and that is a design choice rather than a limitation.** A listing and its
+  item pages are on one site essentially by definition; a cross-origin href is an outbound link,
+  not "the page for this thumbnail". The payoff is large: plain `fetch` with the user's own
+  cookies, so the HTML is what they would actually see — **no `GM_xmlhttpRequest`, no new
+  `@grant`, no `@connect` prompt, and no ability to pull arbitrary third-party documents.** If a
+  cross-origin case ever genuinely needs this, that is the trade being reopened, not a small
+  addition.
+- **Bounded elsewhere too:** one fetch per URL, cached in `pageCache` for the tab; only after
+  `hoverDelay` has already elapsed; never for a link that is already a media URL (that is an
+  ordinary candidate); HTML content-types only, so a link to a PDF is not pulled in full to be
+  thrown away; `blocked()` still applies to the result; and `followLinks` turns it off.
+- **The cost is a real page request per link hovered, and the site sees it.** That is said plainly
+  in the setting's description, because it is a behavioural change a user should be able to
+  consent to: hovering now touches the server, where before it only touched the image CDN.
 
-So a page fetch is worth building only for a site where the media URL genuinely cannot be derived
-from the thumbnail URL. If it ever is, the generic hook is `og:image`/`og:video` (and
-`twitter:player:stream`), it needs `GM_xmlhttpRequest` + a `@grant` for cross-origin destinations,
-a cache, and a hover-delay gate — one HTML request per hover is not free.
+Cases 24–26 all hang off `icon.png`, which has **no upgrade candidates of any kind** — so if a
+preview appears at all, the page was fetched and read. 24 gets a video the URL could never have
+produced, 25 gets an image *no bigger than the thumbnail* (the ratio-gate bypass, which is the
+whole point), 26 gets nothing.
 
 **The thing that actually blocked "same treatment for gifs" was the viewer, not the resolver** —
 built in v0.18.0, see the next section. For an imgur video post the moving original is only ever

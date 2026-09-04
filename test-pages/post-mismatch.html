@@ -1,0 +1,17 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Post page that is not the page you asked for</title>
+<!--
+  The guard case, and it is not hypothetical. Measured against live imgur 2026-09-03:
+  fetching one gallery URL returned a DIFFERENT post's document, and another attempt
+  returned a generic shell whose og:image was the site logo. Both would have put a
+  confident, completely wrong picture on screen — and this candidate skips the ratio gate
+  that would otherwise have caught a 1200x630 logo.
+
+  og:url below names some other path, so pageMediaFrom() must refuse everything here.
+  Case 26's thumbnail has no other candidate, so the correct outcome is no preview at all.
+-->
+<meta property="og:url" content="/test-pages/some-other-post.html">
+<meta property="og:image" content="/test-images/photo.jpg">
+<h1>Wrong page</h1>
+<p>Claims to be a different URL, so nothing it declares may be trusted.</p>

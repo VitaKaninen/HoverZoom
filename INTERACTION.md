@@ -384,6 +384,20 @@ stops with a margin all round and the picture starts spilling from there. Measur
 notches to 1162 × 720, and stops — 91.9 % and 91.8 % of the viewport. If you want it to reach the
 edges, both settings go to 100; nothing else is capping it.
 
+#### E15 · The original can come from the page the thumbnail links to
+Since v0.19.0 a hover also fetches the linked page — same site only — and reads what it declares
+as its own media (`og:video`, then `og:image`). That is the picture or clip you would have got by
+clicking through, so it is **not size-checked**: it wins even when it is smaller than the
+thumbnail, and it ends the search. It runs alongside the ordinary probes rather than ahead of
+them, so a local guess still paints immediately and this replaces it in place when it lands —
+`E8`'s docked ring is the signal that it is still coming.
+
+The page must agree about which page it is: if `og:url` names a different path, nothing it
+declares is used and no preview opens. That guard is why the feature is safe to skip the gate —
+a live Imgur fetch returned another post's document, and another returned a shell whose
+`og:image` was the site logo. `followLinks` (on) turns the whole thing off; note that with it on,
+hovering a linked thumbnail makes a request the site can see.
+
 #### E14 · The preview itself may be a video
 Some animated posts have no image form at all: an Imgur *video post* answers `.jpg` with one
 frozen frame, and the moving original exists only as `.mp4`. Since v0.18.0 the frame can show
@@ -499,6 +513,7 @@ Function names are used rather than line numbers, which rot.
 
 | Date | Change |
 |---|---|
+| 2026-09-03 | v0.19.0. New `E15` — the linked page is fetched and what it declares as its media is used directly, without a size check, because the item page's media *is* what the thumbnail stands for. Guarded by an `og:url` identity check, same-origin only, `followLinks`. |
 | 2026-09-03 | v0.18.0. New `E14` — the preview may itself be a muted, looping video, because an Imgur video post's only moving form is an `.mp4` and "images only" meant "no answer" for it. `P1` unchanged: what is *hovered* is still a picture; this is about what the frame can *display*. |
 | 2026-09-03 | v0.17.0. New `E12` — `P4` now asks whether a `<video>` is a *player* or a *gif*: a short, muted, controls-less clip that is already playing is an animated picture, suppresses nothing, and no player box is derived from it, so Imgur's gallery and gifwow's grid preview normally while video sites stay refused. New `E13` — `bottomReserve`, a 30 px strip kept clear at the bottom of the window where the browser paints link addresses over the picture. |
 | 2026-09-03 | Written against v0.9.0. Initial IDs `R1`, `P1`–`P6`, `S01`–`S17`, `T01`–`T19`, `K1`–`K8`, `B1`–`B2`, `E1`–`E6`. |
