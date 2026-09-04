@@ -17,6 +17,16 @@ if (vStart < 0 || vEnd < 0) { console.error('video markers not found'); process.
 const VIDEO_LINK_RE = new Function(
     src.slice(vStart, vEnd) + '\nreturn VIDEO_LINK_RE;')();
 
+// The banner gate's first three conditions need only the picture's own rectangle, so they
+// slice out and run with no DOM at all. That is what lets `banner-test-sites.md` -- ~40 live
+// pages measured in two browsers on 2026-09-04 -- be asserted here instead of merely written
+// down, which is how the old gate's thresholds drifted onto real sites' geometry unnoticed.
+const bStart = src.indexOf('    const BANNER_TOP');
+const bEnd = src.indexOf('    // Returns WHICH condition decided');
+if (bStart < 0 || bEnd < 0) { console.error('banner markers not found'); process.exit(1); }
+const bannerShape = new Function(
+    src.slice(bStart, bEnd) + '\nreturn bannerShape;')();
+
 const location = { href: 'https://example.com/page/index.html' };
 const body = src.slice(start, end);
 const exported = new Function('location', body +
@@ -315,6 +325,86 @@ eq('a query string in the entry is literal',
     blockMatch('https://site.com/a?b=1', ['https://site.com/a?b=1']), true);
 eq('parentheses and brackets do not throw',
     blockMatch('https://site.com/a(1)[2].png', ['https://site.com/a(1)[2].png']), true);
+
+// ---- the banner gate's shape test, against the measured corpus
+//
+// Every row below is a real page from `banner-test-sites.md`, probed 2026-09-04 with the
+// page scrolled to the top: displayed width, displayed height, and pixels from the top of
+// the DOCUMENT. `true` means "band-shaped and high enough to be page furniture" — the one
+// remaining condition (a row-mate beside it) needs the DOM, and cases 39–41 on the test
+// page exercise that instead.
+//
+// A wrong answer here is SILENT in the wild: the picture simply stops previewing, with
+// nothing on screen to say why. That is the whole reason these are assertions rather than
+// a table in a document — which is what they were, while the thresholds drifted onto real
+// sites' geometry unnoticed.
+function band(label, w, h, top, want) {
+    const got = bannerShape(w, h, top);
+    if (got.band === want) { pass++; return; }
+    fail++;
+    console.log('FAIL banner ' + label + NL + '  got ' + got.band + ', want ' + want +
+        NL + '  ' + got.why);
+}
+
+// Banners the OLD gate let through, every one of them rescued by a coincidence of widths.
+band('homedepot.com promo banner',        1376, 107, 197, true);
+band('avsforum.com masthead',             1280, 307,   8, true);
+band('xkcd.com store-news banner',         540, 100, 113, true);
+band('4chan.org rotating board banner',    300, 100,  39, true);
+band('4chan.org house ad',                 468,  60, 300, true);
+band('furaffinity.net leaderboard ad',     728,  90,  66, true);
+band('furaffinity.net skyscraper ad',      320,  50,  61, true);
+band('linustechtips.com masthead',         304,  58,  13, true);
+band('forums.macrumors.com masthead',      250,  71,  10, true);
+band('spacebattles.com masthead',          340,  58, 294, true);
+
+// Content the OLD gate refused. Silent failures, and the larger group.
+band('unsplash.com photo page',           1082, 721, 124, false);
+band('flickr.com photo page',             1050, 656,  98, false);
+band('pexels.com photo page',             1013, 675, 168, false);
+band('wallhaven.cc wallpaper page',        950, 633, 158, false);
+band('safebooru.org post page',            850, 850, 176, false);
+band('furaffinity.net artwork',           1136, 1136, 175, false);
+band('tumblr.com first post in feed',      580, 326,  34, false);
+band('newgrounds.com featured tile',       624, 374, 192, false);
+band('nasa.gov editorial hero',           1556, 640,  86, false);
+band('itch.io game key art',               960, 540,   0, false);
+band('allbirds.com storefront hero',      1536, 810,  42, false);
+
+// Controls: refusals that were already right and must stay right.
+band('youtube.com channel banner',        1284, 207,  56, true);
+band('bandcamp.com artist header',         975, 180,   1, true);
+band('city-data.com forum masthead',       683,  52,   0, true);
+band('store.steampowered.com bg strip',   1557,  46, 104, true);
+band('questionablecontent.net header',     815,  60, 107, true);
+band('newegg.com hero band',              1280, 315, 140, true);
+band('aliexpress.us promo strip',          539,  38, 182, true);
+band('soundcloud.com profile banner (bg)', 1208, 254, 110, true);
+band('nationalgeographic.com hero (bg)',  1712, 437,  48, true);
+band('phpbb.com header (bg)',             1152, 129,  42, true);
+
+// Controls: content that previewed before and must keep previewing. The first two used to
+// survive on luck — artstation on a sidebar thumbnail happening to sit beside the artwork,
+// 500px on 276/1104 = 0.250000 against a `>= 0.25` test — and now pass on their own shape.
+band('artstation.com artwork',             548, 846, 104, false);
+band('500px.com photo',                   1104, 736,  84, false);
+band('imgur.com gallery item',             480, 741, 221, false);
+band('alrincon.com first post',           1000, 557,  60, false);
+band('pixiv.net artwork (below the band)', 911, 643, 302, false);
+
+// The two pieces of band-shaped CONTENT in the corpus, and position is the only thing that
+// saves them. This pair is why BANNER_TOP does not go above 300.
+band('xkcd.com comic itself',              740, 239, 388, false);
+band('questionablecontent.net comic',      800, 250, 333, false);
+
+// Boundary rows, spelled out so a nudge to any threshold fails loudly rather than silently.
+band('exactly BANNER_BAND is a band',      300, 100,  10, true);
+band('a hair under BANNER_BAND is not',    299, 100,  10, false);
+band('exactly BANNER_MIN is wide enough',  240,  40,  10, true);
+band('a hair under BANNER_MIN is not',     239,  40,  10, false);
+band('exactly BANNER_TOP is high enough', 1000,  60, 300, true);
+band('a hair below BANNER_TOP is not',    1000,  60, 301, false);
+band('a zero-height rect is never a band', 1000,   0,  10, false);
 
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

@@ -1,5 +1,25 @@
 # Banner-gate test corpus
 
+> **The rewrite this file was built for shipped as v0.38.0**, and the measurements below are
+> now the gate's regression suite: `test-resolver.js` asserts every row's width, height and
+> document-Y against `bannerShape()`, so a moved threshold fails by site name. **Everything
+> below describes the OLD four-condition gate** — the verdicts in the MISS and FALSE POSITIVE
+> sections are what it did, not what the script does now. What replaced it, condition by
+> condition, is in `CLAUDE.md` under "The banner gate, rewritten around SHAPE (v0.38.0)".
+>
+> Short version: the width-set condition is deleted, and the deciding test is now that a
+> banner is a **band** — width ÷ height ≥ 3. Measured here, banners run 3.0 to 33.8 and
+> content runs 0.65 to 2.4, with nothing in the gap. `BANNER_TOP` 200 → 300, `BANNER_MIN`
+> 400 → 240, the row-mate must be the same height, `BESIDE_PEER` 0.25 → 0.15.
+>
+> **Four rows are knowingly left as they were,** because nothing measurable separates them
+> from content: samsung.com's 1280×960 hero (1.3:1), steam's 1266×712 app backdrop (1.8:1),
+> and avsforum's second header image at 319 px down. newgrounds' backdrop art and twitch's
+> offline card now preview, having been refused before.
+>
+> **Adding to this file is still useful** — a new row is a new assertion. Run the probe at
+> the bottom, paste the numbers in, and add a `band(...)` line to `test-resolver.js`.
+
 Sample pages for rewriting `bannerCheck()`. Every row in the MEASURED sections was produced by
 running a replica of the shipped gate against the live DOM, **2026-09-04**, with the page scrolled
 to the top.

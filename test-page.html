@@ -15,79 +15,95 @@
 </style>
 
 <!--
-  Case 39, and it has to live HERE rather than in the grid: the rule it tests is "above where
-  the page's content begins", measured from the top of the DOCUMENT. Copied in shape from
-  youtube.com/@TheOnion, measured 2026-09-03 — an <img> 1193x192 at 56px from the top, natural
-  1707x282, alone on its line and unlike every other picture on the page.
+  Cases 39-41, and they have to live HERE rather than in the grid: the rule they test is
+  "a band above where the page's content begins", measured from the top of the DOCUMENT.
+  Rewritten for v0.38.0 against `banner-test-sites.md`, ~40 live pages probed 2026-09-04.
 
-  It must NOT preview, while all 37 cases below still do exactly what they did before: the
-  grid's thumbnails are 200px (under the 400px floor), sit in rows (something is beside them),
-  and share their width with each other.
+  39 is the banner and must NOT preview. 40 and 41 are the two false positives the rule has
+  to avoid, and both must sit inside the top BANNER_TOP (300px) or they prove nothing --
+  check that with the probe in banner-test-sites.md before trusting a pass here.
+
+  The old fixture tested a fourth condition, "no other picture on the page shares its
+  width", which v0.38.0 deleted: every measured miss came from it (homedepot.com's promo
+  banner was saved by four more promo banners, avsforum.com's masthead by the logo beneath
+  it). What replaced it is the BAND test -- width over height -- so 40's tiles are now
+  picture-shaped rather than 600x80 strips. A strip-shaped one-column gallery is the
+  documented residual cost of the deletion, not a case this page asserts.
+
+  All 38 cases below still do exactly what they did before: the grid's thumbnails are 200px
+  (under the 240px floor) and picture-shaped besides.
 -->
 <div class="case" data-expect="none" style="margin:0 0 12px">
-  <h2>39. the banner across the top of the page</h2>
-  <p class="hz good">must NOT preview: above the content, alone, and unlike anything else here</p>
-  <!--
-    The blurred backdrop copy behind the banner is not decoration on this fixture — it is the
-    test. Banners are routinely rendered twice (a soft copy behind the sharp one, or a
-    low-res placeholder left in the tree), and a copy is by definition the SAME WIDTH, so
-    without the same-src exemption the uniqueness condition is defeated by the banner's own
-    reflection and nothing is ever refused.
-  -->
-  <!--
-    The 24px icon to the left is the LibreWolf finding, 2026-09-04: with YouTube's left guide
-    open, a 24px subscription avatar sits in the same horizontal band as the 1284px banner,
-    and "nothing beside it" refused to call it a banner. An icon in a sidebar is not an item
-    in a row with a masthead. It is here at the same scale as the real one so that loosening
-    BESIDE_PEER past a quarter re-breaks the case.
-  -->
-  <div style="position:relative;padding-left:40px">
-    <img id="c39icon" src="test-images/icon.png"
-         style="position:absolute;left:0;top:21px;width:24px;height:18px">
-    <img id="c39dup" src="test-images/banner-1200x125.jpg" aria-hidden="true"
-         style="position:absolute;left:40px;top:0;width:calc(100% - 40px);height:60px;object-fit:cover;filter:blur(8px)">
-    <!--
-      The two faded slides are a rotating banner's cross-fader: stacked images of identical
-      size, different pictures, one of them on its way out. `opacity:0` and
-      `visibility:hidden` both leave a FULL-SIZE rect, so without a visibility test the page
-      holds three 1000px-wide pictures while showing one, and the banner becomes "one of a
-      set". Reported 2026-09-04 by a user looking at a page with a single image on it and
-      being told there were two. Two of them, so removing the test fails this case rather
-      than merely weakening it.
-    -->
-    <img id="c39fadeA" src="test-images/photo.jpg"
-         style="position:absolute;left:40px;top:0;width:calc(100% - 40px);height:60px;object-fit:cover;opacity:0">
-    <img id="c39fadeB" src="test-images/scene.jpg"
-         style="position:absolute;left:40px;top:0;width:calc(100% - 40px);height:60px;object-fit:cover;visibility:hidden">
-    <img id="c39" src="test-images/banner-1200x125.jpg"
-         style="position:relative;width:100%;height:60px;object-fit:cover;display:block">
-  </div>
-  <!--
-    40 is the false positive the rule has to avoid, and it has to sit HERE, inside the top
-    band, or the test proves nothing. A single-column gallery: wide pictures, high on the
-    page, with nothing beside them — three of the four banner conditions hold. The fourth is
-    the only thing between it and being wrongly refused, and it is that a banner is UNIQUE:
-    these two share a width, the banner above them shares it with nothing.
+  <h2>39. the banner across the top of the page &mdash; with 40 and 41, its two controls</h2>
+  <p class="hz good" style="margin:0 0 4px">only the wide strip in the middle row may be refused; everything else here must preview</p>
 
-    The banner is 60px tall rather than its natural 125 for exactly this reason — it has to
-    end high enough that 40's first image still starts within 200px of the document top.
-  -->
-  <h2 style="margin-top:10px">40. control for 39 — a one-column gallery, also at the top</h2>
-  <p class="hz good">must still preview: wide and alone on its line, but not unique — they match each other</p>
   <!--
-    Two DIFFERENT pictures, which is not incidental: a copy of itself is exempt from the
-    uniqueness test (see c39dup above), so a column of the same file repeated would be
-    refused. Real galleries show different pictures; a banner's twin is the same file. That
-    is the trade, and using one file twice here hid it until this fixture was run.
+    41 FIRST, because it has to be nearest the top. Two bands side by side: each is the
+    other's ROW-MATE, so neither is a banner. This is the condition that saves a row of
+    wide cards at the head of a page, and it is narrowed in v0.38.0 to require the
+    neighbour be THE SAME HEIGHT -- measured on furaffinity.net, where a 320x50 skyscraper
+    ad sat beside a 728x90 leaderboard and rescued it from refusal. Two pieces of furniture
+    sharing a horizontal band is not a row.
   -->
-  <img id="c40a" src="test-images/photo-800x600.jpg" style="width:600px;height:80px;object-fit:cover;display:block">
-  <img id="c40b" src="test-images/scene.jpg" style="width:600px;height:80px;object-fit:cover;display:block;margin-top:6px">
+  <p class="hz good" style="margin:0 0 4px">41. a row of two bands: both must preview &mdash; each is the other's row-mate</p>
+  <div style="display:flex;gap:8px">
+    <img id="c41a" src="test-images/photo-800x600.jpg" style="width:260px;height:34px;object-fit:cover">
+    <img id="c41b" src="test-images/scene.jpg" style="width:260px;height:34px;object-fit:cover">
+  </div>
+
+  <p class="hz good" style="margin:8px 0 4px">39. the banner: must NOT preview</p>
   <!--
-    THREE, not two: a column has members, two pictures of a width is a coincidence. The
-    fixture had two until 2026-09-04, when a reported page turned out to be a masthead plus
-    exactly one other picture of its width — and that alone kept it previewing.
+    Four decoys beside the banner, each killing one way the peer test could be loosened
+    into uselessness. If a change makes any of them count as a row-mate, this case fails.
+
+      c39icon   24x18   the LibreWolf finding, at real scale: with YouTube's left guide
+                        open a 24px subscription avatar sits in the same horizontal band as
+                        a 1284px banner, and "nothing beside it" refused to call it one.
+      c39sliver 60x40   same height, but 60/500 = 0.12, under BESIDE_PEER 0.15. An item in
+                        a row is a comparable size; a divider or a bullet is not.
+      c39tall   150x88  wide enough and centred in the band, but nowhere near its height --
+                        the furaffinity shape above.
+      c39ghost 150x40   would be a row-mate in every respect except that it cannot be seen.
+                        `opacity: 0` leaves a FULL-SIZE rect, and a rotating banner is very
+                        often a cross-fader built out of exactly that.
+
+    c39dup and the two fades are the same picture stacked ON the banner rather than beside
+    it -- a blurred backdrop copy and a cross-fader's outgoing slides. They must be refused
+    by the overlap test before visibility is ever consulted.
   -->
-  <img id="c40c" src="test-images/photo.png" style="width:600px;height:80px;object-fit:cover;display:block;margin-top:6px">
+  <div style="position:relative;height:88px">
+    <img id="c39icon" src="test-images/icon.png"
+         style="position:absolute;left:0;top:35px;width:24px;height:18px">
+    <img id="c39sliver" src="test-images/photo.png"
+         style="position:absolute;left:34px;top:24px;width:60px;height:40px;object-fit:cover">
+    <img id="c39tall" src="test-images/scene.jpg"
+         style="position:absolute;left:104px;top:0;width:150px;height:88px;object-fit:cover">
+    <img id="c39ghost" src="test-images/photo.webp"
+         style="position:absolute;left:264px;top:24px;width:150px;height:40px;object-fit:cover;opacity:0">
+    <img id="c39dup" src="test-images/banner-1200x125.jpg" aria-hidden="true"
+         style="position:absolute;left:424px;top:24px;width:500px;height:40px;object-fit:cover;filter:blur(8px)">
+    <img id="c39fadeA" src="test-images/photo.jpg"
+         style="position:absolute;left:424px;top:24px;width:500px;height:40px;object-fit:cover;opacity:0">
+    <img id="c39fadeB" src="test-images/sidebar-600x600.jpg"
+         style="position:absolute;left:424px;top:24px;width:500px;height:40px;object-fit:cover;visibility:hidden">
+    <img id="c39" src="test-images/banner-1200x125.jpg"
+         style="position:absolute;left:424px;top:24px;width:500px;height:40px;object-fit:cover">
+  </div>
+
+  <!--
+    40: a one-column gallery, high on the page, with nothing beside it -- conditions (1) and
+    (2) both hold and the row test is useless on it, exactly as before. What saves it now is
+    that a gallery tile is PICTURE-shaped: 600x400 is 1.5:1, under BANNER_BAND 3. That is
+    the same property that saves unsplash, flickr, pexels, wallhaven, safebooru, tumblr's
+    feed and furaffinity's artwork, all of which the old width-set rule refused.
+
+    Three DIFFERENT pictures, not one file repeated: a copy of itself is exempt from the
+    peer test, and using one file three times here would hide that.
+  -->
+  <p class="hz good" style="margin:8px 0 4px">40. a one-column gallery, also at the top: must still preview</p>
+  <img id="c40a" src="test-images/photo-800x600.jpg" style="width:600px;height:400px;object-fit:cover;display:block">
+  <img id="c40b" src="test-images/scene.jpg" style="width:600px;height:400px;object-fit:cover;display:block;margin-top:6px">
+  <img id="c40c" src="test-images/photo.png" style="width:600px;height:400px;object-fit:cover;display:block;margin-top:6px">
 </div>
 
 <h1>Hover Zoom — test cases</h1>

@@ -903,45 +903,12 @@ Measured on that page, 2026-09-03:
 v0.21.0 as unsafe. This page is why — YouTube ships `alt=""` on the banner *and* on all 23
 content thumbnails. There is nothing in the markup. **The geometry is all there is.**
 
-`bannerReason()` is four conditions, and each of the last three exists to kill a false positive
-that can be named. Together they flagged exactly one of the 24 images on that page, and zero
-after scrolling 1200 px down:
-
-1. **Top within `BANNER_TOP` (200 px) of the top of the DOCUMENT** — above where content
-   begins. Document, not viewport, or every picture drifts into the band as you scroll.
-2. **At least `BANNER_MIN` (400 px) wide on screen** — kills logos, icons, and YouTube's
-   160 px avatar (which sits at 282 and fails this too).
-3. **No PEER sits beside it** — a neighbour at least `BESIDE_PEER` (a quarter) of its width.
-   A picture with a comparable one to its left or right is one item in a row; a gallery's
-   first row is near the top of the document and can be wide, and this is what saves it. A
-   banner is a band, alone on its line.
-   **"Peer", not "anything", and that word cost a version.** Measured in LibreWolf with
-   YouTube's left guide open, 2026-09-04: a **24 px** subscription avatar sits in the band
-   beside a 1284 px banner, and the rule refused to call it a banner. An icon in a sidebar is
-   not an item in a row with a masthead. A quarter is low on purpose, so a masonry row of
-   unequal tiles still protects its widest member.
-4. **Fewer than `BANNER_SET_MIN` (2) other pictures share its width** (within
-   `BANNER_SIMILAR`, 10 %). Saves a **single-column** gallery, where (3) is useless: tiles in
-   a column all share a width, and a banner is unique on its page.
-   **Two pictures are not a set** (v0.26.0). A column has members; a masthead plus one other
-   picture of its width is a coincidence, and that coincidence was the whole of the second
-   reported failure — a 1000×557 forum masthead with exactly one 1000px neighbour. Residual
-   cost, stated because it is real: a page whose first two pictures are stacked, wide and near
-   the top loses the first. **This is the weakest of the four and the only one invented
-   defensively rather than measured — narrow it further before adding anything to it.**
-
-The page-wide scan is only reached once (1) and (2) hold, so an ordinary hover never pays for
-it — a large picture at the very top of the document is rare.
-
-**Cases 39 and 40 share one `.case` box on purpose, and 40 must stay inside it.** The rule is
-position-sensitive: 40 is the single-column-gallery false positive, and it only tests condition
-(4) if its first image starts within 200 px of the document top (measured: 183). Giving it its
-own bordered box pushes it past that and the test silently stops testing anything. The banner
-above it is forced to `height:60px` for the same reason — its natural 125 px does not leave
-room. Verified: 39 refused with the reason printed, 40 still previews.
-
-**`BANNER_TOP` is the knob if a site is missed.** A page with a tall header can put its banner
-lower than 200 px, and then nothing fires.
+**The four conditions that shipped from v0.23.0 to v0.37.0 are recorded below in the rewrite
+section, because the argument against them is only legible next to them.** In outline they were:
+top within `BANNER_TOP` (200 px) of the document top, at least `BANNER_MIN` (400 px) wide, no
+peer beside it, and **fewer than `BANNER_SET_MIN` (2) other pictures on the page share its
+width** (within `BANNER_SIMILAR`, 10 %). Together they flagged exactly one of the 24 images on
+the YouTube page, and zero after scrolling 1200 px down — which is why they looked right.
 
 **The in-app browser is not a substitute for the user's window here, and this rule is why.** The
 YouTube page was measured twice at 1265 px with the guide collapsed and the gate looked perfect
@@ -962,7 +929,7 @@ summary of one of them.**
 `bannerCheck()` returns `{ banner, why }` for both answers, and one hover line reads:
 
 ```
-"bannerGate": "not a banner: 1193×192 at 812px from the top of the document; a banner starts within 200px of the top"
+"bannerGate": "not a banner: 1193×192 (6.2:1) at 812px from the top of the document; a banner starts within 300px of the top"
 ```
 
 That names the failing condition and the number it failed on, so a cross-browser difference is
@@ -989,37 +956,170 @@ inherit**, so a faded *wrapper* leaves the image's own computed opacity at 1. It
 lazily, only for a picture that would otherwise count, so the computed-style read happens once or
 twice rather than for every image on the page.
 
-Case 39 carries two invisible slides (one `opacity:0`, one `visibility:hidden`, different
-pictures, banner width). Two of them, so removing the visibility test fails the case outright
-rather than merely weakening it — with `BANNER_SET_MIN` at 2, one phantom would not have blocked.
+The cross-fader is why `reallyVisible()` survives the v0.38.0 rewrite unchanged, though it now
+serves the row-mate test rather than a set count. Re-confirmed by the corpus: carousel-bearing
+pages at Samsung (27 slides), Best Buy (27), Allbirds (23), Newegg, Steam and AliExpress all had
+their off-screen slides and duplicate clones correctly discarded by it. **"Carousel clones form a
+set" is disproved as a failure mode** — what actually defeated the gate on those pages was
+something else entirely, and it is the subject of the next section.
 
 **Also fixed in passing:** `hoverReport` ran `bannerCheck(t)` on the hover *target* while
 `eligibleDirect` ran it on `el`. Where a cover had been looked through (`E18`) those are
 different elements, so the log described geometry no decision was made about. It is `el || t` now.
 
-**It reports the blocking neighbour's POSITION, not just its width** (v0.26.0). "another
-picture on the page is 1000px wide too" cost a full round trip: whether that neighbour is a
-column-mate below or a second masthead is the entire question, and the width alone cannot answer
-it. A success line reports near-misses too, so a page that is one neighbour away from being
-refused says so.
-
-**It reports EVERY blocker, not the first** (v0.25.0). v0.24.0 returned on the first failing
-condition, the user's log named condition (3), and fixing (3) would have said nothing about
-whether (4) also failed — a second round trip built into the design of the message. The loop now
-collects both and stops early only when both are found.
-
 ### A copy of itself is not a sibling item
 
 Banners are routinely rendered **twice** — a blurred backdrop behind the sharp one, or a low-res
-placeholder left in the tree — and a copy is by definition the same width, so condition (4) was
-being defeated by the banner's own reflection. Pictures with the same `shownUrl()` are skipped in
-both (3) and (4).
+placeholder left in the tree — and a copy is by definition the same width, so the old uniqueness
+condition was being defeated by the banner's own reflection. Pictures with the same `shownUrl()`
+are still skipped, now in the row-mate test.
 
-**The trade, and the fixture found it rather than the reasoning:** a single-column gallery of the
-*same file repeated* is now refused. Case 40 originally used one image twice out of laziness and
-started failing the moment the exemption landed; it uses two different pictures now, because a
-real gallery shows different pictures and a banner's twin is the same file. Do not "tidy" case 40
-back to one src.
+Most of the work is done by geometry instead since v0.38.0: **a copy is stacked ON the banner,
+and overlapping rects are never "beside" each other**, so the usual case never reaches the URL
+comparison. The exemption is kept for one laid out next to it, and case 39's `c39dup` proves it
+by being moved beside the banner and still refused.
+
+## The banner gate, rewritten around SHAPE (v0.38.0)
+
+**Read [`banner-test-sites.md`](banner-test-sites.md) before touching any threshold here.** It
+holds ~40 live pages probed in two browsers on 2026-09-04 — the Claude Code pane signed out at
+~1265 px, and the user's real Chrome signed in at ~1556 px with an ad blocker — each with the
+operands the gate decided on. Every number in this section sits next to a row in that file, and
+`test-resolver.js` now asserts all of them, so a moved threshold fails a named site rather than
+failing silently in the wild.
+
+**The diagnosis is one sentence: the gate reasoned about one picture's width against a bag of
+other widths, and never about the picture itself.** So every miss was a coincidence of widths and
+every false positive was the absence of one, and the two directions could not be fixed together
+because they pulled the same condition opposite ways.
+
+The corpus, in both directions:
+
+| Direction | What happened |
+|---|---|
+| **MISS** — a banner previews. Loud, and the reported bug. | homedepot.com's promo banner was saved by four *more* full-width promo banners down the page: the page is built out of banners, so the banners formed the set that proved none of them was a banner. avsforum.com's 1280×307 masthead was saved by the site logo 319 px below it and something 4,257 px down — membership asked only "is another picture this wide", with no shared x, no spacing, no distance bound. xkcd.com's store strip was saved by two unrelated 520 px images falling within 10 % of 540; nothing about the page changed, the arithmetic did. |
+| **FALSE POSITIVE** — content is refused. Silent, so nobody reports it, and the larger group. | The detail page is the reliable way to break it, because it has exactly one big picture near the top: unsplash, flickr, pexels, wallhaven, safebooru and furaffinity **all refused**. tumblr.com's first feed post too — 519 images on the page and the top one is still "alone" and "unique width", because a blog feed is a column of *differently*-sized pictures. |
+
+**FurAffinity is the sharpest page in the corpus and the one to remember: the artwork was refused
+while three ads above it previewed.** One screen, both failure directions, the exact inverse of
+what anyone wants.
+
+### The band ratio, and why it is not close
+
+A banner is a **band**: wide and short. That is a property of the picture, so nothing else on the
+page can move it. Measured across the corpus:
+
+```
+banners   steam strip 33.8   aliexpress 14.2   qc 13.6   city-data 13.1   homedepot 12.9
+          phpbb 8.9   furaffinity ad 8.1   4chan ad 7.8   youtube 6.2   spacebattles 5.9
+          bandcamp 5.4   xkcd banner 5.4   linustechtips 5.2   soundcloud 4.8   avsforum 4.2
+          newegg 4.1   natgeo 3.9   macrumors 3.5   4chan board banner 3.0
+content   nasa hero 2.4   allbirds 1.9   itch 1.8   tumblr 1.8   alrincon 1.8
+          newgrounds tile 1.7   flickr 1.6   unsplash 1.5   pexels 1.5   500px 1.5
+          wallhaven 1.5   safebooru 1.0   furaffinity artwork 1.0   artstation 0.65
+```
+
+`BANNER_BAND` is **3**, and the gap from 2.4 to 3.0 is empty. Measured from the DISPLAYED rect,
+not the natural size — `object-fit: cover` on a square file is one of the commonest ways to build
+a banner, and the natural aspect says nothing about it.
+
+**Two consequences that were free**, and are worth knowing because they used to be luck:
+artstation.com's artwork previewed only because a "more from this artist" sidebar thumbnail
+happened to sit beside it, and 500px.com's photo passed the peer test on **exact equality** —
+276 / 1104 = 0.250000 against a `>= 0.25` test, so a 275 px avatar would have refused the
+photograph. Both now pass on their own shape. So does alrincon.com's masthead-shaped page, which
+survived only because that particular day's page held three more 1000 px posts.
+
+### What was deleted, and why it cannot be repaired
+
+The width-set condition is **gone**, with `BANNER_SIMILAR` and `BANNER_SET_MIN`. Its job was
+saving a single-column gallery, where a row test is useless; the shape test does that job better,
+because gallery tiles are picture-shaped.
+
+**It was not narrowed, because narrowing it does not work, and the reasoning is worth keeping.**
+Every repair considered fails on a measured row:
+
+- *Require a shared x, or regular spacing* — Home Depot's four promo banners are all 1376 px at
+  x=90, and Samsung's three section bands are all 1265 px at x=0. A column test keeps both.
+- *Require the members be contiguous, immediately below with no content between* — this one
+  actually clears Home Depot (its first member is 315 px below the banner's bottom) and xkcd
+  (674 px). It fails on AVS Forum, whose site logo sits **4 px** below the masthead — and AVS is
+  the shape the user reported.
+
+**The general fact underneath: a stack of same-shaped bands down a page is Home Depot's promo
+column AND a hypothetical column of banner-shaped content, and no test written in layout can
+separate them.** Home Depot is measured; the column of bands is not.
+
+**Residual cost, stated because it is real:** a one-column gallery whose tiles are wider than
+3 : 1, whose first tile starts in the top 300 px, loses that first tile. If that turns up on a
+real page it is evidence to weigh — not a reason to restore a rule whose every measured effect
+was a miss.
+
+### The other three conditions, and what the corpus did to each
+
+- **`BANNER_TOP` 200 → 300.** The corpus clusters right on the old cutoff and it has no relation
+  to where content begins: newgrounds refused a content tile at 192 px and previewed the same
+  tile at 208, homedepot was caught at 197, steam's page backdrop escaped at 206, imgur's content
+  escaped at 221, samsung's hero sits at **−7**. Raising it is safe only because shape now
+  carries the decision; it picks up spacebattles' masthead at 294. **It does not go higher**, and
+  the reason is exactly two rows: xkcd's *comic* is 3.1 : 1 at 388 px down and
+  questionablecontent's is at 333. Those are the only band-shaped content in the corpus, and
+  position is the only thing that saves them.
+- **`BANNER_MIN` 400 → 240.** Real mastheads measured 250 (macrumors), 300 (4chan's rotating
+  board banner), 304 (linustechtips) and 340 (spacebattles), all escaping on width alone. 400 was
+  only ever that high because nothing else was protecting content.
+- **The peer test survives — the corpus records no failure of its direction — but is narrowed
+  twice.** It must now be the same **height** (`PEER_HEIGHT`, 30 %): on furaffinity a 320×50
+  skyscraper ad sat beside a 728×90 leaderboard and rescued it, and two pieces of furniture
+  sharing a horizontal band is not a row. And `BESIDE_PEER` drops 0.25 → 0.15, because the height
+  test independently kills the YouTube subscription avatar the quarter was invented for (24 px
+  against a 207 px banner — re-measured signed in with the guide open, `frac=0.019` against a
+  floor of 0.25, so that condition was never actually failing), while a quarter was sitting on
+  500px.com's exact geometry.
+
+### Known and accepted, so they are not re-reported as new bugs
+
+- **A full-bleed hero is content and previews** — nasa.gov (2.4 : 1), itch.io key art, allbirds.
+  `CLAUDE.md` has always said a full-width photo with text over it is a real photo; the old gate
+  refused exactly that shape, and shape now agrees with the sentence.
+- **The same rule lets samsung.com's 1280×960 hero and steam's 1266×712 app backdrop through**,
+  which the corpus lists as misses. They are 1.3 : 1 and 1.8 : 1 — pixel-for-pixel the NASA shape.
+  Nothing measurable separates a decorative backdrop from an editorial hero, so this is the
+  ambiguous end of the trade rather than an oversight.
+- **newgrounds' site backdrop art (1.4 : 1) and twitch's offline card (1.8 : 1) now preview.**
+  Both were refused before; the corpus rated the first "probably right" and noted the second is
+  caught by the video gates anyway.
+- **avsforum's second header image at 319 px is still missed** — it clears `BANNER_TOP` only
+  because the banner above it is 307 px tall.
+
+### It judges CSS backgrounds too, and that is now deliberate
+
+`CLAUDE.md` used to frame this as the narrow exception that applies to an `<img>`, against
+page-furniture rules that are "CSS backgrounds ONLY". In the code `eligibleDirect()` calls
+`bannerReason(el)` on whatever `el` is, and `bannerCheck()` only ever reads
+`getBoundingClientRect()` and `shownUrl()` — **so it has always judged backgrounds as well, and
+the docs denied it.**
+
+Keep it. Measured on soundcloud.com: the profile banner is a CSS background that escapes **all
+five** `wallpaperReason()` tests — not fixed, not tiled, `textContent` length 0, and 1208/1556 =
+78 % of the viewport against `BAND_WIDTH` 0.98 — and the banner gate is the only thing that
+catches it. At 4.8 : 1 the shape test catches it cleanly.
+
+### Testing it
+
+`bannerShape(w, h, docTop)` is split out as a **pure** function precisely so the corpus can be a
+regression suite: `test-resolver.js` slices it out of the shipped script and asserts every
+measured page plus the boundary rows. The DOM half — the row-mate test — is test-page cases
+39–41, where the banner has four decoys beside it, each killing one way the test could be
+loosened into uselessness. Verified in the browser 2026-09-04 by mutating each decoy into a
+legitimate row-mate one at a time and watching the verdict flip, and by mutating the two that
+must *not* flip (the same-src copy, the invisible slide) and watching it hold.
+
+**Cases 39, 40 and 41 share one `.case` box on purpose, and the vertical budget is the fixture.**
+All three must start within `BANNER_TOP` of the document top or they prove nothing — measured at
+1265 px: 41 at 87, the banner at 172, 40's first tile at 263. Anything added above them pushes 40
+out of the band and the test silently stops testing. Re-measure with the probe in
+`banner-test-sites.md` after any edit to that block.
 
 ## `showEvenIfNotLarger` must not show a copy of what is already on screen (v0.26.0)
 
@@ -1070,7 +1170,10 @@ an `<img>` in a `<header>` — all ordinary shapes for a picture that genuinely 
 **That boundary was stated as settled and it was too broad — see the banner section above.** It
 holds for a picture in the body of a page and does not hold for the one thing above all the
 content, which is an `<img>` on every site that has one. `bannerReason()` is the narrow
-exception, and it earns it by being four conditions rather than one.
+exception, and it earns it by asking a question these five do not: **is it a BAND** — three
+times wider than it is tall — rather than a picture. **Note the sentence above is also wrong in
+the other direction:** `bannerReason()` judges CSS backgrounds too, and soundcloud.com is the
+measured case where it is the only rule that catches one. See the v0.38.0 section above.
 
 `decorativeReason()` is separate (`skipDecorative`, on) and does apply to `<img>`: `aria-hidden="true"`
 and `role="presentation"`/`"none"` are the page stating outright that something is not content.
@@ -1330,14 +1433,23 @@ static catches it — `node --check` passes and the markup is fine.
 
 ```bash
 node --check Hover-Zoom.user.js     # syntax
-node test-resolver.js               # 114 assertions on the pure URL and video-link logic
+node test-resolver.js               # 159 assertions: the pure URL and video-link logic, plus
+                                    # the banner gate's shape test against every measured page
+                                    # in banner-test-sites.md
 python make-test-images.py          # regenerate fixtures into test-images/
 ```
 
-Browser test: `python test-server.py`, then open `http://localhost:8899/test-page.html`. 39 cases,
+Browser test: `python test-server.py`, then open `http://localhost:8899/test-page.html`. 41 cases,
 11 of which HZ+ rejects outright. (`.claude/launch.json` wraps the same command as
 `hover-zoom-test`, but `.claude/` is gitignored — a fresh clone has only the direct command.)
 
+- **Cases 39–41 are the banner gate** (v0.38.0), and all three must start within `BANNER_TOP`
+  (300 px) of the document top or they test nothing — 41 is a row of two bands that must both
+  preview, 39 is the banner with four decoys beside it that must not, 40 is a one-column gallery
+  that must. The vertical budget is part of the fixture: measured at 1265 px they sit at 87, 172
+  and 263 px down. Re-measure with the probe in [`banner-test-sites.md`](banner-test-sites.md)
+  after editing that block, and note the shape half of the gate is asserted offline in
+  `test-resolver.js` against ~40 real pages, so a threshold change fails there by site name.
 - **Cases 29–35 are the v0.21.0 gates**, and 30/31 are the ones that fail loudly if the cover
   walk is loosened: 30 puts two pictures under one cover (must show nothing), 31 puts text over a
   background (must not reach through to it). 35 lives **outside** the `.grid`, because the whole

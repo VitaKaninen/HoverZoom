@@ -108,7 +108,7 @@ arrives — nothing is decided in advance.
 | `P7` | Not page furniture — a CSS background that is part of the page rather than a picture on it (`E17`) | `skipPageBackgrounds` on |
 | `P8` | Neither the displayed URL nor any candidate is on the never-preview list | `blockList` empty |
 | `P9` | Not marked decoration by the page itself: no `aria-hidden="true"`, no `role="presentation"`/`"none"` on the element | `skipDecorative` on |
-| `P10` | Not the banner across the top of the page (`E20`) — the one furniture rule that applies to an `<img>` as well | `skipBanners` on |
+| `P10` | Not a **band** across the top of the page (`E20`) — a masthead, channel banner or leaderboard ad. The one furniture rule that applies to an `<img>` as well | `skipBanners` on |
 
 The element tested is not always the one under the pointer. When the hover target fails `P1`, a
 single picture directly beneath it in the same card is tried instead (`E18`), and that picture
@@ -118,7 +118,8 @@ A candidate that passes all ten still shows nothing unless a probe finds an imag
 `minRatio` (1.2×) bigger than what is displayed **and shaped like it** (`E19`) — see `T04`.
 
 `P7` is five separate tests, listed in `E17`. It applies to CSS backgrounds only; the one rule
-that also judges an `<img>` is `P10`, and it is deliberately much narrower.
+that also judges an `<img>` is `P10`, and it is deliberately much narrower. `P10` runs on CSS
+backgrounds too, which is not an accident — see `E20`.
 
 `P8` is checked in three places — before the spinner (`eligible`), before any candidate is probed
 (`collectCandidates`), and in the not-larger fallback — so a blocked image costs no request and
@@ -573,6 +574,52 @@ what was dragged and the picture letterboxes or spills inside it; zooming no lon
 window at all. Bounds are 48 px at the bottom and the growth ceiling at the top.
 
 
+#### E20 · The band across the top of the page
+`P10` refuses the one picture above where a page's content begins: a channel banner, a forum
+masthead, a promo strip, a leaderboard ad. Rewritten in v0.38.0 against `banner-test-sites.md`,
+~40 live pages probed in two browsers.
+
+| Test | Default | Why |
+|---|---|---|
+| Its top is within `BANNER_TOP` of the top of the **document** | 300 px | above where content begins. Document, not viewport, or every picture drifts into the band as you scroll |
+| At least `BANNER_MIN` wide on screen | 240 px | kills logos, avatars and icons. Real mastheads were measured at 250, 300, 304 and 340 px, so it cannot be much higher |
+| **It is a band** — width ÷ height at least `BANNER_BAND` | 3 : 1 | the condition that carries the decision. A banner is a strip; a picture is not |
+| Nothing of its own height sits beside it | `BESIDE_PEER` 0.15 of its width, `PEER_HEIGHT` within 30 % of its height | a picture with a comparable one to its left or right is one item in a row |
+
+**The shape test is the whole rewrite.** Until v0.38.0 the last condition was "fewer than two
+other pictures on the page share its width", and it decided both answers by coincidence:
+homedepot.com's promo banner previewed because four *more* promo banners further down formed the
+set that proved none of them was a banner, and xkcd.com's store strip previewed because two
+unrelated 520 px images happened to fall within 10 % of 540. Symmetrically, every photo site's
+detail page — unsplash, flickr, pexels, wallhaven, safebooru, furaffinity — was **refused**,
+because one big picture near the top with nothing beside it and nothing sharing its width is
+exactly a masthead by those rules. FurAffinity showed both directions on one screen: the artwork
+refused while three ads above it previewed.
+
+Measured, the two groups do not overlap. Banners run 3.0 : 1 (4chan's board banner) to 33.8 : 1
+(a Steam page strip); content runs 0.65 : 1 (an ArtStation portrait) to 2.4 : 1 (a NASA hero).
+The gap between 2.4 and 3.0 is empty.
+
+**The width-set condition was deleted, not repaired.** A stack of same-width bands down a page is
+Home Depot's promo column *and* a hypothetical column of banner-shaped content, and no layout test
+separates them. Residual cost, stated because it is real: a one-column gallery whose tiles are
+wider than 3 : 1 and whose first tile starts in the top 300 px loses that first tile.
+
+**Two conditions were also nudged by the corpus.** The row-mate must now be about the same
+**height** — on furaffinity.net a 320×50 skyscraper ad sat beside a 728×90 leaderboard and
+rescued it — and `BESIDE_PEER` dropped from a quarter to 0.15, because the height test kills the
+YouTube avatar the quarter was invented for, and a quarter was sitting on 500px.com's exact
+geometry (276 / 1104 = 0.250000, saved only by `>=`).
+
+**It judges CSS backgrounds as well as `<img>`, deliberately.** `E17` says no furniture rule
+touches an `<img>`; this is the narrow exception to that, and it runs in the other direction too.
+SoundCloud's profile banner is a 4.8 : 1 CSS background that escapes all five `E17` tests, and
+`P10` is the only thing that catches it.
+
+The `bannerGate` line in the debug log names the deciding condition and its numbers either way.
+Test-page cases 39–41 cover the DOM half (the row-mate test and its four decoys);
+`test-resolver.js` asserts the shape half against every measured page in the corpus.
+
 #### E19 · An upgrade has to be the same picture, not just a bigger file
 A bigger version of a picture keeps its proportions. Since v0.22.0 a candidate whose aspect
 ratio is more than **4×** away from the thumbnail's own is refused: it is a different image, not
@@ -785,6 +832,7 @@ Function names are used rather than line numbers, which rot.
 | 2026-09-04 | v0.37.0. **`stickBar()` is gone: the status bar sits at the frame's own bottom, always** (`E21`). Three versions of a float that held it on screen were each reported as overriding a deliberate move, and the reason is structural — a window nobody can reach and a window pushed off the bottom on purpose are the same geometry, so no position test separates them. The trap it guarded needed a frame frozen at screen size, which v0.34.0 removed: an un-resized frame shrinks on zoom-out, so scrolling back out escapes the state scrolling in created. |
 | 2026-09-04 | v0.36.0. **The status bar only floats up the frame when no strip of the frame margin is on screen** (`E21`) — "is there another handle", not "where is the frame". v0.35.0's `view.top < 0` test was too coarse: a frame taller than the viewport still has its top off screen after being dragged down, so the rescue fired on the very gesture it was meant to leave alone. Also: the bar now carries **(click this window to pin it)** while the window is only hovered, and drops it once placed (`E10`, `S05`) — a hover preview is pointer-transparent, so nothing on it invites a click. |
 | 2026-09-04 | v0.35.0. **The status bar only floats up the frame while the frame's top edge is off screen too** (`E21`). It rides the visible bottom so a frame grown past the viewport still has a title bar in reach — but a window deliberately dragged down past the bottom of the browser is not that case, and the bar floating back into the picture rather than leaving with the window was reported as a bug. `view.top < 0` separates the rescue from the override. |
+| 2026-09-04 | v0.38.0. **`E20` is rewritten around the SHAPE of the picture** and now has a section of its own. The old gate decided by comparing one width against a bag of other widths, which made both answers a coincidence — homedepot.com's promo banner previewed because four more promo banners formed a "set", and every photo site's detail page (unsplash, flickr, pexels, wallhaven, safebooru, furaffinity) was silently refused because one big picture near the top shares its width with nothing. A banner is a **band**: 3:1 or wider, measured across ~40 live pages in `banner-test-sites.md`, where banners run 3.0–33.8 and content runs 0.65–2.4 with nothing in between. The width-set condition is **deleted** — it cannot be repaired, since a stack of same-width bands is both a promo column and a gallery. `BANNER_TOP` 200 → 300 and `BANNER_MIN` 400 → 240, both of which the shape test now makes safe; the row-mate must be about the same **height** (an ad no longer rescues an ad); `BESIDE_PEER` 0.25 → 0.15, off 500px.com's exact geometry. `P10`'s judging of CSS backgrounds is now deliberate and documented rather than accidental. |
 | 2026-09-04 | v0.34.0. Three changes to the placed window, all of them reported together. **Moving it no longer freezes its size** (`T25` retired, `E22`): the frame follows the picture up to the growth ceiling for as long as the window is alive, and only a hand resize pins it (`E23`). The freeze was v0.29.0's, and v0.31.0 quietly made it fatal — once the wheel belongs to the page while hovering, zooming means placing first, placing is a press, and a press that wandered three pixels was a move, so every window was frozen at its opening size before it could be grown and `maxSizeMultiple` was unreachable. **Zoom is anchored on the pointer** rather than on the frame's centre (`E22`, `T17`), so a growing window expands away from the cursor and a shrinking one collapses towards it instead of walking its edges past the pointer and handing the wheel back to the page. **The X button is gone** (`T16`, `E25`, `E9`, `E11`) — Escape and a click outside already close a placed window, and the button sat in the corner the hand reaches for to resize. |
 | 2026-09-04 | v0.33.0. **Stored settings were being discarded on every page load** and the script ran on defaults until something opened the panel — `readSettings()` is hoisted and the `cfg` initialiser called it while `const RETIRED` was still in its temporal dead zone, so the ReferenceError was swallowed by its own catch. Broken since v0.28.0. Also: the resize strip now straddles the window edge, **6 px outside and 6 px in**, with 13 px of move band beyond it (`E25`); the status bar **no longer outranks a resize**, so the bottom corners and the bottom edge resize like every other edge, and it keeps precedence only over the middle, which is what still matters when `stickBar()` has parked it up the picture (`E21`); `bottomReserve` is retired (`E13`); the manager's menu gains **Enable/Disable for this site**, labelled by what pressing it would do; and the settings panel's Save row is sticky. |
 | 2026-09-04 | v0.32.0. **Moving a window now sets a size CEILING rather than a fixed size** (`T25`, `E22`): zoom out afterwards and the whole window shrinks with the picture the way it did before the move, zoom back in and it stops at the size it was given. `reflow()` gains a third mode for it — `sizeLock` is free, `'max'`, or `'exact'`. **A hand resize is the `'exact'` one** (`E23`) and is the only thing that pins the edges. **And a hand resize is now free-aspect, with Shift to keep the shape** — the reverse of before; the lock existed because a one-axis drag grew bands of background, which `E26` has since made an ordinary state rather than an incoherent one. |

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.37.0
+// @version     0.38.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -2777,63 +2777,146 @@
     // the markup — no role, no aria-hidden, and alt="" is on every image YouTube renders
     // including the video thumbnails, so it separates nothing. The geometry is all there is.
     //
-    // FOUR conditions, and each of the last three exists to kill a false positive that can
-    // be named. Together they flagged exactly one of the 24 images on that page.
+    // REWRITTEN IN v0.38.0 AGAINST A MEASURED CORPUS — see `banner-test-sites.md`, which
+    // holds ~40 live pages probed in two browsers on 2026-09-04, with the operands the old
+    // gate decided on. Read it before touching any number here; every threshold below is
+    // sitting next to a row in that file.
+    //
+    // The old gate was four conditions: near the top, at least 400px wide, nothing beside
+    // it, and FEWER THAN TWO OTHER PICTURES ON THE PAGE SHARE ITS WIDTH. The corpus says
+    // what is wrong with it in one sentence: **it reasoned about one picture's width against
+    // a bag of other widths, and never about the picture itself.** So every miss was a
+    // coincidence of widths and every false positive was the absence of one:
+    //
+    //  - homedepot.com's promo banner previewed because four MORE full-width promo banners
+    //    down the page formed the "set" that proved none of them was a banner. A page built
+    //    out of banners inverts the condition completely.
+    //  - avsforum.com's 1280×307 masthead was saved by the site logo below it and something
+    //    4,257px down the page. Membership asked only "is another picture this wide" — no
+    //    shared x, no spacing, no distance bound.
+    //  - xkcd.com's store banner previewed because two unrelated 520px images happened to
+    //    fall within 10% of 540. Nothing about the page changed; the arithmetic did.
+    //  - and symmetrically: unsplash, flickr, pexels, wallhaven, safebooru and furaffinity
+    //    DETAIL pages were all refused, because one big picture near the top with nothing
+    //    beside it and nothing sharing its width is exactly a masthead by those four rules.
+    //    FurAffinity is the sharpest: the artwork was refused while three ads above it
+    //    previewed — the precise inverse of what anyone wants, on one screen.
+    //
+    // THE REPLACEMENT IS THE SHAPE OF THE PICTURE, which is a property of the thing itself
+    // and cannot be moved by what else the page happens to hold. A banner is a BAND: wide
+    // and short. Measured across the corpus the separation is not close —
+    //
+    //   banners      homedepot 12.9:1  city-data 13.1  qc 13.6  aliexpress 14.2  steam 33.8
+    //                furaffinity ad 8.1  phpbb 8.9  4chan ad 7.8  youtube 6.2  bandcamp 5.4
+    //                xkcd 5.4  spacebattles 5.9  linustechtips 5.2  avsforum 4.2  newegg 4.1
+    //                soundcloud 4.8  natgeo 3.9  macrumors 3.5  4chan board banner 3.0
+    //   content      nasa hero 2.4  allbirds 1.9  itch 1.8  tumblr 1.8  alrincon 1.8
+    //                newgrounds tile 1.7  flickr 1.6  unsplash 1.5  pexels 1.5  500px 1.5
+    //                wallhaven 1.5  safebooru 1.0  furaffinity artwork 1.0  artstation 0.65
+    //
+    // — a clean gap between 3.0 and 2.4 with nothing in it. So:
     //
     //  1. Its top is within BANNER_TOP of the top of the DOCUMENT — above where a page's
     //     content begins. Document, not viewport: scrolled down, an ordinary picture would
-    //     otherwise drift into the band.
-    //  2. At least BANNER_MIN wide on screen. Kills logos, avatars (YouTube's is 160 px and
-    //     sits at 282), and every icon.
-    //  3. NO PEER SITS BESIDE IT. A picture with a comparable one to its left or right is
-    //     one item in a row — a gallery's first row is near the top of the document and can
-    //     be wide, and this is what saves it. A banner is a band; it is alone on its line.
-    //     PEER, not "anything": measured in LibreWolf on the YouTube page with the left
-    //     guide open, a **24 px** subscription avatar sits in the band beside a 1284 px
-    //     banner and defeated this outright. An icon in a sidebar is not an item in a row
-    //     with a masthead. `BESIDE_PEER` is the floor, deliberately low (a quarter) so that
-    //     a masonry row of unequal tiles still protects its own widest member.
-    //  4. FEWER THAN `BANNER_SET_MIN` OTHER PICTURES ON THE PAGE ARE ITS WIDTH. Saves a
-    //     single-column gallery, where (3) is useless: tiles in a column are all the same
-    //     width, and a banner is unique. Ten per cent counts as the same width.
-    //     TWO PICTURES ARE NOT A SET. A column has many members; a page with a masthead and
-    //     one other picture of the same width has a coincidence. Measured 2026-09-04 on the
-    //     reported forum: a 1000×557 masthead with exactly one other 1000px picture on the
-    //     page, and this condition alone kept it previewing. Note the residual cost — a page
-    //     whose first two pictures are stacked, wide, and near the top loses the first.
-    //     This is the weakest of the four conditions and the only one invented defensively
-    //     rather than measured; narrow it further before adding anything to it.
+    //     otherwise drift into the band. RAISED 200 → 300 because the shape test now carries
+    //     the decision and the old cutoff was cutting through the middle of the corpus:
+    //     newgrounds refused a content tile at 192px and previewed the same tile at 208,
+    //     homedepot's banner was caught at 197 and steam's page backdrop escaped at 206.
+    //     300 picks up spacebattles' masthead at 294. It does not go higher because xkcd's
+    //     COMIC is 3.1:1 at 388px down and questionablecontent's is at 333 — those two are
+    //     the only measured content that is band-shaped, and position is all that saves them.
+    //  2. At least BANNER_MIN wide on screen. LOWERED 400 → 240: the corpus measured real
+    //     mastheads at 250 (macrumors), 300 (4chan's rotating board banner), 304
+    //     (linustechtips) and 340 (spacebattles), all escaping on width alone, and 400 was
+    //     only ever that high because nothing else was protecting content.
+    //  3. IT IS A BAND — width ÷ height at least BANNER_BAND. This is the new condition and
+    //     it is the one doing the work. It is what refuses homedepot and xkcd, which nothing
+    //     that looks at other pictures ever could, and it is what lets every photo-site
+    //     detail page through without depending on a coincidence.
+    //  4. NO ROW-MATE SITS BESIDE IT. A picture with a comparable one to its left or right
+    //     is one item in a row. Kept — the corpus records no failure of its direction — but
+    //     narrowed twice:
+    //       - THE ROW-MATE MUST BE THE SAME HEIGHT (within PEER_HEIGHT). Items in a row are;
+    //         furniture that merely shares a horizontal band is not. This is what stops
+    //         furaffinity's 320×50 skyscraper ad from rescuing the 728×90 leaderboard beside
+    //         it, the one measured miss on this condition.
+    //       - BESIDE_PEER drops 0.25 → 0.15, because the height test now independently kills
+    //         the case the quarter-width floor was invented for (YouTube's 24px subscription
+    //         avatar beside a 1284×207 banner: 24 against 207 is nowhere near). 0.25 was the
+    //         single most fragile number in the corpus — 500px.com's photo page passed it on
+    //         EXACT equality, 276 / 1104 = 0.250000, so a 275px avatar would have refused the
+    //         photograph. It is moot now (the photo is 1.5:1 and never reaches this test) but
+    //         a threshold sitting on a real site's geometry is not a threshold.
     //
-    // The page-wide scan is only reached once (1) and (2) hold, so it costs nothing on an
-    // ordinary hover — a large picture at the very top of the document is rare.
+    // WHAT WAS DELETED, and the cost, stated plainly. The old condition (4) — "fewer than two
+    // other pictures share its width" — is GONE, with `BANNER_SIMILAR` and `BANNER_SET_MIN`.
+    // It existed to save a single-column gallery, where a row test is useless; the shape test
+    // does that job better, since gallery tiles are picture-shaped. It cannot be repaired: a
+    // stack of same-width bands down a page is Home Depot's promo column AND a hypothetical
+    // column of banner-shaped content, and no layout test separates them. Home Depot is
+    // measured; the column of bands is not. RESIDUAL COST: a one-column gallery whose tiles
+    // are wider than 3:1, whose first tile starts in the top 300px, loses that first tile.
+    // If that ever turns up on a real page, it is evidence to weigh — not a reason to bring
+    // back a rule whose every measured effect was a miss.
+    //
+    // The page-wide scan is only reached once (1), (2) and (3) hold, so it costs nothing on
+    // an ordinary hover — a band-shaped picture at the top of the document is rare.
     //
     // Unlike the background rules this DOES apply to an <img>, which is a deliberate
     // narrowing of "a full-width photo is still a photo": that stays true of a photo in the
     // body of a page, and stops being true of the one thing above all the content that is
-    // as wide as the page and resembles nothing else on it.
-    const BANNER_TOP = 200;         // px from the top of the document
-    const BANNER_MIN = 400;         // px wide on screen
-    const BANNER_SIMILAR = 0.1;     // widths within 10% are "the same width"
-    const BESIDE_PEER = 0.25;       // a neighbour this fraction of the width is an item in a row
-    const BANNER_SET_MIN = 2;       // this many OTHER pictures of one width make it a set
+    // as wide as the page and shaped like nothing else on it. IT ALSO APPLIES TO CSS
+    // BACKGROUNDS, which `CLAUDE.md` used to deny — `eligibleDirect()` calls it on whatever
+    // was hovered, and it only ever reads `getBoundingClientRect()`. That is now deliberate
+    // rather than accidental: soundcloud's profile banner (4.8:1) escapes all five
+    // `wallpaperReason()` tests and is caught correctly here, and it is the only thing that
+    // catches it.
+    const BANNER_TOP = 300;         // px from the top of the document
+    const BANNER_MIN = 240;         // px wide on screen
+    const BANNER_BAND = 3;          // width ÷ height — below this it is picture-shaped
+    const BESIDE_PEER = 0.15;       // a neighbour this fraction of the width may be a row-mate
+    const PEER_HEIGHT = 0.3;        // ...and only if its height is within this much of ours
+
+    // Conditions (1) to (3) — everything that needs only the picture's OWN rectangle, and
+    // therefore nothing from the DOM at all. Split out so `test-resolver.js` can slice it
+    // and run it offline, which is what turns `banner-test-sites.md` from a document into a
+    // regression suite: ~40 measured live pages, each asserted here as three numbers and an
+    // expected answer. A threshold that is moved without a reason now fails a named site.
+    //
+    // The band ratio is measured from the DISPLAYED rect, not the natural size. A banner is
+    // a band because of how the page lays it out — `object-fit: cover` on a square file is
+    // one of the commonest ways to build one — and the natural aspect says nothing about it.
+    function bannerShape(w, h, docTop) {
+        const band = h > 0 ? w / h : 0;
+        const where = Math.round(w) + '×' + Math.round(h) + ' (' + band.toFixed(1) + ':1) at ' +
+            Math.round(docTop) + 'px from the top of the document';
+        if (w < BANNER_MIN || h < 2)
+            return { band: false, why: where + '; a banner is at least ' + BANNER_MIN + 'px wide' };
+        if (docTop > BANNER_TOP)
+            return { band: false, why: where + '; a banner starts within ' + BANNER_TOP + 'px of the top' };
+        if (band < BANNER_BAND)
+            return { band: false, why: where + '; a banner is a band of at least ' +
+                BANNER_BAND + ':1, and this is picture-shaped' };
+        return { band: true, why: where };
+    }
 
     // Returns WHICH condition decided and the numbers it decided on, for both answers.
     // A bare "not a banner" is useless in a bug report — the whole class of report this
     // exists for is "it works in your browser and not in mine", where the only thing that
     // can settle it is the operands the gate actually saw on the machine showing the bug.
     // Same rule as the video log: print the operands, not a summary of one of them.
-    // A PICTURE NOBODY CAN SEE IS NOT BESIDE ANYTHING, AND IS NOT A MEMBER OF A SET.
     //
-    // `opacity: 0` and `visibility: hidden` both leave a full-size rectangle behind, so a
-    // zero-size filter does not catch them. That matters here more than anywhere else,
-    // because the elements this gate judges are BANNERS and a rotating banner is very often
-    // a cross-fader: two stacked <img> of identical size, one fading out. Different URLs, so
-    // the same-src exemption below misses it, and the page then holds "two 1000px pictures"
-    // while showing one — which is exactly what a user looking at their own page will
-    // (correctly) tell you is impossible.
+    // A PICTURE NOBODY CAN SEE IS NOT BESIDE ANYTHING. `opacity: 0` and `visibility: hidden`
+    // both leave a full-size rectangle behind, so a zero-size filter does not catch them.
+    // That matters here more than anywhere else, because the elements this gate judges are
+    // BANNERS and a rotating banner is very often a cross-fader: stacked <img> of identical
+    // size, one fading out. Confirmed still earning its place by the 2026-09-04 corpus —
+    // carousel-bearing pages at Samsung (27 slides), Best Buy (27), Allbirds (23), Newegg,
+    // Steam and AliExpress all had their off-screen slides and duplicate clones correctly
+    // discarded by this.
     //
-    // Called lazily, only for a picture that would otherwise count, so the computed-style
-    // read happens once or twice rather than for every image on the page.
+    // Called last of all the peer tests, so the computed-style read happens at most once or
+    // twice per hover rather than for every image on the page.
     function reallyVisible(n) {
         if (n.checkVisibility)
             return n.checkVisibility({ opacityProperty: true, visibilityProperty: true });
@@ -2849,61 +2932,49 @@
 
     function bannerCheck(el) {
         const r = el.getBoundingClientRect();
-        const w = Math.round(r.width);
-        const docTop = Math.round(r.top + (window.scrollY || 0));
-        const where = w + '×' + Math.round(r.height) + ' at ' + docTop + 'px from the top of the document';
-        if (r.width < BANNER_MIN || r.height < 2)
-            return { banner: false, why: where + '; a banner is at least ' + BANNER_MIN + 'px wide' };
-        if (docTop > BANNER_TOP)
-            return { banner: false, why: where + '; a banner starts within ' + BANNER_TOP + 'px of the top' };
+        const shape = bannerShape(r.width, r.height, r.top + (window.scrollY || 0));
+        if (!shape.band) return { banner: false, why: shape.why };
+        const where = shape.why;
         const src = shownUrl(el) || '';
         const lists = [document.getElementsByTagName('img'), document.getElementsByTagName('video')];
-        // BOTH blockers are collected rather than returning on the first. A log that names
-        // only the first failing condition costs a round trip every time the next one also
-        // fails — which is exactly what happened between v0.24.0 and this version.
-        let beside = 0;
-        const sameWidth = [];
-        for (let l = 0; l < lists.length; l++) {
+        let beside = null;
+        for (let l = 0; l < lists.length && !beside; l++) {
             for (let i = 0; i < lists[l].length; i++) {
-                if (beside && sameWidth.length >= BANNER_SET_MIN) break;
                 const n = lists[l][i];
                 if (n === el) continue;
                 const q = n.getBoundingClientRect();
                 if (q.width < 2 || q.height < 2) continue;
-                // A COPY OF ITSELF IS NOT A SIBLING ITEM. Banners are routinely rendered
-                // twice — a blurred backdrop behind the sharp one, or a low-res placeholder
-                // left in the tree — and the copy is by definition the same width, which
-                // would defeat the uniqueness test with the banner's own reflection.
-                if (src && (shownUrl(n) || '') === src) continue;
-                let vis = null;
-                const onScreen = function () {
-                    if (vis === null) vis = reallyVisible(n);
-                    return vis;
-                };
+                // Cheap geometry first: the expensive reads (shownUrl, computed style) are
+                // only paid for a candidate that has already passed every shape test.
+                if (q.width < r.width * BESIDE_PEER) continue;
+                // SAME HEIGHT, or it is not a row-mate. Measured on furaffinity.net, where a
+                // 320×50 skyscraper ad sat beside a 728×90 leaderboard and rescued it from
+                // refusal — two pieces of furniture sharing a horizontal band is not a row.
+                if (Math.abs(q.height - r.height) > Math.max(q.height, r.height) * PEER_HEIGHT)
+                    continue;
                 const mid = q.top + q.height / 2;
-                if (!beside && q.width >= r.width * BESIDE_PEER &&
-                    mid >= r.top && mid <= r.bottom && (q.right <= r.left || q.left >= r.right) &&
-                    onScreen())
-                    beside = q.width;
-                if (Math.abs(q.width - r.width) <= r.width * BANNER_SIMILAR && onScreen())
-                    // WHERE it is, not just that it exists. "another picture is 1000px wide
-                    // too" cost a whole round trip on 2026-09-04 — whether that neighbour is
-                    // a column-mate below or a second masthead is the entire question, and
-                    // the width alone cannot answer it.
-                    sameWidth.push(Math.round(q.width) + 'px at x=' + Math.round(q.left) +
-                        ', ' + Math.round(q.top + (window.scrollY || 0)) + 'px down');
+                if (mid < r.top || mid > r.bottom) continue;
+                // BESIDE, not on top of. Overlapping rects are a stack — a cross-fader's
+                // outgoing slide, a blurred backdrop copy — never an item in a row.
+                if (q.right > r.left && q.left < r.right) continue;
+                // A COPY OF ITSELF IS NOT A SIBLING ITEM. Banners are routinely rendered
+                // twice, a blurred backdrop behind the sharp one or a low-res placeholder
+                // left in the tree; the overlap test above catches the usual stacked case,
+                // this catches one laid out beside it.
+                if (src && (shownUrl(n) || '') === src) continue;
+                // A PICTURE NOBODY CAN SEE IS NOT BESIDE ANYTHING. `opacity: 0` and
+                // `visibility: hidden` both leave a full-size rect behind, and a rotating
+                // banner is very often a cross-fader built out of exactly those.
+                if (!reallyVisible(n)) continue;
+                beside = Math.round(q.width) + '×' + Math.round(q.height) + ' at x=' +
+                    Math.round(q.left);
+                break;
             }
         }
-        const blockers = [];
-        if (beside) blockers.push('a ' + Math.round(beside) + 'px picture sits beside it, so this ' +
-            'is one item in a row');
-        if (sameWidth.length >= BANNER_SET_MIN) blockers.push(sameWidth.length + ' other pictures ' +
-            'share its width (' + sameWidth.join('; ') + '), so this is one of a set');
-        if (blockers.length) return { banner: false, why: where + ', but ' + blockers.join('; and ') };
-        return { banner: true, why: where + ', alone on its line, and ' + (sameWidth.length
-            ? sameWidth.length + ' other picture(s) share its width (' + sameWidth.join('; ') +
-              '), which is under the ' + BANNER_SET_MIN + ' that would make it a set'
-            : 'no other picture on the page is its width') };
+        if (beside) return { banner: false, why: where + ', but a ' + beside +
+            ' picture of the same height sits beside it, so this is one item in a row' };
+        return { banner: true, why: where + ' — a band above where the page\'s content ' +
+            'begins, with nothing of its height beside it' };
     }
 
     function bannerReason(el) {
@@ -3734,12 +3805,14 @@
             'text is sitting on. Never applies to an <img> — a full-width photo with a ' +
             'caption over it is still a photo');
         check('skipBanners', 'Never preview the banner across the top of a page',
-            'a channel banner, a forum masthead, a site header image. Recognised by shape ' +
-            'rather than by name: it sits above where the page\'s content begins, is at ' +
-            'least 400px wide, has nothing beside it, and no other picture on the page is ' +
-            'its width. The last two are what keep a gallery\'s first row — and a ' +
-            'single-column gallery — out of it. This is the only rule of its kind that ' +
-            'applies to an <img> as well as to a background');
+            'a channel banner, a forum masthead, a site header image, a leaderboard ad. ' +
+            'Recognised by shape rather than by name: it sits in the top 300px of the ' +
+            'document, is at least 240px wide, is a BAND — three times as wide as it is ' +
+            'tall — and has nothing of its own height beside it. The band test is what ' +
+            'keeps a photo page\'s picture, a blog feed\'s first post and a gallery\'s ' +
+            'first tile out of it, since those are picture-shaped rather than strip-shaped. ' +
+            'This is the only rule of its kind that applies to an <img> as well as to a ' +
+            'background');
         check('skipDecorative', 'Skip images the page marks as decoration',
             'aria-hidden="true" and role="presentation" are the page saying outright that ' +
             'something is not content. Read only on the image itself, never inherited — ' +
