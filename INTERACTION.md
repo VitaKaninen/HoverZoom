@@ -404,7 +404,7 @@ so the markup says nothing. Recognised by shape instead, four conditions togethe
 | Top within 200 px of the top of the **document** | anything below where content begins |
 | At least 400 px wide on screen | logos, icons, avatars (YouTube's is 160 px) |
 | No picture at least a quarter of its width sits beside it | a gallery's first row, which is also near the top and can be wide. A 24px sidebar avatar is not an item in a row with a masthead |
-| No other picture on the page shares its width (±10 %) | a single-column gallery, where the row test is useless |
+| Fewer than two other pictures share its width (±10 %) | a single-column gallery, where the row test is useless. Two pictures of a width are a coincidence, not a set |
 
 A picture with the **same URL** as the candidate is exempt from the last two: banners are often
 rendered twice — a blurred backdrop, a low-res placeholder — and a copy is the same width, so
@@ -617,6 +617,7 @@ Function names are used rather than line numbers, which rot.
 
 | Date | Change |
 |---|---|
+| 2026-09-04 | v0.26.0. Two fixes for one reported page, a forum masthead. `E20` condition four now needs two other pictures of a width before calling it a set — the page had exactly one. And `showEvenIfNotLarger` no longer shows the displayed image back at its own size: that setting means "at natural size even though it is not much bigger", not "an identical copy", and it was the only thing producing a preview there at all. |
 | 2026-09-04 | v0.25.0. `E20` condition three now ignores a neighbour under a quarter of the candidate's width: measured in LibreWolf with YouTube's left guide open, a 24px subscription avatar sat in the banner's band and defeated the whole rule. The gate also reports every failing condition rather than the first, because naming only one guarantees a second round trip. |
 | 2026-09-04 | v0.24.0. `E20` unchanged in behaviour except that a copy of the banner no longer counts against its uniqueness; what changed is the reporting — `bannerGate` now names the deciding condition and its numbers whichever way it goes, because the first report after v0.23.0 was "excluded in Chrome and Firefox, not in LibreWolf" and a bare "not a banner" cannot answer that. |
 | 2026-09-04 | v0.23.0. New `P10`/`E20` — the banner across the top of a page. v0.21.0 declared that no furniture rule would ever judge an `<img>`, which was reasoned from one example rather than measured, and it made both `E17` and `E19` unable to see the thing the user was actually reporting: a YouTube channel banner is an `<img>`, with nothing in its markup to distinguish it from a video thumbnail. |

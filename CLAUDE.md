@@ -512,9 +512,15 @@ after scrolling 1200 px down:
    beside a 1284 px banner, and the rule refused to call it a banner. An icon in a sidebar is
    not an item in a row with a masthead. A quarter is low on purpose, so a masonry row of
    unequal tiles still protects its widest member.
-4. **No other picture on the page is its width** (within `BANNER_SIMILAR`, 10 %). The one that
-   saves a **single-column** gallery, where (3) is useless: tiles in a column all share a
-   width, and a banner is unique on its page.
+4. **Fewer than `BANNER_SET_MIN` (2) other pictures share its width** (within
+   `BANNER_SIMILAR`, 10 %). Saves a **single-column** gallery, where (3) is useless: tiles in
+   a column all share a width, and a banner is unique on its page.
+   **Two pictures are not a set** (v0.26.0). A column has members; a masthead plus one other
+   picture of its width is a coincidence, and that coincidence was the whole of the second
+   reported failure — a 1000×557 forum masthead with exactly one 1000px neighbour. Residual
+   cost, stated because it is real: a page whose first two pictures are stacked, wide and near
+   the top loses the first. **This is the weakest of the four and the only one invented
+   defensively rather than measured — narrow it further before adding anything to it.**
 
 The page-wide scan is only reached once (1) and (2) hold, so an ordinary hover never pays for
 it — a large picture at the very top of the document is rare.
@@ -554,6 +560,12 @@ summary of one of them.**
 That names the failing condition and the number it failed on, so a cross-browser difference is
 one paste rather than a round trip. `bannerReason()` is a thin wrapper for the gate itself.
 
+**It reports the blocking neighbour's POSITION, not just its width** (v0.26.0). "another
+picture on the page is 1000px wide too" cost a full round trip: whether that neighbour is a
+column-mate below or a second masthead is the entire question, and the width alone cannot answer
+it. A success line reports near-misses too, so a page that is one neighbour away from being
+refused says so.
+
 **It reports EVERY blocker, not the first** (v0.25.0). v0.24.0 returned on the first failing
 condition, the user's log named condition (3), and fixing (3) would have said nothing about
 whether (4) also failed — a second round trip built into the design of the message. The loop now
@@ -571,6 +583,33 @@ both (3) and (4).
 started failing the moment the exemption landed; it uses two different pictures now, because a
 real gallery shows different pictures and a banner's twin is the same file. Do not "tidy" case 40
 back to one src.
+
+## `showEvenIfNotLarger` must not show a copy of what is already on screen (v0.26.0)
+
+The second reported page's only preview came from here, and the log said so outright:
+
+```
+hit (not larger — shown anyway) { url: …/74.jpg, w: 1000, h: 557,
+                                  from: "the displayed src itself (shown anyway — not larger)" }
+target: IMG, targetRect: "161,60 1000×557"
+```
+
+Displayed 1000×557, natural 1000×557, **same URL**. The frame was holding the identical bytes at
+the identical scale, floating over the picture they were copied from. `showEvenIfNotLarger` means
+"display it at natural size even though it does not clear `minRatio`" — it never meant "display a
+pixel-for-pixel copy", and `resolve()`'s fallback had no size comparison of any kind.
+
+The guard is `dim.w <= displayed.w && dim.h <= displayed.h` — no bigger in *either* dimension, so
+a picture that is genuinely a little larger still shows under that setting.
+
+**Only the fallback gets this, never the main loop.** The loop's own escape is
+`showEvenIfNotLarger && !isSameAsShown`, and a *different* URL at the same pixel size can be a
+better answer — that is exactly imgur's `.webp` (static) versus `.jpg` (animated) at 412×360.
+Same size, different picture, and worth showing.
+
+Verified with case 13 (an original displayed at its own natural size) and the setting on: no
+preview, and one log line saying why. Case 1 still previews, and case 25 — the linked page's
+not-size-checked answer — is untouched, because that arrives through `trusted` rather than here.
 
 ## What counts as a page background (v0.21.0)
 

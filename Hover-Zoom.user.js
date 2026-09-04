@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.25.0
+// @version     0.26.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -935,6 +935,19 @@
             const dim = await probe(shown);
             if (dim && native && (dim.w !== native.w || dim.h !== native.h)) {
                 markUnstable(shown, native, dim);
+            } else if (dim && dim.w <= displayed.w && dim.h <= displayed.h) {
+                // NOTHING TO SHOW. `showEvenIfNotLarger` means "display it at natural size
+                // even though it does not clear minRatio" — it does not mean "display a
+                // pixel-for-pixel copy of what is already on screen". This branch is the
+                // only one where the candidate is the SAME URL as the thumbnail, so when it
+                // is also the same size the frame would hold the identical bytes at the
+                // identical scale, floating over the picture they were copied from.
+                // Reported 2026-09-04: a 1000×557 masthead served at exactly 1000×557,
+                // where this was the only thing producing a preview at all.
+                dbg('nothing to show — the original is no bigger than what is on screen', {
+                    url: shown, onScreen: displayed.w + '×' + displayed.h,
+                    original: dim.w + '×' + dim.h,
+                });
             } else if (dim) {
                 best = { url: shown, w: dim.w, h: dim.h, video: !!dim.video, duration: dim.duration,
                     from: 'the displayed src itself (shown anyway — not larger)' };
@@ -2250,9 +2263,16 @@
     //     banner and defeated this outright. An icon in a sidebar is not an item in a row
     //     with a masthead. `BESIDE_PEER` is the floor, deliberately low (a quarter) so that
     //     a masonry row of unequal tiles still protects its own widest member.
-    //  4. NO OTHER PICTURE ON THE PAGE IS ITS WIDTH. This is the one that saves a
+    //  4. FEWER THAN `BANNER_SET_MIN` OTHER PICTURES ON THE PAGE ARE ITS WIDTH. Saves a
     //     single-column gallery, where (3) is useless: tiles in a column are all the same
-    //     width, and a banner is unique on the page. Ten per cent counts as the same.
+    //     width, and a banner is unique. Ten per cent counts as the same width.
+    //     TWO PICTURES ARE NOT A SET. A column has many members; a page with a masthead and
+    //     one other picture of the same width has a coincidence. Measured 2026-09-04 on the
+    //     reported forum: a 1000×557 masthead with exactly one other 1000px picture on the
+    //     page, and this condition alone kept it previewing. Note the residual cost — a page
+    //     whose first two pictures are stacked, wide, and near the top loses the first.
+    //     This is the weakest of the four conditions and the only one invented defensively
+    //     rather than measured; narrow it further before adding anything to it.
     //
     // The page-wide scan is only reached once (1) and (2) hold, so it costs nothing on an
     // ordinary hover — a large picture at the very top of the document is rare.
@@ -2265,6 +2285,7 @@
     const BANNER_MIN = 400;         // px wide on screen
     const BANNER_SIMILAR = 0.1;     // widths within 10% are "the same width"
     const BESIDE_PEER = 0.25;       // a neighbour this fraction of the width is an item in a row
+    const BANNER_SET_MIN = 2;       // this many OTHER pictures of one width make it a set
 
     // Returns WHICH condition decided and the numbers it decided on, for both answers.
     // A bare "not a banner" is useless in a bug report — the whole class of report this
@@ -2285,9 +2306,11 @@
         // BOTH blockers are collected rather than returning on the first. A log that names
         // only the first failing condition costs a round trip every time the next one also
         // fails — which is exactly what happened between v0.24.0 and this version.
-        let beside = 0, similar = 0;
+        let beside = 0;
+        const sameWidth = [];
         for (let l = 0; l < lists.length; l++) {
-            for (let i = 0; i < lists[l].length && !(beside && similar); i++) {
+            for (let i = 0; i < lists[l].length; i++) {
+                if (beside && sameWidth.length >= BANNER_SET_MIN) break;
                 const n = lists[l][i];
                 if (n === el) continue;
                 const q = n.getBoundingClientRect();
@@ -2301,18 +2324,25 @@
                 if (!beside && q.width >= r.width * BESIDE_PEER &&
                     mid >= r.top && mid <= r.bottom && (q.right <= r.left || q.left >= r.right))
                     beside = q.width;
-                if (!similar && Math.abs(q.width - r.width) <= r.width * BANNER_SIMILAR)
-                    similar = q.width;
+                if (Math.abs(q.width - r.width) <= r.width * BANNER_SIMILAR)
+                    // WHERE it is, not just that it exists. "another picture is 1000px wide
+                    // too" cost a whole round trip on 2026-09-04 — whether that neighbour is
+                    // a column-mate below or a second masthead is the entire question, and
+                    // the width alone cannot answer it.
+                    sameWidth.push(Math.round(q.width) + 'px at x=' + Math.round(q.left) +
+                        ', ' + Math.round(q.top + (window.scrollY || 0)) + 'px down');
             }
         }
         const blockers = [];
         if (beside) blockers.push('a ' + Math.round(beside) + 'px picture sits beside it, so this ' +
             'is one item in a row');
-        if (similar) blockers.push('another picture on the page is ' + Math.round(similar) +
-            'px wide too, so this is one of a set');
+        if (sameWidth.length >= BANNER_SET_MIN) blockers.push(sameWidth.length + ' other pictures ' +
+            'share its width (' + sameWidth.join('; ') + '), so this is one of a set');
         if (blockers.length) return { banner: false, why: where + ', but ' + blockers.join('; and ') };
-        return { banner: true, why: where + ', alone on its line, and no other picture on the page ' +
-            'is its width' };
+        return { banner: true, why: where + ', alone on its line, and ' + (sameWidth.length
+            ? sameWidth.length + ' other picture(s) share its width (' + sameWidth.join('; ') +
+              '), which is under the ' + BANNER_SET_MIN + ' that would make it a set'
+            : 'no other picture on the page is its width') };
     }
 
     function bannerReason(el) {
