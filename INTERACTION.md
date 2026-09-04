@@ -3,7 +3,7 @@
 What the preview **window** does, as a state machine. Menus, buttons, the status bar contents and
 the loading ring are out of scope except where they change what the window itself accepts.
 
-Describes `Hover-Zoom.user.js` **v0.35.0**.
+Describes `Hover-Zoom.user.js` **v0.36.0**.
 
 ---
 
@@ -430,12 +430,20 @@ bar somewhere below the bottom of the screen. Every gesture is a pan and only Es
 out. Measured: a 2512 × 1392 frame at (−671, −444) on a 1265 × 705 viewport, its own bottom edge
 at 948 and the bar held at 704.
 
-**The `view.top < 0` half is v0.35.0, and it is what stops the rescue overriding you.** Drag a
-placed window down past the bottom of the browser and the bar used to float back up inside the
-picture, so it could never leave the screen. If the frame's top edge is on screen the top of the
-margin is in reach and the window can always be dragged back, so nothing needs rescuing and the
-bar stays where it was put; the trap is only reachable when the frame covers the viewport top to
-bottom. Measured: dragged to `top: 504` on a 705 px viewport, the bar's rect bottom is 1200.
+**The condition is "no other handle is in reach", and that is v0.36.0.** Drag a placed window
+down past the bottom of the browser and the bar used to float back up inside the picture, so it
+could never leave the screen. The frame margin moves the window at any zoom and runs all the way
+round it (`E25`), so one visible strip of it means the window can always be dragged back and
+nothing needs rescuing — the bar then stays at the bottom of the window and goes off screen with
+it. The trap is only reachable when the frame covers the **entire** viewport. `frameMargin: 0`
+draws no ring, and there the bar keeps the old unconditional rescue because it really is the only
+handle. Measured on 1265 × 705: a 1228 × 921 frame at `top: −108` rides down to a bar bottom of
+1312; a 2512 × 1392 frame at (−671, −344) still holds its bar at 704.
+
+The bar also carries **(click this window to pin it)** between the filename and the metadata
+while the window is only being hovered (`S05`), and drops it once placed. A hover preview is
+pointer-transparent, so nothing about it invites a click, and every control that would say so
+appears only after the click — it is the one part of this UI that cannot be guessed.
 
 A faded bar still drops its `pointer-events` (`E10`), so it is not an invisible handle — but that
 also means a press there falls through to a pan. Move the pointer first and it comes back.
@@ -770,6 +778,7 @@ Function names are used rather than line numbers, which rot.
 
 | Date | Change |
 |---|---|
+| 2026-09-04 | v0.36.0. **The status bar only floats up the frame when no strip of the frame margin is on screen** (`E21`) — "is there another handle", not "where is the frame". v0.35.0's `view.top < 0` test was too coarse: a frame taller than the viewport still has its top off screen after being dragged down, so the rescue fired on the very gesture it was meant to leave alone. Also: the bar now carries **(click this window to pin it)** while the window is only hovered, and drops it once placed (`E10`, `S05`) — a hover preview is pointer-transparent, so nothing on it invites a click. |
 | 2026-09-04 | v0.35.0. **The status bar only floats up the frame while the frame's top edge is off screen too** (`E21`). It rides the visible bottom so a frame grown past the viewport still has a title bar in reach — but a window deliberately dragged down past the bottom of the browser is not that case, and the bar floating back into the picture rather than leaving with the window was reported as a bug. `view.top < 0` separates the rescue from the override. |
 | 2026-09-04 | v0.34.0. Three changes to the placed window, all of them reported together. **Moving it no longer freezes its size** (`T25` retired, `E22`): the frame follows the picture up to the growth ceiling for as long as the window is alive, and only a hand resize pins it (`E23`). The freeze was v0.29.0's, and v0.31.0 quietly made it fatal — once the wheel belongs to the page while hovering, zooming means placing first, placing is a press, and a press that wandered three pixels was a move, so every window was frozen at its opening size before it could be grown and `maxSizeMultiple` was unreachable. **Zoom is anchored on the pointer** rather than on the frame's centre (`E22`, `T17`), so a growing window expands away from the cursor and a shrinking one collapses towards it instead of walking its edges past the pointer and handing the wheel back to the page. **The X button is gone** (`T16`, `E25`, `E9`, `E11`) — Escape and a click outside already close a placed window, and the button sat in the corner the hand reaches for to resize. |
 | 2026-09-04 | v0.33.0. **Stored settings were being discarded on every page load** and the script ran on defaults until something opened the panel — `readSettings()` is hoisted and the `cfg` initialiser called it while `const RETIRED` was still in its temporal dead zone, so the ReferenceError was swallowed by its own catch. Broken since v0.28.0. Also: the resize strip now straddles the window edge, **6 px outside and 6 px in**, with 13 px of move band beyond it (`E25`); the status bar **no longer outranks a resize**, so the bottom corners and the bottom edge resize like every other edge, and it keeps precedence only over the middle, which is what still matters when `stickBar()` has parked it up the picture (`E21`); `bottomReserve` is retired (`E13`); the manager's menu gains **Enable/Disable for this site**, labelled by what pressing it would do; and the settings panel's Save row is sticky. |

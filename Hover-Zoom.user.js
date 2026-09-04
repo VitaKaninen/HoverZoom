@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.35.0
+// @version     0.36.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -1073,7 +1073,7 @@
     // is set, so the two can never both be loaded at once.
     let host = null, root = null, box = null, imgEl = null, vidEl = null, mediaEl = null;
     let dimEl = null;
-    let capEl = null, capNameEl = null, capMetaEl = null, blockEl = null;
+    let capEl = null, capNameEl = null, capHintEl = null, capMetaEl = null, blockEl = null;
     let edgeEls = null;         // [top, left, right, bottom] — the drawn frame margin
     let gripEl = null;          // invisible collar that carries the outer half of the resize strip
     let spinEl = null, spinSvg = null;
@@ -1204,6 +1204,14 @@
             '.cap .name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;',
             'font-family:ui-monospace,SFMono-Regular,Consolas,monospace;color:#a6adc8}',
             '.cap .meta{flex:none;white-space:nowrap}',
+            // What a press on the window does, said on the window, because it is the one
+            // thing about this UI that is not guessable — a hover preview is
+            // pointer-transparent, so nothing on it invites a click. It is dropped the moment
+            // the window is placed, when it would be describing something already done, and
+            // it shrinks before the dimensions do on a narrow bar.
+            '.cap .hint{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;',
+            'white-space:nowrap;color:#7f849c;font-style:italic}',
+            '.box.placed .cap .hint{display:none}',
             // "Never this image again". Only on a PLACED window: a hover preview is
             // pointer-transparent, so a button on it cannot be clicked at all. Hover it,
             // click to pin, then press this.
@@ -1295,6 +1303,9 @@
         capEl.className = 'cap';
         capNameEl = document.createElement('span');
         capNameEl.className = 'name';
+        capHintEl = document.createElement('span');
+        capHintEl.className = 'hint';
+        capHintEl.textContent = '(click this window to pin it)';
         capMetaEl = document.createElement('span');
         capMetaEl.className = 'meta';
         blockEl = document.createElement('span');
@@ -1308,6 +1319,7 @@
         blockEl.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); blockCurrent(); }, true);
 
         capEl.appendChild(capNameEl);
+        capEl.appendChild(capHintEl);
         capEl.appendChild(capMetaEl);
         capEl.appendChild(blockEl);
 
@@ -1833,30 +1845,49 @@
         layout();
     }
 
-    // The status bar rides the bottom of the VISIBLE part of the frame — but ONLY while the
-    // frame's top edge is off screen too, which is the narrowing v0.35.0 makes.
+    // Is any part of the frame's own margin on screen? The ring runs along all four edges and
+    // moves the window at any zoom (E25), so it is the OTHER move handle — and as long as one
+    // strip of it is in view, the window can always be dragged back and nothing needs rescuing.
+    //
+    // `frameMargin: 0` draws no ring at all, and then the bar really is the only handle there
+    // is; chromeThickness() is 0 there and this is false whatever the geometry says.
+    function ringOnScreen() {
+        const m = chromeThickness();
+        if (!m) return false;
+        const vw = document.documentElement.clientWidth;
+        const vh = usableHeight();
+        if (!vw || !vh) return true;        // the Browser pane reports 0 while hidden
+        return view.left > -m || view.top > -m ||
+            view.left + outerW() < vw + m || view.top + outerH() < vh + m;
+    }
+
+    // The status bar rides the bottom of the VISIBLE part of the frame, but ONLY when there is
+    // nothing else left to grab the window by.
     //
     // What it is for: there is a state you can zoom yourself into and not get out of. A frame
-    // grown past the viewport and then zoomed until the picture spills covers the whole
-    // screen, so no edge and no corner is reachable to resize by, the middle pans, and the bar
-    // — the one thing that always moves the window — is somewhere below the bottom of the
-    // screen. Every gesture is then a pan and only Escape gets you out. Holding the bar
-    // against the visible bottom edge is the same guarantee a window manager makes about a
-    // title bar, and it also keeps the filename and dimensions readable on a huge frame.
+    // grown to the ceiling covers the whole screen, so no edge and no corner is reachable to
+    // resize by, no strip of the frame margin is in view, the middle pans, and the bar — the
+    // one thing that always moves the window — is somewhere below the bottom of the screen.
+    // Every gesture is then a pan and only Escape gets you out. Holding the bar against the
+    // visible bottom edge is the same guarantee a window manager makes about a title bar.
     //
-    // What it must NOT do is override a deliberate move. Drag a window down past the bottom of
-    // the browser and the bar floated back up inside the picture, so the bar could never leave
-    // the screen — reported as exactly that. `view.top >= 0` is the difference between the two
-    // cases: if the frame's own top edge is on screen then the top of the frame margin is
-    // reachable and the window can always be dragged back, so nothing needs rescuing and the
-    // bar belongs at the bottom of the window where it was put. The trap above is reachable
-    // only when the frame covers the viewport top to bottom, and there `view.top` is negative.
+    // What it must NOT do is override a deliberate move. Drag a placed window down past the
+    // bottom of the browser and the bar floated back up into the picture, so it could never
+    // leave the screen — reported twice, the second time with the tell that made it clear:
+    // *once the window has been resized by hand the bar behaves*, because a hand-resized frame
+    // is usually small enough that a corner is still in view.
+    //
+    // So the test is `ringOnScreen()`, not the frame's own position. Any visible strip of the
+    // margin means there is a handle, so the bar belongs at the bottom of the window where it
+    // was put. v0.35.0 tried `view.top < 0` for this and it was too coarse: a frame taller than
+    // the viewport still has its top off screen after being dragged down, so the rescue fired
+    // on exactly the gesture it was supposed to leave alone.
     //
     // The offset is still clamped so the bar can never climb above the frame's own top.
     function stickBar() {
         if (!capEl || !cfg.showStatusBar) return;
         const oh = outerH();
-        const overhang = view.top < 0 ? (view.top + oh) - usableHeight() : 0;
+        const overhang = ringOnScreen() ? 0 : (view.top + oh) - usableHeight();
         const room = Math.max(0, oh - cfg.borderWidth * 2 - capEl.offsetHeight);
         capEl.style.bottom = Math.round(Math.max(0, Math.min(overhang, room))) + 'px';
     }

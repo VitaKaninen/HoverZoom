@@ -252,6 +252,14 @@ panned but not moved. The margin removes that; turning the bar off now costs the
 ⊘, not the ability to move the window. `frameMargin: 0` **and** `showStatusBar: false` together
 bring the old trade back, and that is what the setting's description says.
 
+**A hint on the bar says what a press does** (v0.36.0). `capHintEl` — *(click this window to pin
+it)* — sits between the filename and the metadata, and `.box.placed .cap .hint{display:none}`
+drops it the moment the window is placed, when it would be describing something already done. It
+is the one thing about this UI that cannot be guessed: a hover preview is pointer-transparent, so
+nothing about it invites a click, and every control that would advertise the fact (the ⊘, the
+browser's own menu) only appears *after* the click. It is `flex:0 1 auto` with an ellipsis, so on
+a narrow bar it gives way before the dimensions do.
+
 **`stickBar()` exists because the bar being the only handle is otherwise not enough.** Found while
 verifying v0.29.0: grow the frame past the viewport, then keep zooming until the picture spills,
 and the frame covers the entire screen — no edge, no corner, the middle pans, and the bar is
@@ -261,18 +269,32 @@ against the bottom of the frame's *visible* part rather than its own bottom, whi
 guarantee a window manager makes about a title bar. Measured: a 2512 × 1392 frame at (−671, −444)
 on a 1265 × 705 viewport, own bottom edge at 948, bar held at 704.
 
-**It only applies while `view.top < 0`, and that narrowing is v0.35.0.** Drag a placed window
-down past the bottom of the browser and the bar floated back up into the picture, so it could
-never leave the screen — reported as exactly that, and it is a rescue overriding a deliberate
-act. The two cases are told apart by the frame's own TOP edge: if it is on screen then the top of
-the frame margin is in reach, the window can always be dragged back, and there is nothing to
-rescue. The trap above is only reachable when the frame covers the viewport from top to bottom,
-and there `view.top` is negative. Measured both: dragged down to `top: 504` on a 705px viewport
-the bar sits at `bottom: 0` and its rect bottom reaches 1200, well off screen; grown to
-2512 × 1392 at `top: −444` it still floats to `bottom: 243px`, rect bottom 704.
+**It only applies while `ringOnScreen()` is false, and that narrowing is v0.36.0.** Drag a placed
+window down past the bottom of the browser and the bar floated back up into the picture, so it
+could never leave the screen — a rescue overriding a deliberate act.
+
+**The right test is "is there another handle", not "where is the frame".** The frame margin moves
+the window at any zoom (`E25`), and its four strips run the whole way round, so one visible strip
+of it means the window can always be dragged back and nothing needs rescuing. The trap is only
+reachable when the frame covers the ENTIRE viewport — no strip in view, the middle pans, and the
+bar below the bottom of the screen.
+
+**v0.35.0 tried `view.top < 0` for this and it was too coarse.** A frame taller than the viewport
+still has its top off screen after being dragged down, so the rescue fired on exactly the gesture
+it was meant to leave alone. The user's own tell is what named it: *once the window has been
+resized by hand the bar behaves* — a hand-resized frame is usually small enough to have an edge
+in view, which is `ringOnScreen()` in different words.
+
+Measured on a 1265 × 705 viewport: a 1228 × 921 frame at `top: −108` (top off screen, right strip
+in view) keeps `bottom: 0` and its bar rides down to 1312 when dragged; a 2512 × 1392 frame at
+(−671, −344), which covers everything, still floats to `bottom: 343px`, bar bottom 704.
+
+**`frameMargin: 0` draws no ring**, so `chromeThickness()` is 0, `ringOnScreen()` is false
+whatever the geometry says, and the bar keeps the old unconditional rescue — correctly, because
+there it really is the only handle.
 
 **Do not "simplify" this to `clampPosition()`'s `KEEP_ON_SCREEN`.** That guarantees 72px of the
-FRAME stays in view, which the top strip satisfies; it says nothing about the bar.
+FRAME stays in view, which a strip of bare picture satisfies; it says nothing about a handle.
 
 **The bar's precedence in `onBoxDown` was narrowed in v0.33.0, and the narrowing is the point.**
 It used to be tested FIRST and suppress `hitRegion()` entirely, from when it was the only move
