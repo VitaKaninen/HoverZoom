@@ -620,6 +620,12 @@ The `bannerGate` line in the debug log names the deciding condition and its numb
 Test-page cases 39–41 cover the DOM half (the row-mate test and its four decoys);
 `test-resolver.js` asserts the shape half against every measured page in the corpus.
 
+**Verified live, 2026-09-04, after shipping:** all 8 reachable MISS pages now refused and all 9
+reachable FALSE POSITIVE pages now preview, with the same geometry the corpus recorded before the
+rewrite — so the flips are the gate changing, not the pages. Every control held. Three sites could
+not be re-measured (FurAffinity is behind a bot check; Unsplash and 500px never render their
+photo into the DOM). The table is in `banner-test-sites.md`.
+
 #### E19 · An upgrade has to be the same picture, not just a bigger file
 A bigger version of a picture keeps its proportions. Since v0.22.0 a candidate whose aspect
 ratio is more than **4×** away from the thumbnail's own is refused: it is a different image, not

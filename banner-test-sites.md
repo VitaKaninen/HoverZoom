@@ -44,6 +44,102 @@ within 10-20px of a threshold, so a different window width flips them.
 
 ---
 
+## RE-MEASURED AGAINST v0.38.0 — 2026-09-04, same day, live
+
+The shipped gate replicated against the live DOM a second time, after the rewrite. Chrome at
+1556–1571 px signed in with an ad blocker; AVS Forum in the Claude Code pane at 1265 px, because
+it wedges Chrome's renderer reliably enough that even a bare `1+1` times out there. **Where a
+row says "exact", the numbers came back identical to the pre-rewrite measurement above**, so the
+verdict flip is the gate changing and not the page.
+
+### The MISS group — every one now refused
+
+| Page | Measured now | Was | Now |
+|---|---|---|---|
+| homedepot.com | `1376×107 (12.9:1) @197d` **exact** | previews (set of 4) | **REFUSED** |
+| avsforum.com | `1280×307 (4.2:1) @8d` **exact** | previews (set of 2) | **REFUSED** |
+| xkcd.com store strip | `540×100 (5.4:1) @113d` **exact** | previews (set of 2) | **REFUSED** |
+| boards.4chan.org board banner | `300×100 (3.0:1) @39d` **exact** | previews (under 400px) | **REFUSED** |
+| boards.4chan.org house ad | `468×60 (7.8:1) @300d` **exact** | previews (past 200) | **REFUSED** |
+| linustechtips.com | `304×54 (5.7:1) @13d` | previews (under 400px) | **REFUSED** |
+| forums.macrumors.com | `250×71 (3.5:1) @10d` **exact** | previews (under 400px) | **REFUSED** |
+| forums.spacebattles.com | `340×58 (5.8:1) @294d` **exact** | previews (under 400px, past 200) | **REFUSED** |
+
+**Two of these land exactly on a threshold, and both pass on the inclusive comparison.** 4chan's
+board banner is `300/100 = 3.0` against `BANNER_BAND` 3 (`band < BANNER_BAND` refuses), and its
+house ad is at `300d` against `BANNER_TOP` 300 (`docTop > BANNER_TOP` refuses). Neither is a
+coincidence to be tidied away — they are why both tests are written inclusive.
+
+### The FALSE POSITIVE group — every one now previews
+
+| Page | Measured now | Was | Now |
+|---|---|---|---|
+| flickr.com photo | `1050×656 (1.6:1) @98d` **exact** | REFUSED | **previews** |
+| pexels.com photo | `1042×694 (1.5:1) @168d` | REFUSED | **previews** |
+| wallhaven.cc `id=wallpaper` | `1226×690 (1.8:1) @143d` | REFUSED | **previews** |
+| safebooru.org `id=image` | `850×850 (1.0:1) @176d` **exact** | REFUSED | **previews** |
+| tumblr.com/staff first post | `580×326 (1.8:1) @34d` **exact**, 519 images | REFUSED | **previews** |
+| newgrounds.com featured tile | `624×298 (2.1:1) @192d` | REFUSED | **previews** |
+| nasa.gov hero | `1556×640 (2.4:1) @86d` **exact** | REFUSED | **previews** |
+| itch.io key art | `960×540 (1.8:1) @0d` **exact** | REFUSED | **previews** |
+| allbirds.com hero | `1536×865 (1.8:1) @42d` | REFUSED | **previews** |
+
+NASA's 2.4 : 1 is the closest any measured content comes to `BANNER_BAND` 3, and it is the row to
+watch if that number is ever lowered.
+
+### Controls — all held
+
+Refused, correctly: youtube.com/@SabineHossenfelder `1316×212 (6.2:1) @112d` with the guide open;
+bandcamp `975×180 @1d` **exact**; city-data.com/forum `683×52 (13.1:1) @0d` **exact**;
+questionablecontent.net `815×60 (13.6:1) @107d` **exact**; newegg.com `1232×303 (4.1:1) @140d`;
+aliexpress.us `823×58 (14.2:1) @198d`.
+
+Previews, correctly: alrincon.com `1000×557 (1.8:1) @60d` **exact** — the originally reported
+page, and it no longer depends on that day's post count; pixiv `579×926 @302d`; every imgur front
+page tile; **xkcd's comic `740×239 (3.1:1) @388d` and questionablecontent's `800×1160 @333d`**,
+the two pieces of band-shaped content, saved by position exactly as designed.
+
+**The three CSS-background rows behave as documented, and the SoundCloud one proves the overlap
+is load-bearing:**
+
+```
+soundcloud.com/skrillex   BG 1208x254 (4.8:1) @110d  wallpaper=NO           -> REFUSED by the banner gate ALONE
+nationalgeographic.com    BG 1712x437 (3.9:1) @48d   wallpaper=full-bleed   -> REFUSED by both
+phpbb.com/community       BG 1152x129 (8.9:1) @42d   wallpaper=text on it   -> REFUSED by both (txt length 43, the three-character margin)
+```
+
+### New finding: ArtStation's luck ran out, which strengthens the case
+
+The corpus recorded artstation.com as "correct, but by luck — saved by a 334 px sidebar thumbnail
+acting as a peer". Re-measured on a different artwork:
+
+```
+artwork  1084x484 (2.2:1) @104d   nearest sidebar thumbnail 334x188 @504d -- OUTSIDE the band
+```
+
+**There is no peer at all on this page, so the OLD gate would have refused this artwork.** It
+previews now on its own shape. The "by luck" note was not hypothetical.
+
+### Not re-measurable in this session
+
+- **furaffinity.net** — behind a Cloudflare bot-check interstitial ("Just a moment…"), which is
+  not something to work around. Its two rows (`728×90` ad = 8.1 : 1 → banner, `1136×1136` artwork
+  = 1.0 : 1 → content) are decided by shape alone and are asserted in `test-resolver.js`.
+- **unsplash.com** — the photo never enters `document.images`; the page renders three 0×0 images
+  and nothing else. Measured twice, 26 s of settling.
+- **500px.com** — the photo never loads (38 s of settling); only the 276 px avatar is present.
+  That avatar is the exact element that used to rescue the photo at `frac = 0.250000`.
+
+### One residual worth knowing about, found here rather than in the first pass
+
+linustechtips.com carries a **320×384 skyscraper ad at 202 px down** that previews, because at
+0.8 : 1 it is picture-shaped. The shape rule refuses banner-shaped advertising (4chan's 468×60,
+FurAffinity's 728×90) and accepts tower-shaped advertising by construction. That is the trade,
+and it is the right way round: a rule that refused tall rectangles near the top of a page would
+refuse the photo on every photo site.
+
+---
+
 ## MEASURED — MISS (banner previews when it should not)
 
 ### `www.homedepot.com` — the strongest case in the corpus (Chrome)

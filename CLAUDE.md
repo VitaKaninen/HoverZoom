@@ -1433,7 +1433,7 @@ static catches it — `node --check` passes and the markup is fine.
 
 ```bash
 node --check Hover-Zoom.user.js     # syntax
-node test-resolver.js               # 159 assertions: the pure URL and video-link logic, plus
+node test-resolver.js               # 160 assertions: the pure URL and video-link logic, plus
                                     # the banner gate's shape test against every measured page
                                     # in banner-test-sites.md
 python make-test-images.py          # regenerate fixtures into test-images/

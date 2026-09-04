@@ -387,6 +387,11 @@ band('phpbb.com header (bg)',             1152, 129,  42, true);
 // survive on luck — artstation on a sidebar thumbnail happening to sit beside the artwork,
 // 500px on 276/1104 = 0.250000 against a `>= 0.25` test — and now pass on their own shape.
 band('artstation.com artwork',             548, 846, 104, false);
+// Re-measured 2026-09-04 on a different artwork, and this one has NO peer at all — its nearest
+// sidebar thumbnail is at 504px down, outside the band. The old gate would have refused it, so
+// the corpus's "correct, but by luck" note was not hypothetical. At 2.2:1 it is also the second
+// closest content row to BANNER_BAND, after nasa.gov's 2.4.
+band('artstation.com artwork, no peer',   1084, 484, 104, false);
 band('500px.com photo',                   1104, 736,  84, false);
 band('imgur.com gallery item',             480, 741, 221, false);
 band('alrincon.com first post',           1000, 557,  60, false);
