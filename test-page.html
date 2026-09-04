@@ -34,9 +34,18 @@
     without the same-src exemption the uniqueness condition is defeated by the banner's own
     reflection and nothing is ever refused.
   -->
-  <div style="position:relative">
+  <!--
+    The 24px icon to the left is the LibreWolf finding, 2026-09-04: with YouTube's left guide
+    open, a 24px subscription avatar sits in the same horizontal band as the 1284px banner,
+    and "nothing beside it" refused to call it a banner. An icon in a sidebar is not an item
+    in a row with a masthead. It is here at the same scale as the real one so that loosening
+    BESIDE_PEER past a quarter re-breaks the case.
+  -->
+  <div style="position:relative;padding-left:40px">
+    <img id="c39icon" src="test-images/icon.png"
+         style="position:absolute;left:0;top:21px;width:24px;height:18px">
     <img id="c39dup" src="test-images/banner-1200x125.jpg" aria-hidden="true"
-         style="position:absolute;inset:0;width:100%;height:60px;object-fit:cover;filter:blur(8px)">
+         style="position:absolute;left:40px;top:0;width:calc(100% - 40px);height:60px;object-fit:cover;filter:blur(8px)">
     <img id="c39" src="test-images/banner-1200x125.jpg"
          style="position:relative;width:100%;height:60px;object-fit:cover;display:block">
   </div>

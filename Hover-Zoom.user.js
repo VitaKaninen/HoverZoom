@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.24.0
+// @version     0.25.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -2242,9 +2242,14 @@
     //     otherwise drift into the band.
     //  2. At least BANNER_MIN wide on screen. Kills logos, avatars (YouTube's is 160 px and
     //     sits at 282), and every icon.
-    //  3. NOTHING SITS BESIDE IT. A picture with another one to its left or right is one
-    //     item in a row — a gallery's first row is near the top of the document and can be
-    //     wide, and this is what saves it. A banner is a band; it is alone on its line.
+    //  3. NO PEER SITS BESIDE IT. A picture with a comparable one to its left or right is
+    //     one item in a row — a gallery's first row is near the top of the document and can
+    //     be wide, and this is what saves it. A banner is a band; it is alone on its line.
+    //     PEER, not "anything": measured in LibreWolf on the YouTube page with the left
+    //     guide open, a **24 px** subscription avatar sits in the band beside a 1284 px
+    //     banner and defeated this outright. An icon in a sidebar is not an item in a row
+    //     with a masthead. `BESIDE_PEER` is the floor, deliberately low (a quarter) so that
+    //     a masonry row of unequal tiles still protects its own widest member.
     //  4. NO OTHER PICTURE ON THE PAGE IS ITS WIDTH. This is the one that saves a
     //     single-column gallery, where (3) is useless: tiles in a column are all the same
     //     width, and a banner is unique on the page. Ten per cent counts as the same.
@@ -2259,6 +2264,7 @@
     const BANNER_TOP = 200;         // px from the top of the document
     const BANNER_MIN = 400;         // px wide on screen
     const BANNER_SIMILAR = 0.1;     // widths within 10% are "the same width"
+    const BESIDE_PEER = 0.25;       // a neighbour this fraction of the width is an item in a row
 
     // Returns WHICH condition decided and the numbers it decided on, for both answers.
     // A bare "not a banner" is useless in a bug report — the whole class of report this
@@ -2276,8 +2282,12 @@
             return { banner: false, why: where + '; a banner starts within ' + BANNER_TOP + 'px of the top' };
         const src = shownUrl(el) || '';
         const lists = [document.getElementsByTagName('img'), document.getElementsByTagName('video')];
+        // BOTH blockers are collected rather than returning on the first. A log that names
+        // only the first failing condition costs a round trip every time the next one also
+        // fails — which is exactly what happened between v0.24.0 and this version.
+        let beside = 0, similar = 0;
         for (let l = 0; l < lists.length; l++) {
-            for (let i = 0; i < lists[l].length; i++) {
+            for (let i = 0; i < lists[l].length && !(beside && similar); i++) {
                 const n = lists[l][i];
                 if (n === el) continue;
                 const q = n.getBoundingClientRect();
@@ -2288,14 +2298,19 @@
                 // would defeat the uniqueness test with the banner's own reflection.
                 if (src && (shownUrl(n) || '') === src) continue;
                 const mid = q.top + q.height / 2;
-                if (mid >= r.top && mid <= r.bottom && (q.right <= r.left || q.left >= r.right))
-                    return { banner: false, why: where + ', but a ' + Math.round(q.width) + 'px picture ' +
-                        'sits beside it, so this is one item in a row' };
-                if (Math.abs(q.width - r.width) <= r.width * BANNER_SIMILAR)
-                    return { banner: false, why: where + ', but another picture on the page is ' +
-                        Math.round(q.width) + 'px wide too, so this is one of a set' };
+                if (!beside && q.width >= r.width * BESIDE_PEER &&
+                    mid >= r.top && mid <= r.bottom && (q.right <= r.left || q.left >= r.right))
+                    beside = q.width;
+                if (!similar && Math.abs(q.width - r.width) <= r.width * BANNER_SIMILAR)
+                    similar = q.width;
             }
         }
+        const blockers = [];
+        if (beside) blockers.push('a ' + Math.round(beside) + 'px picture sits beside it, so this ' +
+            'is one item in a row');
+        if (similar) blockers.push('another picture on the page is ' + Math.round(similar) +
+            'px wide too, so this is one of a set');
+        if (blockers.length) return { banner: false, why: where + ', but ' + blockers.join('; and ') };
         return { banner: true, why: where + ', alone on its line, and no other picture on the page ' +
             'is its width' };
     }

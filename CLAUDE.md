@@ -503,9 +503,15 @@ after scrolling 1200 px down:
    begins. Document, not viewport, or every picture drifts into the band as you scroll.
 2. **At least `BANNER_MIN` (400 px) wide on screen** — kills logos, icons, and YouTube's
    160 px avatar (which sits at 282 and fails this too).
-3. **Nothing sits beside it.** A picture with another to its left or right is one item in a
-   row. A gallery's first row is near the top of the document and can be wide; this is what
-   saves it. A banner is a band — it is alone on its line.
+3. **No PEER sits beside it** — a neighbour at least `BESIDE_PEER` (a quarter) of its width.
+   A picture with a comparable one to its left or right is one item in a row; a gallery's
+   first row is near the top of the document and can be wide, and this is what saves it. A
+   banner is a band, alone on its line.
+   **"Peer", not "anything", and that word cost a version.** Measured in LibreWolf with
+   YouTube's left guide open, 2026-09-04: a **24 px** subscription avatar sits in the band
+   beside a 1284 px banner, and the rule refused to call it a banner. An icon in a sidebar is
+   not an item in a row with a masthead. A quarter is low on purpose, so a masonry row of
+   unequal tiles still protects its widest member.
 4. **No other picture on the page is its width** (within `BANNER_SIMILAR`, 10 %). The one that
    saves a **single-column** gallery, where (3) is useless: tiles in a column all share a
    width, and a banner is unique on its page.
@@ -523,6 +529,13 @@ room. Verified: 39 refused with the reason printed, 40 still previews.
 **`BANNER_TOP` is the knob if a site is missed.** A page with a tall header can put its banner
 lower than 200 px, and then nothing fires.
 
+**The in-app browser is not a substitute for the user's window here, and this rule is why.** The
+YouTube page was measured twice at 1265 px with the guide collapsed and the gate looked perfect
+both times; the failing neighbour only exists with the guide open and an account signed in.
+Widening the pane to 1830 px opens the guide but shows no subscriptions when signed out, so the
+24 px avatars still never appear. **Case 39 carries the icon at its real scale** because that is
+the only place this shape can be re-run.
+
 ### The gate has to say WHICH condition decided, and on what numbers (v0.24.0)
 
 Reported immediately after v0.23.0: the banners are excluded in Chrome and Firefox and **not in
@@ -532,7 +545,7 @@ it — and `bannerGate` said `none — not a page banner`, which is exactly the 
 project has run into twice before. Same rule as the video log: **print the operands, not a
 summary of one of them.**
 
-`bannerCheck()` now returns `{ banner, why }` for both answers, and one hover line reads:
+`bannerCheck()` returns `{ banner, why }` for both answers, and one hover line reads:
 
 ```
 "bannerGate": "not a banner: 1193×192 at 812px from the top of the document; a banner starts within 200px of the top"
@@ -540,6 +553,11 @@ summary of one of them.**
 
 That names the failing condition and the number it failed on, so a cross-browser difference is
 one paste rather than a round trip. `bannerReason()` is a thin wrapper for the gate itself.
+
+**It reports EVERY blocker, not the first** (v0.25.0). v0.24.0 returned on the first failing
+condition, the user's log named condition (3), and fixing (3) would have said nothing about
+whether (4) also failed — a second round trip built into the design of the message. The loop now
+collects both and stops early only when both are found.
 
 ### A copy of itself is not a sibling item
 
