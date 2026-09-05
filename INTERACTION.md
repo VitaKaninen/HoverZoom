@@ -297,9 +297,10 @@ picture follows or does not depending on what it was doing (`E23`).
 
 #### S20 · dragging (zoom slider), placed
 Press on the slider in the status bar. Zoom follows the thumb from the picture's fit (or 25 %,
-whichever is lower) up to `maxZoom`. One slider step is one **round** percentage — 2 % apart below
-100 %, 5 % to 200 %, widening with the level (`ZOOM_STEPS`) — so 100 % and its neighbours are
-always on the track.
+whichever is lower) up to `maxZoom`. One slider step is one **round** percentage — 5 % apart up to
+200 %, widening with the level (`ZOOM_BANDS`) — so 100 % and its neighbours are always on the
+track. The ladder is never longer than the track has pixels, or the thumb could not land on every
+stop (`fitStops()`); a bigger `maxZoom` therefore buys its range by coarsening the low end.
 - **The frame's bottom-right corner does not move** while it grows or shrinks; the picture zooms
   about the frame's centre (`E34`).
 - **The bar cannot fade while the drag is live**, even when the pointer wanders off it.
@@ -457,7 +458,7 @@ this table is a table.
 | Placed mode (`S10`–`S15`, `S19`) | `place`, `unplace`, `onPinKey`, `onPinWheel` |
 | Wheel zoom, both states (`T17`, `T22`, `T24`) | `enableWheelZoom`, `disableWheelZoom`, `onPinWheel` |
 | Geometry (`S12`, `E7`, `E21`, `E25`, `E26`) | `view`, `reflow`, `layout`, `zoomAt`, `pannable`, `viewportBox`, `growBox`, `clampPosition`, `fitScaleFor`, `minScaleFor`, `chrome`, `insetX`/`insetY`, `outerW`/`outerH` |
-| Zoom cluster (`S20`, `S21`, `E34`) | `buildZoomControl`, `syncZoom`, `openZoomField`, `closeZoomField`, `zoomAnchored`, `ZOOM_STEPS`/`buildStops`/`zoomStops`/`zoomIndex`, `zoomLo`/`zoomHi`, `parseZoom`, `capOwns`, `minFrameW` |
+| Zoom cluster (`S20`, `S21`, `E34`) | `buildZoomControl`, `syncZoom`, `openZoomField`, `closeZoomField`, `zoomAnchored`, `ZOOM_BANDS`/`walkStops`/`fitStops`/`zoomStops`/`zoomIndex`, `zoomLo`/`zoomHi`, `parseZoom`, `capOwns`, `minFrameW` |
 | Upgrades (`S06`, `S15`) | `resolve`, `upgradeViewer` |
 
 Function names are used rather than line numbers, which rot.

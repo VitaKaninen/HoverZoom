@@ -165,6 +165,17 @@ ancestor-link candidate ever comes back missing on a shadow-DOM site.
   pane resize — the emulated viewport is letterboxed into the pane, so a stale scale factor puts
   every click off-target.
 
+- **The pane cannot place a click at a single-pixel position, so per-pixel behaviour of a control
+  is NOT measurable here.** Clicking a 100 px `input[type=range]` at x, x+2, x+4, x+6 returned the
+  same value every time, with pointer moves in between to rule out click coalescing — while probes
+  40 px apart on the same slider were consistent and linear. Emulated-viewport scaling (785 CSS →
+  770 screenshot px) means a screenshot pixel is not a CSS pixel, and the mapping quantises.
+  **Measure the slope over a wide baseline and divide**: three clicks gave 0 / 38 / 75 over 83.6 px
+  of travel — 0.9 values per pixel, thumb ~16.4 px — which is what `ZOOM_THUMB` is set from.
+  Synthetic `PointerEvent`/`MouseEvent` do not drive a native range input at all (untrusted events
+  are ignored), so that shortcut is closed too. Found 2026-09-05 verifying v0.53.0's zoom ladder,
+  after v0.52.0 shipped a ladder with more stops than the track had pixels.
+
 Shadow roots are `mode: 'open'` specifically so the test harness can read the viewer. Encapsulation
 is identical to `closed`; only script access differs, and the page can find `#hover-zoom-host`
 either way.

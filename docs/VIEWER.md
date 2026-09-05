@@ -164,32 +164,49 @@ replaced it — `zoomPos()`/`zoomScaleAt()`, v0.47.0–v0.51.0 — was right abo
 wrong about the *values*: it lands wherever the arithmetic falls, so zooming back in from the left
 end read 84 %, 90 %, 95 %, 101 % and 100 % was not on the track at all.
 
-`ZOOM_STEPS` is percent bands paired with the step used inside each — 2 below 100 %, 5 to 200 %, 10
-to 500 %, 25 to 1000 %, 50 to 2000 %, 100 to 5000 %, 200 above; 1 below 30 % and 0.5 below 10 % for
-a picture whose fit is tiny. `buildStops()` walks that into `[lo, …round values…, hi]`,
-`zoomStops()` caches it per `lo/hi` pair, and `zoomIndex()` finds the nearest stop by ratio so a
-wheeled or typed level parks the thumb sensibly. `syncZoom()` writes `max` from the stop count
-**before** the value, or the value clamps against the previous ladder's end.
+**A ladder longer than the track is the same bug wearing round numbers, and v0.52.0 shipped it.**
+That version built 143 stops for a 100 px slider and argued the density was a feature. It is not:
+a range input maps pointer x to `round(fraction × max)`, so with more stops than pixels the browser
+*cannot* select some of them. 100 % was one of the unreachable ones, and the drag read 92, 94, 98,
+105 — round values, inconsistent gaps, no 100 %. **The stop count is capped by the track's pixels;
+that cap is the whole design, not a detail of it.**
 
-Three properties this leans on, none of them accidental:
+`ZOOM_BANDS` is the *wanted* step per percent band — 5 up to 200 %, 25 to 500 %, 50 to 1000 %, 100
+to 2000 %, 200 to 5000 %, 500 above; 2 below 30 % and 1 below 10 % for a picture whose fit is tiny.
+`walkStops()` turns bands into `[lo, …round values…, hi]` plus, per band, its stop count and the log
+distance it covered. `fitStops()` then walks the budget down: while the ladder is longer than
+`BAR_SLIDER_W - ZOOM_THUMB`, it coarsens the band with the most stops **per unit of log distance**
+— per unit of track — one notch along `ZOOM_NICE`. `zoomStops()` caches the result per `lo/hi`
+pair, and `zoomIndex()` finds the nearest stop by ratio so a wheeled or typed level parks sensibly.
+`syncZoom()` writes `max` from the stop count **before** the value, or the value clamps against the
+previous ladder's end.
 
-- **Every step divides its own band's ends**, so a boundary — 100 % above all — is a stop reached
-  from both sides. This is why the bands are 2/5/10/25/50/100 and not the 3/15 the request opened
-  with: 100 is not a multiple of 3, so a 3 % ladder can only hit it by anchoring to 25 %, which
-  breaks the moment `lo` is a fit scale instead.
-- **The ladder is still logarithmic to within a few percent of the track**, because each step is
-  2–5 % of its own value. 25 %→100 % takes 40 of the 143 stops at `maxZoom` 32× (28 % of the
-  track); the log mapping gave it 28.6 %. The feel is unchanged, which is the point.
-- **Stops are finer than the slider's pixels** — 143 over 100 px at 32×, 1.4 per pixel — so no
-  reachable value is lost to snapping, and every pixel of travel still moves the picture. It goes
-  the other way at small ceilings (0.6/px at `maxZoom` 2×) and that is fine: the steps there are
-  2 % and 5 %, and one pixel simply skips one.
+Four properties this leans on, none of them accidental:
+
+- **Every step divides its own band's ends — and so does its neighbour in `ZOOM_NICE`**, because
+  `fitStops()` may coarsen any band by a notch. That is what keeps a boundary (100 % above all) a
+  stop reached from both sides. It is also why the bands are 5/25/50/100 and not the 3/15 the
+  request opened with: 100 is not a multiple of 3, so a 3 % ladder can only hit it by anchoring to
+  25 %, which breaks the moment `lo` is a fit scale instead.
+- **Density is thinned where the track is over-resolved, not where the ladder is longest.** The
+  naive greedy — coarsen the biggest band — spends the cut on 30–200 %, the range actually being
+  used, while leaving the 2000–5000 % band at three stops per pixel. Log distance per stop is the
+  honest measure of "too fine", because equal log distance is equal track.
+- **The ladder stays logarithmic to within a few percent of the track.** At `maxZoom` 32× it is 76
+  stops: 5 % steps to 200 %, then 25s, 50s, 100s, 200s. 25 %→100 % takes 18 of them (24 % of the
+  track) against the log mapping's 28.6 %, the low end being slightly favoured by the fixed bands.
+- **The budget is deliberately pessimistic.** `ZOOM_THUMB` reserves 20 px of the 100 px slider for
+  a thumb measured at ~16.4 px, because the thumb is the UA's and Firefox's is not Chrome's.
 
 The ladder also fixes the arrow keys, which under the old track moved 1/1000 of the range — a
 change too small to see. One press is now one round stop.
 
 `lo` and `hi` are exact first and last entries, so the ends stay reachable: dragging fully left
 gives the fit scale itself, not a rounded near-fit.
+
+**A 64× ceiling costs the low end its 5 % steps** (`fitStops()` thins 30–200 % to 10s), and that is
+the honest trade: 100 px of track cannot resolve both a 256× span and 5 % granularity. Raising
+`BAR_SLIDER_W` buys the budget back — the ladder re-fits itself, nothing else needs touching.
 
 **Its low end is `min(0.25, fitScale)`, not the zoom floor.** `minScaleFor()` is ~0.4 % for a large
 picture, which would spend most of the track on sizes nobody wants; the fit is the natural

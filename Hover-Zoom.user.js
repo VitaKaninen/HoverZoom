@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.52.0
+// @version     0.53.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -1322,10 +1322,15 @@
 
     const ZOOM_LO_CAP = 0.25;   // the low end asked for, when the picture's own fit is above it
 
-    // Percent bands and the step used inside each; every step divides its band's own ends, so a
-    // band boundary — 100% above all — is a stop reached from both sides.
-    const ZOOM_STEPS = [[10, 0.5], [30, 1], [100, 2], [200, 5], [500, 10],
-                        [1000, 25], [2000, 50], [5000, 100], [Infinity, 200]];
+    // Percent bands and the step wanted inside each; every step divides its band's own ends, and
+    // so does its neighbour in ZOOM_NICE, because fitStops() may coarsen a band by one notch.
+    const ZOOM_BANDS = [[10, 1], [30, 2], [200, 5], [500, 25],
+                        [1000, 50], [2000, 100], [5000, 200], [Infinity, 500]];
+    const ZOOM_NICE = [0.5, 1, 2, 5, 10, 25, 50, 100, 200, 500, 1000, 2500, 5000];
+
+    // A stop the thumb cannot land on may as well not exist, so the ladder is capped at the
+    // track's own pixel count. The thumb's width is the UA's, hence the pessimistic reserve.
+    const ZOOM_THUMB = 20;
 
     // The slider spans fit-or-25% up to the ceiling.
     function zoomLo() {
@@ -1337,31 +1342,59 @@
         return Math.max(zoomLo() * 1.01, Math.min(cfg.maxZoom, MAX_SCALE_ABS));
     }
 
-    function zoomStepAt(pct) {
-        for (let i = 0; i < ZOOM_STEPS.length; i++) if (pct < ZOOM_STEPS[i][0]) return ZOOM_STEPS[i][1];
-        return ZOOM_STEPS[ZOOM_STEPS.length - 1][1];
-    }
-
-    // The stops themselves: lo, every round value above it, then hi. One slider step is one stop.
-    function buildStops(lo, hi) {
-        const out = [lo], end = hi * 100;
+    // lo, every round value above it, then hi — with each band's stop count and the log distance
+    // it covered, which together are the only thing fitStops() needs to choose what to thin.
+    function walkStops(lo, hi, bands) {
+        const zero = function () { return 0; };
+        const stops = [lo], counts = bands.map(zero), spans = bands.map(zero), end = hi * 100;
         let pct = lo * 100;
         for (let guard = 0; guard < 4000; guard++) {
-            const step = zoomStepAt(pct + 1e-9);
+            let k = 0;
+            while (k < bands.length - 1 && pct + 1e-9 >= bands[k][0]) k++;
+            const step = bands[k][1];
             const next = Math.floor(pct / step + 1e-9) * step + step;
             if (next >= end - 1e-9) break;
-            out.push(next / 100);
+            stops.push(next / 100);
+            counts[k]++;
+            spans[k] += Math.log(next / pct);
             pct = next;
         }
-        out.push(hi);
-        return out;
+        stops.push(hi);
+        return { stops: stops, counts: counts, spans: spans };
+    }
+
+    function coarser(step) {
+        for (let i = 0; i < ZOOM_NICE.length; i++) if (ZOOM_NICE[i] > step + 1e-9) return ZOOM_NICE[i];
+        return step * 2;
+    }
+
+    // Too many stops for the track: thin the DENSEST band — most stops per unit of log distance,
+    // which is per unit of track — until they fit. Thinning the longest band instead spends the
+    // cut on the range being used rather than on the over-resolved top end.
+    function fitStops(lo, hi, budget) {
+        const bands = ZOOM_BANDS.map(function (b) { return [b[0], b[1]]; });
+        let r = walkStops(lo, hi, bands);
+        for (let guard = 0; guard < 40 && r.stops.length - 1 > budget; guard++) {
+            let k = -1, best = 0;
+            for (let i = 0; i < r.counts.length; i++) {
+                const d = r.spans[i] > 1e-9 ? r.counts[i] / r.spans[i] : 0;
+                if (d > best) { best = d; k = i; }
+            }
+            if (k < 0) break;
+            bands[k][1] = coarser(bands[k][1]);
+            r = walkStops(lo, hi, bands);
+        }
+        return r.stops;
     }
 
     let stopsKey = '', stopsArr = null;
 
     function zoomStops() {
         const lo = zoomLo(), hi = zoomHi(), key = lo + '/' + hi;
-        if (key !== stopsKey) { stopsKey = key; stopsArr = buildStops(lo, hi); }
+        if (key !== stopsKey) {
+            stopsKey = key;
+            stopsArr = fitStops(lo, hi, Math.max(8, BAR_SLIDER_W - ZOOM_THUMB));
+        }
         return stopsArr;
     }
 
