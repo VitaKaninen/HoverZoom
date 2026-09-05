@@ -414,6 +414,26 @@ and `e.target` is the page underneath.
 - **The timeout re-checks `view`** before adding `idle`, and `cancel()` calls `resetBar()`, so a
   preview cannot open with a stale class.
 
+#### The two settings that turn it off, and why 0 needed its own class (v0.43.0)
+
+`barFade` (a checkbox, on by default) gates `barIdleMs` and `barFadeMs` in the panel and the
+behaviour: off means the bar and grab border stay up for as long as the window does, and
+`showBar()` returns without arming a timer.
+
+**`barIdleMs` of 0 means they never appear at all** — reported as "setting it to 0 still shows it
+briefly", which is what a 0 ms timer does: the class comes off, the timer fires on the next
+macrotask, and you get one frame of bar plus a full fade. `barAlwaysIdle()` is the predicate;
+`showBar()` and `resetBar()` both add `idle` immediately instead of arming anything.
+
+**`idle` alone is not enough** — its rules carry `transition:opacity var(--barfade)`, so the
+first open still fades from 1 to 0. `.box.nobar` repeats the `opacity:0` with `transition:none`
+and is placed **after** the `idle` rules; equal specificity, so source order decides.
+
+**A consequence worth knowing before setting it:** `hitRegion()` returns no `move` region while
+`chromeVisible()` is false, so with the bar and border never shown, a *zoomed* window has no
+grab handle — it is moved by dragging the middle of an unzoomed image, or resized from its very
+edge. The panel's hint says so.
+
 Note the Browser pane never advances CSS transitions, so **read the class, not the opacity** — and
 time the flip with a `MutationObserver`, not a polling loop. See [`TESTING.md`](TESTING.md).
 

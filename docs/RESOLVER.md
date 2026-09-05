@@ -123,8 +123,7 @@ real 90 KB image of something else, **and it loads**. Negative tests are in `tes
 **One caveat before chasing it as a bug:** an imgur original is sometimes barely larger than the
 thumbnail (measured `UnCz83E`, 314×228 against a 300 px display = ratio 1.05), and the default
 `minRatio` of 1.2 rejects it, so that post stays a still. There is no way to know a candidate is
-animated without fetching it — a settings answer (`minRatio` ≈ 1.0, or `showEvenIfNotLarger`), not a
-code one.
+animated without fetching it — a settings answer (`minRatio` at or below 1), not a code one.
 
 **On an imgur post page there is nothing to fix**: an animated post renders as `<video>` with an
 `.mp4` src, and the video gates refuse it correctly. The grid thumbnail is the only place a gif is
@@ -176,7 +175,8 @@ produced; 25 gets an image *no bigger than the thumbnail* and 26 gets nothing.
 **The required upsize applies to the declared candidate too, since v0.40.0**, and since v0.42.0 the
 test is `>` rather than `>=` — so `minRatio` 1 means "anything bigger at all" without asking anyone
 to type 1.000001, and 25 (declared image exactly the size of the thumbnail) fails it at every
-value. Only *Preview pictures that are already full size* shows it. It used to bypass the gate on the grounds that the page is authoritative, and
+value **of 1 or more**; since v0.43.0 the floor is 0.1, and anything below 1 shows it. It used to
+bypass the gate on the grounds that the page is authoritative, and
 that is still true about *what* the thumbnail stands for; it is not an answer to *is this worth a
 window*. Reported as "I set Required upsize to 100× and everything still previews", which is exactly
 what a link-following site did.

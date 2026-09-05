@@ -22,7 +22,41 @@ There is no Save button. Every control writes `cfg` and calls `persist()` (`save
 - **The two remaining exits still flush the text editor.** Close and the backdrop call
   `sites.flush()` / `blocks.flush()`, because a click can outrun the textarea's own blur.
 
-Three more settings went in the same pass, for the same reason as v0.39.0's seven:
+## Wording rules the panel follows (v0.43.0)
+
+Two sweeps, both asked for after reading the panel end to end:
+
+- **"Image", never "picture".** Both were in use with no distinction being drawn, so one of them
+  was noise. `previewVideos` is the only place a *contrast* is meant, and it says so in words —
+  a looping clip with no controls is an *animated image*, not a video.
+- **A numeric hint states the unit at the END of its first clause**, not the front: "time the
+  preview window takes to fade in when it opens, and out when it closes, **in ms**". Anything
+  further is a second sentence. The old form led with the bare unit ("ms of a still pointer
+  before…"), which reads as a fragment and buries what the number is.
+
+`zoomFactor` was *Maximum initial zoom level* beside `maxZoom`'s *Maximum zoom* — two labels for
+what reads as one idea. It is **Opening zoom limit** now: `maxZoom` is how far you may zoom by
+hand, `zoomFactor` only how far a small image is enlarged on the way up.
+
+## `showEvenIfNotLarger` retired — it is `minRatio` below 1 (v0.43.0)
+
+*Preview pictures that are already full size* asked the same question as the row above it.
+`minRatio`'s floor was 1, so "show it even though nothing is bigger" needed its own switch; the
+floor is **0.1** now, which says the same thing on a dial instead of a checkbox — and answers the
+reason it was wanted, which is finding out *why* a given image gives no preview.
+
+`bigEnough()` is the only gate either one ever reached, and the shown src is already the last
+candidate `collectCandidates()` returns, so below 1 it passes on the ordinary path. `resolve()`'s
+separate fallback probe of the shown URL went with the setting.
+
+- **`migrate()` converts:** a stored `showEvenIfNotLarger: true` sets `minRatio` to 0.9 unless it
+  is already below 1. Approximate on purpose — the old flag had no floor at all — and stated in
+  the panel rather than guessed at silently.
+- **The main loop now logs the rejection** (`rejected — under the required upsize`, with both
+  sizes and the ratio). It used to `continue` in silence, which is the one thing a diagnostic
+  setting cannot do.
+
+Three more settings went in v0.40.0, for the same reason as v0.39.0's seven:
 
 | Retired | Why |
 |---|---|
@@ -115,23 +149,40 @@ button; `noReferrerHere()` reads it against `pageHost()`.
 The site to add is the one you are **on**, not the image's host — that is what the browser sends
 as the referrer and what `pageHost()` returns.
 
-## Live mode — the panel stops being modal · `E33`
+## The panel is never modal · `E33`
 
-**Test settings live**, at the top of *Advanced options*, keeps the panel open and hands the page
-back: the backdrop is hidden, the host gets `pointer-events:none` (only `.panel` takes input), the
-panel loses its centring transform and is dragged by its title bar. So you can hover a picture,
-watch the preview, and change numbers against it.
+v0.42.0 had two modes and a **Test settings live** button between them. v0.43.0 deleted the
+button and kept the live one: there is no backdrop, the page underneath always works, and only
+`Escape` or **Close** closes the panel. Every setting already wrote through on `change`, so the
+modal half was a mode that only took things away.
 
 - **`persist()` calls `applyLook()` and re-`layout()`s an open window**, which is what makes it
   live: border, radius, shadow, fade and the bar timings are re-written to the window that is
   already up instead of waiting for the next one.
-- **The panel host covers the viewport** (`inset:0`), so without `pointer-events:none` it eats
-  every hover on the page — the mode would do nothing but hide the backdrop.
-- **`ours()` now counts `panelHost` too.** Otherwise a hover over the panel is a hover over an
+- **The panel host covers the viewport** (`inset:0`) and is unconditionally
+  `pointer-events:none`; only `.panel` takes input. Without that it eats every hover on the page.
+- **`ours()` counts `panelHost` too.** Otherwise a hover over the panel is a hover over an
   ordinary page element and `onOver` tries to preview it.
-- **The mode and the fold survive the re-render.** Toggling calls `openPanel()` again, so
-  `panelLive`, `panelPos` and `advOpen` are module-level; without `advOpen` the fold you pressed
-  the button in closes under you.
+- **A click outside the panel does nothing to it.** The `.back` element is gone rather than
+  hidden — with the page live underneath, a stray click on it must reach the page.
+- **`advOpen`, `panelPos` and the body's `scrollTop` survive a re-render**, because `openPanel()`
+  is how *every* outside write refreshes the panel (below). `showPanel()` — the manager's menu
+  command — is the one entry point that resets them, so a fresh visit starts shut and placed.
+
+### Two regressions the collapse introduced, both fixed in the same version
+
+Neither is visible until the panel is non-modal *always*, which is why they arrived together
+with the button's deletion:
+
+- **One Escape closed the panel AND the pinned preview.** `onPinKey` sits on `window` capture and
+  therefore runs before the document-level handler that closes the panel; `panelOwns(e)` only
+  keeps it out when the event is inside the panel, and an Escape pressed with focus on the page
+  is not. `onPinKey` now returns on `Escape` whenever `panelHost` exists — the panel is the
+  window on top, so Escape is its exit first, wherever the focus is.
+- **A preview first opened while the panel was up buried the panel.** Both hosts sit at
+  `z-index: 2147483647`, so DOM order is the only tie-break left, and `buildViewer()` appended.
+  It now inserts *before* `panelHost` when there is one. `openPanel()` appends, so the other
+  order is already right.
 
 ### Whatever is on top owns the keyboard and the wheel
 
@@ -140,10 +191,42 @@ preview's `window`-capture wheel and key listeners took them first (they outrank
 design, `E22`).
 
 `panelOwns(e)` is the arbiter, and `onPinKey` / `onPinWheel` / the `scroll` cancel all defer to
-it: while the panel is up **and modal** it owns everything; in live mode it owns only what
-`composedPath()` says is inside it. Escape is handled at the document level in the same order —
-panel first, then the preview — so one Escape closes the panel and leaves the pinned window
-alone.
+it: it owns whatever `composedPath()` says is inside it, and nothing else. Escape is the
+exception described above.
+
+### Three handles, because the title bar used to scroll away
+
+Reported: the only grab was the `h2`, which lived *inside* `.body` — the scroller — so it was
+gone a few notches down a ~3000 px panel and the window could not be moved at all.
+
+- **The title is now `.head`, a flex-none row above `.body`**, so it cannot scroll away.
+- **`.grab.l` and `.grab.b`** are 7 px absolutely-positioned strips down the left edge and along
+  the bottom, appended **last** so they paint over `.body` and `.foot`. They sit inside the
+  panel's own padding (`.body` has 20 px, `.foot` 12 px), so no control loses its hit area —
+  verified against all three footer buttons with `elementFromPoint`.
+- All three call the same `startPanelDrag`.
+
+### Moving off the panel commits what is half-typed
+
+Reported: a number had to be clicked out of before it took. `num()` commits on `change`, which
+fires on blur — correct (a half-typed number is not a value anyone meant) but wrong to *reach*,
+because the pointer is on its way to the picture the number changes.
+
+`.panel`'s `mouseleave` blurs `sr.activeElement`, which fires the pending `change`. `num()` also
+blurs on Enter, since Enter fires `change` but leaves the caret sitting in the box.
+
+**`TEXTAREA` is exempt.** The list editor commits on its own blur, and losing it because the
+pointer wandered off would drop a paste in progress.
+
+### An outside write re-renders the panel
+
+Reported: adding an image to the exceptions list with the preview's ⊘ left the panel showing the
+old list until it was closed and re-opened. `blockCurrent()` and `toggleSite()` both write the
+whole `cfg` from outside the panel, so both now call `refreshPanel()` — `openPanel()` again if
+one is up. That is also what `GM_addValueChangeListener` has always done for another tab's write.
+
+`openPanel()` carries `.body`'s `scrollTop` across the rebuild, or a ⊘ press throws the reader
+back to the top of the panel.
 
 ## Dark Reader repaints the loading ring
 

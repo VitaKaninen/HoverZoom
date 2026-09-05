@@ -20,11 +20,13 @@ this script is a DOM read, so only the DOM in front of the user can say which on
 
 Two lessons from reading the first real report back (2026-09-03, v0.14.0 fixed both):
 
-- **Every path that paints a preview must log.** `resolve()`'s `showEvenIfNotLarger` fallback
-  called `onHit` with no `dbg('hit', …)`, so a hover that *did* show something produced no `hit`
-  line at all. A log with a silent success path is worse than no log: it reads as positive
-  evidence that nothing was shown. The boot line now also prints `showEvenIfNotLarger`,
-  `minRatio` and `minDisplayed`, because "no hit line" means nothing without them.
+- **Every path that paints a preview must log**, and every path that rejects one as well.
+  `resolve()`'s `showEvenIfNotLarger` fallback (deleted in v0.43.0) called `onHit` with no
+  `dbg('hit', …)`, so a hover that *did* show something produced no `hit` line at all. A log with
+  a silent success path is worse than no log: it reads as positive evidence that nothing was
+  shown. The boot line prints `minRatio` and `minDisplayed`, because "no hit line" means nothing
+  without them — and v0.43.0 gave the main loop's `bigEnough()` rejection its own `dbg` for the
+  same reason, since `minRatio` below 1 is now the diagnostic for "why does this not preview".
 - **Print positions, not just sizes.** The first `hoverReport` logged `1903×798` for the page's
   video and left the actual question unanswerable — gate 0 tests the element's centre against the
   video's *rectangle*, so a video of exactly the right size sitting somewhere else looks identical

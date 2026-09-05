@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.42.0
+// @version     0.43.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -40,8 +40,7 @@
         modifierKey: 'ctrl',        // 'ctrl' | 'alt' | 'shift'
         hoverDelay: 120,            // ms before resolving
         minDisplayed: 48,           // ignore images displayed smaller than this (icons)
-        minRatio: 1.2,              // full size must be at least this much bigger, trusted or guessed
-        showEvenIfNotLarger: false, // show at natural size even when it isn't an upgrade
+        minRatio: 1.2,              // full size must be this much bigger; below 1 previews anything
         previewVideos: false,       // preview video THUMBNAILS and player surfaces too. Off by
         skipFurniture: true,        // never preview the page's own furniture: its background, a
         siteMode: 'blacklist',      // 'blacklist' | 'whitelist'
@@ -62,8 +61,9 @@
         borderWidth: 1,
         borderColor: '#45475a',
         cornerRadius: 6,
-        frameMargin: 24,            // px of frame drawn ON TOP of the picture, on all four
-        barIdleMs: 1000,            // still pointer before the bar and grab border fade
+        frameMargin: 24,            // px of frame drawn ON TOP of the image, on all four
+        barFade: true,              // may the bar and grab border fade at all
+        barIdleMs: 1000,            // still pointer before they fade; 0 = they never appear
         barFadeMs: 1200,            // how long that fade takes
         shadow: true,
         shadowSize: 32,             // px of blur
@@ -81,9 +81,10 @@
     const RETIRED = ['maxWidthPct', 'maxHeightPct', 'dimOpacity', 'bottomReserve',
         'sameShapeOnly', 'keepSearching', 'followLinks', 'hoverThroughOverlays',
         'skipWhileMouseDown', 'playVideos', 'skipVideos', 'skipPageBackgrounds',
-        'skipBanners', 'skipDecorative', 'enabled', 'maxDisplayed', 'cursorGap', 'noReferrer'];
+        'skipBanners', 'skipDecorative', 'enabled', 'maxDisplayed', 'cursorGap', 'noReferrer',
+        'showEvenIfNotLarger'];
 
-    // The two retirements that DO convert.
+    // The retirements that DO convert.
     function migrate(o) {
         if (o.previewVideos === undefined && o.skipVideos !== undefined) {
             o.previewVideos = !o.skipVideos;
@@ -91,6 +92,8 @@
         if (o.skipFurniture === undefined && o.skipPageBackgrounds !== undefined) {
             o.skipFurniture = !!o.skipPageBackgrounds;
         }
+        // "Preview images that are already full size" is a minRatio below 1 now.
+        if (o.showEvenIfNotLarger && !(o.minRatio < 1)) o.minRatio = 0.9;
         return o;
     }
 
@@ -207,6 +210,7 @@
         cfg.siteList = kept;
         saveSettings();
         refreshSiteMenu();
+        refreshPanel();
         if (!siteEnabled()) cancel();
         dbg('site toggled', { host: host, list: cfg.siteList, enabledHere: siteEnabled() });
     }
@@ -715,7 +719,7 @@
                 });
                 return null;
             }
-            if (!bigEnough(dim, displayed) && !cfg.showEvenIfNotLarger) {
+            if (!bigEnough(dim, displayed)) {
                 dbg('linked page rejected — under the required upsize', {
                     url: hit.url, minRatio: cfg.minRatio,
                     onScreen: displayed.w + '×' + displayed.h,
@@ -748,8 +752,14 @@
                 });
                 continue;
             }
-            const usable = bigEnough(dim, displayed) || (cfg.showEvenIfNotLarger && !isSameAsShown);
-            if (!usable) continue;
+            if (!bigEnough(dim, displayed)) {
+                dbg('rejected — under the required upsize', {
+                    url: url, from: c.from, minRatio: cfg.minRatio,
+                    onScreen: displayed.w + '×' + displayed.h,
+                    candidate: dim.w + '×' + dim.h,
+                });
+                continue;
+            }
             if (best && dim.w * dim.h <= best.w * best.h) continue;   // not an improvement
             if (best && best.video && !dim.video) continue;
             best = { url: url, w: dim.w, h: dim.h, video: !!dim.video, duration: dim.duration,
@@ -759,23 +769,6 @@
         }
         await linked;
         if (trusted) return trusted;
-        if (best) return best;
-        if (cfg.showEvenIfNotLarger && shown && !blocked(shown) && !token.cancelled) {
-            const dim = await probe(shown);
-            if (dim && native && (dim.w !== native.w || dim.h !== native.h)) {
-                markUnstable(shown, native, dim);
-            } else if (dim && dim.w <= displayed.w && dim.h <= displayed.h) {
-                dbg('nothing to show — the original is no bigger than what is on screen', {
-                    url: shown, onScreen: displayed.w + '×' + displayed.h,
-                    original: dim.w + '×' + dim.h,
-                });
-            } else if (dim) {
-                best = { url: shown, w: dim.w, h: dim.h, video: !!dim.video, duration: dim.duration,
-                    from: 'the displayed src itself (shown anyway — not larger)' };
-                dbg('hit (not larger — shown anyway)', best);
-                if (onHit && !token.cancelled) onHit(best);
-            }
-        }
         return best;
     }
 
@@ -789,7 +782,7 @@
     // Only two of these are real: Chrome accepts auto, pixelated and crisp-edges, and renders
     // crisp-edges the same as pixelated. Anything else (lanczos, bicubic) needs a canvas.
     const SMOOTHING_OPTS = [
-        ['auto', 'Smooth', 'blended pixels — photographs, and most pictures'],
+        ['auto', 'Smooth', 'blended pixels — photographs, and most images'],
         ['pixelated', 'Hard pixels', 'every pixel a square — pixel art, screenshots, small logos'],
     ];
     let edgeEls = null;         // [top, left, right, bottom] — the drawn frame margin
@@ -934,6 +927,9 @@
             '.cap,.edge{transition:opacity ' + BAR_SHOW_MS + 'ms ease}',
             '.box.idle .cap{opacity:0;pointer-events:none;transition:opacity var(--barfade) ease}',
             '.box.idle .edge{opacity:0;transition:opacity var(--barfade) ease}',
+            // Source order beats the two rules above at equal specificity — "never shown" has no fade.
+            '.box.nobar .cap{opacity:0;pointer-events:none;transition:none}',
+            '.box.nobar .edge{opacity:0;transition:none}',
             '.spin{position:fixed;width:34px;height:34px;display:none;pointer-events:none;',
             'filter:drop-shadow(0 2px 6px rgba(0,0,0,.5))}',
             '.spin.on{display:block}',
@@ -992,7 +988,7 @@
 
         vidOffEl = document.createElement('span');
         vidOffEl.className = 'btn vidoff';
-        vidOffEl.title = 'Stop showing clips in this tab — still pictures only, until you reload';
+        vidOffEl.title = 'Stop showing clips in this tab — still images only, until you reload';
         vidOffEl.textContent = '▶';
         vidOffEl.addEventListener('mousedown', function (e) { e.preventDefault(); e.stopPropagation(); }, true);
         vidOffEl.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); stopVideoPreviews(); }, true);
@@ -1011,7 +1007,7 @@
         capEl.appendChild(aaEl);
 
         aaPopEl = buildPop();
-        popHead(aaPopEl, 'How the picture is drawn when the preview is bigger than the original.',
+        popHead(aaPopEl, 'How the image is drawn when the preview is bigger than the original.',
             ' Point at one to see it; click to keep it.');
         SMOOTHING_OPTS.forEach(function (o) {
             const it = popItem(aaPopEl, o[1], o[2]);
@@ -1074,7 +1070,11 @@
         spinEl.appendChild(spinSvg);
         root.appendChild(spinEl);
 
-        (document.body || document.documentElement).appendChild(host);
+        // Both hosts sit at the maximum z-index, so DOM order is the only tie-break left: a
+        // preview first opened while the panel is up would otherwise bury the panel's controls.
+        const parent = document.body || document.documentElement;
+        if (panelHost && panelHost.parentNode === parent) parent.insertBefore(host, panelHost);
+        else parent.appendChild(host);
     }
 
     // ----------------------------------------------------------------- geometry
@@ -1324,23 +1324,40 @@
         return !!box && !box.classList.contains('idle');
     }
 
-    // The class lives on the BOX, not on the bar.
+    function barIdleMs() {
+        return Math.max(0, Math.min(60000, cfg.barIdleMs | 0));
+    }
+
+    // Zero idle means the bar and grab border never appear at all — the timer version of that
+    // shows them for one frame and fades, which is what "0 still shows it briefly" was.
+    function barAlwaysIdle() {
+        return !!cfg.barFade && !barIdleMs();
+    }
+
+    // The class lives on the BOX, not on the bar. `nobar` kills the transition too, or the
+    // never-shown case still fades from opacity 1 the first time the window opens.
     function showBar() {
         if (!box) return;
-        box.classList.remove('idle');
         clearTimeout(barTimer);
+        barTimer = 0;
+        box.classList.toggle('nobar', barAlwaysIdle());
+        if (barAlwaysIdle()) { box.classList.add('idle'); return; }
+        box.classList.remove('idle');
+        if (!cfg.barFade) return;               // stays up for as long as the window does
         barTimer = setTimeout(function () {
             barTimer = 0;
             if (!box || !view) return;
             if (pointerOverChrome() || popOpen()) { showBar(); return; }   // parked on it: keep it
             box.classList.add('idle');
-        }, Math.max(0, Math.min(60000, cfg.barIdleMs | 0)));
+        }, barIdleMs());
     }
 
     function resetBar() {
         clearTimeout(barTimer);
         barTimer = 0;
-        if (box) box.classList.remove('idle');
+        if (!box) return;
+        box.classList.toggle('nobar', barAlwaysIdle());
+        box.classList.toggle('idle', barAlwaysIdle());
     }
 
     // Point the frame at a resolved candidate, picking the face that can display it.
@@ -1407,7 +1424,7 @@
         if (hasVid) { vidOffEl.style.right = px(right); right += BTN_STEP; }
         aaEl.style.right = px(right); right += BTN_STEP;
         aaEl.classList.toggle('sharp', smoothingMode() !== 'auto');
-        aaEl.title = 'How the picture is drawn when it is enlarged';
+        aaEl.title = 'How the image is drawn when it is enlarged';
         capEl.style.paddingRight =
             px(placed ? Math.min(right + 2, Math.max(8, view.frameW - 8)) : 8);
     }
@@ -1850,6 +1867,7 @@
         if (added) saveSettings();
         dbg('blocked', cfg.blockList);
         probeCache.clear();
+        refreshPanel();             // the Exceptions list is on screen behind this window
         dismiss();
     }
 
@@ -1923,11 +1941,10 @@
         layout();
     }
 
-    // The settings panel is another window on top of this one: while it is up, its own scrolling
-    // and typing are not the preview's to take.
+    // The settings panel is another window on top of this one: what lands inside it is its own
+    // scrolling and typing, not the preview's to take.
     function panelOwns(e) {
         if (!panelHost) return false;
-        if (!panelLive) return true;                    // modal: the panel owns everything
         if (!e || !e.composedPath) return false;
         return e.composedPath().indexOf(panelHost) !== -1;
     }
@@ -1935,6 +1952,9 @@
     function onPinKey(e) {
         if (!placed || !view) return;
         if (panelOwns(e)) return;
+        // The panel is the window on top, so Escape is ITS exit before it is this one's —
+        // wherever the focus happens to be. One press must not close both.
+        if (e.key === 'Escape' && panelHost) return;
         if (e.ctrlKey || e.metaKey || e.altKey) return;   // leave browser/page chords alone
         const step = e.shiftKey ? cfg.panStep * 3 : cfg.panStep;
         let handled = true;
@@ -2562,37 +2582,63 @@
 
     let panelHost = null;
     let panelFlush = null;      // commits an open "edit as text" box, whatever closes the panel
-    let panelLive = false;      // the page underneath stays usable, for trying settings out
-    let panelPos = null;        // where the live panel has been dragged to
-    let advOpen = false;        // the fold survives the re-render a mode change needs
+    let panelPos = null;        // where the panel has been dragged to
+    let advOpen = false;        // the fold survives the re-render every outside write needs
 
     function closePanel() {
         if (panelFlush) { panelFlush(); panelFlush = null; }
         if (panelHost) { panelHost.remove(); panelHost = null; }
     }
 
+    // Anything writing cfg from OUTSIDE the panel re-renders it, or it shows stale values.
+    function refreshPanel() {
+        if (panelHost) openPanel();
+    }
+
+    // The manager's menu — a fresh visit, so the fold starts shut and the window is placed again.
+    function showPanel() {
+        advOpen = false;
+        panelPos = null;
+        openPanel();
+    }
+
+    // A re-render must not throw the reader back to the top of a ~3000px scroller.
+    function panelScroll() {
+        const b = panelHost && panelHost.shadowRoot && panelHost.shadowRoot.querySelector('.body');
+        return b ? b.scrollTop : 0;
+    }
+
     function openPanel() {
+        const keepScroll = panelScroll();
         closePanel();
         reloadSettings();
+        // Never modal: the host covers the viewport, so without this it eats every hover on the page.
         panelHost = document.createElement('div');
-        panelHost.style.cssText = 'all:initial;position:fixed;inset:0;z-index:2147483647;' +
-            (panelLive ? 'pointer-events:none;' : '');
+        panelHost.style.cssText =
+            'all:initial;position:fixed;inset:0;z-index:2147483647;pointer-events:none;';
         const sr = panelHost.attachShadow({ mode: 'open' });
 
         const st = document.createElement('style');
         st.textContent = [
             ':host{all:initial}',
             '*{box-sizing:border-box;font-family:system-ui,-apple-system,Segoe UI,sans-serif}',
-            '.back{position:fixed;inset:0;background:rgba(0,0,0,.5)}',
-            '.panel{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:520px;max-width:94vw;',
+            '.panel{position:fixed;width:520px;max-width:94vw;',
             'max-height:88vh;display:flex;flex-direction:column;overflow:hidden;background:' + C.base + ';',
             'color:' + C.text + ';border:1px solid ' + C.surface2 + ';',
-            'border-radius:10px;box-shadow:0 16px 48px rgba(0,0,0,.6);font-size:13px;',
+            'border-radius:10px;box-shadow:0 18px 60px rgba(0,0,0,.75);font-size:13px;',
             'pointer-events:auto}',
-            '.panel.live{transform:none;box-shadow:0 18px 60px rgba(0,0,0,.75)}',
-            '.panel.live h2{cursor:move}',
-            '.body{flex:1 1 auto;min-height:0;overflow:auto;padding:18px 20px 16px}',
-            'h2{margin:0 0 14px;font-size:15px;font-weight:600;color:' + C.text + '}',
+            '.body{flex:1 1 auto;min-height:0;overflow:auto;padding:14px 20px 16px}',
+            // The title bar is OUTSIDE the scroller, or it is gone the moment you scroll.
+            '.head{flex:none;margin:0;display:flex;align-items:baseline;gap:8px;cursor:move;',
+            'padding:10px 20px 9px;font-size:15px;font-weight:600;color:' + C.text + ';',
+            'border-bottom:1px solid ' + C.surface + '}',
+            '.head .ver{font-weight:400;font-size:12px;color:' + C.sub + '}',
+            // Two more handles, because the pointer is usually already somewhere else on a
+            // window this tall. Source order puts them over the body and the footer.
+            '.grab{position:absolute;cursor:move;background:transparent}',
+            '.grab:hover{background:' + C.surface + '}',
+            '.grab.l{left:0;top:0;bottom:0;width:7px}',
+            '.grab.b{left:0;right:0;bottom:0;height:7px}',
             'h3{margin:18px 0 8px;font-size:12px;font-weight:600;text-transform:uppercase;',
             'letter-spacing:.06em;color:' + C.sub + ';border-bottom:1px solid ' + C.surface + ';padding-bottom:5px}',
             '.row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:5px 0}',
@@ -2658,18 +2704,22 @@
         ].join('');
         sr.appendChild(st);
 
-        const back = document.createElement('div');
-        back.className = 'back';
-        back.hidden = panelLive;            // live mode: the page underneath is the point
-        back.addEventListener('click', closePanel);
-        sr.appendChild(back);
-
         const panel = document.createElement('div');
-        panel.className = panelLive ? 'panel live' : 'panel';
+        panel.className = 'panel';
         sr.appendChild(panel);
 
+        // Moving off the panel commits whatever is half-typed. A number otherwise sits in its
+        // box until you click somewhere else, which is the wrong thing to have to do while
+        // watching the preview it changes. The text editor is exempt — it commits on its own
+        // blur, and losing it because the pointer wandered would drop a paste in progress.
+        panel.addEventListener('mouseleave', function () {
+            const a = sr.activeElement;
+            if (!a || a.tagName === 'TEXTAREA' || typeof a.blur !== 'function') return;
+            a.blur();
+        });
+
         function placePanel() {
-            if (!panelLive || !panelPos) return;
+            if (!panelPos) return;
             const vw = document.documentElement.clientWidth;
             const vh = document.documentElement.clientHeight;
             if (vw && vh) {             // the Browser pane reports 0 while hidden
@@ -2682,7 +2732,7 @@
         }
 
         function startPanelDrag(e) {
-            if (!panelLive || e.button !== 0) return;
+            if (e.button !== 0) return;
             e.preventDefault();
             const r = panel.getBoundingClientRect();
             const ox = e.clientX - r.left, oy = e.clientY - r.top;
@@ -2698,21 +2748,20 @@
             window.addEventListener('mouseup', up, true);
         }
 
-        function toggleLive() {
-            const r = panel.getBoundingClientRect();
-            panelPos = panelLive ? null : { left: r.left, top: r.top };
-            panelLive = !panelLive;
-            openPanel();
-        }
+        const h = document.createElement('h2');
+        h.className = 'head';
+        h.title = 'Drag to move';
+        h.textContent = 'Hover Zoom — settings';
+        const ver = document.createElement('span');
+        ver.className = 'ver';
+        ver.textContent = version();
+        h.appendChild(ver);
+        h.addEventListener('mousedown', startPanelDrag);
+        panel.appendChild(h);
 
         const body = document.createElement('div');
         body.className = 'body';
         panel.appendChild(body);
-
-        const h = document.createElement('h2');
-        h.textContent = 'Hover Zoom — settings  ·  ' + version();
-        if (panelLive) { h.title = 'Drag to move'; h.addEventListener('mousedown', startPanelDrag); }
-        body.appendChild(h);
 
         // What Undo changes goes back to: the whole object as it stood when the panel opened.
         const opened = JSON.parse(JSON.stringify(cfg));
@@ -2790,6 +2839,10 @@
                 cfg[key] = Math.max(min, Math.min(max, v));
                 el.value = cfg[key];
                 persist();
+            });
+            // Enter fires `change` on its own, but leaves the caret sitting in the box.
+            el.addEventListener('keydown', function (e) {
+                if (e.key === 'Enter') { e.preventDefault(); el.blur(); }
             });
             return { el: el, row: row(labelText, hintText, el) };
         }
@@ -2993,7 +3046,7 @@
         const intro = document.createElement('p');
         intro.className = 'intro';
         intro.textContent =
-            'Point at any picture and Hover Zoom finds the full-size original and shows it. ' +
+            'Point at any image and Hover Zoom finds the full-size original and shows it. ' +
             'Click that preview to keep it on screen — then scroll to make it bigger, drag it ' +
             'anywhere, and right-click it to save or copy. Hit Escape or click outside the ' +
             'preview to close it.';
@@ -3018,7 +3071,7 @@
         para('Finding the original.',
             'Nothing is decided until you point at something. It then works from what the page ' +
             'itself offers — a bigger version named in the markup, the same URL with the ' +
-            'thumbnail’s size stripped out of it — and, when the picture links to its own ' +
+            'thumbnail’s size stripped out of it — and, when the image links to its own ' +
             'page on the same site, it reads that page and takes whatever the site declares ' +
             'there. Every candidate is loaded and measured, so a preview is verified to be ' +
             'bigger rather than guessed at. There is no list of supported sites.');
@@ -3030,9 +3083,9 @@
             'Escape or click outside the preview to close it. Nothing else holds it open, and the page underneath ' +
             'stays readable and scrollable while it is there.');
         para('Moving, sizing and zooming.',
-            'Drag the frame around the picture, or its status bar, to move the window; drag an ' +
+            'Drag the frame around the image, or its status bar, to move the window; drag an ' +
             'edge or a corner to resize it, holding Shift to keep its shape. The wheel grows the ' +
-            'whole window until you resize it by hand, after which it zooms the picture inside ' +
+            'whole window until you resize it by hand, after which it zooms the image inside ' +
             'the frame instead. Arrow keys pan, + and − zoom, 0 fits.');
         para('Saving a copy.',
             'Right-click a pinned preview and you get the browser’s own menu — Save image ' +
@@ -3045,9 +3098,9 @@
             'everywhere. For a whole site, the userscript manager’s menu has an ' +
             'enable/disable entry for the page you are on.');
         para('Clips.',
-            'A short muted clip already looping with no controls is an animated picture, not a ' +
+            'A short muted clip already looping with no controls is an animated image, not a ' +
             'video, and previews as one — some posts have no still form at all. Press ▶ in a ' +
-            'pinned preview’s status bar to go back to still pictures for the rest of the ' +
+            'pinned preview’s status bar to go back to still images for the rest of the ' +
             'tab; reloading the page restores it.');
 
         guideBtn.addEventListener('click', function () {
@@ -3072,7 +3125,7 @@
         const posHint = pos.row.querySelector('.hint');
         function syncPos() {
             posHint.textContent = pos.el.value === 'center'
-                ? 'the pointer is nowhere near it, so click the picture you are pointing at to ' +
+                ? 'the pointer is nowhere near it, so click the image you are pointing at to ' +
                   'pin the preview — then hit Escape or click outside the preview to close it'
                 : 'opens under the pointer, so a click pins it without moving the mouse';
         }
@@ -3086,13 +3139,13 @@
         check('previewVideos', 'Preview videos as well',
             'off by default, because pointing at a video is usually aiming to play it and a ' +
             'preview lands on what you were about to click. This is about video thumbnails and ' +
-            'players — a short looping clip with no controls counts as an animated picture and ' +
+            'players — a short looping clip with no controls counts as an animated image and ' +
             'previews either way');
         check('skipFurniture', 'Ignore backgrounds and banners',
-            'page furniture rather than pictures on the page: the page’s own background, a ' +
+            'page furniture rather than images on the page: the page’s own background, a ' +
             'tiled or fixed one, a strip spanning the window, one the page’s text sits on, ' +
             'the banner across the top, and anything the page marks as decoration. Turn off if ' +
-            'it is skipping pictures you want');
+            'it is skipping images you want');
 
         section('Where it runs');
         pick('siteMode', 'Site list', null, [
@@ -3135,72 +3188,67 @@
 
         advanced('Advanced options', '  timings, sizes, appearance');
 
-        const liveBtn = document.createElement('button');
-        liveBtn.className = 'guidebtn';
-        liveBtn.textContent = panelLive ? 'Stop testing live' : 'Test settings live';
-        liveBtn.addEventListener('click', toggleLive);
-        mount.appendChild(liveBtn);
-
-        const liveNote = document.createElement('div');
-        liveNote.className = 'hint';
-        liveNote.style.margin = '-10px 0 14px';
-        liveNote.textContent = panelLive
-            ? 'The page underneath is live — hover a picture and the preview obeys what you ' +
-              'change here as you change it. Drag this window by its title bar. Press the ' +
-              'button again to go back to the normal panel.'
-            : 'Keeps this window open but lets the page underneath work, so you can hover a ' +
-              'picture and watch what your changes do to it.';
-        mount.appendChild(liveNote);
-
         section('Matching');
         num('hoverDelay', 'Delay before the preview appears',
-            'milliseconds. A short wait stops previews firing as you sweep the pointer across ' +
-            'a page', 0, 3000, 10);
-        num('minDisplayed', 'Ignore pictures smaller than', 'px on screen — skips icons', 0, 2000, 1);
+            'how long the pointer rests on an image first, in ms. A short wait stops previews ' +
+            'firing as you sweep the pointer across a page', 0, 3000, 10);
+        num('minDisplayed', 'Ignore images smaller than',
+            'the size it is displayed at, in px — skips icons', 0, 2000, 1);
         num('minRatio', 'Required upsize',
-            'only show the preview if the original is LARGER than this many times the size of ' +
-            'the one on the page — so 1 means anything bigger at all. Applies to what a linked ' +
-            'page declares as well as to what the script works out for itself', 1, 100, 0.1);
-        check('showEvenIfNotLarger', 'Preview pictures that are already full size',
-            'the page is showing the original at its true size, so there is nothing bigger to ' +
-            'find. Turn on to preview it anyway — to zoom into it, or to save it from the ' +
-            'preview. Never a pixel-for-pixel copy of what is already on screen at the same URL');
+            'the original must be at least this many times the size of the image on the page, ' +
+            'so 1 means anything bigger at all. Below 1 previews an image that is no bigger — ' +
+            'useful for working out why something gives no preview. Applies to what a linked ' +
+            'page declares as well as to what the script works out for itself', 0.1, 100, 0.1);
 
         section('The preview window');
-        num('wheelZoomStep', 'Wheel zoom step', '% per notch — +/− step by 25%', 2, 100, 1);
-        num('panStep', 'Arrow-key pan step', 'px per press — Shift for 3×', 5, 500, 5);
-        num('maxZoom', 'Maximum zoom', '× the original’s own size', 1, 64, 1);
+        num('wheelZoomStep', 'Wheel zoom step',
+            'how much one wheel notch changes the zoom, in %. The + and − keys always step by 25%',
+            2, 100, 1);
+        num('panStep', 'Arrow-key pan step',
+            'how far one press moves the image, in px — hold Shift for 3×', 5, 500, 5);
+        num('maxZoom', 'Maximum zoom',
+            'how far you can zoom in by hand, in multiples of the original’s own size', 1, 64, 1);
         num('maxSizeMultiple', 'Maximum window size',
-            '× the browser window. A preview opens no bigger than the window; this is the ' +
-            'ceiling for growing it yourself afterwards, with the wheel or by dragging a corner',
-            1, 4, 0.25);
-        num('zoomFactor', 'Maximum initial zoom level',
-            '× the original’s own size, when it first opens. It is still fitted inside the ' +
-            'browser window, so anything larger than the window opens smaller than this — this ' +
-            'only decides how far a SMALL picture is enlarged (1 = never enlarged)', 0.1, 8, 0.1);
+            'how large the preview window may be grown, in multiples of the browser window. A ' +
+            'preview always opens no larger than the browser window; this is the ceiling for ' +
+            'growing it yourself afterwards, with the wheel or by dragging a corner', 1, 4, 0.25);
+        num('zoomFactor', 'Opening zoom limit',
+            'how far a SMALL image is enlarged when the preview first opens, in multiples of ' +
+            'the original’s own size (1 = never enlarged). It is still fitted inside the ' +
+            'browser window, so anything larger than that opens smaller than this', 0.1, 8, 0.1);
 
         section('Appearance');
         num('fadeMs', 'Preview fade',
-            'ms the preview window takes to fade in when it opens, and out when it closes',
-            0, 1000, 10);
-        num('borderWidth', 'Border thickness', 'px', 0, 20, 1);
+            'time the preview window takes to fade in when it opens, and out when it closes, ' +
+            'in ms', 0, 1000, 10);
+        num('borderWidth', 'Border thickness', 'in px', 0, 20, 1);
         color('borderColor', 'Border colour');
-        num('cornerRadius', 'Corner radius', 'px', 0, 40, 1);
+        num('cornerRadius', 'Corner radius', 'in px', 0, 40, 1);
         num('frameMargin', 'Grab border',
-            'px of frame drawn over the edges of the picture, matching the status bar along the ' +
-            'bottom. This is the strip you grab to move the window at any zoom — and it stops ' +
-            'being a handle once it has faded', 0, 80, 2);
-        num('barIdleMs', 'Grab border fades after',
-            'ms of a still pointer before the grab border and the status bar fade out', 0, 60000, 100);
-        num('barFadeMs', 'Grab border fade takes',
-            'ms for that fade. They come back instantly on any movement over the preview',
-            0, 10000, 100);
+            'width of the frame drawn over the edges of the image, in px, matching the status ' +
+            'bar along the bottom. This is the strip you grab to move the window at any zoom — ' +
+            'and it stops being a handle once it has faded', 0, 80, 2);
+        const barFade = check('barFade', 'Fade the grab border and status bar out',
+            'off keeps both of them on screen for as long as the preview window is up');
+        const barIdle = num('barIdleMs', 'Grab border fades after',
+            'how long the pointer stays still first, in ms. Set it to 0 and the grab border and ' +
+            'the status bar never appear at all — the window is then moved by dragging the ' +
+            'middle of an unzoomed image, and resized from its very edge', 0, 60000, 100);
+        const barTake = num('barFadeMs', 'Grab border fade takes',
+            'how long that fade takes, in ms. Both come back instantly on any movement over ' +
+            'the preview', 0, 10000, 100);
+        function syncBarFade() {
+            barIdle.row.hidden = !barFade.el.checked;
+            barTake.row.hidden = !barFade.el.checked;
+        }
+        barFade.el.addEventListener('change', syncBarFade);
+        syncBarFade();
         const shadow = check('shadow', 'Drop shadow',
             'a soft shadow under the preview window, which separates it from the page behind it');
         const shadowSize = num('shadowSize', 'Shadow size',
-            'px of blur — 0 is none, 60 is a wide soft pool', 0, 120, 4);
+            'the blur under the window, in px — 0 is none, 60 is a wide soft pool', 0, 120, 4);
         const shadowStrength = num('shadowStrength', 'Shadow strength',
-            '% opacity — how dark it is at its centre', 0, 100, 5);
+            'how dark that shadow is at its centre, in %', 0, 100, 5);
         function syncShadow() {
             shadowSize.row.hidden = !shadow.el.checked;
             shadowStrength.row.hidden = !shadow.el.checked;
@@ -3209,11 +3257,13 @@
         syncShadow();
         check('showStatusBar', 'Show the status bar',
             'filename, format, dimensions and size along the bottom, and the ⊘, ▶ and AA ' +
-            'buttons — AA is where smoothing is chosen, on the picture you are looking at. It ' +
-            'doubles as the window’s title bar, and fades out after a second of a still pointer');
+            'buttons — AA is where smoothing is chosen, on the image you are looking at. It ' +
+            'doubles as the window’s title bar, and fades out with the grab border');
         pick('spinnerTheme', 'Loading ring',
-            'the ring shown while it is still searching', [
-                ['auto', 'Match the browser'], ['dark', 'Always dark'], ['light', 'Always light']]);
+            'the ring shown while it is still searching. Matching means the light-or-dark ' +
+            'preference the browser reports to pages, which on every desktop browser is the ' +
+            'operating system’s setting — the browser’s own theme does not change it', [
+                ['auto', 'Match the system'], ['dark', 'Always dark'], ['light', 'Always light']]);
         section('Diagnostics');
         check('debug', 'Log every hover to the console',
             'one line per hover in the browser console (F12): what was under the pointer, which ' +
@@ -3266,19 +3316,29 @@
         foot.appendChild(close);
         panel.appendChild(foot);
 
+        // Last, so they sit over the body and the footer rather than under them.
+        ['l', 'b'].forEach(function (k) {
+            const g = document.createElement('div');
+            g.className = 'grab ' + k;
+            g.title = 'Drag to move';
+            g.addEventListener('mousedown', startPanelDrag);
+            panel.appendChild(g);
+        });
+
         (document.body || document.documentElement).appendChild(panelHost);
 
-        if (panelLive && !panelPos) {       // reopened in live mode: out of the way, on the right
+        if (!panelPos) {                    // out of the way, on the right: the page is the point
             panelPos = {
                 left: Math.max(12, document.documentElement.clientWidth - panel.offsetWidth - 24),
                 top: 40,
             };
         }
         placePanel();
+        body.scrollTop = keepScroll;
     }
 
     if (isTopFrame && typeof GM_registerMenuCommand === 'function') {
-        GM_registerMenuCommand('Hover Zoom settings', openPanel);
+        GM_registerMenuCommand('Hover Zoom settings', showPanel);
         refreshSiteMenu();
     }
 
@@ -3291,7 +3351,6 @@
         playVideos: playVideos,
         skipFurniture: cfg.skipFurniture,
         blockList: cfg.blockList.length,
-        showEvenIfNotLarger: cfg.showEvenIfNotLarger,
         minRatio: cfg.minRatio,
         minDisplayed: cfg.minDisplayed,
     });

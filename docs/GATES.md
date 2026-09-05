@@ -335,19 +335,23 @@ tile at 263. Anything added above pushes 40 out of the band and the test silentl
 - **avsforum's second header image at 319 px is still missed** — it clears `BANNER_TOP` only because
   the banner above it is 307 px tall.
 
-## `showEvenIfNotLarger` must not show a copy of what is on screen
+## A copy of what is on screen is reachable below `minRatio` 1, on purpose (v0.43.0)
 
-The setting means "display at natural size even though it does not clear `minRatio`" — never
-"display a pixel-for-pixel copy". `resolve()`'s fallback had no size comparison at all, so a frame
-could hold the identical bytes at the identical scale, floating over the picture they came from.
+`showEvenIfNotLarger` is retired into `minRatio < 1` — see
+[`SETTINGS.md`](SETTINGS.md). It carried a guard worth recording, because the guard went with it:
+its fallback had no size comparison, so a frame could hold the identical bytes at the identical
+scale, floating over the image they came from, and `dim.w <= displayed.w && dim.h <= displayed.h`
+was added to stop that.
 
-Guard: `dim.w <= displayed.w && dim.h <= displayed.h` — no bigger in *either* dimension, so a
-picture genuinely a little larger still shows.
+**Nothing replaces it, and that is the intended shape.** At `minRatio` ≥ 1 the test is a strict
+`>`, so an identical copy cannot pass at any value anyone would leave set. Below 1 it can — which
+is exactly what the number is for: "show me the preview anyway so I can see what the resolver
+found". Blocking it there would defeat the setting.
 
-**Only the fallback gets this, never the main loop.** The loop's escape is
-`showEvenIfNotLarger && !isSameAsShown`, and a *different* URL at the same pixel size can be a better
-answer — imgur's `.webp` (static) versus `.jpg` (animated) at 412×360. Same size, different picture,
-worth showing.
+The old note "only the fallback gets this, never the main loop" is moot with the fallback deleted,
+but its reason still holds and still constrains: a *different* URL at the same pixel size can be a
+better answer — imgur's `.webp` (static) versus `.jpg` (animated) at 412×360. Same size, different
+image, worth showing.
 
 ## What counts as a page background · `E17`
 
@@ -416,6 +420,6 @@ cannot know about — a watermark, a sprite sheet, one specific image simply not
   `?` or `.` would quietly widen the match, and **a wrong match here is silent**. Same discipline as
   `UPGRADES` — the negative tests matter more.
 
-Blocking is checked in three places, all needed: `eligible()` (so no spinner even flashes),
-`collectCandidates`' `add()` (so a blocked URL is never *probed*), and the `showEvenIfNotLarger`
-fallback in `resolve()`.
+Blocking is checked in two places, both needed: `eligible()` (so no spinner even flashes) and
+`collectCandidates`' `add()` (so a blocked URL is never *probed*). It was three until v0.43.0
+deleted `resolve()`'s fallback probe of the shown URL.

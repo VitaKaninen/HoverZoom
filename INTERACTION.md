@@ -407,7 +407,7 @@ this table is a table.
 | `E30` | A centred preview is pinned from the picture, not from the window | [`docs/VIEWER.md`](docs/VIEWER.md) |
 | `E31` | Smoothing — the AA menu, and why there are only two options | [`docs/SETTINGS.md`](docs/SETTINGS.md) |
 | `E32` | A pan that runs out of picture continues as a window move | [`docs/VIEWER.md`](docs/VIEWER.md) |
-| `E33` | The settings panel's live mode, and who owns the keyboard and wheel | [`docs/SETTINGS.md`](docs/SETTINGS.md) |
+| `E33` | The settings panel is never modal, and who owns the keyboard and wheel | [`docs/SETTINGS.md`](docs/SETTINGS.md) |
 
 `E3` is retired with the detached state (v0.28.0); `E4` and `E5` are retired as dangling.
 
