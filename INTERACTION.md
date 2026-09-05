@@ -3,7 +3,7 @@
 What the preview **window** does, as a state machine. Menus, buttons, the status bar contents and
 the loading ring are out of scope except where they change what the window itself accepts.
 
-Describes `Hover-Zoom.user.js` **v0.39.0**.
+Describes `Hover-Zoom.user.js` **v0.48.0**.
 
 **This file is the vocabulary, not the reasoning.** Each item is one or two lines saying what the window does. *Why* it does it lives in [`docs/`](docs/) — `E` items point straight at the section that holds the argument, and every other ID can be found with `grep -rn "S05" docs/`.
 
@@ -240,8 +240,8 @@ growth ceiling, and only a hand resize pins its edges** (`E22`, `E23`).
   which is clickable and becomes a text field (`S20`, `S21`). Zooming from either **holds the
   frame's bottom-right corner still**, so the control does not run away from the pointer driving
   it (`E34`). The level shows on a hover preview too, but only when it is off its fit; the slider
-  is placed-only. **A placed frame is never narrower than 250 px**, because that is what the bar's
-  controls need.
+  is placed-only. **A placed frame is never narrower than its bar's controls** —
+  256 px, or 280 px while the ▶ is there (`barMinW()`).
 - **May hang off the edges of the screen** (`E21`), which is the point of the growth ceiling
   being above 1×: shoved aside or upwards, the picture still reaches the screen edges instead of
   leaving a strip of empty page behind it.
@@ -289,8 +289,8 @@ picture follows or does not depending on what it was doing (`E23`).
 - **Cursor:** `nwse-resize` / `nesw-resize` on a corner, `ew-resize` / `ns-resize` on an edge.
 - **Aspect:** free — drag the window to any shape you like. **Shift** locks it to the frame's
   shape as it was when the edge was grabbed (`E23`).
-- **Bounds:** no shorter than 48 px and **no narrower than 250 px** — the width the status bar's
-  controls need (`E34`); at the default border that is a 252 × 50 window, which is what keeps the
+- **Bounds:** no shorter than 48 px and **no narrower than `barMinW()`** — 256 px, or 280 px while
+  the ▶ is there (`E34`); at the default border that is a 258 × 50 window, which is what keeps the
   ⊘ reachable at any size (`E25`). No larger than the growth ceiling.
 
 #### S20 · dragging (zoom slider), placed

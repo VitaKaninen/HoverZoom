@@ -150,9 +150,41 @@ thumb simply clamps to the left end there. The high end is `min(cfg.maxZoom, MAX
 does the rest, and the readout then shows what actually stuck, so a clamp is visible rather than
 mysterious.
 
-**`MIN_FRAME_BAR_W` (250) applies only while placed**, via `minFrameW()` — a hover preview has no
-controls and owes them no room. `place()` therefore calls `reflow()` before `layout()`, or a small
-window pinned would keep its old width until something else happened to reflow it.
+**The minimum width is computed, not chosen** — `barMinW()` adds the bar's padding, its two flex
+gaps, the slider, the readout and `btnGutter()`, and every one of those is the same constant the
+stylesheet is built from. 256 px for a picture, 280 px with the ▶ present. A hand-picked 250 was
+wrong on both counts in v0.47.0, which is what let a small preview shrink until the slider sat under
+the AA and ⊘ buttons. `layoutChrome()` takes its `padding-right` from `btnGutter()` too, so the
+reserved gutter and the width that assumes it cannot disagree.
+
+**Filename and metadata must be allowed to collapse.** `.cap .meta` was `flex:none`, which made the
+bar's minimum depend on how long "JPEG · 1000 × 800 · 210 KB" happens to be — and the overflow went
+*under* the absolutely-positioned buttons rather than being clipped. Both text fields are now
+`min-width:0` with an ellipsis, so `barMinW()` counts only their gaps. The name still takes all the
+free space first (`flex:1`, basis 0), so a wide bar is unchanged.
+
+**It applies only while placed**, via `minFrameW()` — a hover preview has no controls and owes them
+no room. `place()` therefore calls `reflow()` before `layout()`, or a small window pinned would keep
+its old width until something else happened to reflow it.
+
+**Slider input is throttled by its own measured cost.** A range input emits one `input` per pixel of
+travel and each one resizes the picture; smoothed *downscaling* of a 3000–4000 px image is the
+expensive direction, and the events outrun the redraws. `slideZoom()` starts its clock when the
+previous zoom *finished* and waits `max(16, lastCost)`, so an expensive picture asks for fewer
+redraws by itself. Measured on a 4000 × 3000 photo: a 60-event sweep across fit→100 % becomes 36
+layouts. **Not `requestAnimationFrame`** — the Browser pane delivers no animation frames, and the
+pane is where this gets tested.
+
+The reported jank (100 % CPU, jerky below 100 %, fine above, only with AA on) was **not reproducible
+here**: main-thread lag stayed under 2 ms across that band with AA both on and off, which fits
+raster happening off the main thread. The throttle bounds how much of it is asked for; it is not a
+verified fix for a fault that was never caught in the act.
+
+**`caption()` caches everything but the zoom.** `layout()` calls it on every frame of a drag, and it
+was running `new URL()`, `decodeURIComponent()` and `performance.getEntriesByName()` — a linear scan
+of the resource-timing buffer — every time. Keyed on URL plus natural size; `deferredCaption()`
+calls `resetCaption()` because the byte count is the one part that arrives late. Measured: 60 zoom
+steps now scan the timing buffer zero times.
 
 Four things this walks into, each silent:
 
@@ -318,8 +350,8 @@ minimum window. Overlaying costs nothing and needs no minimum beyond what the �
   them: they replaced ~15 copies of `view.frameW + cfg.borderWidth * 2`, the expression most likely
   to be half-updated.
 
-**Minimum window is 48 px of picture, and 250 px wide once placed** (`minFrameW()`, see the zoom
-cluster above) — 50 px and 252 px at the default border. Both are applied in `reflow()` (bounding
+**Minimum window is 48 px of picture, and `barMinW()` wide once placed** (`minFrameW()`, see the
+zoom cluster above) — 50 px and 258 px at the default border. Both are applied in `reflow()` (bounding
 the opening size and the wheel) **and** in `resizeBy()` (bounding a hand resize); both places are
 needed. Without a floor, `minDisplayed: 0` on a page of tiny pictures produced previews a few pixels
 across.

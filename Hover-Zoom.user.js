@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.47.0
+// @version     0.48.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -882,13 +882,15 @@
             '.edge{position:absolute;pointer-events:none;background:rgba(30,30,46,.30)}',
             'img[hidden],video[hidden]{display:none}',
             '.cap{position:absolute;left:0;right:0;bottom:0;height:' + BAR_MIN_H + 'px;',
-            'display:flex;align-items:center;gap:10px;box-sizing:border-box;',
-            'padding:0 8px;font:11px/16px system-ui,sans-serif;color:#cdd6f4;',
+            'display:flex;align-items:center;gap:' + BAR_GAP + 'px;box-sizing:border-box;',
+            'padding:0 ' + BAR_PAD + 'px;font:11px/16px system-ui,sans-serif;color:#cdd6f4;',
             'background:rgba(30,30,46,.86);letter-spacing:.02em;user-select:none}',
 
             '.cap .name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;',
             'font-family:ui-monospace,SFMono-Regular,Consolas,monospace;color:#a6adc8}',
-            '.cap .meta{flex:none;white-space:nowrap}',
+            // Shrinkable, or on a narrow frame it shoves the zoom cluster under the buttons.
+            '.cap .meta{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;',
+            'white-space:nowrap}',
             '.cap .hint{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;',
             'white-space:nowrap;color:#7f849c;font-style:italic}',
             '.box.placed .cap .hint{display:none}',
@@ -906,13 +908,13 @@
             '.cap .aa:hover{background:#89b4fa;border-color:#89b4fa;color:#1e1e2e}',
 
             // ---- the zoom cluster: slider, then the readout that opens a field
-            '.cap .zctl{flex:none;display:flex;align-items:center;gap:6px}',
+            '.cap .zctl{flex:none;display:flex;align-items:center;gap:' + BAR_ZOOM_GAP + 'px}',
             '.cap .zctl[hidden]{display:none}',
-            '.cap .zslider{flex:0 1 100px;min-width:60px;height:14px;margin:0;padding:0;',
-            'accent-color:#89b4fa;cursor:pointer}',
+            '.cap .zslider{flex:0 1 ' + BAR_SLIDER_W + 'px;min-width:60px;height:14px;',
+            'margin:0;padding:0;accent-color:#89b4fa;cursor:pointer}',
             '.cap .zslider[hidden]{display:none}',
             '.cap .zoom{flex:none;position:relative;display:flex;align-items:center;',
-            'justify-content:flex-end;width:52px;height:16px}',
+            'justify-content:flex-end;width:' + BAR_ZOOM_W + 'px;height:16px}',
             '.cap .zoom[hidden]{display:none}',
             '.cap .zval{cursor:pointer;padding:0 3px;border-radius:3px;white-space:nowrap}',
             '.cap .zval[hidden]{display:none}',
@@ -1078,11 +1080,9 @@
     const EDGE_GAP = 4;
 
     const MIN_FRAME = 48;
-    const MIN_FRAME_BAR_W = 250;    // narrower than this and the bar's controls have nowhere to go
-
     // Only a PLACED window carries controls, so only a placed one owes them room.
     function minFrameW() {
-        return placed && cfg.showStatusBar ? MIN_FRAME_BAR_W : MIN_FRAME;
+        return placed && cfg.showStatusBar ? barMinW() : MIN_FRAME;
     }
 
     function chrome() {
@@ -1277,6 +1277,12 @@
         return (n / (1024 * 1024)).toFixed(1) + ' MB';
     }
 
+    let capFor = '', capDims = '';
+
+    function resetCaption() { capFor = ''; }
+
+    // Everything but the zoom changes only with the URL or the measured size, and layout() calls
+    // this on every frame of a drag — fileInfo() and transferBytes() are not frame work.
     function caption() {
         if (!cfg.showStatusBar) {
             capEl.style.display = 'none';
@@ -1284,16 +1290,20 @@
         }
         capEl.style.display = '';
 
-        const info = fileInfo(view.url);
-        capNameEl.textContent = info.name;
-        capNameEl.title = view.url;
-
-        const parts = [];
-        if (info.type) parts.push(info.type);
-        parts.push(view.natW + ' × ' + view.natH);
-        const bytes = transferBytes(view.url);
-        if (bytes) parts.push(humanBytes(bytes));
-        capMetaEl.textContent = parts.join('  ·  ');
+        const dims = view.natW + ' × ' + view.natH;
+        if (capFor !== view.url || capDims !== dims) {
+            capFor = view.url;
+            capDims = dims;
+            const info = fileInfo(view.url);
+            capNameEl.textContent = info.name;
+            capNameEl.title = view.url;
+            const parts = [];
+            if (info.type) parts.push(info.type);
+            parts.push(dims);
+            const bytes = transferBytes(view.url);
+            if (bytes) parts.push(humanBytes(bytes));
+            capMetaEl.textContent = parts.join('  ·  ');
+        }
         syncZoom();
     }
 
@@ -1342,6 +1352,34 @@
         return zoomDrag || !!(zinEl && !zinEl.hidden);
     }
 
+    const SLIDE_MIN_MS = 16;
+
+    let slideWant = null, slideTimer = 0, slideFree = 0, slideCost = 0;
+
+    // A slider emits an `input` per pixel of travel, and each one repaints the picture at a new
+    // size. Smoothed DOWNscaling of a large image costs tens of ms a frame, so the events arrive
+    // faster than they can be served and the drag falls behind the pointer. The clock starts when
+    // the last zoom FINISHED, and the wait is the last one's own cost: an expensive picture asks
+    // for fewer redraws by itself, and a cheap one is never throttled below 60/s.
+    function slideZoom(scale) {
+        slideWant = scale;
+        const wait = Math.max(SLIDE_MIN_MS, slideCost) - (Date.now() - slideFree);
+        if (wait <= 0) { flushSlide(); return; }
+        if (!slideTimer) slideTimer = setTimeout(flushSlide, wait);
+    }
+
+    function flushSlide() {
+        clearTimeout(slideTimer);
+        slideTimer = 0;
+        if (slideWant == null || !view) { slideWant = null; return; }
+        const scale = slideWant;
+        slideWant = null;
+        const t0 = Date.now();
+        zoomAnchored(scale);
+        slideFree = Date.now();
+        slideCost = slideFree - t0;
+    }
+
     function buildZoomControl() {
         zctlEl = document.createElement('div');
         zctlEl.className = 'zctl';
@@ -1361,9 +1399,10 @@
         zsliderEl.addEventListener('input', function () {
             if (!view) return;
             zoomDrag = true;
-            zoomAnchored(zoomScaleAt(Number(zsliderEl.value) / ZOOM_TRACK));
+            slideZoom(zoomScaleAt(Number(zsliderEl.value) / ZOOM_TRACK));
         });
         zsliderEl.addEventListener('change', function () {
+            flushSlide();
             zoomDrag = false;
             syncZoom();
             showBar();
@@ -1428,7 +1467,12 @@
     }
 
     function resetZoomControl() {
+        clearTimeout(slideTimer);
+        slideTimer = 0;
+        slideWant = null;
+        slideCost = 0;
         zoomDrag = false;
+        resetCaption();
         if (!zinEl) return;
         zinEl.hidden = true;
         if (zvalEl) zvalEl.hidden = false;
@@ -1440,6 +1484,24 @@
     const BAR_MIN_H = 24;
     const BTN_RIGHT = 20;       // the rightmost button's inset
     const BTN_STEP = 24;        // and the pitch of the ones beside it
+
+    // The bar's own metrics, shared by the stylesheet and by barMinW() so the two cannot disagree.
+    const BAR_PAD = 8;          // .cap's left/right padding
+    const BAR_GAP = 10;         // between name, metadata and the zoom cluster
+    const BAR_SLIDER_W = 100;
+    const BAR_ZOOM_GAP = 6;     // inside the cluster
+    const BAR_ZOOM_W = 52;      // the readout slot, wide enough for "3,200%"
+
+    // What layoutChrome() reserves on the right for the buttons actually shown.
+    function btnGutter() {
+        return BTN_RIGHT + BTN_STEP * (mediaEl === vidEl ? 3 : 2) + 2;
+    }
+
+    // The narrowest frame whose bar still holds its controls. Filename and metadata are allowed to
+    // collapse to nothing, so only their two gaps count.
+    function barMinW() {
+        return BAR_PAD + BAR_GAP * 2 + BAR_SLIDER_W + BAR_ZOOM_GAP + BAR_ZOOM_W + btnGutter();
+    }
 
     let barTimer = 0;
 
@@ -1577,8 +1639,8 @@
         if (hasVid) { vidOffEl.style.right = px(right); right += BTN_STEP; }
         aaEl.style.right = px(right); right += BTN_STEP;
         markSmoothing();
-        capEl.style.paddingRight =
-            px(placed ? Math.min(right + 2, Math.max(8, view.frameW - 8)) : 8);
+        capEl.style.paddingRight = px(placed
+            ? Math.min(btnGutter(), Math.max(BAR_PAD, view.frameW - BAR_PAD)) : BAR_PAD);
     }
 
     function layout() {
@@ -1846,7 +1908,11 @@
 
     function deferredCaption(url) {
         if (!cfg.showStatusBar || transferBytes(url)) return;
-        setTimeout(function () { if (view && view.url === url) caption(); }, 300);
+        setTimeout(function () {
+            if (!view || view.url !== url) return;
+            resetCaption();         // the byte count is the one part that arrives late
+            caption();
+        }, 300);
     }
 
     function hideViewer() {
