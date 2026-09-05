@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.38.0
+// @version     0.39.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -50,22 +50,16 @@
         maxDisplayed: 0,            // ignore images displayed larger than this (0 = no cap)
         minRatio: 1.2,              // full size must be at least this much bigger
         showEvenIfNotLarger: false, // show at natural size even when it isn't an upgrade
-        sameShapeOnly: true,        // an upgrade must be roughly the same shape — a wildly
-                                    // different aspect is a different picture, not a bigger one
-        skipVideos: true,           // never preview a video thumbnail or a player surface
-        playVideos: true,           // the preview may BE a video — the only form some gifs have
-        followLinks: true,          // read the linked page's own og: media — same origin only
-        hoverThroughOverlays: true, // a lid over a picture — hover the picture, not the lid
-        skipPageBackgrounds: true,  // never preview page furniture: the page's own background,
-                                    // a tiled one, a fixed one, a full-width band, or one the
-                                    // page's own text sits on
-        skipDecorative: true,       // skip what the page itself marks as not content
-                                    // (aria-hidden, role=presentation/none)
-        skipBanners: true,          // the picture across the top of a page — masthead, channel
-                                    // banner, forum header. The one furniture rule that also
-                                    // applies to an <img>, so it is kept narrow
-        keepSearching: true,        // show the first hit at once, then keep probing and upgrade in place
-        skipWhileMouseDown: true,   // don't fire mid drag/selection
+        previewVideos: false,       // preview video THUMBNAILS and player surfaces too. Off by
+                                    // default: pointing at a video is nearly always aiming to
+                                    // play it. Says nothing about gifs — a short muted clip
+                                    // already playing with no controls is an animated picture
+                                    // and previews either way, see gifLike()
+        skipFurniture: true,        // never preview the page's own furniture: its background, a
+                                    // tiled or fixed one, a full-width band, one the page's own
+                                    // text sits on, the banner across the top, and anything the
+                                    // page itself marks as decoration (aria-hidden,
+                                    // role=presentation). One switch because they are one idea
         siteMode: 'blacklist',      // 'blacklist' | 'whitelist'
         siteList: [],               // hostnames, matched by suffix
         blockList: [],              // image URLs never to preview; '*' matches anything
@@ -119,12 +113,39 @@
     // panel, or another tab writing), so the script ran on defaults until the user opened
     // its settings. Shipped broken in v0.28.0, found in v0.33.0 while testing a menu label
     // that would not follow the stored site mode.
-    const RETIRED = ['maxWidthPct', 'maxHeightPct', 'dimOpacity', 'bottomReserve'];
+    //
+    // v0.39.0 retired seven switches that had only one sane answer, and the reason is the
+    // same for all of them: a setting nobody can decide from its own label is not a choice,
+    // it is a thing the script should get right. sameShapeOnly, keepSearching, followLinks,
+    // hoverThroughOverlays and skipWhileMouseDown are now unconditional; skipVideos was
+    // INVERTED into previewVideos, and skipBanners/skipDecorative folded into skipFurniture.
+    // playVideos left the stored settings entirely — it is a per-tab session flag now, turned
+    // off from the preview's own status bar, because whether a clip is wanted is a judgement
+    // about the picture in front of you rather than a standing preference.
+    const RETIRED = ['maxWidthPct', 'maxHeightPct', 'dimOpacity', 'bottomReserve',
+        'sameShapeOnly', 'keepSearching', 'followLinks', 'hoverThroughOverlays',
+        'skipWhileMouseDown', 'playVideos', 'skipVideos', 'skipPageBackgrounds',
+        'skipBanners', 'skipDecorative'];
+
+    // The two retirements that DO convert. Both are read before RETIRED deletes the old key,
+    // and both are skipped if the new key is already stored, so this is idempotent — it has
+    // to be, since the whole object is written back on every Save.
+    function migrate(o) {
+        if (o.previewVideos === undefined && o.skipVideos !== undefined) {
+            o.previewVideos = !o.skipVideos;
+        }
+        // Three furniture switches collapsed into one. Only the page-background key carries
+        // over: it is the one that was ever plausibly turned off on purpose.
+        if (o.skipFurniture === undefined && o.skipPageBackgrounds !== undefined) {
+            o.skipFurniture = !!o.skipPageBackgrounds;
+        }
+        return o;
+    }
 
     function readSettings() {
         try {
             const raw = GM_getValue(KEY, null);
-            const o = raw ? JSON.parse(raw) : {};
+            const o = migrate(raw ? JSON.parse(raw) : {});
             RETIRED.forEach(function (k) { delete o[k]; });
             return o;
         } catch (e) {
@@ -138,6 +159,13 @@
     }
 
     let cfg = Object.assign({}, DEFAULTS, readSettings());
+
+    // NOT a stored setting, and that is the point. "May the preview be a clip rather than a
+    // still" is a judgement about the thing currently on screen — some animated posts have no
+    // image form at all, so the answer is usually yes, and the times it is no are one page,
+    // one session. So it starts on, is turned off from the ▶ button in the preview's own
+    // status bar, and resets on reload. Nothing writes it to storage.
+    let playVideos = true;
 
     function saveSettings() {
         GM_setValue(KEY, JSON.stringify(cfg));
@@ -599,7 +627,7 @@
             // `playVideos` off means the frame cannot display one, so a video candidate is
             // not merely useless — probing it would spend one of MAX_PROBES on a result
             // that has to be thrown away, ahead of the image candidate behind it.
-            if (!cfg.playVideos && isVideoUrl(abs)) return;
+            if (!playVideos && isVideoUrl(abs)) return;
             if (seen.has(abs)) return;
             seen.add(abs);
             out.push({ url: abs, from: from });
@@ -639,7 +667,7 @@
         //    after a rewrite
         const a = el.closest && el.closest('a[href]');
         if (a && a.href) {
-            if (looksLikeImage(a.href) || (cfg.playVideos && isVideoUrl(a.href))) add(a.href, 'the ancestor link itself');
+            if (looksLikeImage(a.href) || (playVideos && isVideoUrl(a.href))) add(a.href, 'the ancestor link itself');
             else {
                 linkParamCandidates(a.href).forEach(adder('a url inside the ancestor link\'s query'));
                 upgradeCandidates(a.href).forEach(function (u) {
@@ -853,7 +881,9 @@
     //  - Once per URL, cached for the tab, and only after `hoverDelay` has already elapsed.
     //  - Never for a link that is already a media URL: that is an ordinary candidate and is
     //    handled by collectCandidates().
-    //  - `followLinks` turns it off entirely.
+    //  - Unconditional since v0.39.0. It used to be `followLinks`, and it was retired for
+    //    the reason the others were: the linked page is the site itself saying what the
+    //    thumbnail stands for, so there was never a case for preferring a guess over it.
     const pageCache = new Map();    // page url -> Promise<{url, video}|null>
 
     function metaContent(doc, names) {
@@ -886,7 +916,7 @@
         // PAGE (an embed url) rather than a media file, and that would never load.
         const vid = metaContent(doc, ['og:video:secure_url', 'og:video:url', 'og:video',
             'twitter:player:stream']);
-        if (vid && cfg.playVideos && isVideoUrl(vid)) {
+        if (vid && playVideos && isVideoUrl(vid)) {
             try { return { url: new URL(vid, pageUrl.href).href, video: true }; } catch (e) { /* fall through */ }
         }
         const img = metaContent(doc, ['og:image:secure_url', 'og:image', 'twitter:image:src',
@@ -913,7 +943,6 @@
     }
 
     function linkedMedia(el) {
-        if (!cfg.followLinks) return Promise.resolve(null);
         const a = closestAcross(el, 'a[href]');
         const href = a && a.getAttribute('href');
         if (!href) return Promise.resolve(null);
@@ -952,7 +981,7 @@
             // stands for — but a forum banner links to the section it heads, and that
             // page's og:image is the section's own artwork, which is a different picture
             // rather than a smaller one. Shape is what separates those two cases.
-            if (cfg.sameShapeOnly && !sameShape(native, dim)) {
+            if (!sameShape(native, dim)) {
                 dbg('linked page rejected — a different shape, so a different picture', {
                     url: hit.url,
                     onScreen: native ? native.w + '×' + native.h : '(unknown)',
@@ -986,7 +1015,7 @@
             }
             // NOT THE SAME PICTURE. See sameShape() — a candidate shaped nothing like the
             // thumbnail is a different image, not a bigger one, whatever its pixel count.
-            if (cfg.sameShapeOnly && !sameShape(native, dim)) {
+            if (!sameShape(native, dim)) {
                 dbg('rejected — a different shape, so a different picture', {
                     url: url, from: c.from,
                     onScreen: native.w + '×' + native.h, candidate: dim.w + '×' + dim.h,
@@ -1008,7 +1037,6 @@
                 from: c.from };
             dbg('hit', best);
             if (onHit && !token.cancelled) onHit(best);
-            if (!cfg.keepSearching) break;
         }
         // The search is not over until the page lookup settles — the spinner keeps turning
         // because something really is still running, and a late authoritative answer still
@@ -1074,6 +1102,7 @@
     let host = null, root = null, box = null, imgEl = null, vidEl = null, mediaEl = null;
     let dimEl = null;
     let capEl = null, capNameEl = null, capHintEl = null, capMetaEl = null, blockEl = null;
+    let vidOffEl = null;        // "stop showing clips", only while the frame IS one
     let edgeEls = null;         // [top, left, right, bottom] — the drawn frame margin
     let gripEl = null;          // invisible collar that carries the outer half of the resize strip
     let spinEl = null, spinSvg = null;
@@ -1226,6 +1255,17 @@
             'background:rgba(49,50,68,.9);color:#a6adc8;cursor:pointer;font-size:12px}',
             '.box.hot .cap .block{display:block}',
             '.cap .block:hover{background:#f38ba8;border-color:#f38ba8;color:#1e1e2e}',
+            // "Stop showing clips" — same shape as the ⊘ and the same rules: absolute so a
+            // narrow bar cannot push it off the end, and PLACED only, since a hover preview
+            // cannot be clicked. It is shown only while the frame is actually holding a clip
+            // (`.cap.hasvid`, set by caption()), because that is the moment the question
+            // arises — a standing preference in the settings panel is the wrong shape for it.
+            '.cap .vidoff{position:absolute;right:' + VIDOFF_RIGHT + 'px;top:50%;',
+            'transform:translateY(-50%);display:none;width:18px;height:18px;line-height:16px;',
+            'text-align:center;border-radius:4px;border:1px solid #45475a;',
+            'background:rgba(49,50,68,.9);color:#a6adc8;cursor:pointer;font-size:10px}',
+            '.box.hot .cap.hasvid .vidoff{display:block}',
+            '.cap .vidoff:hover{background:#f9e2af;border-color:#f9e2af;color:#1e1e2e}',
             // The bar sits ON the picture, so on anything with text near the bottom — a meme,
             // a screenshot, a comic panel — it covers the thing you are reading. It fades out
             // after BAR_IDLE_MS of pointer stillness and comes back the moment the pointer
@@ -1318,10 +1358,18 @@
         blockEl.addEventListener('mousedown', function (e) { e.preventDefault(); e.stopPropagation(); }, true);
         blockEl.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); blockCurrent(); }, true);
 
+        vidOffEl = document.createElement('span');
+        vidOffEl.className = 'vidoff';
+        vidOffEl.title = 'Stop showing clips in this tab — still pictures only, until you reload';
+        vidOffEl.textContent = '▶';
+        vidOffEl.addEventListener('mousedown', function (e) { e.preventDefault(); e.stopPropagation(); }, true);
+        vidOffEl.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); stopVideoPreviews(); }, true);
+
         capEl.appendChild(capNameEl);
         capEl.appendChild(capHintEl);
         capEl.appendChild(capMetaEl);
         capEl.appendChild(blockEl);
+        capEl.appendChild(vidOffEl);
 
         // After the picture and before the bar, so the bar is drawn over the bottom strip
         // where the two overlap.
@@ -1730,6 +1778,9 @@
     // corner is where the hand goes to resize or to move, and a destructive button there is
     // a trap.
     const BLOCK_RIGHT = 20;
+    // The ▶ toggle sits immediately inboard of it, on the same row, and only exists while
+    // the frame is holding a clip.
+    const VIDOFF_RIGHT = BLOCK_RIGHT + 24;
 
     let barTimer = 0;
 
@@ -1869,8 +1920,14 @@
         // can never run under it. Clamped rather than fixed in CSS: the bar is positioned
         // left:0/right:0 with border-box sizing, so a padding wider than the frame does not
         // shrink the text, it forces the whole bar wider than the window it is in.
+        // The ▶ toggle is offered only while there is a clip to turn off. CSS cannot ask which
+        // face is live, so the answer is put on the bar as a class — set HERE rather than in
+        // caption(), because layout() calls this first and the gutter below has to read it.
+        const hasVid = mediaEl === vidEl;
+        capEl.classList.toggle('hasvid', hasVid);
+        const gutter = (placed && hasVid ? VIDOFF_RIGHT : BLOCK_RIGHT) + 26;
         capEl.style.paddingRight =
-            px(placed ? Math.min(BLOCK_RIGHT + 26, Math.max(8, view.frameW - 8)) : 8);
+            px(placed ? Math.min(gutter, Math.max(8, view.frameW - 8)) : 8);
     }
 
     function layout() {
@@ -2275,11 +2332,23 @@
     // stopPropagation() runs before a child's own handlers and the control does nothing —
     // the old X button looked correct, hovered correctly and did nothing until this existed.
     // Any new control added inside the box goes in here; the symptom of forgetting is
-    // silence. The ⊘ is the only one left: the X was removed in v0.34.0, because a placed
+    // silence. Two of them: the ⊘ and the ▶. The X was removed in v0.34.0, because a placed
     // window already closes on Escape and on a click anywhere outside it, and the button sat
     // in the corner where the hand goes to resize.
     function isBoxControl(t) {
-        return blockEl.contains(t);
+        return blockEl.contains(t) || vidOffEl.contains(t);
+    }
+
+    // "Stop showing clips in this tab", from the ▶ in the status bar. Session-scoped and
+    // deliberately not stored: whether a moving preview is wanted is a judgement about the
+    // page in front of you, so it costs one click to answer and a reload to undo. The cache
+    // is cleared because a video candidate that was probed and shown must stop being the
+    // answer for the same thumbnail a moment later.
+    function stopVideoPreviews() {
+        playVideos = false;
+        dbg('video previews off for this tab');
+        probeCache.clear();
+        dismiss();
     }
 
     // "Never preview this image again", from the ⊘ in the status bar. Records the URL on
@@ -2528,7 +2597,7 @@
     //    not at all, which is why (2) exists.
     // 2. THE LINK — the nearest ancestor <a href> pointing at something that is plainly a
     //    video. This is a heuristic and it is the one that can be wrong; it is bounded to
-    //    unmistakable shapes and is switchable (`skipVideos`). The asymmetry favours it:
+    //    unmistakable shapes and is switchable (`previewVideos`). The asymmetry favours it:
     //    a false positive costs one preview that will not open, a false negative is the
     //    reported bug — a preview covering the video you are trying to click.
     //
@@ -3056,7 +3125,7 @@
     function eligible(el, x, y) {
         const direct = eligibleDirect(el);
         if (direct) return direct;
-        if (!cfg.hoverThroughOverlays || typeof x !== 'number') return null;
+        if (typeof x !== 'number') return null;
         const under = coveredMedia(el, x, y);
         // The picture found under the lid faces every gate the lid did — video, blocked,
         // decorative — so looking through a cover can never reach something a direct hover
@@ -3078,21 +3147,21 @@
         // for why the other three video tests cannot be used on a video. A real player is
         // still refused, so a watch page is unaffected.
         if (el.tagName === 'VIDEO') {
-            if (!cfg.playVideos || !gifLike(el)) return null;
-            if (cfg.skipVideos && videoLinkReason(el)) return null;
+            if (!playVideos || !gifLike(el)) return null;
+            if (!cfg.previewVideos && videoLinkReason(el)) return null;
             return blocked(shownUrl(el)) ? null : el;
         }
         if (NEVER[el.tagName]) return null;
-        if (cfg.skipVideos && inVideoContext(el)) return null;
-        if (cfg.skipDecorative && decorativeReason(el)) return null;
+        if (!cfg.previewVideos && inVideoContext(el)) return null;
+        if (cfg.skipFurniture && decorativeReason(el)) return null;
         // Before the <img> branch, because this is the one furniture rule that applies to one.
-        if (cfg.skipBanners && bannerReason(el)) return null;
+        if (cfg.skipFurniture && bannerReason(el)) return null;
         if (el.tagName === 'IMG') return blocked(shownUrl(el)) ? null : el;
         // element with a background image and no img of its own
         if (el.querySelector && el.querySelector('img')) return null;
         const bg = backgroundUrl(el);
         if (!bg || blocked(bg)) return null;
-        if (cfg.skipPageBackgrounds && wallpaperReason(el)) return null;
+        if (cfg.skipFurniture && wallpaperReason(el)) return null;
         return el;
     }
 
@@ -3133,7 +3202,7 @@
                 : el === t ? 'the hover target itself'
                     : 'looked through the cover to ' + el.tagName +
                       (el.id ? '#' + el.id : '') + ' — ' + (shownUrl(el) || '').slice(0, 120),
-            skipVideos: cfg.skipVideos,
+            previewVideos: cfg.previewVideos,
             videoGate: videoReason(t) || 'none — NOT treated as video',
             // Only meaningful for an element that HAS a CSS background image — an <img> is
             // never page furniture, and reporting a reason for an element with no background
@@ -3282,7 +3351,7 @@
         if (drag) return;
         if (ours(e.target)) return;         // on our own overlay
         if (!cfg.enabled || !siteEnabled()) return;
-        if (cfg.skipWhileMouseDown && mouseDown) return;
+        if (mouseDown) return;
         if (cfg.activation === 'modifier' && !modifierHeld(e) && !modifierDown) return;
 
         const el = eligible(e.target, e.clientX, e.clientY);
@@ -3449,11 +3518,34 @@
         if (e.key === 'Escape') {
             cancel();                           // onPinKey has already handled the placed case
         }
-        if (cfg.activation === 'modifier' && modifierHeld(e)) modifierDown = true;
+        // Arming the key is the SAME gesture whichever order it happens in. Holding it first
+        // and then pointing at a picture worked from the start, because the pointer arriving
+        // fires a mouseover the gate can read. Pointing first and then pressing the key fired
+        // nothing at all — the pointer is already where it is going, and mouseover only ever
+        // fires on a crossing — so the preview simply never appeared and the mode read as
+        // half-broken. There is no event to wait for here; the keypress IS the event, and the
+        // element under the pointer has to be looked up rather than handed to us.
+        if (cfg.activation === 'modifier' && modifierHeld(e) && !modifierDown) {
+            modifierDown = true;
+            hoverAtPointer();
+        }
     }, true);
     document.addEventListener('keyup', function (e) {
         if (cfg.activation === 'modifier' && !modifierHeld(e)) { modifierDown = false; cancel(); }
     }, true);
+
+    // The pointer is not moving, so onOver is synthesised from where it already is. A plain
+    // object rather than a real MouseEvent: onOver reads `target`, `clientX` and `clientY` and
+    // nothing else, and going through the same function is what keeps the key path and the
+    // pointer path from drifting apart. `modifierDown` is already set, so the gate inside it
+    // passes without this object needing to carry a ctrlKey.
+    function hoverAtPointer() {
+        if (placed || drag || active) return;
+        if (!document.elementFromPoint) return;
+        const el = document.elementFromPoint(pointer.x, pointer.y);
+        if (!el) return;
+        onOver({ target: el, clientX: pointer.x, clientY: pointer.y });
+    }
 
     // -------------------------------------------------------------- settings UI
 
@@ -3489,6 +3581,9 @@
             'letter-spacing:.06em;color:' + C.sub + ';border-bottom:1px solid ' + C.surface + ';padding-bottom:5px}',
             '.row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:5px 0}',
             '.row label{flex:1;cursor:pointer}',
+            // display:flex above outranks the UA's [hidden] rule, so a hidden row would keep
+            // its box — the same trap as img[hidden] on the viewer's two faces.
+            '.row[hidden]{display:none}',
             '.hint{display:block;font-size:11px;color:' + C.sub + ';margin-top:1px}',
             'input[type=checkbox]{accent-color:' + C.blue + ';width:15px;height:15px;cursor:pointer;flex:none}',
             'input[type=number],input[type=text],select,textarea{background:' + C.surface + ';color:' + C.text + ';',
@@ -3533,6 +3628,31 @@
             'font-size:14px;padding:0 4px;flex:none}',
             '.entry button:hover{background:none;color:' + C.text + '}',
             '.empty{color:#6c7086;font-size:13px;text-align:center;padding:12px 0}',
+            // Edit-as-text mode: the same entries as one-per-line plain text, so a list can
+            // be pasted in or copied out. It replaces the rows in place rather than sitting
+            // beside them, because two editable views of one list is how they get out of step.
+            '.listtext{width:100%;height:150px;margin-top:8px;resize:vertical;',
+            'font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12px;line-height:1.5}',
+            '.edittext{padding:4px 10px;font-size:11px}',
+            // The fold at the bottom. <details> gives the whole thing — the disclosure
+            // triangle, the keyboard behaviour, the state — for no script at all.
+            'details.adv{margin-top:20px;border-top:1px solid ' + C.surface + ';padding-top:4px}',
+            'details.adv summary{cursor:pointer;list-style:revert;padding:8px 0;font-size:12px;',
+            'font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:' + C.sub + '}',
+            'details.adv summary:hover{color:' + C.text + '}',
+            'details.adv summary .hint{text-transform:none;letter-spacing:0;font-weight:400}',
+            'details.adv h3:first-of-type{margin-top:6px}',
+            // The two paragraphs at the top: what this is, and — behind a button, because it
+            // is three times as long — how every part of it works.
+            '.intro{font-size:12.5px;line-height:1.55;color:' + C.text + ';margin:0 0 10px}',
+            '.intro b{color:' + C.blue + ';font-weight:600}',
+            '.guide{display:none;margin:2px 0 14px;padding:12px 14px;border-radius:8px;',
+            'background:' + C.surface + ';font-size:12px;line-height:1.55;color:#bac2de}',
+            '.guide.open{display:block}',
+            '.guide p{margin:0 0 9px}',
+            '.guide p:last-child{margin-bottom:0}',
+            '.guide b{color:' + C.text + ';font-weight:600}',
+            '.guidebtn{margin-bottom:14px;padding:5px 12px;font-size:12px}',
         ].join('');
         sr.appendChild(st);
 
@@ -3553,10 +3673,35 @@
 
         const controls = [];
 
+        // Every helper below appends to `mount`, not to `panel`, so a group of them can be
+        // redirected into a collapsed <details> without any of them knowing. advanced() is
+        // the only thing that moves it, and it never moves back — the advanced block is the
+        // last thing on the panel by construction.
+        let mount = panel;
+
         function section(title) {
             const s = document.createElement('h3');
             s.textContent = title;
-            panel.appendChild(s);
+            mount.appendChild(s);
+        }
+
+        // The fold at the bottom. Most of what used to be on this panel is timings, pixel
+        // counts and colours — real settings, but ones nobody opens the panel to change, and
+        // together they buried the four that matter. They are not removed, they are folded.
+        function advanced(title, summaryHint) {
+            const d = document.createElement('details');
+            d.className = 'adv';
+            const sum = document.createElement('summary');
+            sum.textContent = title;
+            if (summaryHint) {
+                const hint = document.createElement('span');
+                hint.className = 'hint';
+                hint.textContent = summaryHint;
+                sum.appendChild(hint);
+            }
+            d.appendChild(sum);
+            panel.appendChild(d);
+            mount = d;
         }
 
         function row(labelText, hintText, control) {
@@ -3572,23 +3717,8 @@
             }
             r.appendChild(l);
             r.appendChild(control);
-            panel.appendChild(r);
+            mount.appendChild(r);
             return r;
-        }
-
-        // A labelled row with no control — for behaviour that is always on and just needs
-        // explaining.
-        function note(labelText, hintText) {
-            const r = document.createElement('div');
-            r.className = 'row';
-            const l = document.createElement('label');
-            l.textContent = labelText;
-            const hint = document.createElement('span');
-            hint.className = 'hint';
-            hint.textContent = hintText;
-            l.appendChild(hint);
-            r.appendChild(l);
-            panel.appendChild(r);
         }
 
         function check(key, labelText, hintText) {
@@ -3621,7 +3751,7 @@
                 el.appendChild(op);
             });
             controls.push(function () { cfg[key] = el.value; });
-            row(labelText, hintText, el);
+            return { el: el, row: row(labelText, hintText, el) };
         }
 
         // A list editor for one of the array settings, laid out the same way as the one in
@@ -3636,6 +3766,16 @@
         function list(key, opts) {
             const items = cfg[key].slice();
             controls.push(function () { cfg[key] = items.slice(); });
+
+            // Alphabetical, case-insensitively, and kept that way after every mutation
+            // rather than only at save time — a list that reorders itself when you press
+            // Save is a list you cannot proof-read before pressing it.
+            function sortItems() {
+                items.sort(function (a, b) {
+                    return a.toLowerCase().localeCompare(b.toLowerCase()) || a.localeCompare(b);
+                });
+            }
+            sortItems();
 
             const wrap = document.createElement('div');
             wrap.className = 'listwrap';
@@ -3704,10 +3844,9 @@
             function add(raw) {
                 const value = String(raw || '').trim();
                 if (!value) return;
-                if (items.indexOf(value) === -1) items.push(value);
+                if (items.indexOf(value) === -1) { items.push(value); sortItems(); }
                 input.value = '';
                 render();
-                entries.scrollTop = entries.scrollHeight;
             }
 
             addBtn.addEventListener('click', function () { add(input.value); });
@@ -3724,26 +3863,89 @@
                 addRow.appendChild(cur);
             }
 
+            // Edit-as-text, because the row-with-an-✕ list and a plain textarea are good at
+            // opposite things and neither one replaces the other. Removing one entry is a
+            // click here and a careful selection there; pasting a list of forty sites in from
+            // somewhere else, or copying this one out, is impossible here and trivial there.
+            // So both, with the text form as a mode rather than a second permanent control.
+            //
+            // It commits on BLUR — "click away and it turns back into the list" — and blur is
+            // the only exit, so there is no Done button to miss and no way to leave the panel
+            // holding text that was never parsed. Save also flushes it (see flush()), for the
+            // one case blur cannot cover: clicking Save moves focus, but the click handler
+            // may run before the blur is delivered.
+            const textarea = document.createElement('textarea');
+            textarea.className = 'listtext';
+            textarea.spellcheck = false;
+            textarea.hidden = true;
+
+            const editBtn = document.createElement('button');
+            editBtn.className = 'edittext';
+            editBtn.type = 'button';
+            editBtn.textContent = 'Edit as text';
+            editBtn.title = 'One entry per line — paste a list in, or copy this one out';
+
+            function editing() { return !textarea.hidden; }
+
+            function openText() {
+                textarea.value = items.join('\n');
+                textarea.hidden = false;
+                entries.hidden = true;
+                addRow.hidden = true;
+                editBtn.textContent = 'Done editing';
+                textarea.focus();
+            }
+
+            function commitText() {
+                if (!editing()) return;
+                const seen = Object.create(null);
+                const next = [];
+                textarea.value.split('\n').forEach(function (line) {
+                    const v = line.trim();
+                    if (!v || seen[v]) return;
+                    seen[v] = 1;
+                    next.push(v);
+                });
+                items.length = 0;
+                Array.prototype.push.apply(items, next);
+                sortItems();
+                textarea.hidden = true;
+                entries.hidden = false;
+                addRow.hidden = false;
+                editBtn.textContent = 'Edit as text';
+                render();
+            }
+
+            textarea.addEventListener('blur', commitText);
+            editBtn.addEventListener('click', function () {
+                if (editing()) { commitText(); } else { openText(); }
+            });
+
+            const editRow = document.createElement('div');
+            editRow.className = 'listbtns';
+            editRow.appendChild(editBtn);
+            // Clear-all rides in the same row rather than a second right-aligned strip under it.
+            if (opts.clearable) {
+                const clr = document.createElement('button');
+                clr.className = 'danger edittext';
+                clr.type = 'button';
+                clr.textContent = 'Clear all';
+                clr.addEventListener('click', function () { commitText(); items.length = 0; render(); });
+                editRow.appendChild(clr);
+            }
+
             wrap.appendChild(addRow);
             wrap.appendChild(entries);
-            panel.appendChild(wrap);
+            wrap.appendChild(textarea);
+            wrap.appendChild(editRow);
+            mount.appendChild(wrap);
             render();
 
-            return { items: items, clear: function () { items.length = 0; render(); } };
-        }
-
-        function listButtons(buttons) {
-            const r = document.createElement('div');
-            r.className = 'listbtns';
-            buttons.forEach(function (b) {
-                const el = document.createElement('button');
-                if (b.cls) el.className = b.cls;
-                if (b.title) el.title = b.title;
-                el.textContent = b.label;
-                el.addEventListener('click', b.onClick);
-                r.appendChild(el);
-            });
-            panel.appendChild(r);
+            return {
+                items: items,
+                clear: function () { commitText(); items.length = 0; render(); },
+                flush: commitText,
+            };
         }
 
         function color(key, labelText) {
@@ -3754,76 +3956,112 @@
             row(labelText, null, el);
         }
 
+        // ------------------------------------------------------------- what this is
+        //
+        // Three sentences and a button. The panel used to open on a checkbox and run straight
+        // into thirty controls, several of which the person who ASKED for them could not name
+        // the effect of — which is the test a settings panel actually has to pass. The short
+        // version says what the script is for and how to use it; the long version is one press
+        // away rather than absent, and it is where the instructions that used to be scattered
+        // through the panel as instruction rows now live.
+        const intro = document.createElement('p');
+        intro.className = 'intro';
+        intro.textContent =
+            'Point at any picture and Hover Zoom finds the full-size original and shows it. ' +
+            'Click that preview to keep it on screen — then scroll to make it bigger, drag it ' +
+            'anywhere, and right-click it to save or copy. Escape, or a click outside it, puts ' +
+            'it away.';
+        panel.appendChild(intro);
+
+        const guideBtn = document.createElement('button');
+        guideBtn.className = 'guidebtn';
+        guideBtn.textContent = 'How it works';
+
+        const guide = document.createElement('div');
+        guide.className = 'guide';
+
+        function para(lead, rest) {
+            const p = document.createElement('p');
+            const b = document.createElement('b');
+            b.textContent = lead + ' ';
+            p.appendChild(b);
+            p.appendChild(document.createTextNode(rest));
+            guide.appendChild(p);
+        }
+
+        para('Finding the original.',
+            'Nothing is decided until you point at something. It then works from what the page ' +
+            'itself offers — a bigger version named in the markup, the same URL with the ' +
+            'thumbnail’s size stripped out of it — and, when the picture links to its own ' +
+            'page on the same site, it reads that page and takes whatever the site declares ' +
+            'there. Every candidate is loaded and measured, so a preview is verified to be ' +
+            'bigger rather than guessed at. There is no list of supported sites.');
+        para('A ring means it is still looking.',
+            'The first thing found appears immediately; if something better turns up a moment ' +
+            'later it replaces it in place, without moving what you are looking at.');
+        para('One press keeps it.',
+            'A click — or the start of a drag — pins the preview. It then stays until you press ' +
+            'Escape or click outside it. Nothing else holds it open, and the page underneath ' +
+            'stays readable and scrollable while it is there.');
+        para('Moving, sizing and zooming.',
+            'Drag the frame around the picture, or its status bar, to move the window; drag an ' +
+            'edge or a corner to resize it, holding Shift to keep its shape. The wheel grows the ' +
+            'whole window until you resize it by hand, after which it zooms the picture inside ' +
+            'the frame instead. Arrow keys pan, + and − zoom, 0 fits.');
+        para('Saving a copy.',
+            'Right-click a pinned preview and you get the browser’s own menu — Save image ' +
+            'as…, Copy image, Copy image address, Open image in new tab — all of them acting ' +
+            'on the full-size original. On a preview you are only hovering, right-click dismisses ' +
+            'it instead.');
+        para('Something previewing that should not.',
+            'Pin it and press ⊘ in its status bar: that image goes on the never-preview list ' +
+            'below, which is the answer to a tiled background or a watermark that previews from ' +
+            'everywhere. For a whole site, the userscript manager’s menu has an ' +
+            'enable/disable entry for the page you are on.');
+        para('Clips.',
+            'A short muted clip already looping with no controls is an animated picture, not a ' +
+            'video, and previews as one — some posts have no still form at all. Press ▶ in a ' +
+            'pinned preview’s status bar to go back to still pictures for the rest of the ' +
+            'tab; reloading the page restores it.');
+
+        guideBtn.addEventListener('click', function () {
+            const open = guide.classList.toggle('open');
+            guideBtn.textContent = open ? 'Hide the details' : 'How it works';
+        });
+        panel.appendChild(guideBtn);
+        panel.appendChild(guide);
+
         check('enabled', 'Enable Hover Zoom');
 
         section('When to zoom');
-        pick('activation', 'Activation', 'Hold the key to arm zooming', [
-            ['hover', 'On hover'], ['modifier', 'Only while a key is held']]);
-        pick('modifierKey', 'Modifier key', null, [
+        const act = pick('activation', 'Show a preview',
+            'either order works with the key — hold it and then point, or point and then press it', [
+                ['hover', 'When I point at a picture'],
+                ['modifier', 'Only while a key is held']]);
+        // Which key only means anything in the second mode, and a control that does nothing is
+        // the thing this rewrite is mostly about. It follows the select live, not just on open.
+        const modKey = pick('modifierKey', 'The key', null, [
             ['ctrl', 'Ctrl'], ['alt', 'Alt'], ['shift', 'Shift']]);
-        num('hoverDelay', 'Hover delay', 'milliseconds before resolving', 0, 3000, 10);
-        num('minDisplayed', 'Ignore images smaller than', 'px on screen — skips icons', 0, 2000, 1);
-        num('maxDisplayed', 'Ignore images larger than', 'px on screen — 0 means no limit', 0, 10000, 1);
-        num('minRatio', 'Required upsize', 'full size must be this many times the thumbnail', 1, 10, 0.1);
-        check('showEvenIfNotLarger', 'Show even when not larger', 'display at natural size anyway');
-        check('sameShapeOnly', 'Only upgrade to the same shape',
-            'a bigger version of a picture has the same proportions. A candidate shaped ' +
-            'nothing like the thumbnail — a 1200×125 banner answering with a 600×600 ' +
-            'picture — is a different image, not a bigger one, which is what rotating ' +
-            '“random image” endpoints on forums produce. The tolerance is loose (4×) so ' +
-            'that a thumbnail cropped differently from its original still counts');
-        check('keepSearching', 'Keep looking after the first hit',
-            'shows the first match immediately, then upgrades the preview in place as bigger ' +
-            'originals turn up — costs up to 8 requests per hover instead of usually one');
-        check('skipVideos', 'Never preview videos',
-            'skips media elements, anything with a player next to it, and images inside a ' +
-            'link that plainly points at a video (/watch?, /shorts/, /embed/, /video/, ' +
-            'youtu.be, .mp4 and friends) — turn off if it is skipping stills you want. ' +
-            'A short muted clip already playing with no controls counts as an animated ' +
-            'picture, not a player, so pages like Imgur’s gallery still preview normally');
-        check('followLinks', 'Look at the linked page for the original',
-            'when a thumbnail links to its own page on the same site, fetch that page and ' +
-            'use whatever it declares as its media — the picture or clip you would have got ' +
-            'by clicking through. It is taken as correct, so it is not size-checked. Costs ' +
-            'one page request per link you hover, cached for the tab; the site sees that ' +
-            'request. Same site only, never another domain');
-        check('playVideos', 'Let the preview be a video',
-            'some animated posts have no image form at all — an Imgur video post answers ' +
-            '.jpg with a single frozen frame, and the moving original exists only as .mp4. ' +
-            'With this on, the preview window plays it, muted and looping. Turn it off to ' +
-            'keep previews to still pictures; you will get the frozen frame instead');
-        check('hoverThroughOverlays', 'Look through covers',
-            'many thumbnail grids lay an invisible link, a caption layer or a hover overlay ' +
-            'across the whole card, so the pointer never reaches the picture at all. With ' +
-            'this on, a cover with a single picture under it hovers that picture. Only ' +
-            'reaches an <img> or a video, and only within the same card — never the page ' +
-            'behind it');
-        check('skipPageBackgrounds', 'Never preview page backgrounds',
-            'CSS background images that are part of the page rather than pictures on it: ' +
-            'the page\'s own background, one tiled end to end, one fixed so it does not ' +
-            'scroll, one spanning the full width of the window, and one the page\'s own ' +
-            'text is sitting on. Never applies to an <img> — a full-width photo with a ' +
-            'caption over it is still a photo');
-        check('skipBanners', 'Never preview the banner across the top of a page',
-            'a channel banner, a forum masthead, a site header image, a leaderboard ad. ' +
-            'Recognised by shape rather than by name: it sits in the top 300px of the ' +
-            'document, is at least 240px wide, is a BAND — three times as wide as it is ' +
-            'tall — and has nothing of its own height beside it. The band test is what ' +
-            'keeps a photo page\'s picture, a blog feed\'s first post and a gallery\'s ' +
-            'first tile out of it, since those are picture-shaped rather than strip-shaped. ' +
-            'This is the only rule of its kind that applies to an <img> as well as to a ' +
-            'background');
-        check('skipDecorative', 'Skip images the page marks as decoration',
-            'aria-hidden="true" and role="presentation" are the page saying outright that ' +
-            'something is not content. Read only on the image itself, never inherited — ' +
-            'carousels mark cloned slides aria-hidden and those are real pictures');
-        check('skipWhileMouseDown', 'Suppress while a mouse button is down');
-        pick('siteMode', 'Site list mode', null, [
+        function syncModKey() { modKey.row.hidden = act.el.value !== 'modifier'; }
+        act.el.addEventListener('change', syncModKey);
+        syncModKey();
+        check('previewVideos', 'Preview videos as well',
+            'off by default, because pointing at a video is usually aiming to play it and a ' +
+            'preview lands on what you were about to click. This is about video thumbnails and ' +
+            'players — a short looping clip with no controls counts as an animated picture and ' +
+            'previews either way');
+        check('skipFurniture', 'Ignore backgrounds and banners',
+            'page furniture rather than pictures on the page: the page’s own background, a ' +
+            'tiled or fixed one, a strip spanning the window, one the page’s text sits on, ' +
+            'the banner across the top, and anything the page marks as decoration. Turn off if ' +
+            'it is skipping pictures you want');
+
+        section('Where it runs');
+        pick('siteMode', 'Site list', null, [
             ['blacklist', 'Disable on listed sites'], ['whitelist', 'Enable only on listed sites']]);
 
-        list('siteList', {
-            description: 'Sites the Site list mode above applies to. Subdomains are included, ' +
-                'so adding example.com also covers www.example.com.',
+        const sites = list('siteList', {
+            description: 'Subdomains are included, so example.com also covers www.example.com.',
             examples: 'Examples: example.com, news.ycombinator.com',
             placeholder: 'e.g. example.com',
             addCurrentLabel: '+ This Site',
@@ -3832,91 +4070,71 @@
         });
 
         section('Never preview these images');
-        note('Add one with the ⊘ button on a placed preview',
-            'Hover the image, click the preview to pin it, then press ⊘ in its status bar: ' +
-            'the image goes into this list and the preview closes. For a page whose tiled ' +
-            'background or watermark previews everywhere, that is one click and done.');
         const blocks = list('blockList', {
-            description: 'Exact image URLs that never open a preview. A * matches anything, ' +
-                'so …/tile.png?* covers a background carrying a cache-busting query.',
+            description: 'Individual images that never open a preview. The quickest way to add ' +
+                'one is the ⊘ button on a pinned preview. A * matches anything.',
             examples: 'Examples: https://example.com/tile.png, https://cdn.example.com/wm/*',
             placeholder: 'e.g. https://example.com/watermark.png',
+            clearable: true,
         });
-        listButtons([
-            { label: 'Clear all', cls: 'danger', onClick: function () { blocks.clear(); } },
-        ]);
 
-        section('The placed window');
-        note('Click the preview, then scroll to make it bigger',
-            'While you are only hovering, the wheel belongs to the page and scrolls it — which ' +
-            'takes the preview down with it. Click the preview first and the wheel becomes the ' +
-            'window\'s: it grows the whole window, which is how a page full of small pictures ' +
-            'gives usable previews without resizing every one by hand. Moving the window then ' +
-            'settles its size: from that point the wheel and +/− zoom the picture inside the ' +
-            'frame instead, the arrow keys pan it, and 0 fits it back to the frame.');
-        note('It behaves like an ordinary window, and may hang off the screen',
-            'Drag the frame around the picture — the margin or the status bar — to move it, ' +
-            'at any zoom. Drag an edge or a corner to resize it freely (hold Shift to keep its shape ' +
-            'rather than keep it). Dragging the middle moves it too, until you have zoomed in ' +
-            'past the frame, at which point the middle pans the picture instead. Zoom out past ' +
-            'the fit and the picture shrinks inside the frame rather than stopping. Close it ' +
-            'with Escape or a click anywhere outside it.');
-        note('Right-click a placed window for the browser\'s own menu',
-            'Save image as…, Copy image, Copy image address, Open image in new tab — all of ' +
-            'them acting on the full-size original, because the browser fetches it itself. ' +
-            'On a preview you are only hovering, right-click dismisses it instead.');
-        pick('pinButton', 'Place with',
-            'the other button dismisses a preview you are hovering — it stays down until you ' +
-            'move off the image and back on', [
+        // Everything below here is a number, a colour or a keystroke — real settings, but ones
+        // nobody opens this panel to change, and together they buried the four above.
+        advanced('Advanced options', '  timings, sizes, appearance');
+
+        section('Matching');
+        num('hoverDelay', 'Delay before the preview appears',
+            'milliseconds. A short wait stops previews firing as you sweep the pointer across ' +
+            'a page', 0, 3000, 10);
+        num('minDisplayed', 'Ignore pictures smaller than', 'px on screen — skips icons', 0, 2000, 1);
+        num('maxDisplayed', 'Ignore pictures larger than', 'px on screen — 0 means no limit', 0, 10000, 1);
+        num('minRatio', 'Required upsize',
+            'the original must be at least this many times the size of the one on the page',
+            1, 10, 0.1);
+        check('showEvenIfNotLarger', 'Show even when it is not bigger',
+            'display at full size anyway — but never a pixel-for-pixel copy of what is already ' +
+            'on screen');
+
+        section('The preview window');
+        pick('pinButton', 'Keep the preview with',
+            'the other button dismisses one you are only hovering', [
                 ['left', 'Left click  (right click dismisses)'],
                 ['right', 'Right click  (left click dismisses)']]);
-        num('wheelZoomStep', 'Wheel zoom step', '% per notch — +/− steps by 25%', 2, 100, 1);
+        num('wheelZoomStep', 'Wheel zoom step', '% per notch — +/− step by 25%', 2, 100, 1);
         num('panStep', 'Arrow-key pan step', 'px per press — Shift for 3×', 5, 500, 5);
-        num('maxZoom', 'Maximum zoom', '× the natural size', 1, 64, 1);
+        num('maxZoom', 'Maximum zoom', '× the original’s own size', 1, 64, 1);
+        num('maxSizeMultiple', 'Maximum window size',
+            '× the browser window. A preview opens no bigger than the window; this is how ' +
+            'far the wheel and the corners may then take it', 1, 4, 0.25);
+        num('zoomFactor', 'Opening zoom', 'scale applied before fitting to the window', 0.1, 8, 0.1);
+        pick('position', 'Opens', null, [
+            ['cursor', 'Beside the pointer'], ['center', 'Centred in the window']]);
+        num('cursorGap', 'Gap from the pointer',
+            'px — still nudged closer if that would put it out of reach', 0, 200, 1);
 
-        section('How to display');
-        num('zoomFactor', 'Zoom factor', 'scale applied before fitting to the window', 0.1, 8, 0.1);
-        num('maxSizeMultiple', 'Maximum size',
-            '× the browser window. A preview always OPENS fitting the window; this is how ' +
-            'far the wheel and the corners may then take it. Above 1 on purpose: a frame ' +
-            'larger than the window can be shoved aside or upwards and still reach the ' +
-            'screen edges, instead of leaving a strip of empty page behind it',
-            1, 4, 0.25);
-        pick('position', 'Position', null, [
-            ['cursor', 'Beside the cursor'], ['center', 'Centred in the window']]);
-        num('cursorGap', 'Gap from cursor', 'px — the frame is still nudged to stay reachable',
-            0, 200, 1);
+        section('Appearance');
         num('fadeMs', 'Fade duration', 'ms', 0, 1000, 10);
         num('borderWidth', 'Border thickness', 'px', 0, 20, 1);
-        num('frameMargin', 'Frame margin',
-            'px of frame drawn over the edges of the picture, matching the status bar along '
-            + 'the bottom. It is a move handle: drag it to move a placed window at any zoom. '
-            + 'It fades with the bar after a second of stillness, and stops being a handle '
-            + 'while faded, so it is never something invisible to press by mistake. 0 leaves '
-            + 'the status bar as the only handle',
-            0, 80, 2);
         color('borderColor', 'Border colour');
         num('cornerRadius', 'Corner radius', 'px', 0, 40, 1);
+        num('frameMargin', 'Frame margin',
+            'px of frame drawn over the edges of the picture, matching the status bar along the ' +
+            'bottom. Drag it to move the window at any zoom. It fades with the bar after a ' +
+            'second of stillness, and stops being a handle while faded', 0, 80, 2);
         check('shadow', 'Drop shadow');
         check('showStatusBar', 'Show the status bar',
-            'filename, format, dimensions, size — and the bottom edge of the frame, which moves '
-            + 'a placed window the way a title bar does. The frame margin does the same on the '
-            + 'other three sides, so turning this off no longer strands a zoomed-in window — '
-            + 'unless the margin is also 0, in which case such a window can be resized and '
-            + 'panned but not moved. '
-            + 'Both fade out after a second of a still pointer so they stop covering the '
-            + 'picture, and return when you move the pointer over the preview');
+            'filename, format, dimensions and size along the bottom, and the ⊘ and ▶ ' +
+            'buttons. It doubles as the window’s title bar. Fades out after a second of a ' +
+            'still pointer and returns when you move over the preview');
         pick('spinnerTheme', 'Loading ring',
-            'auto follows the browser’s light/dark setting', [
+            'the ring shown while it is still searching', [
                 ['auto', 'Match the browser'], ['dark', 'Always dark'], ['light', 'Always light']]);
         check('noReferrer', 'Strip referrer', 'helps on some hosts, breaks others');
 
         section('Diagnostics');
         check('debug', 'Log every hover to the console',
-            'one line per hover in the browser console (F12): what was under the pointer, ' +
-            'whether it was treated as a video and by which rule, whether an ancestor link ' +
-            'was findable, and the URLs probed. Off unless a problem is being chased — it ' +
-            'is noisy on a page you are moving around');
+            'one line per hover in the browser console (F12): what was under the pointer, which ' +
+            'gates fired and why, and the URLs tried. Noisy — on only while chasing a problem');
 
         const foot = document.createElement('div');
         foot.className = 'foot';
@@ -3939,6 +4157,10 @@
         save.className = 'primary';
         save.textContent = 'Save';
         save.addEventListener('click', function () {
+            // A list left in text mode has not been parsed yet, and blur is not
+            // guaranteed to have been delivered before this click handler runs.
+            sites.flush();
+            blocks.flush();
             controls.forEach(function (fn) { fn(); });
             saveSettings();
             probeCache.clear();
@@ -3967,19 +4189,14 @@
         url: location.href,
         enabled: cfg.enabled,
         siteEnabled: siteEnabled(),
-        skipVideos: cfg.skipVideos,
-        playVideos: cfg.playVideos,
-        followLinks: cfg.followLinks,
-        hoverThroughOverlays: cfg.hoverThroughOverlays,
-        skipPageBackgrounds: cfg.skipPageBackgrounds,
-        skipBanners: cfg.skipBanners,
-        skipDecorative: cfg.skipDecorative,
+        previewVideos: cfg.previewVideos,
+        playVideos: playVideos,
+        skipFurniture: cfg.skipFurniture,
         blockList: cfg.blockList.length,
         // These three decide whether a probed candidate becomes a preview, so a log without
         // them cannot be read: 'no hit line' means "nothing was big enough" under the
         // defaults, but showEvenIfNotLarger turns the ratio gate off entirely.
         showEvenIfNotLarger: cfg.showEvenIfNotLarger,
-        sameShapeOnly: cfg.sameShapeOnly,
         minRatio: cfg.minRatio,
         minDisplayed: cfg.minDisplayed,
     });

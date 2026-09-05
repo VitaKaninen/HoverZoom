@@ -102,13 +102,13 @@ arrives — nothing is decided in advance.
 | `P1` | The element is an `<img>`, a **playing gif-style `<video>`** (`E16`), or has a CSS background image and contains no `<img>` of its own | — |
 | `P2` | Displayed at least `minDisplayed` on screen | 48 px |
 | `P3` | Displayed no larger than `maxDisplayed` | 0 = no cap |
-| `P4` | Not a video: not a media/plugin tag, not sitting inside a **video surface** (a laid-out **player**'s rectangle, or the player box derived from it), no **player** in it or within three ancestors, and not inside a link matching the video-URL shapes. A `<video>` that is muted, controls-less, looping or autoplaying, and under a minute long is an animated picture rather than a player — it is none of those things (`E12`) | `skipVideos` on |
+| `P4` | Not a video: not a media/plugin tag, not sitting inside a **video surface** (a laid-out **player**'s rectangle, or the player box derived from it), no **player** in it or within three ancestors, and not inside a link matching the video-URL shapes. A `<video>` that is muted, controls-less, looping or autoplaying, and under a minute long is an animated picture rather than a player — it is none of those things (`E12`) | `previewVideos` off |
 | `P5` | The site passes the blacklist / whitelist test | blacklist, empty |
-| `P6` | In modifier mode, the modifier key is held | activation = hover |
-| `P7` | Not page furniture — a CSS background that is part of the page rather than a picture on it (`E17`) | `skipPageBackgrounds` on |
+| `P6` | In modifier mode, the modifier key is held. **Either order** — hold it and then point, or point and then press it (`E28`) | activation = hover |
+| `P7` | Not page furniture — a CSS background that is part of the page rather than a picture on it (`E17`) | `skipFurniture` on |
 | `P8` | Neither the displayed URL nor any candidate is on the never-preview list | `blockList` empty |
-| `P9` | Not marked decoration by the page itself: no `aria-hidden="true"`, no `role="presentation"`/`"none"` on the element | `skipDecorative` on |
-| `P10` | Not a **band** across the top of the page (`E20`) — a masthead, channel banner or leaderboard ad. The one furniture rule that applies to an `<img>` as well | `skipBanners` on |
+| `P9` | Not marked decoration by the page itself: no `aria-hidden="true"`, no `role="presentation"`/`"none"` on the element | `skipFurniture` on |
+| `P10` | Not a **band** across the top of the page (`E20`) — a masthead, channel banner or leaderboard ad. The one furniture rule that applies to an `<img>` as well | `skipFurniture` on |
 
 The element tested is not always the one under the pointer. When the hover target fails `P1`, a
 single picture directly beneath it in the same card is tried instead (`E18`), and that picture
@@ -195,7 +195,7 @@ The window is up and transient.
   sitting under the cursor.
 
 #### S06 · hover-held, upgrading
-`S05` while the search is still running, because a bigger original may exist (`keepSearching`, on
+`S05` while the search is still running, because a bigger original may exist (always on since v0.39.0, was `keepSearching`, on
 by default, up to 8 probes).
 - **On screen:** the window, plus the ring docked into its lower-right corner — the only signal
   that what you are looking at is not final.
@@ -336,8 +336,8 @@ states.
 | `K4` | Browser window resize | A placed window keeps the size it was given (`T19`). |
 | `K5` | Escape | Closes it, but does **not** suppress the image (`E2`). |
 | `K6` | `mousedown` on the page outside the window's rectangle | — |
-| `K7` | Releasing the modifier key | Modifier mode only. |
-| `K8` | Any mouse button held down | Suppresses *new* windows rather than closing the current one. `skipWhileMouseDown`. |
+| `K7` | Releasing the modifier key | Modifier mode only. Pressing it again re-opens the preview without the pointer moving (`E28`). |
+| `K8` | Any mouse button held down | Suppresses *new* windows rather than closing the current one. Unconditional since v0.39.0. |
 
 ---
 
@@ -511,6 +511,30 @@ occupying the corner the hand reaches for.)
 
 `frameMargin: 0` leaves the status bar as the only handle, which is the pre-v0.30.0 shape.
 
+#### E28 · The modifier key works in either order
+`P6`'s gate is armed by a keypress, and a keypress is not a pointer movement. Holding the key and
+then pointing at a picture always worked, because the pointer arriving fires the `mouseover` the
+gate reads. Pointing first and then pressing the key fired nothing at all — the pointer is already
+where it is going, and `mouseover` only ever fires on a crossing — so the preview simply never
+appeared and the mode read as half-working.
+
+Since v0.39.0 the keypress that arms the mode also looks up what is under the pointer and runs the
+ordinary hover path against it, synthesising the event `onOver` would have received. One function,
+two ways in, exactly as the pointer-transparent press is (`E1`). `K7` is unchanged: releasing the
+key still takes the preview down at once, and pressing it again brings it back.
+
+#### E27 · Turning off clips for the rest of the tab
+`E14` lets the frame hold a muted looping clip, which is the only form some posts have. Whether
+that is wanted is a judgement about the page in front of you rather than a standing preference, so
+it is not a setting: the status bar of a **placed** window carries a `▶` beside the `⊘` **whenever
+the frame is currently showing a clip**, and pressing it closes the window and returns previews to
+still pictures for the rest of the tab. Reloading the page restores them.
+
+It is session state, never written to storage — a stored version of it would be a setting again,
+and one whose effect nobody could see from its label. The button follows the same rules as the
+`⊘`: absolutely positioned so a long filename cannot push it off the bar, placed only (`E11`), and
+listed in `isBoxControl()` or the box's own capture listeners would eat its click.
+
 #### E26 · The picture may be smaller than the frame
 The zoom floor used to be the fit, and the frame was never bigger than the picture in it. Both
 are gone. Zoom out past the fit and the picture keeps shrinking, centred, with the window's own
@@ -638,7 +662,8 @@ unconditionally: a banner links to the section it heads, and that section's `og:
 own artwork, a different picture rather than a smaller one.
 
 Only pictures with a **natural** size are judged — an `<img>` or a `<video>`. A CSS background
-has none, and the shape of its box is not the shape of its image. `sameShapeOnly` turns it off.
+has none, and the shape of its box is not the shape of its image. Unconditional since v0.39.0
+(it was `sameShapeOnly`).
 
 Two related guards, invisible unless they fire: a URL caught returning two different pictures is
 refused for the rest of the tab, checked against the browser's own copy of the thumbnail and
@@ -664,7 +689,7 @@ bounds keep that from reaching too far:
 
 While such a preview is open, moving between layers of the same card — cover to caption to badge
 — is *not* leaving the picture, so it does not close and reopen. Leaving the card does close it,
-at once, as `T06` says. Turn it off with `hoverThroughOverlays`.
+at once, as `T06` says. Unconditional since v0.39.0 (it was `hoverThroughOverlays`).
 
 #### E17 · What counts as a page background
 `P7` is five tests, any one of which refuses a CSS background image. All five are measurements,
@@ -709,14 +734,15 @@ them, so a local guess still paints immediately and this replaces it in place wh
 The page must agree about which page it is: if `og:url` names a different path, nothing it
 declares is used and no preview opens. That guard is why the feature is safe to skip the gate —
 a live Imgur fetch returned another post's document, and another returned a shell whose
-`og:image` was the site logo. `followLinks` (on) turns the whole thing off; note that with it on,
+`og:image` was the site logo. Unconditional since v0.39.0 (it was `followLinks`); note that
 hovering a linked thumbnail makes a request the site can see.
 
 #### E14 · The preview itself may be a video
 Some animated posts have no image form at all: an Imgur *video post* answers `.jpg` with one
 frozen frame, and the moving original exists only as `.mp4`. Since v0.18.0 the frame can show
 that clip instead of a picture — muted, looping, no controls, and every gesture (`S05`–`S17`)
-behaves exactly as it does for a still. `playVideos` (on) turns it off, and the frozen frame is
+behaves exactly as it does for a still. The ▶ in a placed window's status bar turns it off for
+the rest of the tab (`E27`), and the frozen frame is
 what you get instead.
 
 Two precedence rules go with it, both invisible until they are wrong. The video candidate is
@@ -809,7 +835,7 @@ It records **two** URLs — the one on screen and the source element's own `src`
 whenever the preview was an upgrade, and blocking only the resolved one would leave the thumbnail
 still opening a preview that then failed to upgrade.
 
-`skipPageBackgrounds` (`P7`) handles the common case with no gesture at all; `⊘` is for everything
+`skipFurniture` (`P7`) handles the common case with no gesture at all; `⊘` is for everything
 that rule cannot know about.
 
 ---
@@ -840,6 +866,7 @@ Function names are used rather than line numbers, which rot.
 | 2026-09-04 | v0.35.0. **The status bar only floats up the frame while the frame's top edge is off screen too** (`E21`). It rides the visible bottom so a frame grown past the viewport still has a title bar in reach — but a window deliberately dragged down past the bottom of the browser is not that case, and the bar floating back into the picture rather than leaving with the window was reported as a bug. `view.top < 0` separates the rescue from the override. |
 | 2026-09-04 | v0.38.0. **`E20` is rewritten around the SHAPE of the picture** and now has a section of its own. The old gate decided by comparing one width against a bag of other widths, which made both answers a coincidence — homedepot.com's promo banner previewed because four more promo banners formed a "set", and every photo site's detail page (unsplash, flickr, pexels, wallhaven, safebooru, furaffinity) was silently refused because one big picture near the top shares its width with nothing. A banner is a **band**: 3:1 or wider, measured across ~40 live pages in `banner-test-sites.md`, where banners run 3.0–33.8 and content runs 0.65–2.4 with nothing in between. The width-set condition is **deleted** — it cannot be repaired, since a stack of same-width bands is both a promo column and a gallery. `BANNER_TOP` 200 → 300 and `BANNER_MIN` 400 → 240, both of which the shape test now makes safe; the row-mate must be about the same **height** (an ad no longer rescues an ad); `BESIDE_PEER` 0.25 → 0.15, off 500px.com's exact geometry. `P10`'s judging of CSS backgrounds is now deliberate and documented rather than accidental. |
 | 2026-09-04 | v0.34.0. Three changes to the placed window, all of them reported together. **Moving it no longer freezes its size** (`T25` retired, `E22`): the frame follows the picture up to the growth ceiling for as long as the window is alive, and only a hand resize pins it (`E23`). The freeze was v0.29.0's, and v0.31.0 quietly made it fatal — once the wheel belongs to the page while hovering, zooming means placing first, placing is a press, and a press that wandered three pixels was a move, so every window was frozen at its opening size before it could be grown and `maxSizeMultiple` was unreachable. **Zoom is anchored on the pointer** rather than on the frame's centre (`E22`, `T17`), so a growing window expands away from the cursor and a shrinking one collapses towards it instead of walking its edges past the pointer and handing the wheel back to the page. **The X button is gone** (`T16`, `E25`, `E9`, `E11`) — Escape and a click outside already close a placed window, and the button sat in the corner the hand reaches for to resize. |
+| 2026-09-05 | v0.39.0. **The settings panel was rewritten around what a person can actually decide.** Seven switches retired because each had only one sane answer, and a setting nobody can name the effect of is not a choice: `sameShapeOnly`, `keepSearching`, `followLinks`, `hoverThroughOverlays` and `skipWhileMouseDown` are unconditional; `skipVideos` is inverted into **`previewVideos`, off by default**; `skipBanners`/`skipDecorative`/`skipPageBackgrounds` fold into one **`skipFurniture`**. `playVideos` leaves storage entirely for new `E27` — a `▶` in a placed window's status bar, shown only while the frame holds a clip, that turns clips off for the tab. New `E28` — the modifier key now works in **either order** (`P6`, `K7`), where pointing first and then pressing it used to do nothing. The panel itself gains a three-sentence description and a **How it works** button (which is where the instruction rows scattered through it now live), folds every timing, pixel count and colour into an **Advanced options** section, and gives both lists an **Edit as text** mode — one entry per line, committed on blur — with entries kept alphabetical. |
 | 2026-09-04 | v0.33.0. **Stored settings were being discarded on every page load** and the script ran on defaults until something opened the panel — `readSettings()` is hoisted and the `cfg` initialiser called it while `const RETIRED` was still in its temporal dead zone, so the ReferenceError was swallowed by its own catch. Broken since v0.28.0. Also: the resize strip now straddles the window edge, **6 px outside and 6 px in**, with 13 px of move band beyond it (`E25`); the status bar **no longer outranks a resize**, so the bottom corners and the bottom edge resize like every other edge, and it keeps precedence only over the middle, which is what still matters when `stickBar()` has parked it up the picture (`E21`); `bottomReserve` is retired (`E13`); the manager's menu gains **Enable/Disable for this site**, labelled by what pressing it would do; and the settings panel's Save row is sticky. |
 | 2026-09-04 | v0.32.0. **Moving a window now sets a size CEILING rather than a fixed size** (`T25`, `E22`): zoom out afterwards and the whole window shrinks with the picture the way it did before the move, zoom back in and it stops at the size it was given. `reflow()` gains a third mode for it — `sizeLock` is free, `'max'`, or `'exact'`. **A hand resize is the `'exact'` one** (`E23`) and is the only thing that pins the edges. **And a hand resize is now free-aspect, with Shift to keep the shape** — the reverse of before; the lock existed because a one-axis drag grew bands of background, which `E26` has since made an ordinary state rather than an incoherent one. |
 | 2026-09-04 | v0.31.0. Two corrections to v0.30.0, both reversing something it had just decided. **The wheel is the page's again while you are only hovering** (`E22`, `T22`, `K2`) — it scrolls and the scroll closes the preview; growing the window is a placed-window gesture now, one click away. v0.30.0's version stole the scroll wheel from every hover to buy one gesture, which was a bad trade. **The frame margin is drawn ON the picture** (`E25`), the way the status bar always was, rather than laid out around it: the window costs no extra size, the minimum drops from 98 px to 50 px, the ring is mostly transparent, and it fades with the bar — and stops being a handle while faded, which is what makes an overlaid ring safe where an invisible band was not. |

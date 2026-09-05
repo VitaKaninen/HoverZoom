@@ -212,7 +212,7 @@
 
   <div class="case" data-expect="none">
     <h2>17. thumbnail inside a video link</h2>
-    <p class="hz good">must NOT preview: the link is plainly a video (skipVideos)</p>
+    <p class="hz good">must NOT preview: the link is plainly a video (previewVideos off)</p>
     <a href="/watch?v=dQw4w9WgXcQ">
       <img id="c17" width="200" src="test-images/photo-200x150.jpg" data-src="test-images/photo.jpg">
     </a>
@@ -220,7 +220,7 @@
 
   <div class="case" data-expect="none">
     <h2>18. thumbnail beside an inline player</h2>
-    <p class="hz good">must NOT preview: a &lt;video&gt; sits in the same card (skipVideos)</p>
+    <p class="hz good">must NOT preview: a &lt;video&gt; sits in the same card (previewVideos off)</p>
     <img id="c18" width="200" src="test-images/photo-200x150.jpg" data-src="test-images/photo.jpg">
     <video id="v18" width="1" height="1" muted></video>
   </div>
@@ -242,7 +242,7 @@
 
   <div class="case" data-expect="none">
     <h2>22. the same card, but the clip has controls</h2>
-    <p class="hz good">must NOT preview: controls make it a player (skipVideos)</p>
+    <p class="hz good">must NOT preview: controls make it a player (previewVideos off)</p>
     <img id="c22" width="200" src="test-images/photo-200x150.jpg" data-src="test-images/photo.jpg">
     <video id="v22" width="80" height="60" src="test-images/clip-2s.mp4" muted loop controls></video>
   </div>
