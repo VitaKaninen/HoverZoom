@@ -414,25 +414,36 @@ and `e.target` is the page underneath.
 - **The timeout re-checks `view`** before adding `idle`, and `cancel()` calls `resetBar()`, so a
   preview cannot open with a stale class.
 
-#### The two settings that turn it off, and why 0 needed its own class (v0.43.0)
+#### The two settings that turn it off, and what 0 actually means (v0.43.0, corrected in v0.44.0)
 
 `barFade` (a checkbox, on by default) gates `barIdleMs` and `barFadeMs` in the panel and the
 behaviour: off means the bar and grab border stay up for as long as the window does, and
 `showBar()` returns without arming a timer.
 
-**`barIdleMs` of 0 means they never appear at all** — reported as "setting it to 0 still shows it
-briefly", which is what a 0 ms timer does: the class comes off, the timer fires on the next
-macrotask, and you get one frame of bar plus a full fade. `barAlwaysIdle()` is the predicate;
-`showBar()` and `resetBar()` both add `idle` immediately instead of arming anything.
+**`barIdleMs` of 0 means no delay and no fade — NOT "never shown".** The complaint was precise
+and easy to over-read: *"when moving the mouse over the preview, the bar would briefly appear and
+disappear. But when the mouse was over the border, it would stay visible. This is what I wanted,
+just not the flickering when moving across the image."* v0.43.0 read that as "never appear" and
+pinned `idle` on, which also killed the one case that was working. **It is a timing complaint, not
+a visibility one.**
 
-**`idle` alone is not enough** — its rules carry `transition:opacity var(--barfade)`, so the
-first open still fades from 1 to 0. `.box.nobar` repeats the `opacity:0` with `transition:none`
-and is placed **after** the `idle` rules; equal specificity, so source order decides.
+- **`barInstant()`** is the predicate: `barFade` on, `barIdleMs` 0.
+- **`barWanted()`** is the question the fade timer already asked — `pointerOverChrome() ||
+  popOpen() || !!drag` — lifted out so it can be asked *synchronously*. At 0 there is no timer to
+  ask it later, and asking it a frame later is exactly the flicker.
+- **`showBar()` at 0 toggles `idle` from `barWanted()` on the spot.** `onMove` sets `pointer`
+  before calling it, so the answer is right in the same event.
+- **`drag` is in `barWanted()`** or the bar vanishes mid-drag when the pointer leaves the border
+  it grabbed.
 
-**A consequence worth knowing before setting it:** `hitRegion()` returns no `move` region while
-`chromeVisible()` is false, so with the bar and border never shown, a *zoomed* window has no
-grab handle — it is moved by dragging the middle of an unzoomed image, or resized from its very
-edge. The panel's hint says so.
+**`.box.nobar` only removes the transition** — `transition:none` on `.cap` and `.edge`, nothing
+else. It must stay after the `idle` rules (equal specificity, source order decides). v0.43.0 had
+it repeat `opacity:0`, which is what made 0 mean "never", and is the line to check first if the
+bar ever stops coming back.
+
+**A consequence worth knowing:** `hitRegion()` returns no `move` region while `chromeVisible()`
+is false, so at 0 a *zoomed* window has no grab handle while the pointer is over the middle of
+the image — moving onto the border brings both the bar and the handle back instantly.
 
 Note the Browser pane never advances CSS transitions, so **read the class, not the opacity** — and
 time the flip with a `MutationObserver`, not a polling loop. See [`TESTING.md`](TESTING.md).

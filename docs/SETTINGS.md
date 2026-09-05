@@ -19,8 +19,10 @@ There is no Save button. Every control writes `cfg` and calls `persist()` (`save
 - **Lists write through on every mutation** (`store()` inside `list()`), which is what OLINT
   always did. The note below about entries reaching storage only on Save is history: it was
   right while a Cancel button existed to be made a lie.
-- **The two remaining exits still flush the text editor.** Close and the backdrop call
-  `sites.flush()` / `blocks.flush()`, because a click can outrun the textarea's own blur.
+- **Every exit still flushes the text editor.** `closePanel()` runs `panelFlush()` —
+  `sites.flush()` / `blocks.flush()` / `refSites.flush()` — because a click can outrun the
+  textarea's own blur. That covers Close, Escape, and the rebuild an outside write triggers.
+  (It used to be "Close and the backdrop"; the backdrop went in v0.43.0.)
 
 ## Wording rules the panel follows (v0.43.0)
 
@@ -63,13 +65,14 @@ Three more settings went in v0.40.0, for the same reason as v0.39.0's seven:
 | `enabled` | A master off switch for a script the manager can disable, and which already has a per-site switch two rows below it. |
 | `maxDisplayed` | "Ignore pictures displayed larger than N." Nobody could name the case. |
 | `noReferrer` | Converted to a site list rather than deleted — see "Strip the referrer, per site" below. |
-| `smoothing` (panel row) | The value stays; the *row* went. It is chosen from the AA menu on the picture itself (`E31`). |
+| `smoothing` (panel row) | The value stays; the *row* went. It is toggled from the AA button on the image itself (`E31`). |
 | `cursorGap` | **It never did anything.** The window opens at `pointer.x + gap` and `nudgeIntoReach()` then pulls it back until the pointer is 10 px inside the frame — which is unconditional, because a pointer-transparent preview is pinned by a press *inside its rectangle* (`E1`). The gap was overwritten on every path, at every value. |
 
 **The first section is ordered by what people change**, not by topic: *Show a preview* →
-*Opens* → *Pin preview with*, then the two gates. `Opens` and `Pin preview with` came up out of
-Advanced to sit there; `Opens` carries a hint that **changes with the value**, because the centred
-answer needs one sentence the cursor answer does not (how to pin it — `E30`).
+*Location* → *Pin preview with*, then the two gates. `position` and `pinButton` came up out of
+Advanced to sit there; `position` carries a hint that **changes with the value**, because the
+centred answer needs one sentence the cursor answer does not (how to pin it — `E30`). Its label
+was *Opens* until v0.44.0 — a verb where every other label is a noun.
 
 **The footer is not sticky any more.** `.panel` is a flex column, `.body` is the scroller and
 `.foot` sits below it — reported as "there is open space below the buttons and text scrolling
@@ -83,6 +86,30 @@ followed found `editing()` false and re-opened it — so the button looked dead.
 editor is still open. **Both lists had it**; it showed on whichever one was tried second.
 
 *Clear all* is gone with it — the ✕ per row and the text editor both already do the job.
+
+## The ⊘ adds TWO entries, and that is not a bug
+
+Reported from Google Images: blocking one result put both `encrypted-tbn0.gstatic.com/…` (the
+thumbnail) and `images.stockcake.com/…` (the original it resolved to) on the list.
+
+`blockCurrent()` adds `view.url` and `activeShown` because **they stop different things**, and
+dropping either leaves a hole:
+
+- **The shown URL is what `eligible()` tests**, before anything is probed. Without it the hover
+  still fires, the resolver still runs, and the spinner still flashes before finding every
+  candidate blocked.
+- **The resolved URL is what stops the same image reached another way** — a second thumbnail on
+  the page at a different size, or the item page itself. Without it, blocking a watermark on one
+  card leaves it previewing from the next.
+
+On an ordinary site the two are usually the same URL and you get one row. A search engine is the
+case where they are farthest apart, and it is also the case where blocking is least useful — you
+will not meet that thumbnail again. **The cost of the honest version is a stray row you can
+delete**; the cost of the tidy version is a block that silently does not hold. Both rows are
+visible in Exceptions immediately (the panel re-renders — see below) and either can be removed.
+
+If it ever needs to become a choice, the place is the ⊘'s confirmation popover, which already
+exists to ask.
 
 ## The script runs in every iframe · `E29`
 
@@ -101,13 +128,20 @@ once — two frames disagreeing about whether the site was listed.
 Frames still preview — the fix is about *which host* the decision is made against, not about
 running there.
 
-## Smoothing, and the AA menu · `E31`
+## Smoothing, and the AA button · `E31`
 
 `image-rendering` on the preview's media element. **There are only two real answers**, measured
 in the browser rather than assumed: Chromium accepts `auto`, `pixelated`, `crisp-edges` and
 `-webkit-optimize-contrast` and rejects `smooth` and `high-quality` outright — and it renders
-`crisp-edges` the same as `pixelated`. So `SMOOTHING_OPTS` is two entries, and offering
-`crisp-edges` as a third would be the fake choice v0.39.0 spent a version deleting.
+`crisp-edges` the same as `pixelated`. Offering `crisp-edges` as a third would be the fake choice
+v0.39.0 spent a version deleting.
+
+**So v0.44.0 deleted the menu with it.** The AA button was given a popover in v0.39.0 in the
+expectation of more options; two never arrived, and a menu whose whole job is to pick one of two
+is a click and a target for something a toggle says on its own. The button *is* the state now —
+`sharp` when pixelated, and its `title` names what the next press does. `SMOOTHING_OPTS`,
+`popItem()`, `smoothingPreview`, `previewSmoothing()` and `chooseSmoothing()` all went; the
+hover-to-preview-an-option behaviour went with them, and it has no meaning against a toggle.
 
 Anything else people associate with resampling — Lanczos, bicubic, Mitchell — is not reachable
 from CSS at all. It would mean drawing the picture into a `<canvas>` at every zoom step, which
@@ -118,25 +152,26 @@ is `E9`, a core feature.
 **It is a stored setting, not a per-tab one** (unlike the ▶), chosen from the frame rather than
 the panel because the only way to pick one is to look at a picture while you do it.
 
-- **Hovering an option applies it; leaving puts the saved one back.** `smoothingPreview` is the
-  live value and `cfg.smoothing` the committed one; `smoothingMode()` prefers the preview.
-  `chooseSmoothing()` does `reloadSettings()` first, like `blockCurrent()` — it writes the whole
-  object from outside the panel.
+- **`toggleSmoothing()` does `reloadSettings()` first**, like `blockCurrent()` — it writes the
+  whole object from outside the panel.
+- **`markSmoothing()` owns both the class and the title**, and `layoutChrome()` calls it rather
+  than setting either itself. Two writers for one button's appearance is how they drift.
 - **The panel has no smoothing row at all.** Two places to set one value is how they get out of
   step, and the panel cannot show you the difference.
-- **It goes in `isBoxControl()`** with the ⊘ and the ▶ — *and so do both popovers*, or the
-  capture listeners on `.box` eat the clicks inside them and the symptom is silence.
+- **It goes in `isBoxControl()`** with the ⊘ and the ▶ — *and so does the ⊘'s popover*, or the
+  capture listeners on `.box` eat the clicks inside it and the symptom is silence.
 - **The buttons are placed right-to-left in `layoutChrome()`** from `BTN_RIGHT`/`BTN_STEP`, and
   the caption's right padding is whatever that walk ends at. The old fixed `right:` per button
   could not survive a third one that is sometimes beside the ▶ and sometimes not.
 
-### The two popovers
+### The ⊘'s popover
 
-`.pop` — one for the AA menu, one for the ⊘ confirmation — are children of `.box`, anchored
-`bottom: BAR_MIN_H + 4` so they open **upward** from the status bar and stay inside the frame
-(`.box` has `overflow:hidden`). Both are built by `buildPop()`, which swallows `mousedown` so
-opening one never places, drags or dismisses the window. `showBar()`'s idle timer checks
-`popOpen()`, or the bar fades out from under an open menu.
+`.pop` is a child of `.box`, anchored `bottom: BAR_MIN_H + 4` so it opens **upward** from the
+status bar and stays inside the frame (`.box` has `overflow:hidden`). `buildPop()` swallows
+`mousedown` so opening it never places, drags or dismisses the window. `showBar()`'s idle timer
+checks `popOpen()`, or the bar fades out from under it. There were two until v0.44.0 made the AA
+button a toggle; `closePops()` / `togglePop()` are kept general rather than inlined, because the
+next confirmation will want the same shape.
 
 ## Strip the referrer, per site
 
@@ -194,17 +229,39 @@ design, `E22`).
 it: it owns whatever `composedPath()` says is inside it, and nothing else. Escape is the
 exception described above.
 
-### Three handles, because the title bar used to scroll away
+### The whole background is the handle
 
-Reported: the only grab was the `h2`, which lived *inside* `.body` — the scroller — so it was
-gone a few notches down a ~3000 px panel and the window could not be moved at all.
+Reported first as "the title bar scrolls away": the only grab was the `h2`, which lived *inside*
+`.body` — the scroller — so it was gone a few notches down a ~3000 px panel. v0.43.0 answered
+that with a fixed `.head` plus two 7 px edge strips, and **that was the wrong shape** — the ask
+was not "more bars like the preview window has", it was *grab it anywhere that is not text*.
 
-- **The title is now `.head`, a flex-none row above `.body`**, so it cannot scroll away.
-- **`.grab.l` and `.grab.b`** are 7 px absolutely-positioned strips down the left edge and along
-  the bottom, appended **last** so they paint over `.body` and `.foot`. They sit inside the
-  panel's own padding (`.body` has 20 px, `.foot` 12 px), so no control loses its hit area —
-  verified against all three footer buttons with `elementFromPoint`.
-- All three call the same `startPanelDrag`.
+So v0.44.0 deleted the strips. One `mousedown` on `.panel`, and `dragBg(e)` decides:
+
+- **A press on text or a control is not a drag** — `INPUT`/`SELECT`/`TEXTAREA`/`BUTTON`/`OPTION`
+  by tag, and `label,p,summary,h3,span,b,.hint,.listdesc,.listhead,.listex,.empty,.intro,.guide,
+  .auto` by `closest()`. Everything else — padding, the gap in a row, the panel itself — moves it.
+- **`.head` short-circuits to true** before those tests, so the title bar drags from its text too.
+- **Only the drag path calls `preventDefault()`.** That is the whole answer to "can text still be
+  selected and copied": a press that is not a drag is never touched, so selection behaves exactly
+  as it did. Verified by selecting a hint's contents with the panel live.
+- **A scrollbar press is not a drag.** `.body` reports *itself* as the target when its own
+  scrollbar is pressed, so without `onScrollbar()` the panel would move instead of scrolling —
+  a 15 px-wide bug on Windows and invisible on overlay-scrollbar platforms.
+- **The cursor rules mirror `dragBg()`** and must be kept in step with it: containers get
+  `cursor:move`, text elements take it back, and the later control rules (`.row label`,
+  `input[type=checkbox]`) still win on specificity.
+
+### Where it opens
+
+Centred on the first open in a tab, and **wherever you left it after that** — `panelPos` is
+module-level and `showPanel()` deliberately does *not* reset it, unlike `advOpen`. It was the
+right-hand edge in v0.43.0, on the reasoning that the page is the point; reported as wrong,
+because a window you have to move every time is worse than one you have to move past.
+
+`placePanel()` clamps against `clientWidth`/`clientHeight`, and the centring falls back to
+1024×768 when those read 0 — which the Browser pane does while hidden, and which is exactly how
+this was first measured as "centred at 512, 384" on an 1085 px viewport.
 
 ### Moving off the panel commits what is half-typed
 

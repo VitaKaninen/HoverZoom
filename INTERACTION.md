@@ -231,8 +231,9 @@ growth ceiling, and only a hand resize pins its edges** (`E22`, `E23`).
   **the frame margin or the status bar → move, always** (`S14`, `E25`, `E21`); **the middle
   → move the frame, or pan the picture once it is spilling** (`S14` / `S13`).
 - **Its status bar carries three buttons, and only here:** ⊘ never preview this image, which asks
-  first (`E11`), ▶ stop showing clips in this tab (`E27`), AA the smoothing menu (`E31`). The last
-  two open a popover **upward** out of the bar; a press anywhere else in the frame closes it.
+  first (`E11`), ▶ stop showing clips in this tab (`E27`), AA smooth-or-hard-pixels, a plain
+  toggle (`E31`). Only the ⊘ opens a popover, **upward** out of the bar; a press anywhere else in
+  the frame closes it.
 - **May hang off the edges of the screen** (`E21`), which is the point of the growth ceiling
   being above 1×: shoved aside or upwards, the picture still reaches the screen edges instead of
   leaving a strip of empty page behind it.
@@ -405,7 +406,7 @@ this table is a table.
 | `E28` | The modifier key works in either order | [`docs/SETTINGS.md`](docs/SETTINGS.md) |
 | `E29` | The script runs in every iframe; the menu and the site test belong to the page | [`docs/SETTINGS.md`](docs/SETTINGS.md) |
 | `E30` | A centred preview is pinned from the picture, not from the window | [`docs/VIEWER.md`](docs/VIEWER.md) |
-| `E31` | Smoothing — the AA menu, and why there are only two options | [`docs/SETTINGS.md`](docs/SETTINGS.md) |
+| `E31` | Smoothing — the AA toggle, and why there are only two answers | [`docs/SETTINGS.md`](docs/SETTINGS.md) |
 | `E32` | A pan that runs out of picture continues as a window move | [`docs/VIEWER.md`](docs/VIEWER.md) |
 | `E33` | The settings panel is never modal, and who owns the keyboard and wheel | [`docs/SETTINGS.md`](docs/SETTINGS.md) |
 

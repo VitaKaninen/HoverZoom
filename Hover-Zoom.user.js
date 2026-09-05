@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.43.0
+// @version     0.44.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -39,9 +39,9 @@
         activation: 'hover',        // 'hover' | 'modifier' (hold key, then hover)
         modifierKey: 'ctrl',        // 'ctrl' | 'alt' | 'shift'
         hoverDelay: 120,            // ms before resolving
-        minDisplayed: 48,           // ignore images displayed smaller than this (icons)
-        minRatio: 1.2,              // full size must be this much bigger; below 1 previews anything
-        previewVideos: false,       // preview video THUMBNAILS and player surfaces too. Off by
+        minDisplayed: 16,           // ignore images displayed smaller than this — the only size gate
+        minRatio: 1,                // full size must be this much bigger; below 1 previews anything
+        previewVideos: true,        // preview video THUMBNAILS and player surfaces too
         skipFurniture: true,        // never preview the page's own furniture: its background, a
         siteMode: 'blacklist',      // 'blacklist' | 'whitelist'
         siteList: [],               // hostnames, matched by suffix
@@ -54,20 +54,20 @@
         maxZoom: 32,                // hard ceiling, multiples of natural size
 
         // how to display
-        maxSizeMultiple: 2,         // how far the frame may GROW, as a multiple of the window.
-        zoomFactor: 1.0,            // ceiling on the opening scale; the window still fits it
+        maxSizeMultiple: 1.2,       // how far the frame may GROW, as a multiple of the window.
+        zoomFactor: 2,              // ceiling on the opening scale; the window still fits it
         position: 'cursor',         // 'cursor' | 'center'
-        fadeMs: 90,
+        fadeMs: 200,
         borderWidth: 1,
         borderColor: '#45475a',
         cornerRadius: 6,
         frameMargin: 24,            // px of frame drawn ON TOP of the image, on all four
         barFade: true,              // may the bar and grab border fade at all
-        barIdleMs: 1000,            // still pointer before they fade; 0 = they never appear
-        barFadeMs: 1200,            // how long that fade takes
+        barIdleMs: 1200,            // still pointer before they fade; 0 = instant, and no fade
+        barFadeMs: 600,             // how long that fade takes
         shadow: true,
-        shadowSize: 32,             // px of blur
-        shadowStrength: 55,         // % opacity
+        shadowSize: 24,             // px of blur
+        shadowStrength: 50,         // % opacity
         smoothing: 'auto',          // 'auto' | 'pixelated' | 'crisp-edges' — image-rendering
         showStatusBar: true,        // filename / type / size / dimensions strip, also the move handle; auto-fades
         spinnerTheme: 'auto',       // 'auto' (follows the browser) | 'dark' | 'light'
@@ -776,15 +776,9 @@
     let dimEl = null;
     let capEl = null, capNameEl = null, capHintEl = null, capMetaEl = null, blockEl = null;
     let vidOffEl = null;        // "stop showing clips", only while the frame IS one
-    let aaEl = null;            // smoothing, and the menu it opens
-    let aaPopEl = null, blockPopEl = null;
+    let aaEl = null;            // smoothing, toggled between its two answers
+    let blockPopEl = null;
 
-    // Only two of these are real: Chrome accepts auto, pixelated and crisp-edges, and renders
-    // crisp-edges the same as pixelated. Anything else (lanczos, bicubic) needs a canvas.
-    const SMOOTHING_OPTS = [
-        ['auto', 'Smooth', 'blended pixels — photographs, and most images'],
-        ['pixelated', 'Hard pixels', 'every pixel a square — pixel art, screenshots, small logos'],
-    ];
     let edgeEls = null;         // [top, left, right, bottom] — the drawn frame margin
     let gripEl = null;          // invisible collar that carries the outer half of the resize strip
     let spinEl = null, spinSvg = null;
@@ -916,10 +910,6 @@
             '.box.hot .pop.open{display:block}',
             '.pop .head{padding:8px 10px;color:#bac2de;border-bottom:1px solid #45475a}',
             '.pop .head b{color:#cdd6f4}',
-            '.pop .item{padding:6px 10px;cursor:pointer}',
-            '.pop .item:hover{background:#45475a}',
-            '.pop .item.on{color:#89b4fa;font-weight:700}',
-            '.pop .item .sub{display:block;color:#7f849c;font-size:10px;font-weight:400}',
             '.pop .acts{display:flex;gap:6px;justify-content:flex-end;padding:8px}',
             '.pop .acts button{font:11px system-ui,sans-serif;padding:4px 10px;border-radius:5px;',
             'border:1px solid #45475a;background:#313244;color:#cdd6f4;cursor:pointer}',
@@ -927,9 +917,9 @@
             '.cap,.edge{transition:opacity ' + BAR_SHOW_MS + 'ms ease}',
             '.box.idle .cap{opacity:0;pointer-events:none;transition:opacity var(--barfade) ease}',
             '.box.idle .edge{opacity:0;transition:opacity var(--barfade) ease}',
-            // Source order beats the two rules above at equal specificity — "never shown" has no fade.
-            '.box.nobar .cap{opacity:0;pointer-events:none;transition:none}',
-            '.box.nobar .edge{opacity:0;transition:none}',
+            // `idle` still decides whether they show; this only takes the animation off it.
+            // Equal specificity to the two rules above, so source order is what beats them.
+            '.box.nobar .cap,.box.nobar .edge{transition:none}',
             '.spin{position:fixed;width:34px;height:34px;display:none;pointer-events:none;',
             'filter:drop-shadow(0 2px 6px rgba(0,0,0,.5))}',
             '.spin.on{display:block}',
@@ -997,7 +987,7 @@
         aaEl.className = 'btn aa';
         aaEl.textContent = 'AA';
         aaEl.addEventListener('mousedown', function (e) { e.preventDefault(); e.stopPropagation(); }, true);
-        aaEl.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); togglePop(aaPopEl); }, true);
+        aaEl.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); toggleSmoothing(); }, true);
 
         capEl.appendChild(capNameEl);
         capEl.appendChild(capHintEl);
@@ -1005,20 +995,6 @@
         capEl.appendChild(blockEl);
         capEl.appendChild(vidOffEl);
         capEl.appendChild(aaEl);
-
-        aaPopEl = buildPop();
-        popHead(aaPopEl, 'How the image is drawn when the preview is bigger than the original.',
-            ' Point at one to see it; click to keep it.');
-        SMOOTHING_OPTS.forEach(function (o) {
-            const it = popItem(aaPopEl, o[1], o[2]);
-            it.dataset.val = o[0];
-            it.addEventListener('mouseenter', function () { previewSmoothing(o[0]); });
-            it.addEventListener('click', function (e) {
-                e.preventDefault(); e.stopPropagation(); chooseSmoothing(o[0]);
-            }, true);
-        });
-        // Leaving without choosing puts the saved one back.
-        aaPopEl.addEventListener('mouseleave', function () { previewSmoothing(null); });
 
         blockPopEl = buildPop();
         popHead(blockPopEl, 'Never preview this image again.',
@@ -1051,7 +1027,6 @@
         box.appendChild(vidEl);
         edgeEls.forEach(function (d) { box.appendChild(d); });
         box.appendChild(capEl);
-        box.appendChild(aaPopEl);
         box.appendChild(blockPopEl);
         box.addEventListener('mousedown', onBoxDown, true);
         box.addEventListener('click', onBoxClick, true);
@@ -1328,26 +1303,34 @@
         return Math.max(0, Math.min(60000, cfg.barIdleMs | 0));
     }
 
-    // Zero idle means the bar and grab border never appear at all — the timer version of that
-    // shows them for one frame and fades, which is what "0 still shows it briefly" was.
-    function barAlwaysIdle() {
+    // Zero idle means no delay and no fade: the answer is given on the spot instead of a frame
+    // later, which is what the flicker across the middle of the picture was.
+    function barInstant() {
         return !!cfg.barFade && !barIdleMs();
     }
 
-    // The class lives on the BOX, not on the bar. `nobar` kills the transition too, or the
-    // never-shown case still fades from opacity 1 the first time the window opens.
+    // Should it be up right now, asked only where there is no timer to ask it later.
+    function barWanted() {
+        return pointerOverChrome() || popOpen() || !!drag;
+    }
+
+    // The class lives on the BOX, not on the bar. `nobar` kills the transition as well, or the
+    // instant answer still animates over barFadeMs.
     function showBar() {
         if (!box) return;
         clearTimeout(barTimer);
         barTimer = 0;
-        box.classList.toggle('nobar', barAlwaysIdle());
-        if (barAlwaysIdle()) { box.classList.add('idle'); return; }
+        box.classList.toggle('nobar', barInstant());
+        if (barInstant()) {
+            box.classList.toggle('idle', !barWanted());     // on the chrome: still shown
+            return;
+        }
         box.classList.remove('idle');
         if (!cfg.barFade) return;               // stays up for as long as the window does
         barTimer = setTimeout(function () {
             barTimer = 0;
             if (!box || !view) return;
-            if (pointerOverChrome() || popOpen()) { showBar(); return; }   // parked on it: keep it
+            if (barWanted()) { showBar(); return; }         // parked on it: keep it
             box.classList.add('idle');
         }, barIdleMs());
     }
@@ -1356,8 +1339,8 @@
         clearTimeout(barTimer);
         barTimer = 0;
         if (!box) return;
-        box.classList.toggle('nobar', barAlwaysIdle());
-        box.classList.toggle('idle', barAlwaysIdle());
+        box.classList.toggle('nobar', barInstant());
+        box.classList.toggle('idle', barInstant() && !barWanted());
     }
 
     // Point the frame at a resolved candidate, picking the face that can display it.
@@ -1423,8 +1406,7 @@
         blockEl.style.right = px(right); right += BTN_STEP;
         if (hasVid) { vidOffEl.style.right = px(right); right += BTN_STEP; }
         aaEl.style.right = px(right); right += BTN_STEP;
-        aaEl.classList.toggle('sharp', smoothingMode() !== 'auto');
-        aaEl.title = 'How the image is drawn when it is enlarged';
+        markSmoothing();
         capEl.style.paddingRight =
             px(placed ? Math.min(right + 2, Math.max(8, view.frameW - 8)) : 8);
     }
@@ -1751,10 +1733,10 @@
     // Controls that live INSIDE the box.
     function isBoxControl(t) {
         return blockEl.contains(t) || vidOffEl.contains(t) || aaEl.contains(t) ||
-            aaPopEl.contains(t) || blockPopEl.contains(t);
+            blockPopEl.contains(t);
     }
 
-    // ---- the two popovers a status-bar button opens
+    // ---- the popover the ⊘ opens
 
     function buildPop() {
         const d = document.createElement('div');
@@ -1774,46 +1756,25 @@
         return h;
     }
 
-    function popItem(pop, label, sub) {
-        const it = document.createElement('div');
-        it.className = 'item';
-        it.appendChild(document.createTextNode(label));
-        const s = document.createElement('span');
-        s.className = 'sub';
-        s.textContent = sub;
-        it.appendChild(s);
-        pop.appendChild(it);
-        return it;
-    }
-
     function popOpen() {
-        return !!(aaPopEl && (aaPopEl.classList.contains('open') ||
-            blockPopEl.classList.contains('open')));
+        return !!(blockPopEl && blockPopEl.classList.contains('open'));
     }
 
     function closePops() {
-        if (!aaPopEl) return;
-        if (aaPopEl.classList.contains('open')) previewSmoothing(null);
-        aaPopEl.classList.remove('open');
-        blockPopEl.classList.remove('open');
+        if (blockPopEl) blockPopEl.classList.remove('open');
     }
 
     function togglePop(pop) {
         const wasOpen = pop.classList.contains('open');
         closePops();
-        if (!wasOpen) {
-            pop.classList.add('open');
-            markSmoothing();
-        }
+        if (!wasOpen) pop.classList.add('open');
         showBar();
     }
 
-    // ---- smoothing: a stored setting, chosen from the frame instead of the panel
-
-    let smoothingPreview = null;    // what the pointer is resting on in the menu
+    // ---- smoothing: a stored setting, toggled from the frame instead of the panel
 
     function smoothingMode() {
-        return smoothingPreview || cfg.smoothing || 'auto';
+        return cfg.smoothing === 'pixelated' ? 'pixelated' : 'auto';
     }
 
     function applySmoothing() {
@@ -1822,30 +1783,23 @@
         if (vidEl) vidEl.style.imageRendering = v;
     }
 
+    // Two answers, so the button IS the choice — no menu to open and nothing to preview.
     function markSmoothing() {
-        if (!aaPopEl) return;
-        const now = smoothingMode();
-        [].forEach.call(aaPopEl.querySelectorAll('.item'), function (it) {
-            it.classList.toggle('on', it.dataset.val === (cfg.smoothing || 'auto'));
-        });
-        aaEl.classList.toggle('sharp', now !== 'auto');
+        if (!aaEl) return;
+        const sharp = smoothingMode() === 'pixelated';
+        aaEl.classList.toggle('sharp', sharp);
+        aaEl.title = sharp
+            ? 'Hard pixels when enlarged — click for smooth'
+            : 'Smooth when enlarged — click for hard pixels';
     }
 
-    function previewSmoothing(v) {
-        smoothingPreview = v;
-        applySmoothing();
-        markSmoothing();
-    }
-
-    function chooseSmoothing(v) {
-        smoothingPreview = null;
+    function toggleSmoothing() {
         reloadSettings();               // this writes the whole object back
-        cfg.smoothing = v;
+        cfg.smoothing = smoothingMode() === 'pixelated' ? 'auto' : 'pixelated';
         saveSettings();
         applySmoothing();
-        closePops();
         markSmoothing();
-        dbg('smoothing', v);
+        dbg('smoothing', cfg.smoothing);
     }
 
     // "Stop showing clips in this tab", from the ▶ in the status bar.
@@ -2595,10 +2549,10 @@
         if (panelHost) openPanel();
     }
 
-    // The manager's menu — a fresh visit, so the fold starts shut and the window is placed again.
+    // The manager's menu — a fresh visit, so the fold starts shut. `panelPos` is deliberately
+    // NOT reset: the window stays where it was last dragged for the life of the tab.
     function showPanel() {
         advOpen = false;
-        panelPos = null;
         openPanel();
     }
 
@@ -2632,13 +2586,14 @@
             '.head{flex:none;margin:0;display:flex;align-items:baseline;gap:8px;cursor:move;',
             'padding:10px 20px 9px;font-size:15px;font-weight:600;color:' + C.text + ';',
             'border-bottom:1px solid ' + C.surface + '}',
-            '.head .ver{font-weight:400;font-size:12px;color:' + C.sub + '}',
-            // Two more handles, because the pointer is usually already somewhere else on a
-            // window this tall. Source order puts them over the body and the footer.
-            '.grab{position:absolute;cursor:move;background:transparent}',
-            '.grab:hover{background:' + C.surface + '}',
-            '.grab.l{left:0;top:0;bottom:0;width:7px}',
-            '.grab.b{left:0;right:0;bottom:0;height:7px}',
+            '.head .ver{font-weight:400;font-size:12px;color:' + C.sub + ';cursor:move}',
+            // Every part of the panel that is not text or a control is a handle — see
+            // dragBg(). These two rules only make the cursor agree with it; the later,
+            // more specific control rules (.row label, input[type=checkbox], …) still win.
+            '.panel,.body,.row,.foot,.listwrap,.addrow,.entries,.listbtns,.entry,',
+            'details.adv{cursor:move}',
+            'h3,p,span,b,.hint,.listdesc,.listhead,.listex,.empty,.intro,.guide{cursor:text}',
+            'label,summary,button,select,input,textarea{cursor:auto}',
             'h3{margin:18px 0 8px;font-size:12px;font-weight:600;text-transform:uppercase;',
             'letter-spacing:.06em;color:' + C.sub + ';border-bottom:1px solid ' + C.surface + ';padding-bottom:5px}',
             '.row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:5px 0}',
@@ -2731,8 +2686,35 @@
             panel.style.top = panelPos.top + 'px';
         }
 
+        // Text and controls keep their own press; everything else — padding, gaps, the row
+        // background, the panel itself — moves the window. Only the drag path calls
+        // preventDefault(), so selecting and copying the text still works normally.
+        const TEXTY = 'label,p,summary,h3,span,b,.hint,.listdesc,.listhead,.listex,' +
+            '.empty,.intro,.guide,.auto';
+
+        // A press on a scrollbar belongs to the scrollbar. It reports the scrolling element
+        // as its target, so without this the body cannot be scrolled by its own bar.
+        function onScrollbar(el, e) {
+            const r = el.getBoundingClientRect();
+            const barW = el.offsetWidth - el.clientWidth;
+            const barH = el.offsetHeight - el.clientHeight;
+            return (barW > 0 && e.clientX > r.right - barW) ||
+                   (barH > 0 && e.clientY > r.bottom - barH);
+        }
+
+        function dragBg(e) {
+            const t = e.target;
+            if (!t || t.nodeType !== 1) return false;
+            if (t.closest && t.closest('.head')) return true;       // the title bar, text and all
+            if (/^(INPUT|SELECT|TEXTAREA|BUTTON|OPTION)$/.test(t.tagName)) return false;
+            if (t.closest && t.closest(TEXTY)) return false;
+            if (onScrollbar(t, e)) return false;
+            return true;
+        }
+
         function startPanelDrag(e) {
             if (e.button !== 0) return;
+            if (!dragBg(e)) return;
             e.preventDefault();
             const r = panel.getBoundingClientRect();
             const ox = e.clientX - r.left, oy = e.clientY - r.top;
@@ -2748,15 +2730,16 @@
             window.addEventListener('mouseup', up, true);
         }
 
+        panel.addEventListener('mousedown', startPanelDrag);
+
         const h = document.createElement('h2');
         h.className = 'head';
-        h.title = 'Drag to move';
+        h.title = 'Drag anywhere that is not text to move this window';
         h.textContent = 'Hover Zoom — settings';
         const ver = document.createElement('span');
         ver.className = 'ver';
         ver.textContent = version();
         h.appendChild(ver);
-        h.addEventListener('mousedown', startPanelDrag);
         panel.appendChild(h);
 
         const body = document.createElement('div');
@@ -2784,17 +2767,11 @@
         }
 
         // The fold at the bottom.
-        function advanced(title, summaryHint) {
+        function advanced(title) {
             const d = document.createElement('details');
             d.className = 'adv';
             const sum = document.createElement('summary');
             sum.textContent = title;
-            if (summaryHint) {
-                const hint = document.createElement('span');
-                hint.className = 'hint';
-                hint.textContent = summaryHint;
-                sum.appendChild(hint);
-            }
             d.appendChild(sum);
             d.open = advOpen;
             d.addEventListener('toggle', function () { advOpen = d.open; });
@@ -3120,7 +3097,7 @@
         function syncModKey() { modKey.row.hidden = act.el.value !== 'modifier'; }
         act.el.addEventListener('change', syncModKey);
         syncModKey();
-        const pos = pick('position', 'Opens', ' ', [
+        const pos = pick('position', 'Location', ' ', [
             ['cursor', 'Beside the pointer'], ['center', 'Centred in the window']]);
         const posHint = pos.row.querySelector('.hint');
         function syncPos() {
@@ -3137,10 +3114,9 @@
                 ['left', 'Left click  (right click dismisses)'],
                 ['right', 'Right click  (left click dismisses)']]);
         check('previewVideos', 'Preview videos as well',
-            'off by default, because pointing at a video is usually aiming to play it and a ' +
-            'preview lands on what you were about to click. This is about video thumbnails and ' +
-            'players — a short looping clip with no controls counts as an animated image and ' +
-            'previews either way');
+            'video thumbnails and player surfaces. Turn it off if previews get in the way of ' +
+            'clicking play — pointing at a video is often aiming to start it. A short looping ' +
+            'clip with no controls counts as an animated image and previews either way');
         check('skipFurniture', 'Ignore backgrounds and banners',
             'page furniture rather than images on the page: the page’s own background, a ' +
             'tiled or fixed one, a strip spanning the window, one the page’s text sits on, ' +
@@ -3186,14 +3162,16 @@
             currentValue: function () { return pageHost(); },
         });
 
-        advanced('Advanced options', '  timings, sizes, appearance');
+        advanced('Advanced options');
 
         section('Matching');
         num('hoverDelay', 'Delay before the preview appears',
             'how long the pointer rests on an image first, in ms. A short wait stops previews ' +
             'firing as you sweep the pointer across a page', 0, 3000, 10);
         num('minDisplayed', 'Ignore images smaller than',
-            'the size it is displayed at, in px — skips icons', 0, 2000, 1);
+            'the size it is drawn at on the page, in px. This is the ONLY size filter — nothing ' +
+            'separately singles out icons, avatars or emoji, so lower it to reach those (a ' +
+            'YouTube avatar is about 24)', 0, 2000, 1);
         num('minRatio', 'Required upsize',
             'the original must be at least this many times the size of the image on the page, ' +
             'so 1 means anything bigger at all. Below 1 previews an image that is no bigger — ' +
@@ -3257,8 +3235,9 @@
         syncShadow();
         check('showStatusBar', 'Show the status bar',
             'filename, format, dimensions and size along the bottom, and the ⊘, ▶ and AA ' +
-            'buttons — AA is where smoothing is chosen, on the image you are looking at. It ' +
-            'doubles as the window’s title bar, and fades out with the grab border');
+            'buttons — AA switches between smooth and hard pixels when the preview is enlarged, ' +
+            'on the image you are looking at. It doubles as the window’s title bar, and fades ' +
+            'out with the grab border');
         pick('spinnerTheme', 'Loading ring',
             'the ring shown while it is still searching. Matching follows the light-or-dark ' +
             'preference your browser reports to web pages, which is the operating system’s ' +
@@ -3317,21 +3296,14 @@
         foot.appendChild(close);
         panel.appendChild(foot);
 
-        // Last, so they sit over the body and the footer rather than under them.
-        ['l', 'b'].forEach(function (k) {
-            const g = document.createElement('div');
-            g.className = 'grab ' + k;
-            g.title = 'Drag to move';
-            g.addEventListener('mousedown', startPanelDrag);
-            panel.appendChild(g);
-        });
-
         (document.body || document.documentElement).appendChild(panelHost);
 
-        if (!panelPos) {                    // out of the way, on the right: the page is the point
+        if (!panelPos) {                    // first open in this tab: centred
+            const vw = document.documentElement.clientWidth || 1024;
+            const vh = document.documentElement.clientHeight || 768;
             panelPos = {
-                left: Math.max(12, document.documentElement.clientWidth - panel.offsetWidth - 24),
-                top: 40,
+                left: Math.max(12, Math.round((vw - panel.offsetWidth) / 2)),
+                top: Math.max(12, Math.round((vh - panel.offsetHeight) / 2)),
             };
         }
         placePanel();

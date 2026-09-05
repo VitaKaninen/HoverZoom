@@ -133,7 +133,8 @@ path has been touched twice ever, both times in 2021.
   "is the candidate actually bigger than what's displayed", measured by loading it. A candidate
   the linked page *declares* skips the guessing checks but **not** the `minRatio` gate (v0.40.0
   reversed the v0.19.0 exemption — see [`docs/RESOLVER.md`](docs/RESOLVER.md)).
-- **No hardcoded size caps.** `minDisplayed` / `minRatio` are settings; the defaults are 48 / 1.2.
+- **No hardcoded size caps.** `minDisplayed` / `minRatio` are settings; the defaults are 16 / 1,
+  and `minDisplayed` is the ONLY size gate — nothing separately singles out icons or avatars.
 - **Per-element probe state.** No shared lock, no `.one()`. `probeCache` is keyed by URL and
   every probe has both `onload` and `onerror`.
 - **Build UI with `createElement` + `textContent`.** Trusted Types CSP sites (YouTube, Google)
