@@ -179,8 +179,10 @@ node test-resolver.js               # 160 assertions: the pure URL and video-lin
 python make-test-images.py          # regenerate fixtures into test-images/
 ```
 
-Browser test: `python test-server.py`, then open `http://localhost:8899/test-page.html`. 41 cases,
-11 of which HZ+ rejects outright. (`.claude/launch.json` wraps the same command as
+Browser test: `python test-server.py`, then open `http://localhost:8899/test-page.html`. 39 cases,
+17 of them marked `hz bad` — things HZ+'s generic path gets wrong or has no answer for, 5 of which
+it rejects outright. (Counts drift; `grep -c 'class="case"' test-page.html` is the truth.)
+(`.claude/launch.json` wraps the same command as
 `hover-zoom-test`, but `.claude/` is gitignored — a fresh clone has only the direct command.)
 
 The rest of the testing notes — what each case is for, and the Browser pane's behaviours — are in [`docs/TESTING.md`](docs/TESTING.md).

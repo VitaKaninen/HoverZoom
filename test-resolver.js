@@ -30,8 +30,8 @@ const bannerShape = new Function(
 const location = { href: 'https://example.com/page/index.html' };
 const body = src.slice(start, end);
 const exported = new Function('location', body +
-    '\nreturn {parseSrcset, looksLikeImage, isVideoUrl, upgradeCandidates, linkParamCandidates, blockMatch};')(location);
-const { parseSrcset, looksLikeImage, isVideoUrl, upgradeCandidates, linkParamCandidates, blockMatch } = exported;
+    '\nreturn {parseSrcset, looksLikeImage, isVideoUrl, upgradeCandidates, linkParamCandidates, blockMatch, sameStem, urlStem};')(location);
+const { parseSrcset, looksLikeImage, isVideoUrl, upgradeCandidates, linkParamCandidates, blockMatch, sameStem, urlStem } = exported;
 
 let pass = 0, fail = 0;
 const NL = String.fromCharCode(10);
@@ -411,5 +411,43 @@ band('exactly BANNER_TOP is high enough', 1000,  60, 300, true);
 band('a hair below BANNER_TOP is not',    1000,  60, 301, false);
 band('a zero-height rect is never a band', 1000,   0,  10, false);
 
+
+// ---- the linked page's own markup: does a body image name the same picture as the thumbnail?
+// evilmilk.com sets og:image to the share thumbnail, so the full picture is only in the markup.
+const EM_THUMB = 'https://www.evilmilk.com/thumbs/I_Am_An_Expert_s.jpg';
+eq('evilmilk thumb and its full picture are the same stem',
+    sameStem(EM_THUMB, 'https://www.evilmilk.com/pictures/I_Am_An_Expert.jpg'), true);
+
+eq('evilmilk og:image is the thumbnail itself, so a different post never matches',
+    sameStem(EM_THUMB, 'https://www.evilmilk.com/pictures/Prepare_Yourself.jpg'), false);
+
+eq('a different directory does not break the stem match',
+    sameStem('/thumbs/cat_s.jpg', '/pictures/cat.jpg'), true);
+
+eq('a different extension does not break the stem match',
+    sameStem('/thumbs/cat.webp', '/pictures/cat.jpg'), true);
+
+eq('wordpress -150x150 crops match their original',
+    sameStem('/wp/2024/cat-150x150.jpg', '/wp/2024/cat.jpg'), true);
+
+eq('_thumbnail is inside the tail budget',
+    sameStem('/a/cat_thumbnail.jpg', '/a/cat.jpg'), true);
+
+// The tail must be separator-led and short, or the rule starts matching neighbouring pictures.
+eq('a digit with no separator is a different picture, not a size',
+    sameStem('/a/photo1.jpg', '/a/photo.jpg'), false);
+
+eq('a long word tail is a different picture',
+    sameStem('/a/I_Am_An_Expert_The_Sequel.jpg', '/a/I_Am_An_Expert.jpg'), false);
+
+eq('a site logo never matches the thumbnail it sits beside',
+    sameStem(EM_THUMB, 'https://www.evilmilk.com/img/mymilk-logo.png'), false);
+
+eq('unrelated names do not match', sameStem('/a/dog.jpg', '/a/cat.jpg'), false);
+
+eq('a bare directory url has no stem to match', sameStem('/a/', '/a/cat.jpg'), false);
+
+eq('urlStem strips the directory and the extension',
+    urlStem('https://www.evilmilk.com/pictures/I_Am_An_Expert.jpg'), 'I_Am_An_Expert');
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

@@ -1,0 +1,14 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Post page whose og:image is the thumbnail</title>
+<!--
+  The evilmilk.com shape: og:image is the SHARE CARD, which is the thumbnail already on screen,
+  and the original is only in the markup. Before v0.56.0 the og answer was the only one read, it
+  failed the upsize gate against itself, and the whole site previewed nothing. icon_big.png is
+  reached because sameStem() reads `icon_big` as `icon` plus a short tail.
+-->
+<meta property="og:url" content="/test-pages/post-body.html">
+<meta property="og:image" content="/test-images/icon.png">
+<h1>Post page whose og:image is the thumbnail</h1>
+<p>The original is in the markup, not in the metadata.</p>
+<img id="mainpic" src="/test-images/icon_big.png" alt="the original">

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.55.0
+// @version     0.56.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -280,6 +280,28 @@
         } catch (e) {
             return false;
         }
+    }
+
+    // A stem plus a short separator-led tail: `_s`, `-150x150`, `_thumbnail`.
+    const SIZE_TAIL_RE = /^[-_.][A-Za-z0-9][A-Za-z0-9_-]{0,8}$/;
+
+    function urlStem(url) {
+        try {
+            const p = new URL(url, location.href).pathname;
+            const file = p.slice(p.lastIndexOf('/') + 1);
+            const dot = file.lastIndexOf('.');
+            return dot > 0 ? file.slice(0, dot) : file;
+        } catch (e) { return ''; }
+    }
+
+    // Do two media URLs name the same picture at different sizes?
+    function sameStem(a, b) {
+        const x = urlStem(a), y = urlStem(b);
+        if (!x || !y) return false;
+        if (x === y) return true;
+        const long = x.length > y.length ? x : y;
+        const short = x.length > y.length ? y : x;
+        return long.indexOf(short) === 0 && SIZE_TAIL_RE.test(long.slice(short.length));
     }
 
     const THUMB_PARAM = /(?:^|[_-])(?:thumb|thumbnail|tn|small|preview|icon|avatar)(?:$|[_-])/i;
@@ -631,6 +653,8 @@
 
     const MAX_PROBES = 8;
 
+    const LINKED_TRIES = 4;         // the linked page's own answers: og media, then its markup
+
     const pageCache = new Map();    // page url -> Promise<{url, video}|null>
 
     function metaContent(doc, names) {
@@ -642,7 +666,23 @@
         return null;
     }
 
-    // What a fetched page says its media is.
+    // Same-origin media in the fetched page's own markup — resolved against that page, not this one.
+    function pageBodyMedia(doc, pageUrl) {
+        const out = [], seen = new Set();
+        doc.querySelectorAll('img[src], video[src], video source[src]').forEach(function (n) {
+            const raw = n.getAttribute('src');
+            if (!raw) return;
+            let u;
+            try { u = new URL(raw, pageUrl.href); } catch (e) { return; }
+            if (u.origin !== pageUrl.origin || seen.has(u.href)) return;
+            if (!looksLikeImage(u.href) && !(playVideos && isVideoUrl(u.href))) return;
+            seen.add(u.href);
+            out.push(u.href);
+        });
+        return out;
+    }
+
+    // What a fetched page says its media is: what it declares, and what its markup holds.
     function pageMediaFrom(doc, pageUrl) {
         const declared = metaContent(doc, ['og:url']);
         if (declared) {
@@ -650,17 +690,20 @@
             try { d = new URL(declared, pageUrl.href); } catch (e) { d = null; }
             if (!d || d.pathname.replace(/\/+$/, '') !== pageUrl.pathname.replace(/\/+$/, '')) return null;
         }
+        let og = null;
         const vid = metaContent(doc, ['og:video:secure_url', 'og:video:url', 'og:video',
             'twitter:player:stream']);
         if (vid && playVideos && isVideoUrl(vid)) {
-            try { return { url: new URL(vid, pageUrl.href).href, video: true }; } catch (e) { /* fall through */ }
+            try { og = { url: new URL(vid, pageUrl.href).href }; } catch (e) { /* fall through */ }
         }
-        const img = metaContent(doc, ['og:image:secure_url', 'og:image', 'twitter:image:src',
-            'twitter:image']);
-        if (img && looksLikeImage(img)) {
-            try { return { url: new URL(img, pageUrl.href).href, video: false }; } catch (e) { /* none */ }
+        if (!og) {
+            const img = metaContent(doc, ['og:image:secure_url', 'og:image', 'twitter:image:src',
+                'twitter:image']);
+            if (img && looksLikeImage(img)) {
+                try { og = { url: new URL(img, pageUrl.href).href }; } catch (e) { /* none */ }
+            }
         }
-        return null;
+        return { declared: og, body: pageBodyMedia(doc, pageUrl) };
     }
 
     async function fetchPageMedia(pageUrl) {
@@ -707,30 +750,44 @@
         let best = null;
         let trusted = null;
 
-        const linked = linkedMedia(el).then(async function (hit) {
-            if (!hit || token.cancelled || blocked(hit.url)) return null;
-            const dim = await probe(hit.url);
-            if (!dim || token.cancelled) return null;
-            if (!sameShape(native, dim)) {
-                dbg('linked page rejected — a different shape, so a different picture', {
-                    url: hit.url,
-                    onScreen: native ? native.w + '×' + native.h : '(unknown)',
-                    declared: dim.w + '×' + dim.h,
-                });
-                return null;
+        const linked = linkedMedia(el).then(async function (page) {
+            if (!page || token.cancelled) return null;
+            const tries = [];
+            // og:image is the share card on some sites, and that is the thumbnail itself.
+            if (page.declared && page.declared.url !== shown)
+                tries.push({ url: page.declared.url, from: 'the page the thumbnail links to (og: media)' });
+            page.body.forEach(function (u) {
+                if (shown && u !== shown && sameStem(u, shown)) tries.push({ url: u, from: 'the page the thumbnail links to (its own markup)' });
+            });
+            // Largest of the page's own answers, not the first — og: may be a share crop.
+            for (const t of tries.slice(0, LINKED_TRIES)) {
+                if (token.cancelled) break;
+                if (blocked(t.url)) continue;
+                const dim = await probe(t.url);
+                if (!dim || token.cancelled) continue;
+                if (!sameShape(native, dim)) {
+                    dbg('linked page rejected — a different shape, so a different picture', {
+                        url: t.url, from: t.from,
+                        onScreen: native ? native.w + '×' + native.h : '(unknown)',
+                        declared: dim.w + '×' + dim.h,
+                    });
+                    continue;
+                }
+                if (!bigEnough(dim, displayed)) {
+                    dbg('linked page rejected — under the required upsize', {
+                        url: t.url, from: t.from, minRatio: cfg.minRatio,
+                        onScreen: displayed.w + '×' + displayed.h,
+                        declared: dim.w + '×' + dim.h,
+                    });
+                    continue;
+                }
+                if (trusted && dim.w * dim.h <= trusted.w * trusted.h) continue;
+                if (trusted && trusted.video && !dim.video) continue;
+                trusted = { url: t.url, w: dim.w, h: dim.h, video: !!dim.video, duration: dim.duration,
+                    from: t.from };
+                dbg('hit (declared by the linked page)', trusted);
+                if (onHit && !token.cancelled) onHit(trusted);
             }
-            if (!bigEnough(dim, displayed)) {
-                dbg('linked page rejected — under the required upsize', {
-                    url: hit.url, minRatio: cfg.minRatio,
-                    onScreen: displayed.w + '×' + displayed.h,
-                    declared: dim.w + '×' + dim.h,
-                });
-                return null;
-            }
-            trusted = { url: hit.url, w: dim.w, h: dim.h, video: !!dim.video, duration: dim.duration,
-                from: 'the page the thumbnail links to (og: media)' };
-            dbg('hit (declared by the linked page)', trusted);
-            if (onHit && !token.cancelled) onHit(trusted);
             return trusted;
         }, function () { return null; });
 

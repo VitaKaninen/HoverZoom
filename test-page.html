@@ -297,6 +297,19 @@
   </div>
 
   <!--
+    40 is numbered out of sequence on purpose: it belongs with 24-26, and renumbering would
+    break every case number cited in docs/TESTING.md and in conversation.
+  -->
+  <div class="case" data-expect="480">
+    <h2>40. the linked page's og:image IS the thumbnail</h2>
+    <p class="hz bad">HZ+: no equivalent — the original is in the page's markup, not its
+      metadata. This is evilmilk.com's shape; before v0.56.0 it previewed nothing at all</p>
+    <a href="test-pages/post-body.html">
+      <img id="c40" width="200" src="test-images/icon.png" style="width:200px">
+    </a>
+  </div>
+
+  <!--
     27 and 28 are the imgur gallery shape: THE THING UNDER THE POINTER IS THE CLIP. There is
     no <img> here at all, which is what made "hovering a gif does nothing" — <video> was
     refused outright by NEVER, so the frame's video support and the linked-page lookup were

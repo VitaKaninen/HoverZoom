@@ -132,10 +132,12 @@ an `<img>` at all.
 ## Going to the next page for the original · `E15`
 
 Every other mechanism here GUESSES a URL from strings on the page and verifies it by loading it. This
-one asks the site: fetch the page the thumbnail links to and read what it declares as its own media.
-**The media on the item page is by definition the thing the thumbnail stands for, so there is nothing
-to compare** — a hit from `linkedMedia()` → `fetchPageMedia()` → `pageMediaFrom()` **skips the ratio
-gate and ends the search**.
+one asks the site: fetch the page the thumbnail links to and read the media it declares — and, since
+v0.56.0, the media in its own markup. **The media on the item page is by definition the thing the
+thumbnail stands for**, so a hit from `linkedMedia()` → `fetchPageMedia()` → `pageMediaFrom()` **ends
+the search** — the candidate loop breaks the moment `trusted` is set. It does *not* skip the gates:
+`sameShape()` and `bigEnough()` apply to it exactly as they do to a guess (see the upsize note below
+— v0.40.0 reversed the original exemption).
 
 - **It runs in PARALLEL with the ordinary probes, not before them.** A document fetch is slow beside
   an image probe, and there is usually a local candidate worth showing meanwhile — so the guesses
@@ -153,6 +155,25 @@ gate and ends the search**.
 - **`og:video` before `og:image`**, because on a post that has both, the video IS the post and the
   image is its poster frame. `isVideoUrl()` gates it: `og:video` is frequently a player *page* (an
   embed URL), which would never load.
+- **When `og:` is the share card, the page's own markup is the answer · v0.56.0.** A site may point
+  `og:image` at the *thumbnail* — the share card wants a small square, not the original. evilmilk.com
+  does exactly this: `/pictures/X.htm` declares `og:image` = `/thumbs/X_s.jpg`, the 140×140 already on
+  screen, while the 1001px original is only in `<img id="mainpic">`. The og answer then fails the
+  upsize gate and the site previewed nothing at all. So `pageMediaFrom()` returns **both** what the
+  page declares and `pageBodyMedia()` — its same-origin `<img>`/`<video>` srcs — and `resolve()` tries
+  them together, capped at `LINKED_TRIES` (4).
+  - **A body image is only tried when `sameStem()` says it names the same picture** as the thumbnail:
+    identical filename stems, or one stem plus a short separator-led tail (`_s`, `-150x150`,
+    `_thumbnail`). Without that filter this path would happily pick a banner ad off the item page —
+    and it is the one path that gets called authoritative. The tail is capped at 10 characters so
+    `X_The_Sequel` is not read as a size variant of `X`.
+  - **Resolve against the FETCHED page, not this one.** The document comes from `DOMParser`, so
+    `node.src` would resolve relative paths against the listing page. `pageBodyMedia()` reads
+    `getAttribute('src')` and resolves against `pageUrl` itself.
+  - **The largest qualifying answer wins, not the first, and never the URL already on screen.** `og:`
+    is not automatically better than the markup — it can be a mid-size share crop that passes the
+    upsize gate while the real original sits in the body. Both still pass `sameShape()` and
+    `bigEnough()`; nothing here skips a gate.
 - **Same origin only, and that is a design choice rather than a limitation.** A listing and its item
   pages are on one site essentially by definition; a cross-origin href is an outbound link, not "the
   page for this thumbnail". The payoff is large: plain `fetch` with the user's own cookies, so the

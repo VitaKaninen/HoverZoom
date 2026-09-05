@@ -98,6 +98,8 @@ def main():
     save(scene.resize((200, 150)), "thumbs", "scene.jpg")
 
     save(make(24, 18, "i", 4), "icon.png")
+    # Same stem plus a short tail, for the linked-page markup fallback (case 40).
+    save(make(480, 360, "big", 4), "icon_big.png")
 
     # A forum masthead and a sidebar picture: 9.6:1 against 1:1. Nothing else here is
     # anything but 4:3, and these two exist so "the preview is a completely different
