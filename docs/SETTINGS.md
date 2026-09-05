@@ -8,10 +8,32 @@ There is no Save button. Every control writes `cfg` and calls `persist()` (`save
 `probeCache.clear()` + `refreshSiteMenu()`) on its own `change` event, and the footer is
 **Reset to defaults · Undo changes · Close**.
 
-- **Undo is a snapshot, not an inverse.** `openPanel()` deep-copies `cfg` into `opened`; the
-  button writes that back and re-renders. It undoes the whole visit, not the last edit, which is
-  what "revert it to the way it was before they started editing" asks for — and it costs one
+- **Undo is a snapshot, not an inverse.** `cfg` is deep-copied into `panelOpened`; the button
+  writes that back and re-renders. It undoes the whole visit, not the last edit, which is what
+  "revert it to the way it was before they started editing" asks for — and it costs one
   `JSON.parse(JSON.stringify())` instead of a change log.
+
+### The snapshot must outlive a re-render, and Reset must not eat the lists (v0.45.0)
+
+Reported, and both halves were real: *"I hit reset to default and it wiped my saved sites lists.
+Then when I clicked undo changes, it did not restore them."*
+
+- **`panelOpened` is module-level and captured behind `if (!panelOpened)`.** It used to be a
+  `const opened` inside `openPanel()` — so Reset, whose last act is `openPanel()`, re-took the
+  snapshot **from the values it had just wiped**. The button that undoes Reset was destroyed by
+  Reset. `showPanel()` is the only thing that clears it, so a fresh visit re-arms and every
+  re-render (Reset, Undo, `refreshPanel()`, another tab's write) keeps the original.
+- **`RESET_KEEPS`** — `siteList`, `blockList`, `referrerSites` — is copied out of `cfg` and back
+  over `DEFAULTS`. Those are things the user typed; there is no default that reconstructs them,
+  and the ✕ per row already deletes them one at a time. Everything else is a knob with a right
+  answer, which is what "reset to defaults" is asking about.
+
+**Undo still rolls the lists back**, because it restores the whole object — that is the
+difference between the two buttons, and both now say so in a `title`.
+
+Verified end to end: seeded lists survive Reset while the numbers go back; Undo after Reset
+returns every value to the panel's opening state; an outside write (the ⊘, the site-toggle menu
+command) re-renders without moving the baseline; and closing and re-opening re-arms it.
 - **Cancel could not survive auto-save**, and Save had nothing left to do; both went with it.
 - **Numbers commit on `change`, not `input`.** A half-typed number is not a value anyone meant,
   and `input` fires on every keystroke. `num()` also clamps to its own min/max now — the

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.44.0
+// @version     0.45.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -2538,6 +2538,11 @@
     let panelFlush = null;      // commits an open "edit as text" box, whatever closes the panel
     let panelPos = null;        // where the panel has been dragged to
     let advOpen = false;        // the fold survives the re-render every outside write needs
+    let panelOpened = null;     // Undo's snapshot — see openPanel(); MUST outlive a re-render
+
+    // Things the user typed, not knobs. `Reset to defaults` leaves these alone; there is no
+    // getting them back from a default, and the ✕ per row already deletes them one at a time.
+    const RESET_KEEPS = ['siteList', 'blockList', 'referrerSites'];
 
     function closePanel() {
         if (panelFlush) { panelFlush(); panelFlush = null; }
@@ -2549,10 +2554,11 @@
         if (panelHost) openPanel();
     }
 
-    // The manager's menu — a fresh visit, so the fold starts shut. `panelPos` is deliberately
-    // NOT reset: the window stays where it was last dragged for the life of the tab.
+    // The manager's menu — a fresh visit, so the fold starts shut and Undo re-arms. `panelPos`
+    // is deliberately NOT reset: the window stays where it was last dragged for the life of the tab.
     function showPanel() {
         advOpen = false;
+        panelOpened = null;
         openPanel();
     }
 
@@ -2746,8 +2752,10 @@
         body.className = 'body';
         panel.appendChild(body);
 
-        // What Undo changes goes back to: the whole object as it stood when the panel opened.
-        const opened = JSON.parse(JSON.stringify(cfg));
+        // What Undo goes back to: the whole object as it stood when the panel was OPENED — which
+        // is why it is module-level and guarded. Captured here, it was re-taken on every
+        // re-render, so Reset's own openPanel() call overwrote the snapshot that undoes it.
+        if (!panelOpened) panelOpened = JSON.parse(JSON.stringify(cfg));
 
         // Every control writes as it is changed, so there is no Save to miss and no Cancel to lie.
         function persist() {
@@ -3259,8 +3267,12 @@
         const reset = document.createElement('button');
         reset.className = 'danger';
         reset.textContent = 'Reset to defaults';
+        reset.title = 'Puts every option back to its default. Your site list, exceptions and ' +
+            'referrer sites are kept.';
         reset.addEventListener('click', function () {
-            cfg = Object.assign({}, DEFAULTS);
+            const kept = {};
+            RESET_KEEPS.forEach(function (k) { kept[k] = (cfg[k] || []).slice(); });
+            cfg = Object.assign({}, DEFAULTS, kept);
             saveSettings();
             probeCache.clear();
             refreshSiteMenu();
@@ -3270,8 +3282,10 @@
         // Back to the values this panel opened on, whatever has been saved since.
         const undo = document.createElement('button');
         undo.textContent = 'Undo changes';
+        undo.title = 'Puts everything back to how it was when you opened this window, ' +
+            'including the lists.';
         undo.addEventListener('click', function () {
-            cfg = JSON.parse(JSON.stringify(opened));
+            cfg = JSON.parse(JSON.stringify(panelOpened));
             saveSettings();
             probeCache.clear();
             refreshSiteMenu();
