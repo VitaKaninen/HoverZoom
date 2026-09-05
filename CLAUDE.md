@@ -68,6 +68,10 @@ has already been misdiagnosed once. (The shared ones — `innerHTML` on Trusted-
 - **A control placed inside `.box` must be added to `isBoxControl()`.** `onBoxDown`/`onBoxClick`
   are capture listeners on the box, so they eat a child's events first. The symptom is silence,
   and `node --check` passes. See the section below.
+- **Anything registered per-page — a menu command, a listener that writes settings — must be
+  guarded on `isTopFrame`.** `@match *://*/*` with no `@noframes` means every ad iframe runs its
+  own copy, and the manager lists every frame's menu commands together. Site decisions use
+  `pageHost()`, never `location.hostname`. See `E29`.
 - **A class that grants `pointer-events` must be removed on the path that HIDES the element**, not
   the path that lays it out. `layout()` stops running once the frame is down, so a `hot` left set
   leaves an invisible rectangle that eats clicks and blocks hover where the window used to be.
@@ -126,11 +130,10 @@ path has been touched twice ever, both times in 2021.
   `coveredMedia()` for one that is squarely inside the rule: a
   hit-test of the pointer's own position, done at hover time, caching nothing.)*
 - **No format allowlist.** Extension never decides eligibility. The only gate is
-  "is the candidate actually bigger than what's displayed", measured by loading it — with one
-  deliberate exception since v0.19.0: a candidate the linked page *declares* is not a guess and
-  is not size-checked. Everything the script infers for itself still faces the gate.
-- **No hardcoded size caps.** `minDisplayed` / `maxDisplayed` / `minRatio` are settings; the
-  defaults are 48 / 0 (off) / 1.2.
+  "is the candidate actually bigger than what's displayed", measured by loading it. A candidate
+  the linked page *declares* skips the guessing checks but **not** the `minRatio` gate (v0.40.0
+  reversed the v0.19.0 exemption — see [`docs/RESOLVER.md`](docs/RESOLVER.md)).
+- **No hardcoded size caps.** `minDisplayed` / `minRatio` are settings; the defaults are 48 / 1.2.
 - **Per-element probe state.** No shared lock, no `.one()`. `probeCache` is keyed by URL and
   every probe has both `onload` and `onerror`.
 - **Build UI with `createElement` + `textContent`.** Trusted Types CSP sites (YouTube, Google)

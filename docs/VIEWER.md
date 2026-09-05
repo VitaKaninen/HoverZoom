@@ -384,9 +384,15 @@ time the flip with a `MutationObserver`, not a polling loop. See [`TESTING.md`](
 - **There is no close button.** A placed window has two ways out that need no aim, and the X sat in
   the corner the hand reaches for to resize. `closeEl`, its CSS, its `layoutChrome()` placement and
   its `isBoxControl()` entry all went together; the ⊘ is the only control left inside the box.
-- **The preview opens beside the pointer, then is nudged just far enough to touch it**
-  (`nudgeIntoReach`, `REACH_INSET` 10 px) — ~34 px at the default gap, and only on the axis that
-  needs it. Centring it on the cursor solves reachability but moves it much further than needed.
+- **The preview opens beside the pointer, then is nudged until the pointer is `REACH_INSET`
+  (10 px) inside it** (`nudgeIntoReach`), on the axis that needs it. Centring it on the cursor
+  solves reachability but moves it much further than needed. **This is why `cursorGap` was
+  retired in v0.40.0** — the nudge overrode every value it could hold.
+- **With `position: center` there is no nudge, so the press that pins comes from the picture**
+  (`E30`). `pressPinsPreview()` claims a press inside the window's rectangle *or*, in centred
+  mode only, on the element the preview came from. Without it a centred hover preview cannot be
+  kept at all: it is pointer-transparent, the pointer is never over it, and leaving the picture
+  closes it.
 - **Key and wheel listeners live on `CAP_TARGET` (= window), in capture**, so arrows and `+`/`−` are
   ours while placed. Keys are added in `place()` and removed in `unplace()` against that one
   constant; `wheel` uses the shared `WHEEL_OPTS` object for add *and* remove, or the removal

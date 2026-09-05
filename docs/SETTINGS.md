@@ -1,6 +1,80 @@
 # Settings, storage and the manager menu
 
-The settings panel, how `cfg` is read and written, the per-tab staleness trap, the site and block list editors, the manager's menu command, and the two in-window controls that are not stored settings.
+The settings panel, how `cfg` is read and written, the per-tab staleness trap, the site and block list editors, the manager's menu command, and the in-window controls that are not stored settings.
+
+## Everything saves as it is changed (v0.40.0)
+
+There is no Save button. Every control writes `cfg` and calls `persist()` (`saveSettings()` +
+`probeCache.clear()` + `refreshSiteMenu()`) on its own `change` event, and the footer is
+**Reset to defaults · Undo changes · Close**.
+
+- **Undo is a snapshot, not an inverse.** `openPanel()` deep-copies `cfg` into `opened`; the
+  button writes that back and re-renders. It undoes the whole visit, not the last edit, which is
+  what "revert it to the way it was before they started editing" asks for — and it costs one
+  `JSON.parse(JSON.stringify())` instead of a change log.
+- **Cancel could not survive auto-save**, and Save had nothing left to do; both went with it.
+- **Numbers commit on `change`, not `input`.** A half-typed number is not a value anyone meant,
+  and `input` fires on every keystroke. `num()` also clamps to its own min/max now — the
+  attributes never bound anything on their own.
+- **Lists write through on every mutation** (`store()` inside `list()`), which is what OLINT
+  always did. The note below about entries reaching storage only on Save is history: it was
+  right while a Cancel button existed to be made a lie.
+- **The two remaining exits still flush the text editor.** Close and the backdrop call
+  `sites.flush()` / `blocks.flush()`, because a click can outrun the textarea's own blur.
+
+Three more settings went in the same pass, for the same reason as v0.39.0's seven:
+
+| Retired | Why |
+|---|---|
+| `enabled` | A master off switch for a script the manager can disable, and which already has a per-site switch two rows below it. |
+| `maxDisplayed` | "Ignore pictures displayed larger than N." Nobody could name the case. |
+| `cursorGap` | **It never did anything.** The window opens at `pointer.x + gap` and `nudgeIntoReach()` then pulls it back until the pointer is 10 px inside the frame — which is unconditional, because a pointer-transparent preview is pinned by a press *inside its rectangle* (`E1`). The gap was overwritten on every path, at every value. |
+
+**The footer is not sticky any more.** `.panel` is a flex column, `.body` is the scroller and
+`.foot` sits below it — reported as "there is open space below the buttons and text scrolling
+under them", which is what `position:sticky` with negative margins looked like in practice.
+
+### "Done editing" was eaten by its own blur
+
+Pressing the button blurred the textarea, `commitText()` closed the editor, and the click that
+followed found `editing()` false and re-opened it — so the button looked dead. `mousedown` +
+`preventDefault()` on the button keeps focus in the textarea, so the click arrives while the
+editor is still open. **Both lists had it**; it showed on whichever one was tried second.
+
+*Clear all* is gone with it — the ✕ per row and the text editor both already do the job.
+
+## The script runs in every iframe · `E29`
+
+`@match *://*/*` with no `@noframes`, so an ad or embed frame gets its own copy — with its own
+`cfg`, its own hostname, and, until v0.40.0, **its own pair of menu commands.** Tampermonkey
+lists the commands of every frame together, so the "Disable for this site" that was clicked was
+often an iframe's: it added *that* frame's host to the list, the page went on previewing, and a
+second click on the other entry finally hit the top frame. The tell was both labels showing at
+once — two frames disagreeing about whether the site was listed.
+
+- **Menu commands are registered only when `window.top === window.self`.**
+- **`pageHost()` is what the site list matches**, not `location.hostname`: the top frame's host
+  where it can be read (`ancestorOrigins`, then a same-origin `window.top.location`, then
+  `document.referrer`), so a disabled site is disabled inside its frames too.
+
+Frames still preview — the fix is about *which host* the decision is made against, not about
+running there.
+
+## Smoothing, and the AA button · `E31`
+
+`image-rendering` on the preview's media element: `auto` (the browser's own smoothing),
+`pixelated` (hard pixel edges — pixel art, screenshots, small logos) or `crisp-edges` (nominally
+edge-preserving; Chrome treats it as `pixelated`).
+
+Same shape as the ▶: a stored default plus a **per-tab override** (`let smoothing = null`), set
+from the status bar of a pinned preview and forgotten on reload. It is a judgement about the
+picture in front of you, which is not a thing to go to a settings panel for.
+
+- **It goes in `isBoxControl()`** with the ⊘ and the ▶, or the capture listeners on `.box` eat
+  its click and the symptom is silence.
+- **The buttons are placed right-to-left in `layoutChrome()`** from `BTN_RIGHT`/`BTN_STEP`, and
+  the caption's right padding is whatever that walk ends at. The old fixed `right:` per button
+  could not survive a third one that is sometimes beside the ▶ and sometimes not.
 
 ## The settings panel, rewritten around decisions (v0.39.0)
 
@@ -82,11 +156,10 @@ pasting forty sites in from somewhere else — or copying the list out — is im
 and trivial in the second. So both, with the text form as a **mode** rather than a second
 permanent control, because two editable views of one list is how they get out of step.
 
-- **It commits on BLUR.** "Click away and it turns back into the list" was the asked-for shape,
-  and blur is also the only exit, so there is no Done button to miss and no way to leave the
-  panel holding text that was never parsed.
-- **Save flushes it too** (`sites.flush()` / `blocks.flush()`), for the one case blur cannot
-  cover: pressing Save moves focus, but the click handler may run before the blur is delivered.
+- **It commits on BLUR** — and on the Done editing button, which needs `mousedown` +
+  `preventDefault()` to survive its own blur (see above).
+- **Close and the backdrop flush it too** (`sites.flush()` / `blocks.flush()`), for the one case
+  blur cannot cover: the click handler may run before the blur is delivered.
 - **Entries are sorted after every mutation, not at save time.** A list that reorders itself when
   you press Save is a list you cannot proof-read before pressing it. Case-insensitive, with an
   exact comparison as the tie-break so the order is stable.
@@ -152,12 +225,12 @@ green **+ This Site**, then the entries as rows with a `✕` — because these p
 side and a second dialect of the same control is a cost with no benefit. Colours come from the
 shared palette (`#89b4fa` Add, `#a6e3a1` add-current, `#313244` rows, `#f38ba8` remove).
 
-**One deliberate difference from OLINT: entries stage in a local array and reach storage only on
-Save**, like every other control on this panel. OLINT's lists write straight through, which is
-right there because it has no Save button; copying that here would make Cancel a lie.
+Entries staged in a local array and reached storage only on Save, because Cancel would otherwise
+have been a lie. **Since v0.40.0 they write straight through**, like OLINT's, because there is no
+Save and no Cancel.
 
-`list(key, opts)` returns `{ items, clear }` rather than the old textarea element, so *Clear all*
-calls `blocks.clear()`. `addLine()` is gone. Removal is **by value, not index** — entries are
+`list(key, opts)` returns `{ items, flush }` rather than the old textarea element. `addLine()` is
+gone. Removal is **by value, not index** — entries are
 unique because `add()` dedupes, and an index would be wrong the moment display and storage order
 disagree.
 
@@ -172,7 +245,7 @@ anyone makes, and doing it through the panel means opening it and scrolling to t
   label would be wrong in one of them. `siteMenuLabel()` just reads `siteEnabled()`: enabled here
   means the command would disable, and the other way round.
 - **The label is kept honest by unregistering and re-registering**, from `refreshSiteMenu()`,
-  called at boot, from `toggleSite()`, from the panel's Save and Reset, and from the
+  called at boot, from `toggleSite()`, from every panel write (`persist()`), and from the
   `GM_addValueChangeListener` handler. `GM_unregisterMenuCommand` is feature-detected and needs
   its own `@grant`; a manager without it keeps the label it had at load rather than growing a
   second entry underneath the first.
@@ -183,10 +256,9 @@ anyone makes, and doing it through the panel means opening it and scrolling to t
 - **`reloadSettings()` first**, for the same reason `blockCurrent()` does it: this writes the
   whole `cfg` object back, and it is written from outside the panel.
 
-**The panel's Save row is `position: sticky`.** The negative margins (`margin:18px -20px -18px`)
-pull it out to the panel's own edges and down into its bottom padding, so nothing shows under it
-while it is stuck. The panel is ~3300px of scroll against a ~700px viewport, which is why hunting
-for Save was worth a fix.
+**The panel's button row was `position: sticky` here; v0.40.0 made it a flex row below the
+scroller instead** — see the top of this file. The panel is ~3000 px of scroll against a ~700 px
+viewport, which is why the row has to be pinned somehow.
 
 ## Settings are per-tab snapshots — always re-read before rendering the panel
 

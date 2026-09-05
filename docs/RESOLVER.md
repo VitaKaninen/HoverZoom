@@ -171,8 +171,13 @@ gate and ends the search**.
 
 Cases 24–26 all hang off `icon.png`, which has **no upgrade candidates of any kind** — so if a
 preview appears at all, the page was fetched and read. 24 gets a video the URL could never have
-produced, 25 gets an image *no bigger than the thumbnail* (the ratio-gate bypass, which is the whole
-point), 26 gets nothing.
+produced; 25 gets an image *no bigger than the thumbnail* and 26 gets nothing.
+
+**The required upsize applies to the declared candidate too, since v0.40.0** — so 25 previews only
+with `minRatio` at 1. It used to bypass the gate on the grounds that the page is authoritative, and
+that is still true about *what* the thumbnail stands for; it is not an answer to *is this worth a
+window*. Reported as "I set Required upsize to 100× and everything still previews", which is exactly
+what a link-following site did.
 
 **gifwow is carried by the URL rule, not by its own `/go/` page** — that page declares `og:url` =
 `https://gifpit.com/gifs/…`, a different host and path from the one requested, so the `og:url` guard

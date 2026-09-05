@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.39.0
+// @version     0.40.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -35,15 +35,12 @@
     // ---------------------------------------------------------------- settings
 
     const DEFAULTS = {
-        enabled: true,
-
         // when to zoom
         activation: 'hover',        // 'hover' | 'modifier' (hold key, then hover)
         modifierKey: 'ctrl',        // 'ctrl' | 'alt' | 'shift'
         hoverDelay: 120,            // ms before resolving
         minDisplayed: 48,           // ignore images displayed smaller than this (icons)
-        maxDisplayed: 0,            // ignore images displayed larger than this (0 = no cap)
-        minRatio: 1.2,              // full size must be at least this much bigger
+        minRatio: 1.2,              // full size must be at least this much bigger, trusted or guessed
         showEvenIfNotLarger: false, // show at natural size even when it isn't an upgrade
         previewVideos: false,       // preview video THUMBNAILS and player surfaces too. Off by
         skipFurniture: true,        // never preview the page's own furniture: its background, a
@@ -59,15 +56,17 @@
 
         // how to display
         maxSizeMultiple: 2,         // how far the frame may GROW, as a multiple of the window.
-        zoomFactor: 1.0,            // scale applied to natural size before clamping
+        zoomFactor: 1.0,            // ceiling on the opening scale; the window still fits it
         position: 'cursor',         // 'cursor' | 'center'
-        cursorGap: 24,              // px between pointer and frame edge
         fadeMs: 90,
         borderWidth: 1,
         borderColor: '#45475a',
         cornerRadius: 6,
         frameMargin: 24,            // px of frame drawn ON TOP of the picture, on all four
         shadow: true,
+        shadowSize: 32,             // px of blur
+        shadowStrength: 55,         // % opacity
+        smoothing: 'auto',          // 'auto' | 'pixelated' | 'crisp-edges' — image-rendering
         showStatusBar: true,        // filename / type / size / dimensions strip, also the move handle; auto-fades
         spinnerTheme: 'auto',       // 'auto' (follows the browser) | 'dark' | 'light'
         noReferrer: false,          // strip referrer when loading full image
@@ -80,7 +79,7 @@
     const RETIRED = ['maxWidthPct', 'maxHeightPct', 'dimOpacity', 'bottomReserve',
         'sameShapeOnly', 'keepSearching', 'followLinks', 'hoverThroughOverlays',
         'skipWhileMouseDown', 'playVideos', 'skipVideos', 'skipPageBackgrounds',
-        'skipBanners', 'skipDecorative'];
+        'skipBanners', 'skipDecorative', 'enabled', 'maxDisplayed', 'cursorGap'];
 
     // The two retirements that DO convert.
     function migrate(o) {
@@ -139,8 +138,29 @@
         return host === e || host.endsWith('.' + e);
     }
 
+    const isTopFrame = (function () {
+        try { return window.top === window.self; } catch (e) { return false; }
+    })();
+
+    // The site the USER is on, not the frame this copy happens to run in.
+    function pageHost() {
+        if (isTopFrame) return location.hostname.toLowerCase();
+        try {
+            const anc = location.ancestorOrigins;
+            if (anc && anc.length) return new URL(anc[anc.length - 1]).hostname.toLowerCase();
+        } catch (e) { /* not in Firefox */ }
+        try {
+            const h = window.top.location.hostname;      // same-origin frames only
+            if (h) return h.toLowerCase();
+        } catch (e) { /* cross-origin */ }
+        try {
+            if (document.referrer) return new URL(document.referrer).hostname.toLowerCase();
+        } catch (e) { /* no referrer */ }
+        return location.hostname.toLowerCase();
+    }
+
     function siteListed() {
-        const host = location.hostname.toLowerCase();
+        const host = pageHost();
         return cfg.siteList.some(function (entry) { return entryCovers(entry, host); });
     }
 
@@ -155,8 +175,10 @@
         return on ? 'Disable for this site' : 'Enable for this site';
     }
 
-    // Re-registering is how the label is kept honest.
+    // Re-registering is how the label is kept honest. Top frame only, or every iframe on the page
+    // registers a second copy and the one you click is not the one you meant.
     function refreshSiteMenu() {
+        if (!isTopFrame) return;
         if (typeof GM_registerMenuCommand !== 'function') return;
         if (siteMenuId != null) {
             if (typeof GM_unregisterMenuCommand !== 'function') return;
@@ -171,7 +193,7 @@
     // reloadSettings() first for the same reason blockCurrent() does it.
     function toggleSite() {
         reloadSettings();
-        const host = location.hostname.toLowerCase();
+        const host = pageHost();
         const kept = cfg.siteList.filter(function (entry) { return !entryCovers(entry, host); });
         if (kept.length === cfg.siteList.length) kept.push(host);
         cfg.siteList = kept;
@@ -659,6 +681,11 @@
         return p;
     }
 
+    // The required upsize. Applies to the linked page's own answer too — a ratio nobody enforces is a setting that does nothing.
+    function bigEnough(dim, displayed) {
+        return dim.w >= displayed.w * cfg.minRatio || dim.h >= displayed.h * cfg.minRatio;
+    }
+
     async function resolve(el, displayed, token, onHit) {
         const candidates = collectCandidates(el).slice(0, MAX_PROBES);
         const shown = shownUrl(el);
@@ -675,6 +702,14 @@
                 dbg('linked page rejected — a different shape, so a different picture', {
                     url: hit.url,
                     onScreen: native ? native.w + '×' + native.h : '(unknown)',
+                    declared: dim.w + '×' + dim.h,
+                });
+                return null;
+            }
+            if (!bigEnough(dim, displayed) && !cfg.showEvenIfNotLarger) {
+                dbg('linked page rejected — under the required upsize', {
+                    url: hit.url, minRatio: cfg.minRatio,
+                    onScreen: displayed.w + '×' + displayed.h,
                     declared: dim.w + '×' + dim.h,
                 });
                 return null;
@@ -704,8 +739,7 @@
                 });
                 continue;
             }
-            const bigEnough = dim.w >= displayed.w * cfg.minRatio || dim.h >= displayed.h * cfg.minRatio;
-            const usable = bigEnough || (cfg.showEvenIfNotLarger && !isSameAsShown);
+            const usable = bigEnough(dim, displayed) || (cfg.showEvenIfNotLarger && !isSameAsShown);
             if (!usable) continue;
             if (best && dim.w * dim.h <= best.w * best.h) continue;   // not an improvement
             if (best && best.video && !dim.video) continue;
@@ -740,6 +774,7 @@
     let dimEl = null;
     let capEl = null, capNameEl = null, capHintEl = null, capMetaEl = null, blockEl = null;
     let vidOffEl = null;        // "stop showing clips", only while the frame IS one
+    let aaEl = null;            // smoothing on/off for this tab
     let edgeEls = null;         // [top, left, right, bottom] — the drawn frame margin
     let gripEl = null;          // invisible collar that carries the outer half of the resize strip
     let spinEl = null, spinSvg = null;
@@ -835,18 +870,18 @@
             '.cap .hint{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;',
             'white-space:nowrap;color:#7f849c;font-style:italic}',
             '.box.placed .cap .hint{display:none}',
-            '.cap .block{position:absolute;right:' + BLOCK_RIGHT + 'px;top:50%;',
-            'transform:translateY(-50%);display:none;width:18px;height:18px;line-height:16px;',
-            'text-align:center;border-radius:4px;border:1px solid #45475a;',
-            'background:rgba(49,50,68,.9);color:#a6adc8;cursor:pointer;font-size:12px}',
-            '.box.hot .cap .block{display:block}',
-            '.cap .block:hover{background:#f38ba8;border-color:#f38ba8;color:#1e1e2e}',
-            '.cap .vidoff{position:absolute;right:' + VIDOFF_RIGHT + 'px;top:50%;',
-            'transform:translateY(-50%);display:none;width:18px;height:18px;line-height:16px;',
-            'text-align:center;border-radius:4px;border:1px solid #45475a;',
-            'background:rgba(49,50,68,.9);color:#a6adc8;cursor:pointer;font-size:10px}',
+            '.cap .btn{position:absolute;top:50%;transform:translateY(-50%);display:none;',
+            'width:18px;height:18px;line-height:16px;text-align:center;border-radius:4px;',
+            'border:1px solid #45475a;background:rgba(49,50,68,.9);color:#a6adc8;',
+            'cursor:pointer;font-size:12px}',
+            '.box.hot .cap .block,.box.hot .cap .aa{display:block}',
             '.box.hot .cap.hasvid .vidoff{display:block}',
+            '.cap .vidoff{font-size:10px}',
+            '.cap .aa{font-size:9px;font-weight:700;letter-spacing:-.06em}',
+            '.cap .aa.sharp{background:#89b4fa;border-color:#89b4fa;color:#1e1e2e}',
+            '.cap .block:hover{background:#f38ba8;border-color:#f38ba8;color:#1e1e2e}',
             '.cap .vidoff:hover{background:#f9e2af;border-color:#f9e2af;color:#1e1e2e}',
+            '.cap .aa:hover{background:#89b4fa;border-color:#89b4fa;color:#1e1e2e}',
             '.cap,.edge{transition:opacity ' + BAR_SHOW_MS + 'ms ease}',
             '.box.idle .cap{opacity:0;pointer-events:none;transition:opacity ' + BAR_FADE_MS + 'ms ease}',
             '.box.idle .edge{opacity:0;transition:opacity ' + BAR_FADE_MS + 'ms ease}',
@@ -900,24 +935,31 @@
         capMetaEl = document.createElement('span');
         capMetaEl.className = 'meta';
         blockEl = document.createElement('span');
-        blockEl.className = 'block';
+        blockEl.className = 'btn block';
         blockEl.title = 'Never preview this image again';
         blockEl.textContent = '⊘';
         blockEl.addEventListener('mousedown', function (e) { e.preventDefault(); e.stopPropagation(); }, true);
         blockEl.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); blockCurrent(); }, true);
 
         vidOffEl = document.createElement('span');
-        vidOffEl.className = 'vidoff';
+        vidOffEl.className = 'btn vidoff';
         vidOffEl.title = 'Stop showing clips in this tab — still pictures only, until you reload';
         vidOffEl.textContent = '▶';
         vidOffEl.addEventListener('mousedown', function (e) { e.preventDefault(); e.stopPropagation(); }, true);
         vidOffEl.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); stopVideoPreviews(); }, true);
+
+        aaEl = document.createElement('span');
+        aaEl.className = 'btn aa';
+        aaEl.textContent = 'AA';
+        aaEl.addEventListener('mousedown', function (e) { e.preventDefault(); e.stopPropagation(); }, true);
+        aaEl.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); toggleSmoothing(); }, true);
 
         capEl.appendChild(capNameEl);
         capEl.appendChild(capHintEl);
         capEl.appendChild(capMetaEl);
         capEl.appendChild(blockEl);
         capEl.appendChild(vidOffEl);
+        capEl.appendChild(aaEl);
 
         edgeEls = ['t', 'l', 'r', 'b'].map(function (k) {
             const d = document.createElement('div');
@@ -1167,8 +1209,8 @@
 
     // The bar's height, fixed so the ring around it can be a matching thickness.
     const BAR_MIN_H = 24;
-    const BLOCK_RIGHT = 20;
-    const VIDOFF_RIGHT = BLOCK_RIGHT + 24;
+    const BTN_RIGHT = 20;       // the rightmost button's inset
+    const BTN_STEP = 24;        // and the pitch of the ones beside it
 
     let barTimer = 0;
 
@@ -1225,6 +1267,7 @@
         idle.hidden = true;
         clearMedia(idle);
         mediaEl.hidden = false;
+        applySmoothing();
         if (!wantsVideo && cfg.noReferrer) imgEl.referrerPolicy = 'no-referrer';
         mediaEl.src = res.url;
         if (wantsVideo) {
@@ -1273,9 +1316,18 @@
             : 'left:' + px(m) + ';right:' + px(m) + ';bottom:0;height:' + px(m);
         const hasVid = mediaEl === vidEl;
         capEl.classList.toggle('hasvid', hasVid);
-        const gutter = (placed && hasVid ? VIDOFF_RIGHT : BLOCK_RIGHT) + 26;
+        // Right to left, skipping the ▶ when the frame is not holding a clip; the gutter has to
+        // clear whatever is actually there or the filename runs under the buttons.
+        let right = BTN_RIGHT;
+        blockEl.style.right = px(right); right += BTN_STEP;
+        if (hasVid) { vidOffEl.style.right = px(right); right += BTN_STEP; }
+        aaEl.style.right = px(right); right += BTN_STEP;
+        aaEl.classList.toggle('sharp', smoothingMode() !== 'auto');
+        aaEl.title = smoothingMode() === 'auto'
+            ? 'Smoothing on — click for hard pixel edges in this tab'
+            : 'Hard pixel edges — click for smoothing in this tab';
         capEl.style.paddingRight =
-            px(placed ? Math.min(gutter, Math.max(8, view.frameW - 8)) : 8);
+            px(placed ? Math.min(right + 2, Math.max(8, view.frameW - 8)) : 8);
     }
 
     function layout() {
@@ -1406,6 +1458,13 @@
 
     // -------------------------------------------------------------------- show
 
+    function shadowCss() {
+        if (!cfg.shadow) return 'none';
+        const size = Math.max(0, Math.min(120, cfg.shadowSize | 0));
+        const a = Math.max(0, Math.min(100, cfg.shadowStrength | 0)) / 100;
+        return '0 ' + Math.round(size / 4) + 'px ' + size + 'px rgba(0,0,0,' + a.toFixed(2) + ')';
+    }
+
     function showViewer(res, pointer) {
         buildViewer();
 
@@ -1425,7 +1484,7 @@
 
         box.style.border = cfg.borderWidth > 0 ? cfg.borderWidth + 'px solid ' + cfg.borderColor : 'none';
         box.style.borderRadius = cfg.cornerRadius + 'px';
-        box.style.boxShadow = cfg.shadow ? '0 8px 32px rgba(0,0,0,.55)' : 'none';
+        box.style.boxShadow = shadowCss();
 
         const ow = outerW();
         const oh = outerH();
@@ -1434,8 +1493,8 @@
             view.top = (m.vh - oh) / 2;
         } else {
             // Beside the pointer, on whichever side has more room.
-            const rightRoom = m.vw - pointer.x - cfg.cursorGap;
-            view.left = rightRoom >= ow ? pointer.x + cfg.cursorGap : pointer.x - cfg.cursorGap - ow;
+            const rightRoom = m.vw - pointer.x;
+            view.left = rightRoom >= ow ? pointer.x : pointer.x - ow;
             view.top = pointer.y - oh / 2;
             nudgeIntoReach();
         }
@@ -1559,7 +1618,30 @@
 
     // Controls that live INSIDE the box.
     function isBoxControl(t) {
-        return blockEl.contains(t) || vidOffEl.contains(t);
+        return blockEl.contains(t) || vidOffEl.contains(t) || aaEl.contains(t);
+    }
+
+    // Smoothing: the stored setting, overridden for this tab by the AA button.
+    let smoothing = null;
+
+    function smoothingMode() {
+        return smoothing || cfg.smoothing || 'auto';
+    }
+
+    function applySmoothing() {
+        const v = smoothingMode();
+        if (imgEl) imgEl.style.imageRendering = v;
+        if (vidEl) vidEl.style.imageRendering = v;
+    }
+
+    function toggleSmoothing() {
+        smoothing = smoothingMode() === 'auto'
+            ? (cfg.smoothing !== 'auto' ? cfg.smoothing : 'pixelated')
+            : 'auto';
+        applySmoothing();
+        layout();
+        showBar();
+        dbg('smoothing', smoothing);
     }
 
     // "Stop showing clips in this tab", from the ▶ in the status bar.
@@ -1699,6 +1781,15 @@
     let modifierDown = false;
 
     // A hover preview cannot be hit-tested, so "is the pointer on it" is answered from `view` instead.
+    // A hover preview is pinned by pressing it — but with position:center the pointer is nowhere
+    // near it, so the press that pins it is the one on the picture that produced it.
+    function pressPinsPreview(e) {
+        if (!view || !box || !box.classList.contains('on')) return false;
+        if (pointInPreview(e.clientX, e.clientY)) return true;
+        if (cfg.position !== 'center' || !active) return false;
+        return e.target === active || (active.contains && active.contains(e.target));
+    }
+
     function pointInPreview(x, y) {
         if (!view || !box || !box.classList.contains('on')) return false;
         const w = outerW();
@@ -2115,7 +2206,7 @@
         if (placed) return;
         if (drag) return;
         if (ours(e.target)) return;         // on our own overlay
-        if (!cfg.enabled || !siteEnabled()) return;
+        if (!siteEnabled()) return;
         if (mouseDown) return;
         if (cfg.activation === 'modifier' && !modifierHeld(e) && !modifierDown) return;
 
@@ -2132,7 +2223,6 @@
         cancel();
         const displayed = sizeOf(el);
         if (displayed.w < cfg.minDisplayed && displayed.h < cfg.minDisplayed) return;
-        if (cfg.maxDisplayed > 0 && (displayed.w > cfg.maxDisplayed || displayed.h > cfg.maxDisplayed)) return;
 
         active = el;
         activeCovered = (el !== e.target);
@@ -2185,8 +2275,7 @@
     CAP_TARGET.addEventListener('mousedown', function (e) {
         swallowNextClick = false;
         if (ours(e.target)) { claimClick(); return; }   // onBoxDown / the backdrop own this one
-        if (!placed && view && box && box.classList.contains('on') &&
-            (e.button === 0 || e.button === 2) && pointInPreview(e.clientX, e.clientY)) {
+        if (!placed && (e.button === 0 || e.button === 2) && pressPinsPreview(e)) {
             claimClick();
             onBoxDown(e);
             return;
@@ -2211,8 +2300,8 @@
             return;
         }
         if (ours(e.target)) return;             // onBoxClick owns it
-        if (placed || !view || !box || !box.classList.contains('on')) return;
-        if (!pointInPreview(e.clientX, e.clientY)) return;
+        if (placed) return;
+        if (!pressPinsPreview(e)) return;
         onBoxClick(e);
     }, true);
     CAP_TARGET.addEventListener('contextmenu', function (e) {
@@ -2282,8 +2371,10 @@
             '*{box-sizing:border-box;font-family:system-ui,-apple-system,Segoe UI,sans-serif}',
             '.back{position:fixed;inset:0;background:rgba(0,0,0,.5)}',
             '.panel{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:520px;max-width:94vw;',
-            'max-height:88vh;overflow:auto;background:' + C.base + ';color:' + C.text + ';border:1px solid ' + C.surface2 + ';',
-            'border-radius:10px;padding:18px 20px;box-shadow:0 16px 48px rgba(0,0,0,.6);font-size:13px}',
+            'max-height:88vh;display:flex;flex-direction:column;overflow:hidden;background:' + C.base + ';',
+            'color:' + C.text + ';border:1px solid ' + C.surface2 + ';',
+            'border-radius:10px;box-shadow:0 16px 48px rgba(0,0,0,.6);font-size:13px}',
+            '.body{flex:1 1 auto;min-height:0;overflow:auto;padding:18px 20px 16px}',
             'h2{margin:0 0 14px;font-size:15px;font-weight:600;color:' + C.text + '}',
             'h3{margin:18px 0 8px;font-size:12px;font-weight:600;text-transform:uppercase;',
             'letter-spacing:.06em;color:' + C.sub + ';border-bottom:1px solid ' + C.surface + ';padding-bottom:5px}',
@@ -2298,9 +2389,10 @@
             'input[type=color]{width:40px;height:26px;padding:0;border:1px solid ' + C.surface2 + ';',
             'border-radius:5px;background:' + C.surface + ';cursor:pointer}',
             'textarea{width:100%;height:64px;resize:vertical;font-family:ui-monospace,monospace}',
-            '.foot{position:sticky;bottom:0;z-index:2;display:flex;gap:8px;justify-content:flex-end;',
-            'margin:18px -20px -18px;padding:14px 20px 18px;background:' + C.base + ';',
-            'border-top:1px solid ' + C.surface + '}',
+            // Not sticky — a flex row below the scroller, or content shows under it.
+            '.foot{flex:none;display:flex;gap:8px;align-items:center;padding:12px 20px;',
+            'background:' + C.base + ';border-top:1px solid ' + C.surface + '}',
+            '.foot .auto{flex:1;font-size:11px;color:' + C.sub + '}',
             'button{background:' + C.surface + ';color:' + C.text + ';border:1px solid ' + C.surface2 + ';',
             'border-radius:6px;padding:6px 14px;font-size:12px;cursor:pointer}',
             'button:hover{background:' + C.surface2 + '}',
@@ -2349,20 +2441,36 @@
 
         const back = document.createElement('div');
         back.className = 'back';
-        back.addEventListener('click', closePanel);
+        back.addEventListener('click', function () {
+            sites.flush();
+            blocks.flush();
+            closePanel();
+        });
         sr.appendChild(back);
 
         const panel = document.createElement('div');
         panel.className = 'panel';
         sr.appendChild(panel);
 
+        const body = document.createElement('div');
+        body.className = 'body';
+        panel.appendChild(body);
+
         const h = document.createElement('h2');
         h.textContent = 'Hover Zoom — settings  ·  ' + version();
-        panel.appendChild(h);
+        body.appendChild(h);
 
-        const controls = [];
+        // What Undo changes goes back to: the whole object as it stood when the panel opened.
+        const opened = JSON.parse(JSON.stringify(cfg));
 
-        let mount = panel;
+        // Every control writes as it is changed, so there is no Save to miss and no Cancel to lie.
+        function persist() {
+            saveSettings();
+            probeCache.clear();
+            refreshSiteMenu();
+        }
+
+        let mount = body;
 
         function section(title) {
             const s = document.createElement('h3');
@@ -2383,7 +2491,7 @@
                 sum.appendChild(hint);
             }
             d.appendChild(sum);
-            panel.appendChild(d);
+            body.appendChild(d);
             mount = d;
         }
 
@@ -2408,20 +2516,24 @@
             const el = document.createElement('input');
             el.type = 'checkbox';
             el.checked = !!cfg[key];
-            controls.push(function () { cfg[key] = el.checked; });
-            row(labelText, hintText, el);
+            el.addEventListener('change', function () { cfg[key] = el.checked; persist(); });
+            return { el: el, row: row(labelText, hintText, el) };
         }
 
+        // On `change`, not `input`: a half-typed number is not a value anyone meant to save.
         function num(key, labelText, hintText, min, max, step) {
             const el = document.createElement('input');
             el.type = 'number';
             el.value = cfg[key];
             el.min = min; el.max = max; el.step = step || 1;
-            controls.push(function () {
+            el.addEventListener('change', function () {
                 const v = parseFloat(el.value);
-                if (!isNaN(v)) cfg[key] = v;
+                if (isNaN(v)) { el.value = cfg[key]; return; }
+                cfg[key] = Math.max(min, Math.min(max, v));
+                el.value = cfg[key];
+                persist();
             });
-            row(labelText, hintText, el);
+            return { el: el, row: row(labelText, hintText, el) };
         }
 
         function pick(key, labelText, hintText, opts) {
@@ -2433,14 +2545,15 @@
                 if (cfg[key] === o[0]) op.selected = true;
                 el.appendChild(op);
             });
-            controls.push(function () { cfg[key] = el.value; });
+            el.addEventListener('change', function () { cfg[key] = el.value; persist(); });
             return { el: el, row: row(labelText, hintText, el) };
         }
 
         // A list editor for one of the array settings, laid out the same way as the one in Open Links in New Tab.
         function list(key, opts) {
             const items = cfg[key].slice();
-            controls.push(function () { cfg[key] = items.slice(); });
+
+            function store() { cfg[key] = items.slice(); persist(); }
 
             // Alphabetical, case-insensitively, and kept that way after every mutation rather than only at save time.
             function sortItems() {
@@ -2504,6 +2617,7 @@
                     rm.addEventListener('click', function () {
                         const at = items.indexOf(item);
                         if (at !== -1) items.splice(at, 1);
+                        store();
                         render();
                     });
                     r.appendChild(label);
@@ -2515,7 +2629,7 @@
             function add(raw) {
                 const value = String(raw || '').trim();
                 if (!value) return;
-                if (items.indexOf(value) === -1) { items.push(value); sortItems(); }
+                if (items.indexOf(value) === -1) { items.push(value); sortItems(); store(); }
                 input.value = '';
                 render();
             }
@@ -2569,6 +2683,7 @@
                 items.length = 0;
                 Array.prototype.push.apply(items, next);
                 sortItems();
+                store();
                 textarea.hidden = true;
                 entries.hidden = false;
                 addRow.hidden = false;
@@ -2577,6 +2692,9 @@
             }
 
             textarea.addEventListener('blur', commitText);
+            // Or the press blurs the textarea, commitText() closes it, and the click that follows
+            // sees "not editing" and re-opens it — Done editing looks dead.
+            editBtn.addEventListener('mousedown', function (e) { e.preventDefault(); });
             editBtn.addEventListener('click', function () {
                 if (editing()) { commitText(); } else { openText(); }
             });
@@ -2584,15 +2702,6 @@
             const editRow = document.createElement('div');
             editRow.className = 'listbtns';
             editRow.appendChild(editBtn);
-            // Clear-all rides in the same row rather than a second right-aligned strip under it.
-            if (opts.clearable) {
-                const clr = document.createElement('button');
-                clr.className = 'danger edittext';
-                clr.type = 'button';
-                clr.textContent = 'Clear all';
-                clr.addEventListener('click', function () { commitText(); items.length = 0; render(); });
-                editRow.appendChild(clr);
-            }
 
             wrap.appendChild(addRow);
             wrap.appendChild(entries);
@@ -2601,19 +2710,15 @@
             mount.appendChild(wrap);
             render();
 
-            return {
-                items: items,
-                clear: function () { commitText(); items.length = 0; render(); },
-                flush: commitText,
-            };
+            return { items: items, flush: commitText };
         }
 
         function color(key, labelText) {
             const el = document.createElement('input');
             el.type = 'color';
             el.value = cfg[key];
-            controls.push(function () { cfg[key] = el.value; });
-            row(labelText, null, el);
+            el.addEventListener('change', function () { cfg[key] = el.value; persist(); });
+            return { el: el, row: row(labelText, null, el) };
         }
 
         const intro = document.createElement('p');
@@ -2623,7 +2728,7 @@
             'Click that preview to keep it on screen — then scroll to make it bigger, drag it ' +
             'anywhere, and right-click it to save or copy. Escape, or a click outside it, puts ' +
             'it away.';
-        panel.appendChild(intro);
+        body.appendChild(intro);
 
         const guideBtn = document.createElement('button');
         guideBtn.className = 'guidebtn';
@@ -2680,17 +2785,15 @@
             const open = guide.classList.toggle('open');
             guideBtn.textContent = open ? 'Hide the details' : 'How it works';
         });
-        panel.appendChild(guideBtn);
-        panel.appendChild(guide);
-
-        check('enabled', 'Enable Hover Zoom');
+        body.appendChild(guideBtn);
+        body.appendChild(guide);
 
         section('When to zoom');
         const act = pick('activation', 'Show a preview',
             'either order works with the key — hold it and then point, or point and then press it', [
-                ['hover', 'When I point at a picture'],
-                ['modifier', 'Only while a key is held']]);
-        const modKey = pick('modifierKey', 'The key', null, [
+                ['hover', 'When I hover over an image'],
+                ['modifier', 'Only when the modifier key is held']]);
+        const modKey = pick('modifierKey', 'Modifier key', null, [
             ['ctrl', 'Ctrl'], ['alt', 'Alt'], ['shift', 'Shift']]);
         function syncModKey() { modKey.row.hidden = act.el.value !== 'modifier'; }
         act.el.addEventListener('change', syncModKey);
@@ -2715,17 +2818,16 @@
             examples: 'Examples: example.com, news.ycombinator.com',
             placeholder: 'e.g. example.com',
             addCurrentLabel: '+ This Site',
-            addCurrentTitle: location.hostname,
-            currentValue: function () { return location.hostname; },
+            addCurrentTitle: pageHost(),
+            currentValue: function () { return pageHost(); },
         });
 
-        section('Never preview these images');
+        section('Exceptions');
         const blocks = list('blockList', {
             description: 'Individual images that never open a preview. The quickest way to add ' +
                 'one is the ⊘ button on a pinned preview. A * matches anything.',
             examples: 'Examples: https://example.com/tile.png, https://cdn.example.com/wm/*',
             placeholder: 'e.g. https://example.com/watermark.png',
-            clearable: true,
         });
 
         advanced('Advanced options', '  timings, sizes, appearance');
@@ -2735,30 +2837,34 @@
             'milliseconds. A short wait stops previews firing as you sweep the pointer across ' +
             'a page', 0, 3000, 10);
         num('minDisplayed', 'Ignore pictures smaller than', 'px on screen — skips icons', 0, 2000, 1);
-        num('maxDisplayed', 'Ignore pictures larger than', 'px on screen — 0 means no limit', 0, 10000, 1);
         num('minRatio', 'Required upsize',
-            'the original must be at least this many times the size of the one on the page',
-            1, 10, 0.1);
-        check('showEvenIfNotLarger', 'Show even when it is not bigger',
-            'display at full size anyway — but never a pixel-for-pixel copy of what is already ' +
-            'on screen');
+            'only show the preview if the original is at least this many times the size of the ' +
+            'one on the page. Applies to what a linked page declares as well as to what the ' +
+            'script works out for itself', 1, 100, 0.1);
+        check('showEvenIfNotLarger', 'Preview pictures that are already full size',
+            'the page is showing the original at its true size, so there is nothing bigger to ' +
+            'find. Turn on to preview it anyway — to zoom into it, or to save it from the ' +
+            'preview. Never a pixel-for-pixel copy of what is already on screen at the same URL');
 
         section('The preview window');
-        pick('pinButton', 'Keep the preview with',
-            'the other button dismisses one you are only hovering', [
+        pick('pinButton', 'Pin preview with',
+            'which button keeps a preview on screen. The other one puts it away without ' +
+            'following the link underneath', [
                 ['left', 'Left click  (right click dismisses)'],
                 ['right', 'Right click  (left click dismisses)']]);
         num('wheelZoomStep', 'Wheel zoom step', '% per notch — +/− step by 25%', 2, 100, 1);
         num('panStep', 'Arrow-key pan step', 'px per press — Shift for 3×', 5, 500, 5);
         num('maxZoom', 'Maximum zoom', '× the original’s own size', 1, 64, 1);
         num('maxSizeMultiple', 'Maximum window size',
-            '× the browser window. A preview opens no bigger than the window; this is how ' +
-            'far the wheel and the corners may then take it', 1, 4, 0.25);
-        num('zoomFactor', 'Opening zoom', 'scale applied before fitting to the window', 0.1, 8, 0.1);
+            '× the browser window. A preview opens no bigger than the window; this is the ' +
+            'ceiling for growing it yourself afterwards, with the wheel or by dragging a corner',
+            1, 4, 0.25);
+        num('zoomFactor', 'Maximum initial zoom level',
+            '× the original’s own size, when it first opens. It is still fitted inside the ' +
+            'browser window, so anything larger than the window opens smaller than this — this ' +
+            'only decides how far a SMALL picture is enlarged (1 = never enlarged)', 0.1, 8, 0.1);
         pick('position', 'Opens', null, [
             ['cursor', 'Beside the pointer'], ['center', 'Centred in the window']]);
-        num('cursorGap', 'Gap from the pointer',
-            'px — still nudged closer if that would put it out of reach', 0, 200, 1);
 
         section('Appearance');
         num('fadeMs', 'Fade duration', 'ms', 0, 1000, 10);
@@ -2769,15 +2875,40 @@
             'px of frame drawn over the edges of the picture, matching the status bar along the ' +
             'bottom. Drag it to move the window at any zoom. It fades with the bar after a ' +
             'second of stillness, and stops being a handle while faded', 0, 80, 2);
-        check('shadow', 'Drop shadow');
+        const shadow = check('shadow', 'Drop shadow',
+            'a soft shadow under the preview window, which separates it from the page behind it');
+        const shadowSize = num('shadowSize', 'Shadow size',
+            'px of blur — 0 is none, 60 is a wide soft pool', 0, 120, 4);
+        const shadowStrength = num('shadowStrength', 'Shadow strength',
+            '% opacity — how dark it is at its centre', 0, 100, 5);
+        function syncShadow() {
+            shadowSize.row.hidden = !shadow.el.checked;
+            shadowStrength.row.hidden = !shadow.el.checked;
+        }
+        shadow.el.addEventListener('change', syncShadow);
+        syncShadow();
+        pick('smoothing', 'Smoothing',
+            'how the picture is drawn when the preview is bigger than the original. Smooth ' +
+            'blends the pixels, which suits photographs; hard pixels shows each one as a square, ' +
+            'which is what you want for pixel art, screenshots and small logos. The AA button in ' +
+            'a pinned preview’s status bar switches it for that tab', [
+                ['auto', 'Smooth (the browser’s own)'],
+                ['pixelated', 'Hard pixel edges'],
+                ['crisp-edges', 'Crisp edges (browser’s choice — Chrome treats it as hard)']]);
         check('showStatusBar', 'Show the status bar',
-            'filename, format, dimensions and size along the bottom, and the ⊘ and ▶ ' +
+            'filename, format, dimensions and size along the bottom, and the ⊘, ▶ and AA ' +
             'buttons. It doubles as the window’s title bar. Fades out after a second of a ' +
             'still pointer and returns when you move over the preview');
         pick('spinnerTheme', 'Loading ring',
             'the ring shown while it is still searching', [
                 ['auto', 'Match the browser'], ['dark', 'Always dark'], ['light', 'Always light']]);
-        check('noReferrer', 'Strip referrer', 'helps on some hosts, breaks others');
+        check('noReferrer', 'Strip referrer',
+            'when the preview loads a picture, the browser normally tells the image host which ' +
+            'page asked for it. Leave this off. Turn it on only for a site where previews come ' +
+            'up blank or as a “no hotlinking” placeholder while the page’s own thumbnails are ' +
+            'fine — some hosts refuse a request that names another site. It has the opposite ' +
+            'effect on hosts that require their own site as the referrer (Pixiv is one), where ' +
+            'stripping it turns working previews blank');
 
         section('Diagnostics');
         check('debug', 'Log every hover to the console',
@@ -2787,42 +2918,51 @@
         const foot = document.createElement('div');
         foot.className = 'foot';
 
+        const auto = document.createElement('span');
+        auto.className = 'auto';
+        auto.textContent = 'Changes save as you make them.';
+
         const reset = document.createElement('button');
         reset.className = 'danger';
         reset.textContent = 'Reset to defaults';
         reset.addEventListener('click', function () {
             cfg = Object.assign({}, DEFAULTS);
             saveSettings();
+            probeCache.clear();
             refreshSiteMenu();
             openPanel();
         });
 
-        const cancelBtn = document.createElement('button');
-        cancelBtn.textContent = 'Cancel';
-        cancelBtn.addEventListener('click', closePanel);
-
-        const save = document.createElement('button');
-        save.className = 'primary';
-        save.textContent = 'Save';
-        save.addEventListener('click', function () {
-            sites.flush();
-            blocks.flush();
-            controls.forEach(function (fn) { fn(); });
+        // Back to the values this panel opened on, whatever has been saved since.
+        const undo = document.createElement('button');
+        undo.textContent = 'Undo changes';
+        undo.addEventListener('click', function () {
+            cfg = JSON.parse(JSON.stringify(opened));
             saveSettings();
             probeCache.clear();
             refreshSiteMenu();
+            openPanel();
+        });
+
+        const close = document.createElement('button');
+        close.className = 'primary';
+        close.textContent = 'Close';
+        close.addEventListener('click', function () {
+            sites.flush();      // an open text editor commits on blur, which a click may outrun
+            blocks.flush();
             closePanel();
         });
 
+        foot.appendChild(auto);
         foot.appendChild(reset);
-        foot.appendChild(cancelBtn);
-        foot.appendChild(save);
+        foot.appendChild(undo);
+        foot.appendChild(close);
         panel.appendChild(foot);
 
         (document.body || document.documentElement).appendChild(panelHost);
     }
 
-    if (typeof GM_registerMenuCommand === 'function') {
+    if (isTopFrame && typeof GM_registerMenuCommand === 'function') {
         GM_registerMenuCommand('Hover Zoom settings', openPanel);
         refreshSiteMenu();
     }
@@ -2830,7 +2970,7 @@
     dbg('loaded', {
         version: version(),
         url: location.href,
-        enabled: cfg.enabled,
+        topFrame: isTopFrame,
         siteEnabled: siteEnabled(),
         previewVideos: cfg.previewVideos,
         playVideos: playVideos,

@@ -103,9 +103,9 @@ arrives — nothing is decided in advance.
 |---|---|---|
 | `P1` | The element is an `<img>`, a **playing gif-style `<video>`** (`E16`), or has a CSS background image and contains no `<img>` of its own | — |
 | `P2` | Displayed at least `minDisplayed` on screen | 48 px |
-| `P3` | Displayed no larger than `maxDisplayed` | 0 = no cap |
+| `P3` | Displayed no larger than `maxDisplayed` — **retired in v0.40.0**, nobody could name a reason to skip big pictures | — |
 | `P4` | Not a video: not a media/plugin tag, not sitting inside a **video surface** (a laid-out **player**'s rectangle, or the player box derived from it), no **player** in it or within three ancestors, and not inside a link matching the video-URL shapes. A `<video>` that is muted, controls-less, looping or autoplaying, and under a minute long is an animated picture rather than a player — it is none of those things (`E12`) | `previewVideos` off |
-| `P5` | The site passes the blacklist / whitelist test | blacklist, empty |
+| `P5` | The site passes the blacklist / whitelist test. The host tested is the **page's**, not the frame's (`E29`) | blacklist, empty |
 | `P6` | In modifier mode, the modifier key is held. **Either order** — hold it and then point, or point and then press it (`E28`) | activation = hover |
 | `P7` | Not page furniture — a CSS background that is part of the page rather than a picture on it (`E17`) | `skipFurniture` on |
 | `P8` | Neither the displayed URL nor any candidate is on the never-preview list | `blockList` empty |
@@ -117,7 +117,9 @@ single picture directly beneath it in the same card is tried instead (`E18`), an
 then faces every precondition here in its own right.
 
 A candidate that passes all ten still shows nothing unless a probe finds an image at least
-`minRatio` (1.2×) bigger than what is displayed **and shaped like it** (`E19`) — see `T04`.
+`minRatio` (1.2×) bigger than what is displayed **and shaped like it** (`E19`) — see `T04`. Since
+v0.40.0 that ratio applies to what a linked page declares as well; the page is trusted about
+*what* the thumbnail stands for, not about whether it is worth a window.
 
 `P7` is five separate tests, listed in `E17`. It applies to CSS backgrounds only; the one rule
 that also judges an `<img>` is `P10`, and it is deliberately much narrower. `P10` runs on CSS
@@ -172,9 +174,11 @@ window.
 #### S05 · hover-held
 The window is up and transient.
 - **Placement:** decided once, when it opens, and never revisited. With `position: cursor` (the
-  default) it opens beside the pointer with a `cursorGap` (24 px) and is then nudged the smallest
-  distance that puts the pointer `REACH_INSET` (10 px) inside its edge. With `position: center` it
-  is centred in the window and the pointer is usually *outside* it — which changes `E1`.
+  default) it opens beside the pointer and is nudged the smallest distance that puts the pointer
+  `REACH_INSET` (10 px) inside its edge. (`cursorGap` was retired in v0.40.0: that nudge always
+  overrode it, so the gap could never survive.) With `position: center` it is centred in the
+  window and the pointer is *outside* it, so the press that pins it is the one on the picture
+  itself (`E30`).
 - **On screen:** the window, **pointer-transparent** — but only to *hover and wheel*, which is
   the distinction that matters:
   - **hover** passes through. `mouseover` reaches the element underneath, which is what makes a
@@ -225,6 +229,8 @@ growth ceiling, and only a hand resize pins its edges** (`E22`, `E23`).
   arrows → pan (`panStep` 80 px, Shift for 3×); **a corner or an edge → resize** (`S19`, `E23`);
   **the frame margin or the status bar → move, always** (`S14`, `E25`, `E21`); **the middle
   → move the frame, or pan the picture once it is spilling** (`S14` / `S13`).
+- **Its status bar carries three buttons, and only here:** ⊘ never preview this image (`E11`),
+  ▶ stop showing clips in this tab (`E27`), AA smoothing on or off in this tab (`E31`).
 - **May hang off the edges of the screen** (`E21`), which is the point of the growth ceiling
   being above 1×: shoved aside or upwards, the picture still reaches the screen edges instead of
   leaving a strip of empty page behind it.
@@ -393,6 +399,9 @@ this table is a table.
 | `E26` | The picture may be smaller than the frame | [`docs/VIEWER.md`](docs/VIEWER.md) |
 | `E27` | Turning off clips for the rest of the tab | [`docs/SETTINGS.md`](docs/SETTINGS.md) |
 | `E28` | The modifier key works in either order | [`docs/SETTINGS.md`](docs/SETTINGS.md) |
+| `E29` | The script runs in every iframe; the menu and the site test belong to the page | [`docs/SETTINGS.md`](docs/SETTINGS.md) |
+| `E30` | A centred preview is pinned from the picture, not from the window | [`docs/VIEWER.md`](docs/VIEWER.md) |
+| `E31` | Smoothing, and the AA button that overrides it for a tab | [`docs/SETTINGS.md`](docs/SETTINGS.md) |
 
 `E3` is retired with the detached state (v0.28.0); `E4` and `E5` are retired as dangling.
 
