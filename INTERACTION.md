@@ -3,7 +3,7 @@
 What the preview **window** does, as a state machine. Menus, buttons, the status bar contents and
 the loading ring are out of scope except where they change what the window itself accepts.
 
-Describes `Hover-Zoom.user.js` **v0.50.0**.
+Describes `Hover-Zoom.user.js` **v0.51.0**.
 
 **This file is the vocabulary, not the reasoning.** Each item is one or two lines saying what the window does. *Why* it does it lives in [`docs/`](docs/) — `E` items point straight at the section that holds the argument, and every other ID can be found with `grep -rn "S05" docs/`.
 

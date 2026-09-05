@@ -195,6 +195,22 @@ that width they are clipped to nothing. `layoutChrome()` positions the cluster a
 `padding-right` from `textGutter()`, which is `btnGutter()` plus the cluster, so the reserve and
 the thing it reserves for cannot disagree.
 
+**The cluster's width is written, never shrink-to-fit — and that is a Firefox bug fix.** An
+absolutely positioned box with no `width` is shrink-to-fit, and Chrome sized it from the slider's
+`flex-basis` (100 px) to exactly 158 px, flush at both edges. Firefox sizes it from the range
+input's larger *intrinsic* width instead, so the box came out wider than its contents — and with
+the default `justify-content: flex-start` the surplus parked **after the last item**, as a ~30 px
+gap between the readout and the AA button. Chrome had no surplus, so Chrome looked right.
+
+`layoutChrome()` now writes `zctlEl.style.width = zctlW()`, the same number `textGutter()` reserves,
+and `.zctl` carries `justify-content: flex-end` as a second guard: if a browser still oversizes the
+box, the surplus goes in front of the slider rather than behind the readout. The slider is
+`flex:none; width:100px` for the same reason — with `barMinW()` now accounting for the ▶ it never
+needs to compress, so nothing depends on how a browser sizes a form control.
+
+**The Browser pane is Chromium, so this class of fault is invisible to every check made here.**
+Reported by the user against Firefox and LibreWolf, v0.50.0.
+
 **`caption()` runs before `layoutChrome()` in `layout()`.** `textGutter()` measures the cluster
 through the `hidden` flags that `syncZoom()` writes, so reversing the two leaves the padding one
 frame stale every time the cluster appears or disappears.

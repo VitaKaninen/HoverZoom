@@ -81,6 +81,9 @@ has already been misdiagnosed once. (The shared ones — `innerHTML` on Trusted-
 - **Measure the viewport with `vpW()`/`vpH()`, never `documentElement.clientHeight` directly.** On a
   quirks-mode page (no doctype) the root answers with the whole document's height. See
   [`docs/VIEWER.md`](docs/VIEWER.md).
+- **The Browser pane is Chromium; a Firefox-only layout fault is invisible to every check made
+  here.** Give any absolutely positioned box holding a form control an explicit width — shrink-to-fit
+  diverges between engines. See [`docs/TESTING.md`](docs/TESTING.md).
 - **The Browser pane reports `innerWidth`/`clientHeight` as ZERO while hidden**, and delivers zero
   animation frames while claiming to be visible. Pin a viewport with `resize_window` before
   measuring anything geometric, and never use `requestAnimationFrame` for something that must

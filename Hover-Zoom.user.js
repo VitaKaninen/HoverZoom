@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.50.0
+// @version     0.51.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -910,10 +910,12 @@
             // ---- the zoom cluster: slider, then the readout that opens a field
             // Absolutely placed, like the buttons: a flex item's position depends on how wide the
             // filename and metadata happen to be, and this one must not move.
-            '.cap .zctl{position:absolute;top:50%;transform:translateY(-50%);',
-            'display:flex;align-items:center;gap:' + BAR_ZOOM_GAP + 'px}',
+            // Width written by layoutChrome(), never shrink-to-fit: Firefox sizes an abspos flex
+            // box from the range's intrinsic width and parks the surplus after the last item.
+            '.cap .zctl{position:absolute;top:50%;transform:translateY(-50%);box-sizing:border-box;',
+            'display:flex;align-items:center;justify-content:flex-end;gap:' + BAR_ZOOM_GAP + 'px}',
             '.cap .zctl[hidden]{display:none}',
-            '.cap .zslider{flex:0 1 ' + BAR_SLIDER_W + 'px;min-width:60px;height:14px;',
+            '.cap .zslider{flex:none;width:' + BAR_SLIDER_W + 'px;height:14px;',
             'margin:0;padding:0;accent-color:#89b4fa;cursor:pointer}',
             '.cap .zslider[hidden]{display:none}',
             '.cap .zoom{flex:none;position:relative;display:flex;align-items:center;',
@@ -1662,6 +1664,7 @@
         if (hasVid) { vidOffEl.style.right = px(right); right += BTN_STEP; }
         aaEl.style.right = px(right); right += BTN_STEP;
         markSmoothing();
+        zctlEl.style.width = px(zctlW());
         zctlEl.style.right = px(btnGutter());
         capEl.style.paddingRight =
             px(Math.min(textGutter(), Math.max(BAR_PAD, view.frameW - BAR_PAD)));

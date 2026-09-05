@@ -131,6 +131,12 @@ ancestor-link candidate ever comes back missing on a shadow-DOM site.
   as the blank-screenshot and zero-rAF problems. **Call `resize_window` to pin an emulated
   viewport before measuring any geometry**, and sanity-check `clientHeight` in the same call as
   the measurement rather than trusting it.
+- **The pane is Chromium, so it cannot see a Firefox-only layout fault at all.** v0.50.0 shipped a
+  ~30 px gap in the status bar that existed in Firefox and LibreWolf and not in Chrome: an
+  absolutely positioned flex box with no `width` is shrink-to-fit, and the two engines size it
+  differently when it holds a form control. Everything measured here was correct. **Give any
+  abspos box that holds a form control an explicit width**, and treat "verified in the pane" as
+  "verified in Chromium" when writing it up.
 - **A `javascript_tool` call that times out has still run everything up to the timeout.** A
   45 s-capped call that hovered, measured, then *wrote a setting* left that setting written; the
   next measurement was of the changed config and read as "the new setting does nothing". Keep a
