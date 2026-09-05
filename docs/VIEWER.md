@@ -42,6 +42,27 @@ on it.
 Browser pane reports `clientHeight` 0 while hidden. It survives as the single answer to "where is
 the bottom", so the size cap, the opening position and `clampPosition()` cannot disagree.
 
+### The bottom gap is bigger than the other three · `STATUS_TIP_H`
+
+Every side keeps `EDGE_GAP` (4 px) clear; the bottom keeps `bottomGap()` — `EDGE_GAP +
+STATUS_TIP_H`, 24 px. The browser paints the link target it is about to follow over the bottom-left
+of the viewport, and a hover preview's status bar is the first thing that covers. Flat pixels, not
+a fraction: the strip the browser paints is a fixed height.
+
+**This is not `bottomReserve` coming back.** What was retired was a *setting* — a knob in the same
+sweep as `maxWidthPct`, `maxHeightPct` and `dimOpacity` — and the invariant the retirement bought
+was that only one expression decides where the bottom is. `bottomGap()` keeps that: `viewportBox()`
+(the opening size) and `clampPosition()`'s hover branch both call it, so they cannot disagree.
+
+**It costs the placed growth ceiling 20 px × `maxSizeMultiple`**, because `growBox()` multiplies
+`viewportBox()`. Accepted rather than special-cased: at the 1.2 default the ceiling is still far
+past the viewport, and a second height that means "the same but without the reserve" is exactly the
+drift the single-answer rule exists to prevent.
+
+The gap only binds a **hover** preview. `clampPosition()`'s placed branch is `KEEP_ON_SCREEN` and
+lets a window sit wherever it was put, tip or no tip. The loading ring is nudged up by the same
+amount, since it is a hover-time thing too.
+
 ## The wheel grows a PLACED window, about the POINTER · `E22`
 
 `view.fixedW` is the whole of the state:

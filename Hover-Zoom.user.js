@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.48.0
+// @version     0.49.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -1079,6 +1079,12 @@
 
     const EDGE_GAP = 4;
 
+    // The browser paints the link target it is about to follow over the bottom-left of the
+    // viewport, and our status bar is the first thing it covers.
+    const STATUS_TIP_H = 20;
+
+    function bottomGap() { return EDGE_GAP + STATUS_TIP_H; }
+
     const MIN_FRAME = 48;
     // Only a PLACED window carries controls, so only a placed one owes them room.
     function minFrameW() {
@@ -1115,7 +1121,7 @@
             vw: vw,
             vh: vh,
             w: Math.max(MIN_FRAME, vw - EDGE_GAP * 2 - insetX() * 2),
-            h: Math.max(MIN_FRAME, vh - EDGE_GAP * 2 - insetY() * 2),
+            h: Math.max(MIN_FRAME, vh - EDGE_GAP - bottomGap() - insetY() * 2),
         };
     }
 
@@ -1190,7 +1196,7 @@
         if (!placed) {
             const bh = usableHeight();
             const loX = vw - ow - EDGE_GAP, hiX = EDGE_GAP;
-            const loY = bh - oh - EDGE_GAP, hiY = EDGE_GAP;
+            const loY = bh - oh - bottomGap(), hiY = EDGE_GAP;
             view.left = loX >= hiX ? Math.max(hiX, Math.min(view.left, loX))
                                    : Math.max(loX, Math.min(view.left, hiX));
             view.top = loY >= hiY ? Math.max(hiY, Math.min(view.top, loY))
@@ -1787,8 +1793,8 @@
                 Math.round(view.top + insetY() + view.frameH - capH - SPIN_SIZE - 8) + 'px';
             return;
         }
-        spinEl.style.left = Math.min(pointer.x + 16, m.vw - SPIN_SIZE - 4) + 'px';
-        spinEl.style.top = Math.min(pointer.y + 16, m.vh - SPIN_SIZE - 4) + 'px';
+        spinEl.style.left = Math.min(pointer.x + 16, m.vw - SPIN_SIZE - EDGE_GAP) + 'px';
+        spinEl.style.top = Math.min(pointer.y + 16, m.vh - SPIN_SIZE - bottomGap()) + 'px';
     }
 
     function hideSpinner() {

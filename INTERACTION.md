@@ -181,7 +181,8 @@ The window is up and transient.
   `REACH_INSET` (10 px) inside its edge. (`cursorGap` was retired in v0.40.0: that nudge always
   overrode it, so the gap could never survive.) With `position: center` it is centred in the
   window and the pointer is *outside* it, so the press that pins it is the one on the picture
-  itself (`E30`).
+  itself (`E30`). Either way it stays 4 px clear of the viewport's edges and **24 px clear of the
+  bottom**, which is where the browser paints the link target it would follow (`STATUS_TIP_H`).
 - **On screen:** the window, **pointer-transparent** — but only to *hover and wheel*, which is
   the distinction that matters:
   - **hover** passes through. `mouseover` reaches the element underneath, which is what makes a
