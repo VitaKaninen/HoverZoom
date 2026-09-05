@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.53.0
+// @version     0.54.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -1332,10 +1332,17 @@
     // track's own pixel count. The thumb's width is the UA's, hence the pessimistic reserve.
     const ZOOM_THUMB = 20;
 
-    // The slider spans fit-or-25% up to the ceiling.
+    // The scale below which reflow() stops shrinking the frame and letterboxes the picture instead.
+    function noBarsScale() {
+        const g = growBox();
+        return Math.max(view.natW ? Math.min(minFrameW(), g.w) / view.natW : 0,
+                        view.natH ? MIN_FRAME / view.natH : 0);
+    }
+
+    // The slider spans fit-or-25% up to the ceiling, but never down into the letterbox.
     function zoomLo() {
         if (!view) return ZOOM_LO_CAP;
-        return Math.max(0.01, Math.min(ZOOM_LO_CAP, view.fitScale));
+        return Math.max(0.01, Math.min(view.fitScale, Math.max(ZOOM_LO_CAP, noBarsScale())));
     }
 
     function zoomHi() {

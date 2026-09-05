@@ -208,10 +208,28 @@ gives the fit scale itself, not a rounded near-fit.
 the honest trade: 100 px of track cannot resolve both a 256× span and 5 % granularity. Raising
 `BAR_SLIDER_W` buys the budget back — the ladder re-fits itself, nothing else needs touching.
 
-**Its low end is `min(0.25, fitScale)`, not the zoom floor.** `minScaleFor()` is ~0.4 % for a large
-picture, which would spend most of the track on sizes nobody wants; the fit is the natural
-zoomed-all-the-way-out point. Below-fit scales are still reachable by wheel and by typing, and the
-thumb simply clamps to the left end there. The high end is `min(cfg.maxZoom, MAX_SCALE_ABS)`.
+**Its low end is `min(fitScale, max(0.25, noBarsScale()))`, not the zoom floor.** `minScaleFor()` is
+~0.4 % for a large picture, which would spend most of the track on sizes nobody wants; the fit is
+the natural zoomed-all-the-way-out point. Below-fit scales are still reachable by wheel and by
+typing, and the thumb simply clamps to the left end there. The high end is
+`min(cfg.maxZoom, MAX_SCALE_ABS)`.
+
+**`noBarsScale()` is the letterbox floor, and it is per-picture.** `reflow()` will not shrink the
+frame below `minFrameW()` — the width its own controls need, 236 px — so under
+`minFrameW() / natW` the frame stops following the picture and centres it instead, with background
+showing either side. Measured: a 1600 px picture is clean to 15 % and letterboxes at 14.5 %
+(236/1600 = 14.75 %); a 600 px one letterboxes at anything under 39.3 %. The same applies to height
+against `MIN_FRAME` (48 px), which only bites on a very wide, very short picture.
+
+**This is why the fix is not "raise the floor to 30 %".** 30 % is the letterbox point of an ~790 px
+picture and nothing more: it still shows bars on anything narrower, and it needlessly forbids
+25–30 % on everything wider than 944 px, where there were never any bars. Reported 2026-09-05 as
+black bars at 25 %, with 30 % offered as the fix — right number, one picture wide.
+
+The `min(fitScale, …)` on the outside keeps the fit reachable when the two rules disagree. A narrow,
+very tall picture can have `noBarsScale()` above its own fit; there the picture is letterboxed at
+every scale it can be seen at, so the floor gives up rather than putting the slider's left end above
+the point `0` returns to.
 
 **Nothing restricts what may be typed.** `parseZoom()` strips commas, spaces and `%`; `clampScale()`
 does the rest, and the readout then shows what actually stuck, so a clamp is visible rather than
