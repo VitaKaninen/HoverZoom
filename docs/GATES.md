@@ -1,388 +1,229 @@
 # What may be hovered — the gates
 
-Everything that decides whether a thing under the pointer is a picture worth previewing: the video gates, the banner gate, page backgrounds, covers laid over cards, the same-picture check, and the user's own never-preview list.
+Everything deciding whether the thing under the pointer is a picture worth previewing. Headings
+carry the `E` id that owns them.
 
-## A `<video>` is a PLAYER or a GIF, and only a player suppresses (v0.17.0)  · `E12`
+## A `<video>` is a PLAYER or a GIF · `E12`
 
-Every gate below asks "is there a `<video>` involved". That was too blunt, and the user's own
-framing is the correction: a site **dedicated to video** has a listing page and, behind each
-entry, a page holding one player with a play button, a volume slider and a quality menu — no
-previews wanted anywhere on it. A site like **imgur's gallery or gifwow's grid** shows a wall of
-short muted clips *already playing*, with no controls and nothing to click but the link
-underneath — those are animated pictures that happen to be encoded as video, and the page is an
-ordinary picture page where previews belong. Clicking one leads to a player page, which is the
+"Is there a `<video>` involved" is too blunt. A site **dedicated to video** has a listing page and,
+behind each entry, one player with a play button, a volume slider and a quality menu — no previews
+anywhere on it. **imgur's gallery or gifwow's grid** shows a wall of short muted clips *already
+playing*, no controls, nothing to click but the link underneath — animated pictures that happen to
+be encoded as video, on an ordinary picture page. Clicking one leads to a player page, which is the
 first kind again and is still refused.
 
-`gifLike(v)` is the test, and **all four properties are required**, because each alone has a
-false positive:
+`gifLike(v)` is the test and **all four properties are required**, because each alone has a false
+positive:
 
 - **no `controls`** — false on YouTube too, which draws its own chrome.
 - **`muted`** — true of any player started under an autoplay policy.
 - **`loop` or `autoplay`** — says nothing about length on its own.
-- **duration ≤ `GIF_MAX_SECS` (60), and known.** This is the one that carries the argument: a
-  clip that loops in under a minute is not something you sit and watch. An **unknown** duration —
-  metadata not in yet, a cued player never started — reads as PLAYER, which is the safe direction
-  to be wrong in, and it is what keeps test case 18's empty `<video>` (duration `NaN`) refused.
+- **duration ≤ `GIF_MAX_SECS` (60), and known.** This carries the argument: a clip that loops in
+  under a minute is not something you sit and watch. An **unknown** duration (metadata not in, a
+  cued player never started) reads as PLAYER — the safe direction to be wrong in, and what keeps an
+  empty `<video>` (duration `NaN`) refused.
 
-It is applied in exactly two places, and both matter: `videoSurfaces()` lists a gif but flags it,
-so `overVideoSurface()` skips it *and no player box is derived from it*, and the structural
-ancestor walk goes through `playerIn()` rather than `querySelector('video')`. The debug line still
-prints every video on the page, gifs labelled as ignored — a gate that silently stops considering
-something is the kind of thing the log exists to make visible.
+Applied in exactly two places, both load-bearing: `videoSurfaces()` lists a gif but **flags** it, so
+`overVideoSurface()` skips it *and no player box is derived from it*; and the structural ancestor
+walk goes through `playerIn()` rather than `querySelector('video')`. The debug line still prints
+every video, gifs labelled as ignored — a gate that silently stops considering something is exactly
+what the log exists to make visible.
 
-**What this deliberately cannot do is judge the destination.** A muted, playing, controls-less
-clip on a video site's *listing* page is pixel-for-pixel the imgur shape; nothing in the DOM
-separates them, and the ancestor-link gate is the only signal left for that case. That is why the
-link gate stays exactly as it was.
+**What this deliberately cannot do is judge the destination.** A muted, playing, controls-less clip
+on a video site's *listing* page is pixel-for-pixel the imgur shape; nothing in the DOM separates
+them, and the ancestor-link gate is the only signal left. That is why the link gate stays as it is.
 
-Measured 2026-09-03 while building this: gifwow's grid is `<picture>`/`<img>` webp with `/go/…`
-links and **no `<video>` at all**; its item page is one `<video autoplay muted>` mp4 with a poster
-and **no controls** — a gif by this rule, which is right, because the 90×90 thumbnails beside it
-are ordinary images. Imgur's gallery grid measured as `<img>` throughout in that browser.
+Measured: gifwow's grid is `<picture>`/`<img>` webp with `/go/…` links and **no `<video>` at all**;
+its item page is one `<video autoplay muted>` mp4 with a poster and no controls — a gif by this
+rule, which is right, because the 90×90 thumbnails beside it are ordinary images.
 
-Cases 21 and 22 on the test page are the same card twice and differ **only** in the `controls`
-attribute — 21 must preview, 22 must not. The fixture is a real 2-second silent mp4
-(`test-images/clip-2s.mp4`, generated by `make-test-images.py` via ffmpeg and committed, so a
-clone without ffmpeg still has it) because the gate reads `duration` and an empty `<video>`
-reports `NaN`.
+Test cases 21 and 22 are the same card twice, differing **only** in the `controls` attribute — 21
+must preview, 22 must not. The fixture is a real 2-second silent mp4 because the gate reads
+`duration`, and an empty `<video>` reports `NaN`.
 
-**This paragraph used to say an imgur-style `<video>` grid item was still refused as a *source* by
-`NEVER`, and to ask before changing it. Fixed in v0.20.0 — and it is left here as the record of
-how it went wrong: that limitation made the whole of v0.18.0 and v0.19.0 unreachable on the exact
-site they were built for, it was written down rather than fixed, and the user found it by hovering
-a gif and getting nothing. See "A playing clip is a hoverable picture" below.**
+## Videos are never previewed — four gates, any one sufficient
 
-## Videos are never previewed (v0.9.0)
+`previewVideos` is OFF by default and switches gate 3 only.
 
-"Images only" was a stated invariant that nothing actually enforced — a video thumbnail is a
-plain `<img>` and previewed like any other. Reported on YouTube: "when I go to click a video,
-I get a preview." Four gates, in `eligible()` / `inVideoContext()` / `overVideoSurface()`, any
-one sufficient:
+### 0 · Geometry
 
-0. **Geometry** (v0.10.0, corrected in v0.15.0) — the element's centre lies inside a **video
-   surface**: the rect of a laid-out `<video>`, *or* of a player box derived from it. A
-   player's poster, cued-thumbnail overlay and endscreen images all occupy that rectangle, so
-   this names them exactly whatever the DOM between them looks like. Videos smaller than 2px
-   are skipped, so the test page's 1×1 fixture contains nothing and cannot poison a page the
-   way an unbounded ancestor walk does.
+The element's centre lies inside a **video surface**: the rect of a laid-out `<video>`, *or* of a
+player box derived from it. A player's poster, cued-thumbnail overlay and endscreen images all
+occupy that rectangle, so this names them exactly whatever the DOM between them looks like. Videos
+under 2 px are skipped, so a 1×1 fixture contains nothing and cannot poison a page.
 
-   **The `<video>`'s own rect is NOT always where the player appears — this cost two rounds of
-   debugging.** Measured on a LibreWolf YouTube watch page in the cued (not-yet-playing) state,
-   2026-09-03:
+**The `<video>`'s own rect is NOT always where the player appears — this cost two rounds of
+debugging.** Measured on a LibreWolf YouTube watch page, cued state:
 
-   | | rect | top | bottom |
-   |---|---|---|---|
-   | poster overlay (`.ytp-cued-thumbnail-overlay-image`) | `0,56 1903×798` | 56 | 854 |
-   | `<video>` | `0,-742 1903×798` | −742 | 56 |
+| | rect | top | bottom |
+|---|---|---|---|
+| poster overlay (`.ytp-cued-thumbnail-overlay-image`) | `0,56 1903×798` | 56 | 854 |
+| `<video>` | `0,-742 1903×798` | −742 | 56 |
 
-   The video is laid out exactly its own height **above** the player, touching the poster's top
-   edge and overlapping it nowhere. The gate missed by precisely 798px, reported "not a video",
-   and the poster previewed. Chrome puts the video where the player is, which is why this was
-   Firefox-only and read as a browser bug rather than a geometry bug.
+The video is laid out exactly its own height **above** the player, touching the poster's top edge
+and overlapping it nowhere. The gate missed by precisely 798 px and the poster previewed. Chrome
+puts the video where the player is, which is why this was Firefox-only and read as a browser bug.
 
-   `videoSurfaces()` therefore also derives the **player box**: walking up to `PLAYER_UP` (3)
-   ancestors of each `<video>`, keeping those the video substantially fills. Two bounds, both
-   load-bearing:
-   - **`PLAYER_FILL` (0.5)** — the video must cover half the ancestor's area. This is what stops
-     one `<video>` anywhere on a page from suppressing every image on it, and it is why this
-     walk can be anchored at the video and needs no "still one card" img bound.
-   - **Not narrower or shorter than the video.** An area test alone admitted a `40×7006` column
-     against a `640×360` video in testing. A player box cannot be smaller than the video it
-     holds, whatever the area works out to. It `continue`s rather than `break`s — a wrapper can
-     be odd while its parent is the real player box.
+So `videoSurfaces()` also derives the **player box**: walking up to `PLAYER_UP` (3) ancestors of
+each `<video>`, keeping those the video substantially fills. Two bounds, both load-bearing:
 
-   Reproduce it with a `<video>` positioned `top:-360px` inside a `position:relative` player of
-   the same size, with an `inset:0` background-image overlay: the two rects must not overlap.
-   Verified the poster is refused while test cases 1, 9, 19 and 20 still preview and 17 and 18
-   stay skipped — run that check with `showEvenIfNotLarger:true` and `minDisplayed:12`, the
-   permissive settings the bug was reported under, or the ratio gate hides the result.
+- **`PLAYER_FILL` (0.5)** — the video must cover half the ancestor's area. This is what stops one
+  `<video>` anywhere on a page from suppressing every image on it, and why the walk can be anchored
+  at the video and needs no "still one card" bound.
+- **Not narrower or shorter than the video.** An area test alone admitted a `40×7006` column against
+  a `640×360` video. A player box cannot be smaller than the video it holds. It `continue`s rather
+  than `break`s — a wrapper can be odd while its parent is the real player box.
 
-1. **`NEVER`** — `VIDEO`/`AUDIO`/`IFRAME`/`CANVAS`/`OBJECT`/`EMBED`/`SOURCE`/`TRACK` are never
-   candidates, whatever CSS background they carry.
-2. **Structure** — a `<video>` in the element or in up to three ancestors. Exact when it
-   fires, but late on a card whose inline player has not been injected yet, which is why (3)
-   exists.
-3. **The link** — the nearest ancestor `a[href]` matching `VIDEO_LINK_RE` (`/watch?`,
-   `/shorts/`, `/embed/`, `/video(s)/`, `youtu.be/`, `.mp4|webm|m3u8|mov|mkv|avi`). This is
-   the heuristic, and the one that can be wrong. The asymmetry favours having it: a false
-   positive costs one preview that never opens, a false negative is the reported bug. It is
-   switchable — `previewVideos`, OFF by default (it was `skipVideos`, on) — and has positive
-   *and* negative cases in
-   `test-resolver.js`, which slices the regex out of the script the way the URL tests do.
+Reproduce with a `<video>` at `top:-360px` inside a `position:relative` player of the same size,
+plus an `inset:0` background-image overlay: the two rects must not overlap.
 
-**That bound is also why gate 0 had to exist.** The bound is applied to an ancestor *before* the
-ancestor is tested for a `<video>`, and on a YouTube watch page the player element holds the
-video **and** several `<img>`, so the walk ended before the exact structural signal was ever
-read — a preview opened over the video you were trying to click. Reordering the two inside the
-loop is not the fix: testing the video first re-breaks the test page, because the grid ancestor
-holding the 1×1 fixture would then match. The geometric test sits *outside* the walk and leaves
-the bound exactly as it was. Found 2026-09-03; the reproduction is a `<div>` holding a `<video>`,
-two sibling `<img>`, and the poster nested one level down.
+### 1 · `NEVER`
 
-**The ancestor walk must stop at the first ancestor holding more than one `<img>`.** Measured
-2026-09-03: without that bound the walk reached the test page's grid, found the single 1×1
-`<video>` fixture in case 18, and disabled all nineteen cases. One video anywhere on a page
-would otherwise poison every image on it. The bound is "still one card", not a depth count —
-depth alone does not distinguish a card from a grid.
+`VIDEO`/`AUDIO`/`IFRAME`/`CANVAS`/`OBJECT`/`EMBED`/`SOURCE`/`TRACK` are never candidates, whatever
+CSS background they carry. **Except**: `eligible()` takes a `VIDEO` branch *before* this test — see
+[`RESOLVER.md`](RESOLVER.md) `E16`.
 
-Cases 17 (video link), 18 (video in the card) and 19 (an ordinary `/gallery/` link, the
-control) exist so a regression shows up as a test-page failure rather than in the wild.
+### 2 · Structure
 
-## The pointer often never touches the picture — looking through a cover (v0.21.0)  · `E18`
+A `<video>` in the element or up to three ancestors. Exact when it fires, but late on a card whose
+inline player has not been injected yet, which is why (3) exists.
 
-Reported as "gifwow.com does not work; there is some sort of overlay". Measured live on the grid,
-2026-09-03, and the overlay is the whole story:
+**The ancestor walk must stop at the first ancestor holding more than one `<img>`.** Without that
+bound the walk reaches a grid, finds a single 1×1 `<video>` fixture, and disables every case on the
+page. One video anywhere would poison every image. The bound is "still one card", not a depth count
+— depth alone does not distinguish a card from a grid.
+
+**That bound is also why gate 0 had to exist.** It is applied to an ancestor *before* the ancestor
+is tested for a `<video>`, and a YouTube watch page's player element holds the video **and** several
+`<img>`, so the walk ended before the structural signal was read. Reordering the two inside the loop
+is not the fix — testing the video first re-breaks the test page, because the grid ancestor holding
+the 1×1 fixture would then match. The geometric test sits *outside* the walk and leaves the bound
+exactly as it was.
+
+### 3 · The link
+
+The nearest ancestor `a[href]` matching `VIDEO_LINK_RE` (`/watch?`, `/shorts/`, `/embed/`,
+`/video(s)/`, `youtu.be/`, `.mp4|webm|m3u8|mov|mkv|avi`). This is the heuristic, and the one that can
+be wrong. **The asymmetry favours having it**: a false positive costs one preview that never opens,
+a false negative is the reported bug. Positive *and* negative cases live in `test-resolver.js`.
+
+**`closestAcross()` — `closest()` does not cross a shadow boundary**, and neither does
+`parentElement`. A site building cards from custom elements can put the `<img>` inside a shadow root
+and the wrapping `<a>` outside, and this gate then sees no link at all. The composed walk (ordinary
+`closest()`, then hop to `getRootNode().host` and continue) is what the gate uses.
+`collectCandidates` still uses plain `closest()` and is a candidate for the same treatment if an
+ancestor-link candidate ever comes back missing on a shadow-DOM site.
+
+Cases 17, 18 and 19 (video link, video in the card, and an ordinary `/gallery/` control) exist so a
+regression shows as a test-page failure rather than in the wild.
+
+## Looking through a cover · `E18`
+
+The pointer often never touches the picture. Measured on gifwow's grid:
 
 ```
 div.grid-item > figure > a > picture > img          393×510   the picture
               > figure > figcaption > a[href=/go/…] 393×510   position:absolute, ON TOP
 ```
 
-`document.elementsFromPoint()` at the middle of the picture returns `[A, FIGCAPTION, IMG, …]` —
-the hover target is an **empty anchor covering the whole card**, `eligible()` saw an element with
-no `<img>` of its own and no background image, and returned null. No preview, no spinner, nothing
-to debug. This is not a gifwow quirk; an absolutely positioned link, a caption layer, a hover
-overlay or a click-catcher across the card face is one of the most common ways a thumbnail grid
-is built anywhere.
+`elementsFromPoint()` at the middle returns `[A, FIGCAPTION, IMG, …]` — the hover target is an
+**empty anchor covering the whole card**, so `eligible()` saw no `<img>` and no background image and
+returned null. No preview, no spinner, nothing to debug. This is not a gifwow quirk: an absolutely
+positioned link, a caption layer or a click-catcher across the card face is one of the commonest
+ways a thumbnail grid is built.
 
-`coveredMedia(el, x, y)` walks the hit-test stack below the target. **Two bounds, and the second
-is what keeps it from being dangerous:**
+`coveredMedia(el, x, y)` walks the hit-test stack below the target. **Two bounds, and the second is
+what keeps it from being dangerous:**
 
-- **Only an `<img>` or a `<video>` is picked up this way, never a CSS background.** This is the
-  load-bearing distinction, and it is the answer to "images that are under other images" as an
-  *exclusion* rule — which is what it looks like at first. Reaching down through a paragraph onto
-  the section behind it is precisely the hero/backdrop case; "content is stacked on top of it" is
-  the signal that a background IS a backdrop, and the signal that an `<img>` is a card's picture.
-  The same fact means opposite things for the two, and **the element type is the only thing that
-  separates them.**
+- **Only an `<img>` or a `<video>`, never a CSS background.** This is the load-bearing distinction.
+  Reaching down through a paragraph onto the section behind it is precisely the hero/backdrop case:
+  "content is stacked on top of it" is the signal that a background IS a backdrop, and the signal
+  that an `<img>` is a card's picture. **The same fact means opposite things for the two, and the
+  element type is the only thing that separates them.**
 - **Same card:** an ancestor of the cover, within `COVER_UP` (4), that contains the picture and
-  contains exactly one *laid-out* picture. This is the "still one card" bound the video gate
-  already uses. Without it the walk reaches the grid or the page, and a full-page backdrop `<img>`
-  — or an arbitrary neighbour — becomes the answer to hovering anything.
-  **Laid-out, not `querySelectorAll(...).length`:** gifwow's card also holds a `display:none`
-  loader `<img>`, and counting it bounds the walk one level too early, at `FIGCAPTION`, which
-  finds nothing. Test case 30 is the positive side of the bound (two pictures under one cover →
-  no preview).
+  contains exactly one *laid-out* picture. Without it the walk reaches the grid or the page and a
+  full-page backdrop `<img>` becomes the answer to hovering anything. **Laid-out, not
+  `querySelectorAll(...).length`** — gifwow's card also holds a `display:none` loader `<img>`, and
+  counting it bounds the walk one level too early, at `FIGCAPTION`, which finds nothing.
 
-Everything found under a cover then faces `eligibleDirect()` in its own right, so looking through
-a cover can never reach something a direct hover would have refused.
+Everything found under a cover then faces `eligibleDirect()` in its own right, so looking through a
+cover can never reach something a direct hover would have refused.
 
-**The hold rule needed a second answer** (`activeCovered` / `suppressedCovered`). "Leaving the
-image takes the preview down at once" is enforced by mouseout's `active.contains(to)` test — and
-the pointer is *never* on a covered picture, so that test says "left" on every crossing between
-layers of the same card, closing and reopening the preview. For a covered preview the question is
-answered by the stack instead (`stillUnderPointer`). **This is deliberately not used for a direct
-hover:** at the exact boundary pixel the stack still holds the image, which would keep the preview
-alive a moment too long and cost the one-preview-per-image row scan that pointer-transparency
-exists for.
+**The hold rule needed a second answer** (`activeCovered` / `suppressedCovered`). "Leaving the image
+takes the preview down at once" is enforced by mouseout's `active.contains(to)` test — and the
+pointer is *never* on a covered picture, so that says "left" on every crossing between layers of the
+same card, closing and reopening the preview. For a covered preview the question is answered by the
+stack instead (`stillUnderPointer`). **Deliberately not used for a direct hover:** at the exact
+boundary pixel the stack still holds the image, which would keep the preview alive a moment too long
+and cost the one-preview-per-image row scan that pointer-transparency exists for.
 
-Verified end to end against the real gifwow URLs (the card rebuilt inside the local test page,
-because the Browser pane blocks a localhost script from an https origin): hover the cover →
-`resolvedFrom: looked through the cover to IMG#… gp-7xx2k.webp` → the existing `/gifs/<id>.mp4`
-upgrade rule → a playing 350×621 video in the frame.
+Case 30 is the negative bound (two pictures under one cover → no preview); case 31 puts text over a
+background and must not reach through to it.
 
-**gifwow's own `/go/` page is NOT what resolves it, and that is the `og:url` guard working.**
-Measured: `https://gifwow.com/go/gp-7xx2k` declares `og:url` = `https://gifpit.com/gifs/gp-7xx2k.gif`
-— a different host and a different path from the one requested — so `pageMediaFrom()` trusts
-nothing on it. The URL rule is what carries this site.
+## The preview is a completely different picture · `E19`
 
-## The preview is a completely different picture (v0.22.0)  · `E19`
+Reported on a forum whose 1200×125 masthead and ~600×600 sidebar picture both come from a pool that
+rotates daily; hovering the banner gave the sidebar image.
 
-Reported: a forum whose masthead is a **1200×125 banner** and whose sidebar carries a
-**~600×600** picture, both drawn from a pool that rotates daily. Hovering the banner gave the
-sidebar image — "and it varies, probably depending on the dimensions that they happen to roll".
-
-**The obvious diagnosis is wrong, and following it cost a round.** "The URL hands out a
-different picture each request" is the intuitive story, so the first fix compared the probe
-against the element's own `naturalWidth`. Then the fixture would not reproduce the bug, which
-is how this got measured, in Chrome 2026-09-03:
+**The obvious diagnosis is wrong, and following it cost a round.** "The URL hands out a different
+picture each request" is the intuitive story. Measured in Chrome:
 
 ```js
 for (let i=0;i<4;i++) { const im=new Image(); await load(im,'/rotate.php'); }
 // four loads, Cache-Control: no-store  ->  ONE network request, four identical pictures
 ```
 
-**A browser does not re-request a URL the document is already displaying.** So an unstable
-*displayed src* cannot mislead: probe and frame both get the copy already in memory, and the
-preview is the same picture the thumbnail is. The case that actually bites is a **different
-URL** — `/banner.php` derived from `/banner.php?loc=header` by the generic query-strip rule.
-That rolls once, and every later check then agrees with it perfectly while it shows something
-unrelated. **General lesson: when a bug story requires the network to be hit twice, measure
-that it is.**
+**A browser does not re-request a URL the document is already displaying.** So an unstable *displayed
+src* cannot mislead — probe and frame both get the copy in memory. The case that bites is a
+**different URL**: `/banner.php` derived from `/banner.php?loc=header` by the query-strip rule. That
+rolls once, and every later check agrees with it perfectly while it shows something unrelated.
+**General lesson: when a bug story requires the network to be hit twice, measure that it is.**
 
-Three answers, deliberately at three different depths:
+Three answers, at three different depths:
 
-- **The query-strip rule only fires on a path that names a media file.** On `photo.jpg?w=400`
-  the query is decoration over a file that exists either way, so dropping it asks for the same
-  picture bigger. On `/banner.php?loc=header` the query *is* the request, and dropping it asks
-  a different question. This is the fix; the rest are backstops.
-- **`sameShape()` — an upgrade has the same shape as the picture it upgrades.** The only cheap
-  handle on "is this the thing I pointed at". `ASPECT_TOL` is **4**, and it is loose on purpose:
-  a thumbnail is often a *crop* of its original (a square thumb of a 3:2 photo is 1.5× off, a
-  16:9 crop of 4:3 is 1.34×) and all of those must pass, while the reported case is 9.6:1
-  against 1:1 — 9.6× apart. There is a wide gap between "cropped differently" and "not the same
-  picture", and 4 sits in it. A wrong refusal here is silent, so the number errs toward letting
-  things through. Applied to guesses **and** to the linked-page answer, which otherwise skips
-  every gate — a banner links to the section it heads, and that section's `og:image` is its own
-  artwork, a different picture rather than a smaller one.
-  Only where a **natural** size exists (`nativeSize()`): a CSS background has none, and its box
-  aspect is not the image's, so backgrounds are not judged.
-- **`markUnstable()` — a URL caught contradicting itself is refused for the tab.** Two points,
-  both free: the probe against the element's own `naturalWidth`, and the frame's own load
-  against the probe. Given the measurement above these do **not** fire in Chrome, and they are
-  kept for browsers that do re-request (Firefox honours `no-store` more strictly, and this
-  project's reports come from LibreWolf). Do not delete them believing they are dead, and do
-  not expect the test page to exercise them under Chromium — say so in any note that touches
-  them.
+- **The query-strip rule only fires on a path that names a media file.** On `photo.jpg?w=400` the
+  query is decoration over a file that exists either way; on `/banner.php?loc=header` the query *is*
+  the request. **This is the fix**; the rest are backstops.
+- **`sameShape()` — an upgrade has the same shape as the picture it upgrades.** `ASPECT_TOL` is **4**
+  and it is loose on purpose: a thumbnail is often a *crop* of its original (a square thumb of a 3:2
+  photo is 1.5× off, a 16:9 crop of 4:3 is 1.34×) and all must pass, while the reported case is
+  9.6:1 against 1:1. A wrong refusal here is silent, so the number errs toward letting things
+  through. Applied to guesses **and** to the linked-page answer, which otherwise skips every gate —
+  a banner links to the section it heads, and that section's `og:image` is its own artwork. Only
+  where a **natural** size exists (`nativeSize()`): a CSS background has none, and its box aspect is
+  not the image's.
+- **`markUnstable()` — a URL caught contradicting itself is refused for the tab.** Two free check
+  points: the probe against the element's own `naturalWidth`, and the frame's load against the probe.
+  Given the measurement above these do **not** fire in Chrome; they are kept for browsers that
+  re-request (Firefox honours `no-store` more strictly, and this project's reports come from
+  LibreWolf). **Do not delete them believing they are dead, and do not expect the test page to
+  exercise them under Chromium.**
 
-**`collectCandidates()` now returns `{ url, from }`, and `from` is the whole point.** There are
-six mechanisms that can produce a preview and the log used to print only the winning URL, which
-says nothing about which one to go and look at. "The preview is the wrong picture" is
-unanswerable without it; with it, one hover with `debug` on names the mechanism
-(`"from":"url rule on the displayed src"`, `"the page the thumbnail links to (og: media)"`, …).
+**`collectCandidates()` returns `{ url, from }`, and `from` is the whole point.** Six mechanisms can
+produce a preview; the log used to print only the winning URL, which says nothing about which one to
+go and look at. "The preview is the wrong picture" is unanswerable without it.
 
-Cases 36 and 37 are the two shapes, and both are **verified to fail without the fix**: 37 with
-the shape test disabled shows 600×600, and 36's candidate list contains `/rotate.php` before the
-strip rule was narrowed. `test-server.py`'s `/rotate.php` is deterministic on the query rather
-than actually random, because a test has to assert which picture came back — per-request
-variation is not what makes the bug.
+Cases 36 and 37 are the two shapes and both are **verified to fail without the fix**.
+`test-server.py`'s `/rotate.php` is deterministic on the query rather than actually random, because
+a test has to assert which picture came back.
 
-**Still open, and NOT guessed at:** a second report in the same message described a 1000×557
-background image near the top of a page, under a bar of links, also rotating daily. It is not
-known whether that is a CSS background or an `<img>`, and the two need different answers — a
-"large background near the top of the document is a masthead" rule would be pure invention
-without the page. Ask before building it.
+## The band across the top of the page · `E20`
 
-## The banner across the top of a page (v0.23.0)  · `E20`
+**Read [`../banner-test-sites.md`](../banner-test-sites.md) before touching any threshold.** ~40 live
+pages probed in two browsers, each with the operands the gate decided on. Every number here sits next
+to a row, and `test-resolver.js` asserts them all, so a moved threshold fails a named site rather
+than failing silently in the wild.
 
-Reported: v0.21.0 and v0.22.0 did not fix the two sites they were built for, with a test anyone
-can repeat — **youtube.com/@TheOnion**, whose channel banner previews.
+**The old gate reasoned about one picture's width against a bag of other widths, and never about the
+picture itself.** So every miss was a coincidence of widths and every false positive the absence of
+one, and the two directions could not be fixed together because they pulled the same condition
+opposite ways. FurAffinity is the sharpest page in the corpus: the artwork was refused while three
+ads above it previewed.
 
-**The reason is a boundary I drew and stated too confidently.** v0.21.0's page-furniture rules
-were written "CSS backgrounds ONLY, never an `<img>` — a full-width photo with a caption over it
-is still a photo". That sentence is right about a photo in the body of a page and wrong about
-the one thing above all the content. Every banner that matters is an `<img>`, so every rule was
-looking in the wrong place. The measurement was never done; the boundary was reasoned from a
-single example and then written down as settled.
-
-Measured on that page, 2026-09-03:
-
-| | |
-|---|---|
-| element | `<img>` 1193×192, natural 1707×282, inside `#page-header-banner` |
-| position | **56 px from the top of the document** |
-| `role` / `aria-hidden` | none |
-| `alt` | `""` — and so is every video thumbnail's, so it separates nothing |
-
-`alt=""` deserves the note: it is the standard decorative convention and it was rejected in
-v0.21.0 as unsafe. This page is why — YouTube ships `alt=""` on the banner *and* on all 23
-content thumbnails. There is nothing in the markup. **The geometry is all there is.**
-
-**The four conditions that shipped from v0.23.0 to v0.37.0 are recorded below in the rewrite
-section, because the argument against them is only legible next to them.** In outline they were:
-top within `BANNER_TOP` (200 px) of the document top, at least `BANNER_MIN` (400 px) wide, no
-peer beside it, and **fewer than `BANNER_SET_MIN` (2) other pictures on the page share its
-width** (within `BANNER_SIMILAR`, 10 %). Together they flagged exactly one of the 24 images on
-the YouTube page, and zero after scrolling 1200 px down — which is why they looked right.
-
-**The in-app browser is not a substitute for the user's window here, and this rule is why.** The
-YouTube page was measured twice at 1265 px with the guide collapsed and the gate looked perfect
-both times; the failing neighbour only exists with the guide open and an account signed in.
-Widening the pane to 1830 px opens the guide but shows no subscriptions when signed out, so the
-24 px avatars still never appear. **Case 39 carries the icon at its real scale** because that is
-the only place this shape can be re-run.
-
-### The gate has to say WHICH condition decided, and on what numbers (v0.24.0)
-
-Reported immediately after v0.23.0: the banners are excluded in Chrome and Firefox and **not in
-LibreWolf**. Every condition above is a geometry read of the user's own page, so the only thing
-that can settle a report like that is the operands the gate actually saw on the machine showing
-it — and `bannerGate` said `none — not a page banner`, which is exactly the useless answer this
-project has run into twice before. Same rule as the video log: **print the operands, not a
-summary of one of them.**
-
-`bannerCheck()` returns `{ banner, why }` for both answers, and one hover line reads:
-
-```
-"bannerGate": "not a banner: 1193×192 (6.2:1) at 812px from the top of the document; a banner starts within 300px of the top"
-```
-
-That names the failing condition and the number it failed on, so a cross-browser difference is
-one paste rather than a round trip. `bannerReason()` is a thin wrapper for the gate itself.
-
-### One picture, two elements — a cross-fader (v0.27.0)
-
-Pushed back on, and correctly: *"There is only one image at the top of the page. If it is seeing
-2 images, then it must be counting the same image twice."*
-
-It cannot count the same element twice — `if (n === el) continue`, and the `img` and `video`
-lists are disjoint. But **one picture really can be two elements**, and the way it happens is
-specific to the thing this gate judges: a rotating banner is very often a **cross-fader**, two
-stacked `<img>` of identical size with the outgoing one at `opacity: 0`. Different URLs, so the
-same-src exemption misses them, and:
-
-**`opacity: 0` and `visibility: hidden` both leave a FULL-SIZE rectangle.** The only filter here
-was `width >= 2 && height >= 2`, which they pass. So the page holds two 1000px pictures and shows
-one, which is exactly what a user looking at their own page will tell you is impossible.
-
-`reallyVisible()` uses `Element.checkVisibility({opacityProperty, visibilityProperty})` where it
-exists, falling back to computed style plus a four-level ancestor walk — **opacity does not
-inherit**, so a faded *wrapper* leaves the image's own computed opacity at 1. It is called
-lazily, only for a picture that would otherwise count, so the computed-style read happens once or
-twice rather than for every image on the page.
-
-The cross-fader is why `reallyVisible()` survives the v0.38.0 rewrite unchanged, though it now
-serves the row-mate test rather than a set count. Re-confirmed by the corpus: carousel-bearing
-pages at Samsung (27 slides), Best Buy (27), Allbirds (23), Newegg, Steam and AliExpress all had
-their off-screen slides and duplicate clones correctly discarded by it. **"Carousel clones form a
-set" is disproved as a failure mode** — what actually defeated the gate on those pages was
-something else entirely, and it is the subject of the next section.
-
-**Also fixed in passing:** `hoverReport` ran `bannerCheck(t)` on the hover *target* while
-`eligibleDirect` ran it on `el`. Where a cover had been looked through (`E18`) those are
-different elements, so the log described geometry no decision was made about. It is `el || t` now.
-
-### A copy of itself is not a sibling item
-
-Banners are routinely rendered **twice** — a blurred backdrop behind the sharp one, or a low-res
-placeholder left in the tree — and a copy is by definition the same width, so the old uniqueness
-condition was being defeated by the banner's own reflection. Pictures with the same `shownUrl()`
-are still skipped, now in the row-mate test.
-
-Most of the work is done by geometry instead since v0.38.0: **a copy is stacked ON the banner,
-and overlapping rects are never "beside" each other**, so the usual case never reaches the URL
-comparison. The exemption is kept for one laid out next to it, and case 39's `c39dup` proves it
-by being moved beside the banner and still refused.
-
-## The banner gate, rewritten around SHAPE (v0.38.0)  · `E20`
-
-**Read [`banner-test-sites.md`](../banner-test-sites.md) before touching any threshold here.** It
-holds ~40 live pages probed in two browsers on 2026-09-04 — the Claude Code pane signed out at
-~1265 px, and the user's real Chrome signed in at ~1556 px with an ad blocker — each with the
-operands the gate decided on. Every number in this section sits next to a row in that file, and
-`test-resolver.js` now asserts all of them, so a moved threshold fails a named site rather than
-failing silently in the wild.
-
-**The diagnosis is one sentence: the gate reasoned about one picture's width against a bag of
-other widths, and never about the picture itself.** So every miss was a coincidence of widths and
-every false positive was the absence of one, and the two directions could not be fixed together
-because they pulled the same condition opposite ways.
-
-The corpus, in both directions:
-
-| Direction | What happened |
-|---|---|
-| **MISS** — a banner previews. Loud, and the reported bug. | homedepot.com's promo banner was saved by four *more* full-width promo banners down the page: the page is built out of banners, so the banners formed the set that proved none of them was a banner. avsforum.com's 1280×307 masthead was saved by the site logo 319 px below it and something 4,257 px down — membership asked only "is another picture this wide", with no shared x, no spacing, no distance bound. xkcd.com's store strip was saved by two unrelated 520 px images falling within 10 % of 540; nothing about the page changed, the arithmetic did. |
-| **FALSE POSITIVE** — content is refused. Silent, so nobody reports it, and the larger group. | The detail page is the reliable way to break it, because it has exactly one big picture near the top: unsplash, flickr, pexels, wallhaven, safebooru and furaffinity **all refused**. tumblr.com's first feed post too — 519 images on the page and the top one is still "alone" and "unique width", because a blog feed is a column of *differently*-sized pictures. |
-
-**FurAffinity is the sharpest page in the corpus and the one to remember: the artwork was refused
-while three ads above it previewed.** One screen, both failure directions, the exact inverse of
-what anyone wants.
-
-### The band ratio, and why it is not close
+### The band ratio
 
 A banner is a **band**: wide and short. That is a property of the picture, so nothing else on the
-page can move it. Measured across the corpus:
+page can move it.
 
 ```
 banners   steam strip 33.8   aliexpress 14.2   qc 13.6   city-data 13.1   homedepot 12.9
@@ -394,226 +235,183 @@ content   nasa hero 2.4   allbirds 1.9   itch 1.8   tumblr 1.8   alrincon 1.8
           wallhaven 1.5   safebooru 1.0   furaffinity artwork 1.0   artstation 0.65
 ```
 
-`BANNER_BAND` is **3**, and the gap from 2.4 to 3.0 is empty. Measured from the DISPLAYED rect,
-not the natural size — `object-fit: cover` on a square file is one of the commonest ways to build
-a banner, and the natural aspect says nothing about it.
+`BANNER_BAND` is **3**, and the gap from 2.4 to 3.0 is empty. Measured from the DISPLAYED rect, not
+the natural size — `object-fit: cover` on a square file is one of the commonest ways to build a
+banner.
 
-**Two consequences that were free**, and are worth knowing because they used to be luck:
-artstation.com's artwork previewed only because a "more from this artist" sidebar thumbnail
-happened to sit beside it, and 500px.com's photo passed the peer test on **exact equality** —
-276 / 1104 = 0.250000 against a `>= 0.25` test, so a 275 px avatar would have refused the
-photograph. Both now pass on their own shape. So does alrincon.com's masthead-shaped page, which
-survived only because that particular day's page held three more 1000 px posts.
+### The width-set condition is deleted and CANNOT be repaired
 
-### What was deleted, and why it cannot be repaired
-
-The width-set condition is **gone**, with `BANNER_SIMILAR` and `BANNER_SET_MIN`. Its job was
-saving a single-column gallery, where a row test is useless; the shape test does that job better,
-because gallery tiles are picture-shaped.
-
-**It was not narrowed, because narrowing it does not work, and the reasoning is worth keeping.**
-Every repair considered fails on a measured row:
+Its job was saving a single-column gallery, which the shape test now does better because gallery
+tiles are picture-shaped. Every repair considered fails on a measured row:
 
 - *Require a shared x, or regular spacing* — Home Depot's four promo banners are all 1376 px at
-  x=90, and Samsung's three section bands are all 1265 px at x=0. A column test keeps both.
-- *Require the members be contiguous, immediately below with no content between* — this one
-  actually clears Home Depot (its first member is 315 px below the banner's bottom) and xkcd
-  (674 px). It fails on AVS Forum, whose site logo sits **4 px** below the masthead — and AVS is
-  the shape the user reported.
+  x=90; Samsung's three section bands are all 1265 px at x=0. A column test keeps both.
+- *Require members be contiguous below with no content between* — clears Home Depot and xkcd, fails
+  on AVS Forum, whose site logo sits **4 px** below the masthead. AVS is the shape the user reported.
 
-**The general fact underneath: a stack of same-shaped bands down a page is Home Depot's promo
-column AND a hypothetical column of banner-shaped content, and no test written in layout can
-separate them.** Home Depot is measured; the column of bands is not.
+**A stack of same-shaped bands down a page is Home Depot's promo column AND a hypothetical column of
+banner-shaped content, and no test written in layout can separate them.** Home Depot is measured;
+the column of bands is not.
 
-**Residual cost, stated because it is real:** a one-column gallery whose tiles are wider than
-3 : 1, whose first tile starts in the top 300 px, loses that first tile. If that turns up on a
-real page it is evidence to weigh — not a reason to restore a rule whose every measured effect
-was a miss.
+**Residual cost, stated because it is real:** a one-column gallery whose tiles are wider than 3:1 and
+whose first tile starts in the top 300 px loses that first tile. If that turns up on a real page it
+is evidence to weigh — not a reason to restore a rule whose every measured effect was a miss.
 
-### The other three conditions, and what the corpus did to each
+### The other three conditions
 
-- **`BANNER_TOP` 200 → 300.** The corpus clusters right on the old cutoff and it has no relation
-  to where content begins: newgrounds refused a content tile at 192 px and previewed the same
-  tile at 208, homedepot was caught at 197, steam's page backdrop escaped at 206, imgur's content
-  escaped at 221, samsung's hero sits at **−7**. Raising it is safe only because shape now
-  carries the decision; it picks up spacebattles' masthead at 294. **It does not go higher**, and
-  the reason is exactly two rows: xkcd's *comic* is 3.1 : 1 at 388 px down and
-  questionablecontent's is at 333. Those are the only band-shaped content in the corpus, and
-  position is the only thing that saves them.
-- **`BANNER_MIN` 400 → 240.** Real mastheads measured 250 (macrumors), 300 (4chan's rotating
-  board banner), 304 (linustechtips) and 340 (spacebattles), all escaping on width alone. 400 was
-  only ever that high because nothing else was protecting content.
-- **The peer test survives — the corpus records no failure of its direction — but is narrowed
-  twice.** It must now be the same **height** (`PEER_HEIGHT`, 30 %): on furaffinity a 320×50
-  skyscraper ad sat beside a 728×90 leaderboard and rescued it, and two pieces of furniture
-  sharing a horizontal band is not a row. And `BESIDE_PEER` drops 0.25 → 0.15, because the height
-  test independently kills the YouTube subscription avatar the quarter was invented for (24 px
-  against a 207 px banner — re-measured signed in with the guide open, `frac=0.019` against a
-  floor of 0.25, so that condition was never actually failing), while a quarter was sitting on
-  500px.com's exact geometry.
+- **`BANNER_TOP` 300.** The corpus clusters on the old 200 cutoff with no relation to where content
+  begins: newgrounds refused a content tile at 192 px and previewed it at 208; homedepot was caught
+  at 197; steam's backdrop escaped at 206; samsung's hero sits at **−7**. **It does not go higher**,
+  for exactly two rows: xkcd's *comic* is 3.1:1 at 388 px down and questionablecontent's at 333.
+  Those are the only band-shaped content in the corpus, and position is the only thing saving them.
+- **`BANNER_MIN` 240.** Real mastheads measured 250 (macrumors), 300 (4chan's rotating board banner),
+  304 (linustechtips), 340 (spacebattles) — all escaping on width alone at the old 400.
+- **The peer test survives, narrowed twice.** It must be the same **height** (`PEER_HEIGHT`, 30 %):
+  on furaffinity a 320×50 skyscraper sat beside a 728×90 leaderboard and rescued it, and two pieces
+  of furniture sharing a horizontal band is not a row. `BESIDE_PEER` is 0.15, not 0.25 — the height
+  test independently kills the YouTube subscription avatar the quarter was invented for, while a
+  quarter sat on 500px.com's exact geometry.
 
-### Known and accepted, so they are not re-reported as new bugs
+### One picture can be two elements — a cross-fader
 
-- **A full-bleed hero is content and previews** — nasa.gov (2.4 : 1), itch.io key art, allbirds.
-  `CLAUDE.md` has always said a full-width photo with text over it is a real photo; the old gate
-  refused exactly that shape, and shape now agrees with the sentence.
-- **The same rule lets samsung.com's 1280×960 hero and steam's 1266×712 app backdrop through**,
-  which the corpus lists as misses. They are 1.3 : 1 and 1.8 : 1 — pixel-for-pixel the NASA shape.
-  Nothing measurable separates a decorative backdrop from an editorial hero, so this is the
-  ambiguous end of the trade rather than an oversight.
-- **newgrounds' site backdrop art (1.4 : 1) and twitch's offline card (1.8 : 1) now preview.**
-  Both were refused before; the corpus rated the first "probably right" and noted the second is
-  caught by the video gates anyway.
-- **avsforum's second header image at 319 px is still missed** — it clears `BANNER_TOP` only
-  because the banner above it is 307 px tall.
+Pushed back on, correctly: *"There is only one image at the top of the page."* It cannot count the
+same element twice (`if (n === el) continue`, and the img/video lists are disjoint) — but a rotating
+banner is very often a **cross-fader**: two stacked `<img>` of identical size with the outgoing one
+at `opacity: 0`. Different URLs, so the same-src exemption misses them, and **`opacity: 0` and
+`visibility: hidden` both leave a FULL-SIZE rectangle**, which passes a `width >= 2` filter.
 
-### It judges CSS backgrounds too, and that is now deliberate
+`reallyVisible()` uses `Element.checkVisibility({opacityProperty, visibilityProperty})` where it
+exists, falling back to computed style plus a four-level ancestor walk — **opacity does not
+inherit**, so a faded *wrapper* leaves the image's own computed opacity at 1. Called lazily, only for
+a picture that would otherwise count.
 
-`CLAUDE.md` used to frame this as the narrow exception that applies to an `<img>`, against
-page-furniture rules that are "CSS backgrounds ONLY". In the code `eligibleDirect()` calls
-`bannerReason(el)` on whatever `el` is, and `bannerCheck()` only ever reads
-`getBoundingClientRect()` and `shownUrl()` — **so it has always judged backgrounds as well, and
-the docs denied it.**
+Confirmed by the corpus: carousel pages at Samsung (27 slides), Best Buy (27), Allbirds (23), Newegg,
+Steam and AliExpress all had off-screen slides and duplicate clones correctly discarded.
 
-Keep it. Measured on soundcloud.com: the profile banner is a CSS background that escapes **all
-five** `wallpaperReason()` tests — not fixed, not tiled, `textContent` length 0, and 1208/1556 =
-78 % of the viewport against `BAND_WIDTH` 0.98 — and the banner gate is the only thing that
-catches it. At 4.8 : 1 the shape test catches it cleanly.
+**A copy of itself is not a row-mate.** Banners are routinely rendered twice — a blurred backdrop
+behind the sharp one, a low-res placeholder left in the tree — and a copy is by definition the same
+shape. Mostly handled by geometry now, since **a copy is stacked ON the banner and overlapping rects
+are never "beside" each other**; the `shownUrl()` comparison is kept for one laid out next to it.
 
-### Testing it
+### It judges CSS backgrounds too, and that is deliberate
+
+`bannerCheck()` only ever reads `getBoundingClientRect()` and `shownUrl()`, and `eligibleDirect()`
+calls it on whatever `el` is — **so it has always judged backgrounds, and the docs used to deny it.**
+
+Keep it. Measured on soundcloud.com: the profile banner is a CSS background escaping **all five**
+`wallpaperReason()` tests — not fixed, not tiled, `textContent` length 0, and 78 % of the viewport
+against `BAND_WIDTH` 0.98 — and this gate is the only thing that catches it. At 4.8:1 it is caught
+cleanly.
+
+### Reporting and testing
+
+`bannerCheck()` returns `{ banner, why }` for **both** answers, naming the failing condition and its
+numbers:
+
+```
+"bannerGate": "not a banner: 1193×192 (6.2:1) at 812px from the top of the document;
+               a banner starts within 300px of the top"
+```
+
+A bare "not a banner" cannot answer a cross-browser report; this makes it one paste rather than a
+round trip. Same rule as the video log: **print the operands, not a summary of one of them.**
+`hoverReport` runs it on `el || t`, not the hover target — where a cover was looked through those
+differ.
 
 `bannerShape(w, h, docTop)` is split out as a **pure** function precisely so the corpus can be a
-regression suite: `test-resolver.js` slices it out of the shipped script and asserts every
-measured page plus the boundary rows. The DOM half — the row-mate test — is test-page cases
-39–41, where the banner has four decoys beside it, each killing one way the test could be
-loosened into uselessness. Verified in the browser 2026-09-04 by mutating each decoy into a
-legitimate row-mate one at a time and watching the verdict flip, and by mutating the two that
-must *not* flip (the same-src copy, the invisible slide) and watching it hold.
+regression suite. The DOM half is test cases 39–41, where the banner has four decoys beside it, each
+killing one way the test could be loosened. **All three must start within `BANNER_TOP` of the
+document top or they prove nothing** — measured at 1265 px: 41 at 87, the banner at 172, 40's first
+tile at 263. Anything added above pushes 40 out of the band and the test silently stops testing.
 
-**Cases 39, 40 and 41 share one `.case` box on purpose, and the vertical budget is the fixture.**
-All three must start within `BANNER_TOP` of the document top or they prove nothing — measured at
-1265 px: 41 at 87, the banner at 172, 40's first tile at 263. Anything added above them pushes 40
-out of the band and the test silently stops testing. Re-measure with the probe in
-`banner-test-sites.md` after any edit to that block.
+### Known and accepted — not new bugs
 
-## `showEvenIfNotLarger` must not show a copy of what is already on screen (v0.26.0)
+- **A full-bleed hero is content and previews** — nasa.gov (2.4:1), itch.io key art, allbirds. The
+  project has always held that a full-width photo with text over it is a real photo; shape now agrees.
+- **samsung.com's 1280×960 hero and steam's 1266×712 backdrop pass**, at 1.3:1 and 1.8:1 — pixel-for-
+  pixel the NASA shape. Nothing measurable separates a decorative backdrop from an editorial hero.
+- **newgrounds' backdrop art (1.4:1) and twitch's offline card (1.8:1) now preview.** The second is
+  caught by the video gates anyway.
+- **avsforum's second header image at 319 px is still missed** — it clears `BANNER_TOP` only because
+  the banner above it is 307 px tall.
 
-The second reported page's only preview came from here, and the log said so outright:
+## `showEvenIfNotLarger` must not show a copy of what is on screen
 
-```
-hit (not larger — shown anyway) { url: …/74.jpg, w: 1000, h: 557,
-                                  from: "the displayed src itself (shown anyway — not larger)" }
-target: IMG, targetRect: "161,60 1000×557"
-```
+The setting means "display at natural size even though it does not clear `minRatio`" — never
+"display a pixel-for-pixel copy". `resolve()`'s fallback had no size comparison at all, so a frame
+could hold the identical bytes at the identical scale, floating over the picture they came from.
 
-Displayed 1000×557, natural 1000×557, **same URL**. The frame was holding the identical bytes at
-the identical scale, floating over the picture they were copied from. `showEvenIfNotLarger` means
-"display it at natural size even though it does not clear `minRatio`" — it never meant "display a
-pixel-for-pixel copy", and `resolve()`'s fallback had no size comparison of any kind.
+Guard: `dim.w <= displayed.w && dim.h <= displayed.h` — no bigger in *either* dimension, so a
+picture genuinely a little larger still shows.
 
-The guard is `dim.w <= displayed.w && dim.h <= displayed.h` — no bigger in *either* dimension, so
-a picture that is genuinely a little larger still shows under that setting.
+**Only the fallback gets this, never the main loop.** The loop's escape is
+`showEvenIfNotLarger && !isSameAsShown`, and a *different* URL at the same pixel size can be a better
+answer — imgur's `.webp` (static) versus `.jpg` (animated) at 412×360. Same size, different picture,
+worth showing.
 
-**Only the fallback gets this, never the main loop.** The loop's own escape is
-`showEvenIfNotLarger && !isSameAsShown`, and a *different* URL at the same pixel size can be a
-better answer — that is exactly imgur's `.webp` (static) versus `.jpg` (animated) at 412×360.
-Same size, different picture, and worth showing.
+## What counts as a page background · `E17`
 
-Verified with case 13 (an original displayed at its own natural size) and the setting on: no
-preview, and one log line saying why. Case 1 still previews, and case 25 — the linked page's
-not-size-checked answer — is untouched, because that arrives through `trusted` rather than here.
+`wallpaperReason()` returns a string, like `videoReason()`, so `hoverReport` can print which of the
+five fired. **These apply to CSS backgrounds ONLY** — with the banner gate above as the deliberate
+exception, since it asks a different question (*is it a band*).
 
-## What counts as a page background (v0.21.0)  · `E17`
+- `<body>`/`<html>`.
+- **repeat + `auto` size.** Repeat alone is NOT the test: `background-repeat: repeat` is the CSS
+  *default*, so a hero setting only `background-size: cover` computes to it. Test case 9 is exactly
+  that shape, so a repeat-only rule kills it. It is repeat **and** `auto` together that mean tiled.
+- **`background-attachment: fixed`** — it does not scroll with the page. A picture you are meant to
+  look at moves with the text beside it; a parallax backdrop does not.
+- **Spans ≥ `BAND_WIDTH` (98 %) of the window width.** 98 % rather than looser because a gallery tile
+  inside a centred container never reaches both edges and a band does by definition. **Guard
+  `clientWidth > 0`** — the Browser pane reports 0 while hidden, and without it *every* element spans
+  a zero-width viewport.
+- **Carries ≥ `CONTENT_CHARS` (40) characters of text** — the page's own content is sitting on it.
+  The threshold is what lets a tile's caption ("Sunset, 2019") through. Only reachable by hovering
+  the element's own blank space, since text hit-tests first.
 
-`isWallpaper()` → `wallpaperReason()`, a string like `videoReason()` so `hoverReport` can print
-which of the five fired. Two tests were already there (`<body>`/`<html>`, repeat + auto size);
-three are new, and each is a **measurement**, not a guess at intent:
+`decorativeReason()` is a separate test under the same `skipFurniture` switch and **does** apply to
+`<img>`: `aria-hidden="true"` and `role="presentation"`/`"none"` are the page stating outright that
+something is not content. **Read on the element itself, never inherited** — carousels routinely mark
+cloned slides `aria-hidden` and those are real pictures on screen. **`alt=""` is deliberately NOT
+used** even though it is the same convention: YouTube ships `alt=""` on its banner *and* on all 23
+content thumbnails, so it separates nothing, and being wrong here is silent.
 
-- **`background-attachment: fixed`** — it does not scroll with the page. A picture you are meant
-  to look at moves with the text beside it; a parallax backdrop does not.
-- **Spans ≥ `BAND_WIDTH` (98 %) of the window width** — masthead, hero, section stripe, footer.
-  98 % rather than something looser because a gallery tile inside a centred container never
-  reaches both edges and a band does by definition. Guard `clientWidth > 0`: the Browser pane
-  reports 0 while hidden, and without it *every* element spans a zero-width viewport.
-- **Carries ≥ `CONTENT_CHARS` (40) characters of text** — the page's own content is sitting on it,
-  so it is a backdrop. The threshold is what lets a tile's caption ("Sunset, 2019") through. Only
-  reachable by hovering the element's own blank space, since the text hit-tests first.
-
-**These apply to CSS backgrounds ONLY.** A full-width `<img>`, an `<img>` with a caption over it,
-an `<img>` in a `<header>` — all ordinary shapes for a picture that genuinely is the content.
-
-**That boundary was stated as settled and it was too broad — see the banner section above.** It
-holds for a picture in the body of a page and does not hold for the one thing above all the
-content, which is an `<img>` on every site that has one. `bannerReason()` is the narrow
-exception, and it earns it by asking a question these five do not: **is it a BAND** — three
-times wider than it is tall — rather than a picture. **Note the sentence above is also wrong in
-the other direction:** `bannerReason()` judges CSS backgrounds too, and soundcloud.com is the
-measured case where it is the only rule that catches one. See the v0.38.0 section above.
-
-`decorativeReason()` is a separate test under the same `skipFurniture` switch, and does apply to
-`<img>`: `aria-hidden="true"`
-and `role="presentation"`/`"none"` are the page stating outright that something is not content.
-**Read on the element itself, never inherited** — carousels routinely mark cloned slides
-`aria-hidden` and those are real pictures on screen. **`alt=""` is deliberately NOT used** even
-though it is the same convention: too many sites ship real content images with an empty or
-missing alt, and being wrong here is silent.
-
-**Considered and rejected, with reasons, so they are not re-proposed:**
+### Considered and rejected — do not re-propose
 
 | Suggestion | Why not |
 |---|---|
-| class/id matching `/hero\|banner\|bg\|masthead/i` | a guess at intent dressed as a measurement. A wrong exclusion here is **silent** — the picture just stops previewing, with nothing on screen to say why — and this project keeps no allowlist |
+| class/id matching `/hero\|banner\|bg\|masthead/i` | a guess at intent dressed as a measurement. A wrong exclusion is **silent** — the picture just stops previewing — and this project keeps no allowlist |
 | filename patterns (`sprite`, `bg-`, `pixel`) | same, and weaker |
 | `alt=""` / missing alt | too many real content images ship without alt |
 | extreme aspect ratios (>5:1) | panoramas and comic strips are real pictures |
-| "ignore CSS backgrounds entirely" | test case 9 is a legitimate background thumbnail, and this would delete a working feature to fix a narrower bug |
-| "require a positive signal (figure, data-full, meaningful alt) before previewing" | inverts the project's premise. The gate here is *is it bigger than what is displayed*, measured by loading it; a positive-signal requirement is an allowlist by another name and would lose the long tail this exists to win |
+| ignore CSS backgrounds entirely | test case 9 is a legitimate background thumbnail; deletes a working feature to fix a narrower bug |
+| require a positive signal (figure, data-full, meaningful alt) | inverts the project's premise. The gate is *is it bigger than what is displayed*, measured by loading it; a positive-signal requirement is an allowlist by another name and loses the long tail this exists to win |
 | minimum size, tracking pixels | already `minDisplayed` (48 px) |
-| `background-repeat: repeat` alone | breaks test case 9 — repeat is the CSS *default*, so `background-size: cover` computes to it. It is repeat **and** `auto` together that mean tiled |
+| `background-repeat: repeat` alone | breaks test case 9 — see above |
 
-## Images the user has ruled out — the ⊘ button and `blockList` (v0.13.0)  · `E11`
+## Images the user has ruled out — the ⊘ and `blockList` · `E11`
 
-Reported: a page whose background is one image **tiled** previews that tile from every patch of
-blank space on the page. Two mechanisms, because neither covers the other.
+Two mechanisms, because neither covers the other: **automatic** is `skipFurniture` (the tests above);
+**manual** is the ⊘ in the status bar and the `blockList` setting, for anything the automatic rule
+cannot know about — a watermark, a sprite sheet, one specific image simply not wanted.
 
-**Automatic — `skipFurniture` (on).** `wallpaperReason()` skips `<body>`/`<html>`, and any
-element whose background both repeats *and* has an `auto` size — plus, since v0.21.0, three more
-tests listed in the "What counts as a page background" section above.
-
-- **Repeat alone is NOT the test, and getting this wrong breaks a shipped case.**
-  `background-repeat: repeat` is the CSS *default*, so a hero image that sets only
-  `background-size: cover` computes to `repeat` too. Test case 9 is exactly that shape —
-  measured `repeat` + `cover` — so a repeat-only rule kills it. It is repeat **and** `auto`
-  together that mean the image is being laid out at natural size and stepped across the element,
-  which is the thing being described.
-
-**Manual — the `⊘` in the status bar, and the `blockList` setting.** Anything the automatic rule
-cannot know about: a watermark, a sprite sheet, one specific image that is simply not wanted.
-
-- **`blockCurrent()` records TWO urls** — `view.url` (what is on screen) and `activeShown` (the
-  source element's own src). They differ whenever the preview is an upgrade, and blocking only
-  the resolved one leaves the thumbnail still opening a preview that then fails to upgrade.
-  `activeShown` exists solely for this and is cleared in `cancel()`.
+- **`blockCurrent()` records TWO urls** — `view.url` (what is on screen) and `activeShown` (the source
+  element's own src). They differ whenever the preview is an upgrade, and blocking only the resolved
+  one leaves the thumbnail still opening a preview that then fails to upgrade. `activeShown` exists
+  solely for this and is cleared in `cancel()`.
 - **The button is only on a PLACED window** (`.box.hot .cap .block`): a hover preview is
-  pointer-transparent, so a button on it cannot be clicked at all. The
-  flow is hover → click to pin → ⊘. The panel's list description and its **How it works** text
-  both say so, because it is not guessable.
-- **It is absolutely positioned, 20px in from the right edge** (v0.30.0). As a flex item it was
-  clipped off the end of a narrow bar; see "The window has a frame" for why that failed exactly
-  where the button matters most.
-- **It goes in `isBoxControl()`.** That is the documented capture-listener trap — a control inside
-  the box whose events `onBoxDown`/`onBoxClick` eat first, and the symptom is silence, not an
-  error. Verified by dispatching a real click at the button and watching the list change.
+  pointer-transparent, so a button on it cannot be clicked at all. The flow is hover → click to pin →
+  ⊘, and the panel says so, because it is not guessable.
+- **It goes in `isBoxControl()`** — the capture-listener trap; the symptom is silence, not an error.
 - **`blockCurrent()` calls `reloadSettings()` first.** The list is the one setting written from
   *outside* the panel, so it is the one place a stale in-memory `cfg` would silently drop another
-  tab's entries — the same staleness bug as the settings panel, arriving by a different door.
+  tab's entries.
 - Entries are exact URLs, or globs when they contain `*` — which is what a background carrying a
-  cache-busting query needs, since its URL is never twice the same. `blockMatch()` is pure and
-  sits **inside the slice `test-resolver.js` evaluates**, so the matching is tested offline like
-  the URL rules. It escapes regex metacharacters: an unescaped `?` or `.` in a URL would quietly
-  widen the match, and **a wrong match here is silent** — the image just stops previewing, with
-  nothing on screen to say why. Same discipline as `UPGRADES`: the negative tests matter more.
+  cache-busting query needs, since its URL is never twice the same. `blockMatch()` is pure and sits
+  **inside the slice `test-resolver.js` evaluates**. It escapes regex metacharacters: an unescaped
+  `?` or `.` would quietly widen the match, and **a wrong match here is silent**. Same discipline as
+  `UPGRADES` — the negative tests matter more.
 
-Blocking is checked in three places, and all three are needed: `eligible()` (so no spinner even
-flashes), `collectCandidates`' `add()` (so a blocked URL is never *probed*), and the
-`showEvenIfNotLarger` fallback in `resolve()`.
+Blocking is checked in three places, all needed: `eligible()` (so no spinner even flashes),
+`collectCandidates`' `add()` (so a blocked URL is never *probed*), and the `showEvenIfNotLarger`
+fallback in `resolve()`.
