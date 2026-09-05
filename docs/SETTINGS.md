@@ -28,7 +28,14 @@ Three more settings went in the same pass, for the same reason as v0.39.0's seve
 |---|---|
 | `enabled` | A master off switch for a script the manager can disable, and which already has a per-site switch two rows below it. |
 | `maxDisplayed` | "Ignore pictures displayed larger than N." Nobody could name the case. |
+| `noReferrer` | Converted to a site list rather than deleted — see "Strip the referrer, per site" below. |
+| `smoothing` (panel row) | The value stays; the *row* went. It is chosen from the AA menu on the picture itself (`E31`). |
 | `cursorGap` | **It never did anything.** The window opens at `pointer.x + gap` and `nudgeIntoReach()` then pulls it back until the pointer is 10 px inside the frame — which is unconditional, because a pointer-transparent preview is pinned by a press *inside its rectangle* (`E1`). The gap was overwritten on every path, at every value. |
+
+**The first section is ordered by what people change**, not by topic: *Show a preview* →
+*Opens* → *Pin preview with*, then the two gates. `Opens` and `Pin preview with` came up out of
+Advanced to sit there; `Opens` carries a hint that **changes with the value**, because the centred
+answer needs one sentence the cursor answer does not (how to pin it — `E30`).
 
 **The footer is not sticky any more.** `.panel` is a flex column, `.body` is the scroller and
 `.foot` sits below it — reported as "there is open space below the buttons and text scrolling
@@ -60,21 +67,67 @@ once — two frames disagreeing about whether the site was listed.
 Frames still preview — the fix is about *which host* the decision is made against, not about
 running there.
 
-## Smoothing, and the AA button · `E31`
+## Smoothing, and the AA menu · `E31`
 
-`image-rendering` on the preview's media element: `auto` (the browser's own smoothing),
-`pixelated` (hard pixel edges — pixel art, screenshots, small logos) or `crisp-edges` (nominally
-edge-preserving; Chrome treats it as `pixelated`).
+`image-rendering` on the preview's media element. **There are only two real answers**, measured
+in the browser rather than assumed: Chromium accepts `auto`, `pixelated`, `crisp-edges` and
+`-webkit-optimize-contrast` and rejects `smooth` and `high-quality` outright — and it renders
+`crisp-edges` the same as `pixelated`. So `SMOOTHING_OPTS` is two entries, and offering
+`crisp-edges` as a third would be the fake choice v0.39.0 spent a version deleting.
 
-Same shape as the ▶: a stored default plus a **per-tab override** (`let smoothing = null`), set
-from the status bar of a pinned preview and forgotten on reload. It is a judgement about the
-picture in front of you, which is not a thing to go to a settings panel for.
+Anything else people associate with resampling — Lanczos, bicubic, Mitchell — is not reachable
+from CSS at all. It would mean drawing the picture into a `<canvas>` at every zoom step, which
+costs a re-resample per notch on a full-size image and, worse, puts a canvas where the `<img>`
+was: *Save image as…* and *Copy image* then act on the resample rather than the original, which
+is `E9`, a core feature.
 
-- **It goes in `isBoxControl()`** with the ⊘ and the ▶, or the capture listeners on `.box` eat
-  its click and the symptom is silence.
+**It is a stored setting, not a per-tab one** (unlike the ▶), chosen from the frame rather than
+the panel because the only way to pick one is to look at a picture while you do it.
+
+- **Hovering an option applies it; leaving puts the saved one back.** `smoothingPreview` is the
+  live value and `cfg.smoothing` the committed one; `smoothingMode()` prefers the preview.
+  `chooseSmoothing()` does `reloadSettings()` first, like `blockCurrent()` — it writes the whole
+  object from outside the panel.
+- **The panel has no smoothing row at all.** Two places to set one value is how they get out of
+  step, and the panel cannot show you the difference.
+- **It goes in `isBoxControl()`** with the ⊘ and the ▶ — *and so do both popovers*, or the
+  capture listeners on `.box` eat the clicks inside them and the symptom is silence.
 - **The buttons are placed right-to-left in `layoutChrome()`** from `BTN_RIGHT`/`BTN_STEP`, and
   the caption's right padding is whatever that walk ends at. The old fixed `right:` per button
   could not survive a third one that is sometimes beside the ▶ and sometimes not.
+
+### The two popovers
+
+`.pop` — one for the AA menu, one for the ⊘ confirmation — are children of `.box`, anchored
+`bottom: BAR_MIN_H + 4` so they open **upward** from the status bar and stay inside the frame
+(`.box` has `overflow:hidden`). Both are built by `buildPop()`, which swallows `mousedown` so
+opening one never places, drags or dismisses the window. `showBar()`'s idle timer checks
+`popOpen()`, or the bar fades out from under an open menu.
+
+## Strip the referrer, per site
+
+`noReferrer` was a global checkbox, and that was the wrong shape: stripping the referrer fixes
+hosts that refuse a request naming another site and breaks hosts that require their own site as
+the referrer, so one switch means flipping it at every navigation. It is now `referrerSites`, a
+suffix-matched host list beside the block list under **Exceptions**, with a *+ This Site*
+button; `noReferrerHere()` reads it against `pageHost()`.
+
+The site to add is the one you are **on**, not the image's host — that is what the browser sends
+as the referrer and what `pageHost()` returns.
+
+## Dark Reader repaints the loading ring
+
+Reported: the ring is always light while Dark Reader is on, and obeys `spinnerTheme` with it off.
+`applySpinTheme()` runs on every hover and reads the setting first, so nothing inside the script
+explains it — Dark Reader is restyling our shadow-root stylesheet (it supports shadow DOM).
+
+**Dark Reader has no per-element opt-out.** The only documented lever is `class="darkreader"` on
+a `<style>` element, which makes it skip that sheet, and that is now on both of ours (the viewer's
+and the panel's). Two things to know: it is DR's own marker for its own sheets, so a future DR
+cleanup pass could in principle remove ours — ours live inside a shadow root, where DR's
+document-level `querySelectorAll` cannot reach them — and if DR is in **Filter / Filter+** mode it
+inverts the whole page as a post-process, where nothing the page does can help. Unverified here:
+this machine has no Dark Reader.
 
 ## The settings panel, rewritten around decisions (v0.39.0)
 

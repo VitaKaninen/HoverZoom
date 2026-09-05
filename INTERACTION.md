@@ -229,8 +229,9 @@ growth ceiling, and only a hand resize pins its edges** (`E22`, `E23`).
   arrows → pan (`panStep` 80 px, Shift for 3×); **a corner or an edge → resize** (`S19`, `E23`);
   **the frame margin or the status bar → move, always** (`S14`, `E25`, `E21`); **the middle
   → move the frame, or pan the picture once it is spilling** (`S14` / `S13`).
-- **Its status bar carries three buttons, and only here:** ⊘ never preview this image (`E11`),
-  ▶ stop showing clips in this tab (`E27`), AA smoothing on or off in this tab (`E31`).
+- **Its status bar carries three buttons, and only here:** ⊘ never preview this image, which asks
+  first (`E11`), ▶ stop showing clips in this tab (`E27`), AA the smoothing menu (`E31`). The last
+  two open a popover **upward** out of the bar; a press anywhere else in the frame closes it.
 - **May hang off the edges of the screen** (`E21`), which is the point of the growth ceiling
   being above 1×: shoved aside or upwards, the picture still reaches the screen edges instead of
   leaving a strip of empty page behind it.
@@ -254,7 +255,9 @@ Press in the middle while the picture is spilling — and only while it is spill
 to pan the same press moves the frame instead (`S14`). The picture moves inside a frame that
 stays put.
 - **Cursor:** `grabbing`.
-- **Bounds:** clamped so the frame never shows past the edges of the picture.
+- **Bounds:** clamped so the frame never shows past the edges of the picture — and **what the
+  clamp refuses moves the window instead** (`E32`), so a frame bigger than the screen still has
+  reachable edges.
 - **It outlives the window and the browser** (`E24`): once started, the pan follows the pointer
   across the frame's edge and off the browser entirely, and ends on the release wherever that
   happens.
@@ -401,7 +404,8 @@ this table is a table.
 | `E28` | The modifier key works in either order | [`docs/SETTINGS.md`](docs/SETTINGS.md) |
 | `E29` | The script runs in every iframe; the menu and the site test belong to the page | [`docs/SETTINGS.md`](docs/SETTINGS.md) |
 | `E30` | A centred preview is pinned from the picture, not from the window | [`docs/VIEWER.md`](docs/VIEWER.md) |
-| `E31` | Smoothing, and the AA button that overrides it for a tab | [`docs/SETTINGS.md`](docs/SETTINGS.md) |
+| `E31` | Smoothing — the AA menu, and why there are only two options | [`docs/SETTINGS.md`](docs/SETTINGS.md) |
+| `E32` | A pan that runs out of picture continues as a window move | [`docs/VIEWER.md`](docs/VIEWER.md) |
 
 `E3` is retired with the detached state (v0.28.0); `E4` and `E5` are retired as dangling.
 

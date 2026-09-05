@@ -403,6 +403,10 @@ cannot know about — a watermark, a sprite sheet, one specific image simply not
   pointer-transparent, so a button on it cannot be clicked at all. The flow is hover → click to pin →
   ⊘, and the panel says so, because it is not guessable.
 - **It goes in `isBoxControl()`** — the capture-listener trap; the symptom is silence, not an error.
+- **It asks first (v0.41.0).** The ⊘ opens a confirmation over the picture — what it will do, where
+  the entry lands, and that Exceptions in the settings panel is how to take it back — with Cancel
+  and *Never preview it*. A one-click permanent rule with no visible record was the complaint; the
+  undo path has to be stated at the moment the rule is made, not found afterwards.
 - **`blockCurrent()` calls `reloadSettings()` first.** The list is the one setting written from
   *outside* the panel, so it is the one place a stale in-memory `cfg` would silently drop another
   tab's entries.

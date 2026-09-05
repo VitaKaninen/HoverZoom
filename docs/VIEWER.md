@@ -275,6 +275,34 @@ picture were welded at the fit. Both limits had to go together.
   `resize` listener, `upgradeViewer`, `resizeBy`. Miss one and the symptom is a zoom-out that
   silently springs back on a path nobody tests.
 
+## A pan that runs out continues as a window move · `E32`
+
+`maxSizeMultiple` above 1 means the frame can be wider than the screen, with its edges off it.
+`reflow()` clamps the pan so the frame never shows past the picture's edges — and that clamp used
+to be the end of the gesture, which left the edges of the picture **unreachable**: they sit at the
+frame's edges, which are off-screen.
+
+`panBy()` now measures what the clamp refused and adds it to `view.left` / `view.top`. One drag
+pans until the picture's edge meets the frame, then carries the window along with no stop in
+between. The placed clamp (`KEEP_ON_SCREEN`, 72 px) is the only limit, so any part of the picture
+can be brought into view.
+
+*(Where the handover happens: `pannable()` — the picture larger than the frame — is what the
+middle of the frame does on a press, and it becomes true once the frame stops growing, i.e. at
+the `maxSizeMultiple` ceiling or after a hand resize pins the frame. The cursor says which:
+`move` (four arrows) = the window moves, `grab` (hand) = the picture pans.)*
+
+## The drop shadow needs SPREAD, not just blur
+
+`0 8px 32px rgba(0,0,0,.55)` looks like almost nothing however far the numbers are pushed,
+because a shadow with no spread is the box's own shape: its edge is *under* the box, so the
+darkest thing visible outside is the halfway point of the blur — about 50 % of the colour, before
+the alpha is even applied. Reported as "100 % opacity and 60 px gives maybe 30 % darkening".
+
+`shadowCss()` sets spread to `size / 2` and blur to `size`, so the solid part of the shadow
+reaches the box edge and the taper runs from there to roughly `size` px out — which is what the
+two numbers claim to mean.
+
 ## The HOVER preview is POINTER-TRANSPARENT · `E1`
 
 **This is the load-bearing decision.** `.box` has `pointer-events:none`; `.box.hot` turns it back

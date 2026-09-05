@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.40.0
+// @version     0.41.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -69,7 +69,7 @@
         smoothing: 'auto',          // 'auto' | 'pixelated' | 'crisp-edges' — image-rendering
         showStatusBar: true,        // filename / type / size / dimensions strip, also the move handle; auto-fades
         spinnerTheme: 'auto',       // 'auto' (follows the browser) | 'dark' | 'light'
-        noReferrer: false,          // strip referrer when loading full image
+        referrerSites: [],          // sites to load previews from WITHOUT a referrer
 
         debug: false,               // log every hover decision to the console
     };
@@ -79,7 +79,7 @@
     const RETIRED = ['maxWidthPct', 'maxHeightPct', 'dimOpacity', 'bottomReserve',
         'sameShapeOnly', 'keepSearching', 'followLinks', 'hoverThroughOverlays',
         'skipWhileMouseDown', 'playVideos', 'skipVideos', 'skipPageBackgrounds',
-        'skipBanners', 'skipDecorative', 'enabled', 'maxDisplayed', 'cursorGap'];
+        'skipBanners', 'skipDecorative', 'enabled', 'maxDisplayed', 'cursorGap', 'noReferrer'];
 
     // The two retirements that DO convert.
     function migrate(o) {
@@ -166,6 +166,12 @@
 
     function siteEnabled() {
         return cfg.siteMode === 'whitelist' ? siteListed() : !siteListed();
+    }
+
+    // Per site, because stripping it fixes one host and breaks the next.
+    function noReferrerHere() {
+        const host = pageHost();
+        return cfg.referrerSites.some(function (entry) { return entryCovers(entry, host); });
     }
 
     let siteMenuId = null;
@@ -603,7 +609,7 @@
         }
         const p = new Promise(function (resolve) {
             const img = new Image();
-            if (cfg.noReferrer) img.referrerPolicy = 'no-referrer';
+            if (noReferrerHere()) img.referrerPolicy = 'no-referrer';
             const done = function (ok) {
                 img.onload = img.onerror = null;
                 resolve(ok ? { w: img.naturalWidth, h: img.naturalHeight } : null);
@@ -774,7 +780,15 @@
     let dimEl = null;
     let capEl = null, capNameEl = null, capHintEl = null, capMetaEl = null, blockEl = null;
     let vidOffEl = null;        // "stop showing clips", only while the frame IS one
-    let aaEl = null;            // smoothing on/off for this tab
+    let aaEl = null;            // smoothing, and the menu it opens
+    let aaPopEl = null, blockPopEl = null;
+
+    // Only two of these are real: Chrome accepts auto, pixelated and crisp-edges, and renders
+    // crisp-edges the same as pixelated. Anything else (lanczos, bicubic) needs a canvas.
+    const SMOOTHING_OPTS = [
+        ['auto', 'Smooth', 'blended pixels — photographs, and most pictures'],
+        ['pixelated', 'Hard pixels', 'every pixel a square — pixel art, screenshots, small logos'],
+    ];
     let edgeEls = null;         // [top, left, right, bottom] — the drawn frame margin
     let gripEl = null;          // invisible collar that carries the outer half of the resize strip
     let spinEl = null, spinSvg = null;
@@ -843,6 +857,7 @@
         root = host.attachShadow({ mode: 'open' });
 
         const style = document.createElement('style');
+        style.className = 'darkreader';     // the one documented "leave this alone" marker
         style.textContent = [
             ':host{all:initial}',
             '.dim{position:fixed;inset:0;background:transparent;pointer-events:none}',
@@ -882,6 +897,21 @@
             '.cap .block:hover{background:#f38ba8;border-color:#f38ba8;color:#1e1e2e}',
             '.cap .vidoff:hover{background:#f9e2af;border-color:#f9e2af;color:#1e1e2e}',
             '.cap .aa:hover{background:#89b4fa;border-color:#89b4fa;color:#1e1e2e}',
+            '.pop{position:absolute;right:8px;bottom:' + (BAR_MIN_H + 4) + 'px;display:none;',
+            'z-index:4;max-width:250px;background:rgba(30,30,46,.98);border:1px solid #45475a;',
+            'border-radius:6px;overflow:hidden;box-shadow:0 6px 20px rgba(0,0,0,.55);',
+            'font:11px/1.4 system-ui,sans-serif;color:#cdd6f4;text-align:left}',
+            '.box.hot .pop.open{display:block}',
+            '.pop .head{padding:8px 10px;color:#bac2de;border-bottom:1px solid #45475a}',
+            '.pop .head b{color:#cdd6f4}',
+            '.pop .item{padding:6px 10px;cursor:pointer}',
+            '.pop .item:hover{background:#45475a}',
+            '.pop .item.on{color:#89b4fa;font-weight:700}',
+            '.pop .item .sub{display:block;color:#7f849c;font-size:10px;font-weight:400}',
+            '.pop .acts{display:flex;gap:6px;justify-content:flex-end;padding:8px}',
+            '.pop .acts button{font:11px system-ui,sans-serif;padding:4px 10px;border-radius:5px;',
+            'border:1px solid #45475a;background:#313244;color:#cdd6f4;cursor:pointer}',
+            '.pop .acts button.go{background:#f38ba8;border-color:#f38ba8;color:#1e1e2e;font-weight:700}',
             '.cap,.edge{transition:opacity ' + BAR_SHOW_MS + 'ms ease}',
             '.box.idle .cap{opacity:0;pointer-events:none;transition:opacity ' + BAR_FADE_MS + 'ms ease}',
             '.box.idle .edge{opacity:0;transition:opacity ' + BAR_FADE_MS + 'ms ease}',
@@ -939,7 +969,7 @@
         blockEl.title = 'Never preview this image again';
         blockEl.textContent = '⊘';
         blockEl.addEventListener('mousedown', function (e) { e.preventDefault(); e.stopPropagation(); }, true);
-        blockEl.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); blockCurrent(); }, true);
+        blockEl.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); togglePop(blockPopEl); }, true);
 
         vidOffEl = document.createElement('span');
         vidOffEl.className = 'btn vidoff';
@@ -952,7 +982,7 @@
         aaEl.className = 'btn aa';
         aaEl.textContent = 'AA';
         aaEl.addEventListener('mousedown', function (e) { e.preventDefault(); e.stopPropagation(); }, true);
-        aaEl.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); toggleSmoothing(); }, true);
+        aaEl.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); togglePop(aaPopEl); }, true);
 
         capEl.appendChild(capNameEl);
         capEl.appendChild(capHintEl);
@@ -960,6 +990,41 @@
         capEl.appendChild(blockEl);
         capEl.appendChild(vidOffEl);
         capEl.appendChild(aaEl);
+
+        aaPopEl = buildPop();
+        popHead(aaPopEl, 'How the picture is drawn when the preview is bigger than the original.',
+            ' Point at one to see it; click to keep it.');
+        SMOOTHING_OPTS.forEach(function (o) {
+            const it = popItem(aaPopEl, o[1], o[2]);
+            it.dataset.val = o[0];
+            it.addEventListener('mouseenter', function () { previewSmoothing(o[0]); });
+            it.addEventListener('click', function (e) {
+                e.preventDefault(); e.stopPropagation(); chooseSmoothing(o[0]);
+            }, true);
+        });
+        // Leaving without choosing puts the saved one back.
+        aaPopEl.addEventListener('mouseleave', function () { previewSmoothing(null); });
+
+        blockPopEl = buildPop();
+        popHead(blockPopEl, 'Never preview this image again.',
+            ' It goes on the Exceptions list in Hover Zoom settings, where you can take it off ' +
+            'again. The page itself is not changed.');
+        const acts = document.createElement('div');
+        acts.className = 'acts';
+        const noBtn = document.createElement('button');
+        noBtn.textContent = 'Cancel';
+        noBtn.addEventListener('click', function (e) {
+            e.preventDefault(); e.stopPropagation(); closePops();
+        }, true);
+        const yesBtn = document.createElement('button');
+        yesBtn.className = 'go';
+        yesBtn.textContent = 'Never preview it';
+        yesBtn.addEventListener('click', function (e) {
+            e.preventDefault(); e.stopPropagation(); closePops(); blockCurrent();
+        }, true);
+        acts.appendChild(noBtn);
+        acts.appendChild(yesBtn);
+        blockPopEl.appendChild(acts);
 
         edgeEls = ['t', 'l', 'r', 'b'].map(function (k) {
             const d = document.createElement('div');
@@ -971,6 +1036,8 @@
         box.appendChild(vidEl);
         edgeEls.forEach(function (d) { box.appendChild(d); });
         box.appendChild(capEl);
+        box.appendChild(aaPopEl);
+        box.appendChild(blockPopEl);
         box.addEventListener('mousedown', onBoxDown, true);
         box.addEventListener('click', onBoxClick, true);
         root.appendChild(box);
@@ -1248,7 +1315,7 @@
         barTimer = setTimeout(function () {
             barTimer = 0;
             if (!box || !view) return;
-            if (pointerOverChrome()) { showBar(); return; }   // parked on it: keep it
+            if (pointerOverChrome() || popOpen()) { showBar(); return; }   // parked on it: keep it
             box.classList.add('idle');
         }, BAR_IDLE_MS);
     }
@@ -1268,7 +1335,7 @@
         clearMedia(idle);
         mediaEl.hidden = false;
         applySmoothing();
-        if (!wantsVideo && cfg.noReferrer) imgEl.referrerPolicy = 'no-referrer';
+        if (!wantsVideo && noReferrerHere()) imgEl.referrerPolicy = 'no-referrer';
         mediaEl.src = res.url;
         if (wantsVideo) {
             const started = vidEl.play();
@@ -1323,9 +1390,7 @@
         if (hasVid) { vidOffEl.style.right = px(right); right += BTN_STEP; }
         aaEl.style.right = px(right); right += BTN_STEP;
         aaEl.classList.toggle('sharp', smoothingMode() !== 'auto');
-        aaEl.title = smoothingMode() === 'auto'
-            ? 'Smoothing on — click for hard pixel edges in this tab'
-            : 'Hard pixel edges — click for smoothing in this tab';
+        aaEl.title = 'How the picture is drawn when it is enlarged';
         capEl.style.paddingRight =
             px(placed ? Math.min(right + 2, Math.max(8, view.frameW - 8)) : 8);
     }
@@ -1390,11 +1455,17 @@
             view.top + insetY() + view.frameH / 2);
     }
 
+    // Whatever the pan clamp refuses moves the WINDOW instead, or a frame bigger than the screen
+    // has edges of the picture nobody can ever reach.
     function panBy(dx, dy) {
         if (!view || !pannable()) return;
+        const wasX = view.ox, wasY = view.oy;
         view.ox += dx;
         view.oy += dy;
         reflow();
+        const spareX = dx - (view.ox - wasX);
+        const spareY = dy - (view.oy - wasY);
+        if (spareX || spareY) { view.left += spareX; view.top += spareY; }
         layout();
     }
 
@@ -1458,11 +1529,15 @@
 
     // -------------------------------------------------------------------- show
 
+    // A shadow with no SPREAD is half-hidden under the box: its own edge sits on the box's, so the
+    // darkest part visible outside is 50% of the colour. Spread pushes the solid part out first.
     function shadowCss() {
         if (!cfg.shadow) return 'none';
         const size = Math.max(0, Math.min(120, cfg.shadowSize | 0));
         const a = Math.max(0, Math.min(100, cfg.shadowStrength | 0)) / 100;
-        return '0 ' + Math.round(size / 4) + 'px ' + size + 'px rgba(0,0,0,' + a.toFixed(2) + ')';
+        if (!size || !a) return 'none';
+        return '0 ' + Math.round(size / 10) + 'px ' + size + 'px ' + Math.round(size / 2) + 'px ' +
+            'rgba(0,0,0,' + a.toFixed(2) + ')';
     }
 
     function showViewer(res, pointer) {
@@ -1545,6 +1620,7 @@
 
     function hideViewer() {
         if (!box) return;
+        closePops();
         box.classList.remove('on', 'hot', 'pan', 'drag');
         box.style.cursor = '';      // onMove writes this inline over the bands; see hitRegion
         if (gripEl) { gripEl.classList.remove('hot'); gripEl.style.cursor = ''; }
@@ -1618,14 +1694,70 @@
 
     // Controls that live INSIDE the box.
     function isBoxControl(t) {
-        return blockEl.contains(t) || vidOffEl.contains(t) || aaEl.contains(t);
+        return blockEl.contains(t) || vidOffEl.contains(t) || aaEl.contains(t) ||
+            aaPopEl.contains(t) || blockPopEl.contains(t);
     }
 
-    // Smoothing: the stored setting, overridden for this tab by the AA button.
-    let smoothing = null;
+    // ---- the two popovers a status-bar button opens
+
+    function buildPop() {
+        const d = document.createElement('div');
+        d.className = 'pop';
+        d.addEventListener('mousedown', function (e) { e.preventDefault(); e.stopPropagation(); }, true);
+        return d;
+    }
+
+    function popHead(pop, lead, rest) {
+        const h = document.createElement('div');
+        h.className = 'head';
+        const b = document.createElement('b');
+        b.textContent = lead;
+        h.appendChild(b);
+        h.appendChild(document.createTextNode(rest));
+        pop.appendChild(h);
+        return h;
+    }
+
+    function popItem(pop, label, sub) {
+        const it = document.createElement('div');
+        it.className = 'item';
+        it.appendChild(document.createTextNode(label));
+        const s = document.createElement('span');
+        s.className = 'sub';
+        s.textContent = sub;
+        it.appendChild(s);
+        pop.appendChild(it);
+        return it;
+    }
+
+    function popOpen() {
+        return !!(aaPopEl && (aaPopEl.classList.contains('open') ||
+            blockPopEl.classList.contains('open')));
+    }
+
+    function closePops() {
+        if (!aaPopEl) return;
+        if (aaPopEl.classList.contains('open')) previewSmoothing(null);
+        aaPopEl.classList.remove('open');
+        blockPopEl.classList.remove('open');
+    }
+
+    function togglePop(pop) {
+        const wasOpen = pop.classList.contains('open');
+        closePops();
+        if (!wasOpen) {
+            pop.classList.add('open');
+            markSmoothing();
+        }
+        showBar();
+    }
+
+    // ---- smoothing: a stored setting, chosen from the frame instead of the panel
+
+    let smoothingPreview = null;    // what the pointer is resting on in the menu
 
     function smoothingMode() {
-        return smoothing || cfg.smoothing || 'auto';
+        return smoothingPreview || cfg.smoothing || 'auto';
     }
 
     function applySmoothing() {
@@ -1634,14 +1766,30 @@
         if (vidEl) vidEl.style.imageRendering = v;
     }
 
-    function toggleSmoothing() {
-        smoothing = smoothingMode() === 'auto'
-            ? (cfg.smoothing !== 'auto' ? cfg.smoothing : 'pixelated')
-            : 'auto';
+    function markSmoothing() {
+        if (!aaPopEl) return;
+        const now = smoothingMode();
+        [].forEach.call(aaPopEl.querySelectorAll('.item'), function (it) {
+            it.classList.toggle('on', it.dataset.val === (cfg.smoothing || 'auto'));
+        });
+        aaEl.classList.toggle('sharp', now !== 'auto');
+    }
+
+    function previewSmoothing(v) {
+        smoothingPreview = v;
         applySmoothing();
-        layout();
-        showBar();
-        dbg('smoothing', smoothing);
+        markSmoothing();
+    }
+
+    function chooseSmoothing(v) {
+        smoothingPreview = null;
+        reloadSettings();               // this writes the whole object back
+        cfg.smoothing = v;
+        saveSettings();
+        applySmoothing();
+        closePops();
+        markSmoothing();
+        dbg('smoothing', v);
     }
 
     // "Stop showing clips in this tab", from the ▶ in the status bar.
@@ -1675,6 +1823,7 @@
 
     function onBoxDown(e) {
         if (isBoxControl(e.target)) return;
+        closePops();                // a press anywhere else puts an open menu away
         if (e.button !== 0 && e.button !== 2) return;
 
         if (placed) {
@@ -2366,6 +2515,7 @@
         const sr = panelHost.attachShadow({ mode: 'open' });
 
         const st = document.createElement('style');
+        st.className = 'darkreader';
         st.textContent = [
             ':host{all:initial}',
             '*{box-sizing:border-box;font-family:system-ui,-apple-system,Segoe UI,sans-serif}',
@@ -2401,6 +2551,8 @@
             'button.danger{color:' + C.red + '}',
             '.listbtns{display:flex;gap:8px;justify-content:flex-end;margin-top:6px}',
             '.listwrap{margin-top:4px}',
+            '.listwrap + .listwrap{margin-top:18px}',
+            '.listhead{font-size:12.5px;font-weight:600;color:' + C.text + ';margin-bottom:3px}',
             '.listdesc{font-size:12px;color:#9399b2;line-height:1.45}',
             '.listex{margin-top:4px;color:#6c7086;font-style:italic}',
             '.addrow{display:flex;gap:6px;margin-top:8px}',
@@ -2444,6 +2596,7 @@
         back.addEventListener('click', function () {
             sites.flush();
             blocks.flush();
+            refSites.flush();
             closePanel();
         });
         sr.appendChild(back);
@@ -2565,6 +2718,13 @@
 
             const wrap = document.createElement('div');
             wrap.className = 'listwrap';
+
+            if (opts.heading) {
+                const hd = document.createElement('div');
+                hd.className = 'listhead';
+                hd.textContent = opts.heading;
+                wrap.appendChild(hd);
+            }
 
             const desc = document.createElement('div');
             desc.className = 'listdesc';
@@ -2788,7 +2948,7 @@
         body.appendChild(guideBtn);
         body.appendChild(guide);
 
-        section('When to zoom');
+        section('The preview');
         const act = pick('activation', 'Show a preview',
             'either order works with the key — hold it and then point, or point and then press it', [
                 ['hover', 'When I hover over an image'],
@@ -2798,6 +2958,22 @@
         function syncModKey() { modKey.row.hidden = act.el.value !== 'modifier'; }
         act.el.addEventListener('change', syncModKey);
         syncModKey();
+        const pos = pick('position', 'Opens', ' ', [
+            ['cursor', 'Beside the pointer'], ['center', 'Centred in the window']]);
+        const posHint = pos.row.querySelector('.hint');
+        function syncPos() {
+            posHint.textContent = pos.el.value === 'center'
+                ? 'the pointer is nowhere near it, so click the picture you are pointing at to ' +
+                  'pin the preview — then Escape or a click outside puts it away'
+                : 'opens under the pointer, so a click pins it without moving the mouse';
+        }
+        pos.el.addEventListener('change', syncPos);
+        syncPos();
+        pick('pinButton', 'Pin preview with',
+            'which button keeps a preview on screen. The other one puts it away without ' +
+            'following the link underneath', [
+                ['left', 'Left click  (right click dismisses)'],
+                ['right', 'Right click  (left click dismisses)']]);
         check('previewVideos', 'Preview videos as well',
             'off by default, because pointing at a video is usually aiming to play it and a ' +
             'preview lands on what you were about to click. This is about video thumbnails and ' +
@@ -2824,10 +3000,26 @@
 
         section('Exceptions');
         const blocks = list('blockList', {
+            heading: 'Never preview these images',
             description: 'Individual images that never open a preview. The quickest way to add ' +
                 'one is the ⊘ button on a pinned preview. A * matches anything.',
             examples: 'Examples: https://example.com/tile.png, https://cdn.example.com/wm/*',
             placeholder: 'e.g. https://example.com/watermark.png',
+        });
+
+        const refSites = list('referrerSites', {
+            heading: 'Load previews without a referrer on these sites',
+            description: 'The browser normally tells the image host which page asked for it. A ' +
+                'few hosts refuse a request that names another site, and their previews come up ' +
+                'blank or as a “no hotlinking” placeholder while the page’s own thumbnails look ' +
+                'fine — add that site here. It is per site because stripping the referrer has ' +
+                'the opposite effect on hosts that require their own site as the referrer, ' +
+                'where it turns working previews blank.',
+            examples: 'Subdomains are included, same as the site list above',
+            placeholder: 'e.g. example.com',
+            addCurrentLabel: '+ This Site',
+            addCurrentTitle: pageHost(),
+            currentValue: function () { return pageHost(); },
         });
 
         advanced('Advanced options', '  timings, sizes, appearance');
@@ -2847,11 +3039,6 @@
             'preview. Never a pixel-for-pixel copy of what is already on screen at the same URL');
 
         section('The preview window');
-        pick('pinButton', 'Pin preview with',
-            'which button keeps a preview on screen. The other one puts it away without ' +
-            'following the link underneath', [
-                ['left', 'Left click  (right click dismisses)'],
-                ['right', 'Right click  (left click dismisses)']]);
         num('wheelZoomStep', 'Wheel zoom step', '% per notch — +/− step by 25%', 2, 100, 1);
         num('panStep', 'Arrow-key pan step', 'px per press — Shift for 3×', 5, 500, 5);
         num('maxZoom', 'Maximum zoom', '× the original’s own size', 1, 64, 1);
@@ -2863,8 +3050,6 @@
             '× the original’s own size, when it first opens. It is still fitted inside the ' +
             'browser window, so anything larger than the window opens smaller than this — this ' +
             'only decides how far a SMALL picture is enlarged (1 = never enlarged)', 0.1, 8, 0.1);
-        pick('position', 'Opens', null, [
-            ['cursor', 'Beside the pointer'], ['center', 'Centred in the window']]);
 
         section('Appearance');
         num('fadeMs', 'Fade duration', 'ms', 0, 1000, 10);
@@ -2887,29 +3072,13 @@
         }
         shadow.el.addEventListener('change', syncShadow);
         syncShadow();
-        pick('smoothing', 'Smoothing',
-            'how the picture is drawn when the preview is bigger than the original. Smooth ' +
-            'blends the pixels, which suits photographs; hard pixels shows each one as a square, ' +
-            'which is what you want for pixel art, screenshots and small logos. The AA button in ' +
-            'a pinned preview’s status bar switches it for that tab', [
-                ['auto', 'Smooth (the browser’s own)'],
-                ['pixelated', 'Hard pixel edges'],
-                ['crisp-edges', 'Crisp edges (browser’s choice — Chrome treats it as hard)']]);
         check('showStatusBar', 'Show the status bar',
             'filename, format, dimensions and size along the bottom, and the ⊘, ▶ and AA ' +
-            'buttons. It doubles as the window’s title bar. Fades out after a second of a ' +
-            'still pointer and returns when you move over the preview');
+            'buttons — AA is where smoothing is chosen, on the picture you are looking at. It ' +
+            'doubles as the window’s title bar, and fades out after a second of a still pointer');
         pick('spinnerTheme', 'Loading ring',
             'the ring shown while it is still searching', [
                 ['auto', 'Match the browser'], ['dark', 'Always dark'], ['light', 'Always light']]);
-        check('noReferrer', 'Strip referrer',
-            'when the preview loads a picture, the browser normally tells the image host which ' +
-            'page asked for it. Leave this off. Turn it on only for a site where previews come ' +
-            'up blank or as a “no hotlinking” placeholder while the page’s own thumbnails are ' +
-            'fine — some hosts refuse a request that names another site. It has the opposite ' +
-            'effect on hosts that require their own site as the referrer (Pixiv is one), where ' +
-            'stripping it turns working previews blank');
-
         section('Diagnostics');
         check('debug', 'Log every hover to the console',
             'one line per hover in the browser console (F12): what was under the pointer, which ' +
@@ -2950,6 +3119,7 @@
         close.addEventListener('click', function () {
             sites.flush();      // an open text editor commits on blur, which a click may outrun
             blocks.flush();
+            refSites.flush();
             closePanel();
         });
 
