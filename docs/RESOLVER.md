@@ -24,6 +24,53 @@ absolute http(s) URL passing `looksLikeImage()` out of an ancestor link, which i
 displaces the original. Everything it returns still faces the ratio gate, so the worst case is a
 wasted probe — but only because of those guards.
 
+## An opaque size code on the stem · v0.57.0
+
+The named-vocabulary rule strips suffixes it can read — `_thumb`, `_small`, `_tn`. Sites also use
+codes that mean nothing outside that site: `my.evilmilk.com` serves `/p/<id>_t3.jpg`. The rule below
+it strips **any** short code and lets the probe decide:
+
+    /^(.*\/[^/]{3,})[_-](?:[a-z]{2}\d{0,2}|[a-z]\d{1,2})(\.[a-z0-9]+)$/i
+
+**Never interpret the suffix — strip it and measure.** The two evilmilk hosts are the proof that its
+meaning is not knowable from the string:
+
+| | `_s` is |
+|---|---|
+| `www.evilmilk.com` | the **thumbnail** (140×140), original at `/pictures/X.jpg` |
+| `my.evilmilk.com` | a **larger** copy (600×923), and *still* not the biggest |
+
+Measured live 2026-09-05, `my.evilmilk.com` is a three-rung ladder — `_t3` 340×523, `_s` 600×923,
+**bare 720×1108**. So the bare stem is the top rung, which is why stripping beats enumerating a
+vocabulary of suffixes to try: one candidate, no guessing at what `_s` or `_b` might mean here.
+
+- **The token must be at least two characters**, which is the whole safety margin. A single letter is
+  too ambiguous — it would strip imgur's `_d` (breaking that rule's host-check negative test) and the
+  `_a`/`_b` of a numbered series, where the bare stem may be a *different picture*. `_t3` survives as
+  one letter plus a digit.
+- **Digit-led tokens are excluded** so `_2x` and `_1` are left alone: a bare number is a series index,
+  not a size. `-150x150` and `_400x400` belong to the WordPress and Shopify rules above.
+- **The remaining stem must be ≥3 characters**, so `ab_t3.jpg` is left alone.
+- The accepted residual risk is a bare stem that exists, loads, is bigger, and is a *different*
+  picture. `sameShape()` will not catch it — `ASPECT_TOL` is 4, far too loose to distinguish two
+  photographs. Nothing else guards it, so the negative tests in `test-resolver.js` are the control.
+
+**`E15` cannot help on this site**, which is why the URL rule had to. The grid item is
+`<div class="it go" data-url="...">` with **no `<a href>` anywhere** — clicking opens a JS lightbox
+that pushes `/go/<id>.htm` through the History API without leaving the page. There is no link for
+`linkedMedia()` to follow and no separate document to fetch.
+
+### The "it previews the same image" report is the gate working
+
+Reported as a bug: hovering shows a preview of the identical URL, and raising *Required upsize* to
+1.1 does not stop it. It is not a bug. The masonry layout renders the 340 px file in a box whose
+width follows the viewport — measured at 311 px on a 1000 px viewport, and *upscaled* to 400 px on a
+1280 px one. At 311 px the file really is 1.09× the displayed size, so `bigEnough()` passes at
+`minRatio` 1 and sits on the knife edge at 1.1 (`340 > 342.1` is false, but a 309 px column flips
+it). The preview looked identical because it was the same picture, 9 % bigger. Finding the 720 px
+original is what actually answers the complaint — **a marginal upsize is a symptom that the real
+original has not been found yet, not a reason to raise the threshold.**
+
 ## Progressive resolution · `E6` · `E8`
 
 `resolve()` takes an `onHit` callback and fires it for every strictly larger candidate, so the first

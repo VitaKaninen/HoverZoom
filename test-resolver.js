@@ -120,6 +120,36 @@ has('generic _thumb filename suffix',
     upgradeCandidates('https://site.com/images/pic_thumb.png'),
     'https://site.com/images/pic.png');
 
+// ---- an OPAQUE size code on the stem, where no vocabulary names it.
+// my.evilmilk.com serves the same picture at _t3 (340px), _s (600px) and bare (720px), so the
+// bare stem is the top of the ladder. Measured live 2026-09-05.
+has('opaque _t3 size code is stripped to the bare stem',
+    upgradeCandidates('https://my.evilmilk.com/p/5bq-4evr26_t3.jpg'),
+    'https://my.evilmilk.com/p/5bq-4evr26.jpg');
+
+has('a tilde in the stem does not stop it',
+    upgradeCandidates('https://my.evilmilk.com/p/5bq-4evq~p_t3.jpg'),
+    'https://my.evilmilk.com/p/5bq-4evq~p.jpg');
+
+has('two-letter size codes are stripped', upgradeCandidates('https://site.com/i/pic_xl.jpg'),
+    'https://site.com/i/pic.jpg');
+
+has('a hyphen separator works the same', upgradeCandidates('https://site.com/i/pic-v2.jpg'),
+    'https://site.com/i/pic.jpg');
+
+// The token is capped at two characters MINIMUM and four maximum, which is what keeps this rule
+// off single-letter suffixes -- imgur's _d, and the _a/_b of a numbered series.
+none('a single-letter suffix is too ambiguous to strip', 'https://site.com/i/diagram_a.jpg');
+none('so is _s, which is a THUMBNAIL on one evilmilk host and the ORIGINAL on the other',
+    'https://site.com/i/picture_s.jpg');
+none('a digit-only suffix is a series number, not a size',
+    'https://site.com/i/photo_1.jpg');
+none('a digit-led token is not a size code here', 'https://site.com/i/logo_2x.png');
+none('a real word is left to the named-vocabulary rule above',
+    'https://site.com/i/picture_large.jpg');
+none('the remaining stem must be at least three characters',
+    'https://site.com/i/ab_t3.jpg');
+
 // ---- imgur thumbnail suffixes. The positive cases are all measured against the live host
 // (2026-09-03); the negative ones are the point of the rule, because a bare id with its last
 // character removed is a REAL image of something else and would load without complaint.

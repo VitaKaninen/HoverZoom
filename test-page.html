@@ -297,8 +297,8 @@
   </div>
 
   <!--
-    40 is numbered out of sequence on purpose: it belongs with 24-26, and renumbering would
-    break every case number cited in docs/TESTING.md and in conversation.
+    40 and 41 are numbered out of sequence on purpose: they belong with 24-26, and renumbering
+    would break every case number cited in docs/TESTING.md and in conversation.
   -->
   <div class="case" data-expect="480">
     <h2>40. the linked page's og:image IS the thumbnail</h2>
@@ -307,6 +307,17 @@
     <a href="test-pages/post-body.html">
       <img id="c40" width="200" src="test-images/icon.png" style="width:200px">
     </a>
+  </div>
+
+  <!--
+    41 is my.evilmilk.com's shape, and the upscaling is the point: the file is 340 wide and the
+    page renders it at 400, so the displayed src is correctly refused as its own upgrade and the
+    ONLY way to a preview is stripping the opaque _t3. No link, no data-src, no srcset.
+  -->
+  <div class="case" data-expect="1600">
+    <h2>41. an opaque size code on the stem, displayed upscaled</h2>
+    <p class="hz bad">HZ+: no generic path rewriting at all — and `_t3` is in no vocabulary</p>
+    <img id="c41" src="test-images/photo_t3.jpg" style="width:400px">
   </div>
 
   <!--

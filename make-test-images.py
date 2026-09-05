@@ -92,6 +92,8 @@ def main():
         save(full.resize((w, h)), "photo-%dx%d.jpg" % (w, h))
     save(full.resize((200, 150)), "photo-200x150.png")
     save(full.resize((200, 150)), "photo-200x150.webp")
+    # An opaque size code, displayed UPSCALED the way my.evilmilk.com does (case 41).
+    save(full.resize((340, 255)), "photo_t3.jpg")
 
     scene = make(1600, 1200, "SCENE", 3)
     save(scene, "scene.jpg")
