@@ -3,9 +3,10 @@
 <title>Post page declaring a small image</title>
 <!--
   og:image here is 200x150, exactly the size case 25's thumbnail is displayed at. Since
-  v0.40.0 the required upsize applies to a declared candidate too, so this previews only
-  when minRatio is 1: the page is trusted about WHAT the thumbnail stands for, not about
-  whether a same-size copy of it is worth a window.
+  v0.40.0 the required upsize applies to a declared candidate too, and since v0.42.0 that
+  test is "larger than" — so this never previews on size alone, at any minRatio. The page is
+  trusted about WHAT the thumbnail stands for, not about whether a same-size copy of it is
+  worth a window. Turning on "Preview pictures that are already full size" shows it.
 -->
 <meta property="og:url" content="/test-pages/post-small.html">
 <meta property="og:image" content="/test-images/photo-200x150.jpg">

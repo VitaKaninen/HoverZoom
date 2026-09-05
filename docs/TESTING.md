@@ -141,6 +141,16 @@ ancestor-link candidate ever comes back missing on a shadow-DOM site.
   Navigate to the URL with a **changed query string** (`?v=2`, `?v=3`) instead; same-URL
   `navigate` is also treated as a no-op. The tell is that `document.getElementById('hover-zoom-host')`
   is still non-null on what should be a fresh page.
+- **A reloaded page can still run the PREVIOUS build of the script.** `test-page.html` pulls it
+  with a plain `<script src="./Hover-Zoom.user.js">`, and the pane's browser serves that from its
+  HTTP cache — even across a changed page query string, which only busts the *page*. Symptom: a
+  control you just added is missing from the panel and every conclusion drawn afterwards is about
+  old code. Bust it explicitly before reloading:
+  `await fetch('/Hover-Zoom.user.js', {cache:'reload'}); location.reload();` — and when something
+  you just wrote appears to be absent, check that first rather than the code.
+- **CSS transitions do not advance while the pane is hidden**, so opacity reads as its start value
+  for ever. Anything about fading has to be reasoned from the code — measuring it there returns
+  `0` and looks like a bug in the thing you are testing (2026-09-05, chasing `fadeMs`).
 - **A `computer{action:"hover"}` to a coordinate the pointer is already at fires no `mouseover`,**
   so a second test against the same element silently does nothing and reads as a script bug. Move
   the pointer somewhere else first, and re-derive coordinates from a fresh screenshot after any

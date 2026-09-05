@@ -115,19 +115,66 @@ button; `noReferrerHere()` reads it against `pageHost()`.
 The site to add is the one you are **on**, not the image's host — that is what the browser sends
 as the referrer and what `pageHost()` returns.
 
+## Live mode — the panel stops being modal · `E33`
+
+**Test settings live**, at the top of *Advanced options*, keeps the panel open and hands the page
+back: the backdrop is hidden, the host gets `pointer-events:none` (only `.panel` takes input), the
+panel loses its centring transform and is dragged by its title bar. So you can hover a picture,
+watch the preview, and change numbers against it.
+
+- **`persist()` calls `applyLook()` and re-`layout()`s an open window**, which is what makes it
+  live: border, radius, shadow, fade and the bar timings are re-written to the window that is
+  already up instead of waiting for the next one.
+- **The panel host covers the viewport** (`inset:0`), so without `pointer-events:none` it eats
+  every hover on the page — the mode would do nothing but hide the backdrop.
+- **`ours()` now counts `panelHost` too.** Otherwise a hover over the panel is a hover over an
+  ordinary page element and `onOver` tries to preview it.
+- **The mode and the fold survive the re-render.** Toggling calls `openPanel()` again, so
+  `panelLive`, `panelPos` and `advOpen` are module-level; without `advOpen` the fold you pressed
+  the button in closes under you.
+
+### Whatever is on top owns the keyboard and the wheel
+
+Reported: with a preview pinned, the settings panel could not be scrolled or typed in — the
+preview's `window`-capture wheel and key listeners took them first (they outrank the page by
+design, `E22`).
+
+`panelOwns(e)` is the arbiter, and `onPinKey` / `onPinWheel` / the `scroll` cancel all defer to
+it: while the panel is up **and modal** it owns everything; in live mode it owns only what
+`composedPath()` says is inside it. Escape is handled at the document level in the same order —
+panel first, then the preview — so one Escape closes the panel and leaves the pinned window
+alone.
+
 ## Dark Reader repaints the loading ring
 
 Reported: the ring is always light while Dark Reader is on, and obeys `spinnerTheme` with it off.
 `applySpinTheme()` runs on every hover and reads the setting first, so nothing inside the script
-explains it — Dark Reader is restyling our shadow-root stylesheet (it supports shadow DOM).
+explains it — DR is rewriting our rules.
 
-**Dark Reader has no per-element opt-out.** The only documented lever is `class="darkreader"` on
-a `<style>` element, which makes it skip that sheet, and that is now on both of ours (the viewer's
-and the panel's). Two things to know: it is DR's own marker for its own sheets, so a future DR
-cleanup pass could in principle remove ours — ours live inside a shadow root, where DR's
-document-level `querySelectorAll` cannot reach them — and if DR is in **Filter / Filter+** mode it
-inverts the whole page as a post-process, where nothing the page does can help. Unverified here:
-this machine has no Dark Reader.
+**The fix comes from Sudokupad-Tools' `docs/LESSONS_LEARNED.md`, "Beating DarkReader",** which
+settled this against a real DR install over many versions. Two of its findings are exactly our
+case:
+
+- **DR rewrites `var()` usage inside STYLESHEETS, not inline.** Our ring was themed by setting
+  `--spin-arc` on the host and consuming it in a shadow-root rule — the losing shape.
+- **A stylesheet `!important` does not help** (DR emits an equal-specificity counter-rule after
+  ours), but **an inline `!important` literal is not fought at all**, and once you also strip the
+  `data-darkreader-inline-*` marker DR does not come back to the element.
+
+So `applySpinTheme()` keeps the custom properties (they cost nothing and work with no DR) and
+then calls `paintOver()` on each circle: `style.setProperty(prop, literal, 'important')` plus
+`removeAttribute('data-darkreader-inline-' + prop)`. `applyLook()` does the same for the frame's
+background and border colour, the other two colours a user picks.
+
+**What was tried and removed:** `class="darkreader"` on our `<style>` elements — the one lever
+the DR issue tracker offers. It is DR's own marker for sheets *it* injects, and DR's teardown
+removes every `style.darkreader` on the page (measured in the Sudokupad work: 43 → 0 when a
+`darkreader-lock` meta went in), so it invites our stylesheet being deleted out from under us.
+A page-wide `<meta name="darkreader-lock">` — what Sudokupad-Tools uses — is right there and
+wrong here: this script runs on every site and does not get to turn the user's dark mode off.
+
+Still true: in **Filter / Filter+** mode DR inverts the whole page as a post-process and nothing
+in the page can help. Unverified here — this machine has no Dark Reader.
 
 ## The settings panel, rewritten around decisions (v0.39.0)
 

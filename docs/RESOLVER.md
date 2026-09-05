@@ -173,8 +173,10 @@ Cases 24–26 all hang off `icon.png`, which has **no upgrade candidates of any 
 preview appears at all, the page was fetched and read. 24 gets a video the URL could never have
 produced; 25 gets an image *no bigger than the thumbnail* and 26 gets nothing.
 
-**The required upsize applies to the declared candidate too, since v0.40.0** — so 25 previews only
-with `minRatio` at 1. It used to bypass the gate on the grounds that the page is authoritative, and
+**The required upsize applies to the declared candidate too, since v0.40.0**, and since v0.42.0 the
+test is `>` rather than `>=` — so `minRatio` 1 means "anything bigger at all" without asking anyone
+to type 1.000001, and 25 (declared image exactly the size of the thumbnail) fails it at every
+value. Only *Preview pictures that are already full size* shows it. It used to bypass the gate on the grounds that the page is authoritative, and
 that is still true about *what* the thumbnail stands for; it is not an answer to *is this worth a
 window*. Reported as "I set Required upsize to 100× and everything still previews", which is exactly
 what a link-following site did.

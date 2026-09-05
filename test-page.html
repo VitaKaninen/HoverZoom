@@ -278,10 +278,11 @@
     </a>
   </div>
 
-  <div class="case" data-expect="none at the default 1.2; 200 at Required upsize 1">
+  <div class="case" data-expect="none unless 'already full size' is on">
     <h2>25. the linked page's image is no bigger than the thumbnail</h2>
-    <p class="hz good">must NOT preview at the default Required upsize: the page is trusted about
-      WHAT this is, not about whether it is worth showing</p>
+    <p class="hz good">must NOT preview: Required upsize is "larger than", so an equal-size
+      original fails it at every value. The page is trusted about WHAT this is, not about
+      whether it is worth showing</p>
     <a href="test-pages/post-small.html">
       <img id="c25" width="200" src="test-images/icon.png" style="width:200px">
     </a>

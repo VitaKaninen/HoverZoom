@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.41.0
+// @version     0.42.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -63,6 +63,8 @@
         borderColor: '#45475a',
         cornerRadius: 6,
         frameMargin: 24,            // px of frame drawn ON TOP of the picture, on all four
+        barIdleMs: 1000,            // still pointer before the bar and grab border fade
+        barFadeMs: 1200,            // how long that fade takes
         shadow: true,
         shadowSize: 32,             // px of blur
         shadowStrength: 55,         // % opacity
@@ -688,8 +690,9 @@
     }
 
     // The required upsize. Applies to the linked page's own answer too — a ratio nobody enforces is a setting that does nothing.
+    // Strictly greater, so 1 means "anything bigger at all" without asking for 1.000001.
     function bigEnough(dim, displayed) {
-        return dim.w >= displayed.w * cfg.minRatio || dim.h >= displayed.h * cfg.minRatio;
+        return dim.w > displayed.w * cfg.minRatio || dim.h > displayed.h * cfg.minRatio;
     }
 
     async function resolve(el, displayed, token, onHit) {
@@ -833,14 +836,31 @@
         return false;
     }
 
+    // DarkReader rewrites var() usage inside STYLESHEETS, so a themed rule loses to it; it does not
+    // fight an inline !important literal. Sudokupad-Tools' LESSONS_LEARNED, "Beating DarkReader".
+    function paintOver(el, prop, value) {
+        if (!el) return;
+        el.style.setProperty(prop, value, 'important');
+        el.removeAttribute('data-darkreader-inline-' + prop);
+    }
+
     // Catppuccin Mocha in dark mode, near-white in light.
     function applySpinTheme() {
         if (!host) return;
         const dark = darkMode();
-        host.style.setProperty('--spin-bg', dark ? 'rgba(24,24,37,.96)' : 'rgba(255,255,255,.97)');
-        host.style.setProperty('--spin-edge', dark ? 'rgba(205,214,244,.45)' : 'rgba(30,30,46,.45)');
-        host.style.setProperty('--spin-track', dark ? 'rgba(205,214,244,.30)' : 'rgba(30,30,46,.22)');
-        host.style.setProperty('--spin-arc', dark ? '#89b4fa' : '#1e66f5');
+        const bg = dark ? 'rgba(24,24,37,.96)' : 'rgba(255,255,255,.97)';
+        const edge = dark ? 'rgba(205,214,244,.45)' : 'rgba(30,30,46,.45)';
+        const track = dark ? 'rgba(205,214,244,.30)' : 'rgba(30,30,46,.22)';
+        const arc = dark ? '#89b4fa' : '#1e66f5';
+        host.style.setProperty('--spin-bg', bg);
+        host.style.setProperty('--spin-edge', edge);
+        host.style.setProperty('--spin-track', track);
+        host.style.setProperty('--spin-arc', arc);
+        if (!spinSvg) return;
+        paintOver(spinSvg.querySelector('.disc'), 'fill', bg);
+        paintOver(spinSvg.querySelector('.disc'), 'stroke', edge);
+        paintOver(spinSvg.querySelector('.track'), 'stroke', track);
+        paintOver(spinSvg.querySelector('.arc'), 'stroke', arc);
     }
 
     let view = null;
@@ -857,7 +877,6 @@
         root = host.attachShadow({ mode: 'open' });
 
         const style = document.createElement('style');
-        style.className = 'darkreader';     // the one documented "leave this alone" marker
         style.textContent = [
             ':host{all:initial}',
             '.dim{position:fixed;inset:0;background:transparent;pointer-events:none}',
@@ -913,8 +932,8 @@
             'border:1px solid #45475a;background:#313244;color:#cdd6f4;cursor:pointer}',
             '.pop .acts button.go{background:#f38ba8;border-color:#f38ba8;color:#1e1e2e;font-weight:700}',
             '.cap,.edge{transition:opacity ' + BAR_SHOW_MS + 'ms ease}',
-            '.box.idle .cap{opacity:0;pointer-events:none;transition:opacity ' + BAR_FADE_MS + 'ms ease}',
-            '.box.idle .edge{opacity:0;transition:opacity ' + BAR_FADE_MS + 'ms ease}',
+            '.box.idle .cap{opacity:0;pointer-events:none;transition:opacity var(--barfade) ease}',
+            '.box.idle .edge{opacity:0;transition:opacity var(--barfade) ease}',
             '.spin{position:fixed;width:34px;height:34px;display:none;pointer-events:none;',
             'filter:drop-shadow(0 2px 6px rgba(0,0,0,.5))}',
             '.spin.on{display:block}',
@@ -1270,8 +1289,6 @@
         capMetaEl.textContent = parts.join('  ·  ');
     }
 
-    const BAR_IDLE_MS = 1000;
-    const BAR_FADE_MS = 1200;
     const BAR_SHOW_MS = 120;
 
     // The bar's height, fixed so the ring around it can be a matching thickness.
@@ -1317,7 +1334,7 @@
             if (!box || !view) return;
             if (pointerOverChrome() || popOpen()) { showBar(); return; }   // parked on it: keep it
             box.classList.add('idle');
-        }, BAR_IDLE_MS);
+        }, Math.max(0, Math.min(60000, cfg.barIdleMs | 0)));
     }
 
     function resetBar() {
@@ -1540,6 +1557,24 @@
             'rgba(0,0,0,' + a.toFixed(2) + ')';
     }
 
+    // Everything the appearance settings write to a window that is already up, so changing one
+    // while a preview is open shows it (see the panel's live mode).
+    function applyLook() {
+        if (!host || !box) return;
+        host.style.setProperty('--fade', cfg.fadeMs + 'ms');
+        host.style.setProperty('--barfade', barFadeMs() + 'ms');
+        box.style.border = cfg.borderWidth > 0
+            ? cfg.borderWidth + 'px solid ' + cfg.borderColor : 'none';
+        box.style.borderRadius = cfg.cornerRadius + 'px';
+        box.style.boxShadow = shadowCss();
+        paintOver(box, 'background-color', '#1e1e2e');
+        if (cfg.borderWidth > 0) paintOver(box, 'border-color', cfg.borderColor);
+    }
+
+    function barFadeMs() {
+        return Math.max(0, Math.min(10000, cfg.barFadeMs | 0));
+    }
+
     function showViewer(res, pointer) {
         buildViewer();
 
@@ -1555,11 +1590,7 @@
         };
         reflow();
 
-        host.style.setProperty('--fade', cfg.fadeMs + 'ms');
-
-        box.style.border = cfg.borderWidth > 0 ? cfg.borderWidth + 'px solid ' + cfg.borderColor : 'none';
-        box.style.borderRadius = cfg.cornerRadius + 'px';
-        box.style.boxShadow = shadowCss();
+        applyLook();
 
         const ow = outerW();
         const oh = outerH();
@@ -1578,6 +1609,14 @@
         layout();
         deferredCaption(res.url);
 
+        // Start every open from a settled opacity 0, or the fade is whatever the last fade-out
+        // left behind — returning to an image mid-fade looked like the setting doing nothing.
+        box.classList.remove('on');
+        box.style.transition = 'none';
+        box.style.opacity = '0';
+        void box.offsetWidth;
+        box.style.transition = '';
+        box.style.opacity = '';
         box.classList.add('on');
         showBar();
     }
@@ -1884,8 +1923,18 @@
         layout();
     }
 
+    // The settings panel is another window on top of this one: while it is up, its own scrolling
+    // and typing are not the preview's to take.
+    function panelOwns(e) {
+        if (!panelHost) return false;
+        if (!panelLive) return true;                    // modal: the panel owns everything
+        if (!e || !e.composedPath) return false;
+        return e.composedPath().indexOf(panelHost) !== -1;
+    }
+
     function onPinKey(e) {
         if (!placed || !view) return;
+        if (panelOwns(e)) return;
         if (e.ctrlKey || e.metaKey || e.altKey) return;   // leave browser/page chords alone
         const step = e.shiftKey ? cfg.panStep * 3 : cfg.panStep;
         let handled = true;
@@ -1906,6 +1955,7 @@
     // A wheel over a PLACED window is the window's; anywhere else, and in every other state, it is the page's.
     function onPinWheel(e) {
         if (!view || !placed) return;
+        if (panelOwns(e)) return;
         if (!pointInPreview(e.clientX, e.clientY)) return;
         e.preventDefault();
         e.stopPropagation();
@@ -1947,6 +1997,8 @@
     }
 
     function ours(node) {
+        if (panelHost && (node === panelHost ||
+            (panelHost.contains && panelHost.contains(node)))) return true;
         return !!host && (node === host || (host.contains && host.contains(node)));
     }
 
@@ -2463,7 +2515,9 @@
         mouseDown = false;
         endDrag();
     }, true);
-    window.addEventListener('scroll', function () { if (!placed) cancel(); }, true);
+    window.addEventListener('scroll', function (e) {
+        if (!placed && !panelOwns(e)) cancel();
+    }, true);
     window.addEventListener('blur', function () { if (!placed) cancel(); });
     window.addEventListener('resize', function () {
         if (!placed) { cancel(); return; }
@@ -2475,6 +2529,11 @@
         layout();
     });
     document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape' && panelHost) {
+            closePanel();                       // the panel is on top; it closes first
+            e.stopPropagation();
+            return;
+        }
         if (e.key === 'Escape') {
             cancel();                           // onPinKey has already handled the placed case
         }
@@ -2502,8 +2561,13 @@
         sub: '#a6adc8', blue: '#89b4fa', green: '#a6e3a1', red: '#f38ba8' };
 
     let panelHost = null;
+    let panelFlush = null;      // commits an open "edit as text" box, whatever closes the panel
+    let panelLive = false;      // the page underneath stays usable, for trying settings out
+    let panelPos = null;        // where the live panel has been dragged to
+    let advOpen = false;        // the fold survives the re-render a mode change needs
 
     function closePanel() {
+        if (panelFlush) { panelFlush(); panelFlush = null; }
         if (panelHost) { panelHost.remove(); panelHost = null; }
     }
 
@@ -2511,11 +2575,11 @@
         closePanel();
         reloadSettings();
         panelHost = document.createElement('div');
-        panelHost.style.cssText = 'all:initial;position:fixed;inset:0;z-index:2147483647;';
+        panelHost.style.cssText = 'all:initial;position:fixed;inset:0;z-index:2147483647;' +
+            (panelLive ? 'pointer-events:none;' : '');
         const sr = panelHost.attachShadow({ mode: 'open' });
 
         const st = document.createElement('style');
-        st.className = 'darkreader';
         st.textContent = [
             ':host{all:initial}',
             '*{box-sizing:border-box;font-family:system-ui,-apple-system,Segoe UI,sans-serif}',
@@ -2523,7 +2587,10 @@
             '.panel{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:520px;max-width:94vw;',
             'max-height:88vh;display:flex;flex-direction:column;overflow:hidden;background:' + C.base + ';',
             'color:' + C.text + ';border:1px solid ' + C.surface2 + ';',
-            'border-radius:10px;box-shadow:0 16px 48px rgba(0,0,0,.6);font-size:13px}',
+            'border-radius:10px;box-shadow:0 16px 48px rgba(0,0,0,.6);font-size:13px;',
+            'pointer-events:auto}',
+            '.panel.live{transform:none;box-shadow:0 18px 60px rgba(0,0,0,.75)}',
+            '.panel.live h2{cursor:move}',
             '.body{flex:1 1 auto;min-height:0;overflow:auto;padding:18px 20px 16px}',
             'h2{margin:0 0 14px;font-size:15px;font-weight:600;color:' + C.text + '}',
             'h3{margin:18px 0 8px;font-size:12px;font-weight:600;text-transform:uppercase;',
@@ -2593,17 +2660,50 @@
 
         const back = document.createElement('div');
         back.className = 'back';
-        back.addEventListener('click', function () {
-            sites.flush();
-            blocks.flush();
-            refSites.flush();
-            closePanel();
-        });
+        back.hidden = panelLive;            // live mode: the page underneath is the point
+        back.addEventListener('click', closePanel);
         sr.appendChild(back);
 
         const panel = document.createElement('div');
-        panel.className = 'panel';
+        panel.className = panelLive ? 'panel live' : 'panel';
         sr.appendChild(panel);
+
+        function placePanel() {
+            if (!panelLive || !panelPos) return;
+            const vw = document.documentElement.clientWidth;
+            const vh = document.documentElement.clientHeight;
+            if (vw && vh) {             // the Browser pane reports 0 while hidden
+                const keep = 80;
+                panelPos.left = Math.max(keep - panel.offsetWidth, Math.min(panelPos.left, vw - keep));
+                panelPos.top = Math.max(0, Math.min(panelPos.top, vh - 34));
+            }
+            panel.style.left = panelPos.left + 'px';
+            panel.style.top = panelPos.top + 'px';
+        }
+
+        function startPanelDrag(e) {
+            if (!panelLive || e.button !== 0) return;
+            e.preventDefault();
+            const r = panel.getBoundingClientRect();
+            const ox = e.clientX - r.left, oy = e.clientY - r.top;
+            const move = function (ev) {
+                panelPos = { left: ev.clientX - ox, top: ev.clientY - oy };
+                placePanel();
+            };
+            const up = function () {
+                window.removeEventListener('mousemove', move, true);
+                window.removeEventListener('mouseup', up, true);
+            };
+            window.addEventListener('mousemove', move, true);
+            window.addEventListener('mouseup', up, true);
+        }
+
+        function toggleLive() {
+            const r = panel.getBoundingClientRect();
+            panelPos = panelLive ? null : { left: r.left, top: r.top };
+            panelLive = !panelLive;
+            openPanel();
+        }
 
         const body = document.createElement('div');
         body.className = 'body';
@@ -2611,6 +2711,7 @@
 
         const h = document.createElement('h2');
         h.textContent = 'Hover Zoom — settings  ·  ' + version();
+        if (panelLive) { h.title = 'Drag to move'; h.addEventListener('mousedown', startPanelDrag); }
         body.appendChild(h);
 
         // What Undo changes goes back to: the whole object as it stood when the panel opened.
@@ -2621,6 +2722,8 @@
             saveSettings();
             probeCache.clear();
             refreshSiteMenu();
+            applyLook();                    // a preview that is already up follows along
+            if (view && box && box.classList.contains('on')) { reflow(); layout(); showBar(); }
         }
 
         let mount = body;
@@ -2644,6 +2747,8 @@
                 sum.appendChild(hint);
             }
             d.appendChild(sum);
+            d.open = advOpen;
+            d.addEventListener('toggle', function () { advOpen = d.open; });
             body.appendChild(d);
             mount = d;
         }
@@ -2708,8 +2813,10 @@
 
             function store() { cfg[key] = items.slice(); persist(); }
 
-            // Alphabetical, case-insensitively, and kept that way after every mutation rather than only at save time.
+            // Alphabetical for the host lists; the block list stays in the order things were
+            // added, so the one just added by mistake is the last row.
             function sortItems() {
+                if (opts.chronological) return;
                 items.sort(function (a, b) {
                     return a.toLowerCase().localeCompare(b.toLowerCase()) || a.localeCompare(b);
                 });
@@ -2784,6 +2891,8 @@
                     r.appendChild(rm);
                     entries.appendChild(r);
                 });
+                // The newest is the last row, so show that end of it.
+                if (opts.chronological) entries.scrollTop = entries.scrollHeight;
             }
 
             function add(raw) {
@@ -2886,8 +2995,8 @@
         intro.textContent =
             'Point at any picture and Hover Zoom finds the full-size original and shows it. ' +
             'Click that preview to keep it on screen — then scroll to make it bigger, drag it ' +
-            'anywhere, and right-click it to save or copy. Escape, or a click outside it, puts ' +
-            'it away.';
+            'anywhere, and right-click it to save or copy. Hit Escape or click outside the ' +
+            'preview to close it.';
         body.appendChild(intro);
 
         const guideBtn = document.createElement('button');
@@ -2918,7 +3027,7 @@
             'later it replaces it in place, without moving what you are looking at.');
         para('One press keeps it.',
             'A click — or the start of a drag — pins the preview. It then stays until you press ' +
-            'Escape or click outside it. Nothing else holds it open, and the page underneath ' +
+            'Escape or click outside the preview to close it. Nothing else holds it open, and the page underneath ' +
             'stays readable and scrollable while it is there.');
         para('Moving, sizing and zooming.',
             'Drag the frame around the picture, or its status bar, to move the window; drag an ' +
@@ -2964,13 +3073,13 @@
         function syncPos() {
             posHint.textContent = pos.el.value === 'center'
                 ? 'the pointer is nowhere near it, so click the picture you are pointing at to ' +
-                  'pin the preview — then Escape or a click outside puts it away'
+                  'pin the preview — then hit Escape or click outside the preview to close it'
                 : 'opens under the pointer, so a click pins it without moving the mouse';
         }
         pos.el.addEventListener('change', syncPos);
         syncPos();
         pick('pinButton', 'Pin preview with',
-            'which button keeps a preview on screen. The other one puts it away without ' +
+            'which button keeps a preview on screen. The other one closes it without ' +
             'following the link underneath', [
                 ['left', 'Left click  (right click dismisses)'],
                 ['right', 'Right click  (left click dismisses)']]);
@@ -3001,8 +3110,10 @@
         section('Exceptions');
         const blocks = list('blockList', {
             heading: 'Never preview these images',
+            chronological: true,
             description: 'Individual images that never open a preview. The quickest way to add ' +
-                'one is the ⊘ button on a pinned preview. A * matches anything.',
+                'one is the ⊘ button on a pinned preview. Newest last, so an accidental one is ' +
+                'the bottom row. A * matches anything.',
             examples: 'Examples: https://example.com/tile.png, https://cdn.example.com/wm/*',
             placeholder: 'e.g. https://example.com/watermark.png',
         });
@@ -3024,15 +3135,32 @@
 
         advanced('Advanced options', '  timings, sizes, appearance');
 
+        const liveBtn = document.createElement('button');
+        liveBtn.className = 'guidebtn';
+        liveBtn.textContent = panelLive ? 'Stop testing live' : 'Test settings live';
+        liveBtn.addEventListener('click', toggleLive);
+        mount.appendChild(liveBtn);
+
+        const liveNote = document.createElement('div');
+        liveNote.className = 'hint';
+        liveNote.style.margin = '-10px 0 14px';
+        liveNote.textContent = panelLive
+            ? 'The page underneath is live — hover a picture and the preview obeys what you ' +
+              'change here as you change it. Drag this window by its title bar. Press the ' +
+              'button again to go back to the normal panel.'
+            : 'Keeps this window open but lets the page underneath work, so you can hover a ' +
+              'picture and watch what your changes do to it.';
+        mount.appendChild(liveNote);
+
         section('Matching');
         num('hoverDelay', 'Delay before the preview appears',
             'milliseconds. A short wait stops previews firing as you sweep the pointer across ' +
             'a page', 0, 3000, 10);
         num('minDisplayed', 'Ignore pictures smaller than', 'px on screen — skips icons', 0, 2000, 1);
         num('minRatio', 'Required upsize',
-            'only show the preview if the original is at least this many times the size of the ' +
-            'one on the page. Applies to what a linked page declares as well as to what the ' +
-            'script works out for itself', 1, 100, 0.1);
+            'only show the preview if the original is LARGER than this many times the size of ' +
+            'the one on the page — so 1 means anything bigger at all. Applies to what a linked ' +
+            'page declares as well as to what the script works out for itself', 1, 100, 0.1);
         check('showEvenIfNotLarger', 'Preview pictures that are already full size',
             'the page is showing the original at its true size, so there is nothing bigger to ' +
             'find. Turn on to preview it anyway — to zoom into it, or to save it from the ' +
@@ -3052,14 +3180,21 @@
             'only decides how far a SMALL picture is enlarged (1 = never enlarged)', 0.1, 8, 0.1);
 
         section('Appearance');
-        num('fadeMs', 'Fade duration', 'ms', 0, 1000, 10);
+        num('fadeMs', 'Preview fade',
+            'ms the preview window takes to fade in when it opens, and out when it closes',
+            0, 1000, 10);
         num('borderWidth', 'Border thickness', 'px', 0, 20, 1);
         color('borderColor', 'Border colour');
         num('cornerRadius', 'Corner radius', 'px', 0, 40, 1);
-        num('frameMargin', 'Frame margin',
+        num('frameMargin', 'Grab border',
             'px of frame drawn over the edges of the picture, matching the status bar along the ' +
-            'bottom. Drag it to move the window at any zoom. It fades with the bar after a ' +
-            'second of stillness, and stops being a handle while faded', 0, 80, 2);
+            'bottom. This is the strip you grab to move the window at any zoom — and it stops ' +
+            'being a handle once it has faded', 0, 80, 2);
+        num('barIdleMs', 'Grab border fades after',
+            'ms of a still pointer before the grab border and the status bar fade out', 0, 60000, 100);
+        num('barFadeMs', 'Grab border fade takes',
+            'ms for that fade. They come back instantly on any movement over the preview',
+            0, 10000, 100);
         const shadow = check('shadow', 'Drop shadow',
             'a soft shadow under the preview window, which separates it from the page behind it');
         const shadowSize = num('shadowSize', 'Shadow size',
@@ -3116,12 +3251,14 @@
         const close = document.createElement('button');
         close.className = 'primary';
         close.textContent = 'Close';
-        close.addEventListener('click', function () {
-            sites.flush();      // an open text editor commits on blur, which a click may outrun
+        close.addEventListener('click', closePanel);
+
+        // An open "edit as text" box commits on blur, which a click can outrun; every exit runs this.
+        panelFlush = function () {
+            sites.flush();
             blocks.flush();
             refSites.flush();
-            closePanel();
-        });
+        };
 
         foot.appendChild(auto);
         foot.appendChild(reset);
@@ -3130,6 +3267,14 @@
         panel.appendChild(foot);
 
         (document.body || document.documentElement).appendChild(panelHost);
+
+        if (panelLive && !panelPos) {       // reopened in live mode: out of the way, on the right
+            panelPos = {
+                left: Math.max(12, document.documentElement.clientWidth - panel.offsetWidth - 24),
+                top: 40,
+            };
+        }
+        placePanel();
     }
 
     if (isTopFrame && typeof GM_registerMenuCommand === 'function') {

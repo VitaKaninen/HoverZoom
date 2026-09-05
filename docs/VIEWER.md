@@ -292,6 +292,24 @@ middle of the frame does on a press, and it becomes true once the frame stops gr
 the `maxSizeMultiple` ceiling or after a hand resize pins the frame. The cursor says which:
 `move` (four arrows) = the window moves, `grab` (hand) = the picture pans.)*
 
+## Every open fades from a settled zero
+
+Reported as "`fadeMs` only works the first time; after that the preview opens instantly". The
+window is one element reused for every preview, so `box.classList.add('on')` transitions from
+**whatever opacity the last fade-out left**, and returning to an image before that fade-out
+finished starts the fade-in from most of the way up — indistinguishable from no fade. A brand-new
+element has the opposite problem: a transition needs a previous computed value, and the first
+`add('on')` after insertion has none.
+
+`showViewer()` therefore removes `on`, sets `transition:none; opacity:0`, forces a reflow with
+`void box.offsetWidth`, clears both inline properties and only then adds `on`. Both cases become
+the same case. *(Not measurable in the Browser pane — transitions do not advance while it is
+hidden, see [`TESTING.md`](TESTING.md).)*
+
+`applyLook()` is the other half: everything the appearance settings write to the window —
+`--fade`, `--barfade`, border, radius, shadow — in one function, called from `showViewer()` and
+from the panel's `persist()`, so a change made while a preview is up lands on it (`E33`).
+
 ## The drop shadow needs SPREAD, not just blur
 
 `0 8px 32px rgba(0,0,0,.55)` looks like almost nothing however far the numbers are pushed,

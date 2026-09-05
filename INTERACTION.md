@@ -116,8 +116,9 @@ The element tested is not always the one under the pointer. When the hover targe
 single picture directly beneath it in the same card is tried instead (`E18`), and that picture
 then faces every precondition here in its own right.
 
-A candidate that passes all ten still shows nothing unless a probe finds an image at least
-`minRatio` (1.2×) bigger than what is displayed **and shaped like it** (`E19`) — see `T04`. Since
+A candidate that passes all ten still shows nothing unless a probe finds an image **larger than**
+`minRatio` (1.2×) times what is displayed — strictly, so 1 means "anything bigger at all" — **and
+shaped like it** (`E19`) — see `T04`. Since
 v0.40.0 that ratio applies to what a linked page declares as well; the page is trusted about
 *what* the thumbnail stands for, not about whether it is worth a window.
 
@@ -406,6 +407,7 @@ this table is a table.
 | `E30` | A centred preview is pinned from the picture, not from the window | [`docs/VIEWER.md`](docs/VIEWER.md) |
 | `E31` | Smoothing — the AA menu, and why there are only two options | [`docs/SETTINGS.md`](docs/SETTINGS.md) |
 | `E32` | A pan that runs out of picture continues as a window move | [`docs/VIEWER.md`](docs/VIEWER.md) |
+| `E33` | The settings panel's live mode, and who owns the keyboard and wheel | [`docs/SETTINGS.md`](docs/SETTINGS.md) |
 
 `E3` is retired with the detached state (v0.28.0); `E4` and `E5` are retired as dangling.
 
