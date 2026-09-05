@@ -171,18 +171,33 @@ thumb simply clamps to the left end there. The high end is `min(cfg.maxZoom, MAX
 does the rest, and the readout then shows what actually stuck, so a clamp is visible rather than
 mysterious.
 
-**The minimum width is computed, not chosen** — `barMinW()` adds the bar's padding, its two flex
-gaps, the slider, the readout and `btnGutter()`, and every one of those is the same constant the
-stylesheet is built from. 256 px for a picture, 280 px with the ▶ present. A hand-picked 250 was
-wrong on both counts in v0.47.0, which is what let a small preview shrink until the slider sat under
-the AA and ⊘ buttons. `layoutChrome()` takes its `padding-right` from `btnGutter()` too, so the
-reserved gutter and the width that assumes it cannot disagree.
+**The cluster is absolutely positioned, like the buttons — it is NOT a flex item.** This is the
+whole of why it stays still, and two versions were spent learning it. A flex item's position is
+whatever is left after the filename and metadata have taken their share, so it moves whenever
+*they* change width: as the frame narrows the text shrinks, the free space runs out, and the
+cluster starts sliding along the bar. With the pointer holding the slider thumb, a slider that
+moves under it is a slider being dragged — the value ran to an end on its own. `.zctl` now sits at
+`right: btnGutter()`, so its screen position depends on the frame's right edge and nothing else,
+and `zoomAnchored()` nails that edge.
 
-**Filename and metadata must be allowed to collapse.** `.cap .meta` was `flex:none`, which made the
-bar's minimum depend on how long "JPEG · 1000 × 800 · 210 KB" happens to be — and the overflow went
-*under* the absolutely-positioned buttons rather than being clipped. Both text fields are now
-`min-width:0` with an ellipsis, so `barMinW()` counts only their gaps. The name still takes all the
-free space first (`flex:1`, basis 0), so a wide bar is unchanged.
+The project already knew this failure: *"The ⊘ is absolutely positioned … as a flex item after a
+`flex:none` dimensions field it was pushed past the end and clipped."* Same bar, same cause.
+
+v0.48.0's attempt — make `.cap .meta` shrinkable so the text collapses first — is kept, because the
+text does have to give way, but it is not what holds the cluster still. **On its own it is not
+enough:** it makes the cluster's position depend on text width *smoothly* instead of abruptly,
+which is still a dependency.
+
+**The minimum width is computed, not chosen** — `barMinW()` is the bar's padding, the slider, the
+readout and `btnGutter()`, every one of them the same constant the stylesheet is built from:
+236 px for a picture, 260 px with the ▶ present. Filename and metadata claim nothing, because at
+that width they are clipped to nothing. `layoutChrome()` positions the cluster and sets
+`padding-right` from `textGutter()`, which is `btnGutter()` plus the cluster, so the reserve and
+the thing it reserves for cannot disagree.
+
+**`caption()` runs before `layoutChrome()` in `layout()`.** `textGutter()` measures the cluster
+through the `hidden` flags that `syncZoom()` writes, so reversing the two leaves the padding one
+frame stale every time the cluster appears or disappears.
 
 **It applies only while placed**, via `minFrameW()` — a hover preview has no controls and owes them
 no room. `place()` therefore calls `reflow()` before `layout()`, or a small window pinned would keep
@@ -372,7 +387,7 @@ minimum window. Overlaying costs nothing and needs no minimum beyond what the �
   to be half-updated.
 
 **Minimum window is 48 px of picture, and `barMinW()` wide once placed** (`minFrameW()`, see the
-zoom cluster above) — 50 px and 258 px at the default border. Both are applied in `reflow()` (bounding
+zoom cluster above) — 50 px and 238 px at the default border. Both are applied in `reflow()` (bounding
 the opening size and the wheel) **and** in `resizeBy()` (bounding a hand resize); both places are
 needed. Without a floor, `minDisplayed: 0` on a page of tiny pictures produced previews a few pixels
 across.

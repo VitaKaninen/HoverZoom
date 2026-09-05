@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.49.0
+// @version     0.50.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -908,7 +908,10 @@
             '.cap .aa:hover{background:#89b4fa;border-color:#89b4fa;color:#1e1e2e}',
 
             // ---- the zoom cluster: slider, then the readout that opens a field
-            '.cap .zctl{flex:none;display:flex;align-items:center;gap:' + BAR_ZOOM_GAP + 'px}',
+            // Absolutely placed, like the buttons: a flex item's position depends on how wide the
+            // filename and metadata happen to be, and this one must not move.
+            '.cap .zctl{position:absolute;top:50%;transform:translateY(-50%);',
+            'display:flex;align-items:center;gap:' + BAR_ZOOM_GAP + 'px}',
             '.cap .zctl[hidden]{display:none}',
             '.cap .zslider{flex:0 1 ' + BAR_SLIDER_W + 'px;min-width:60px;height:14px;',
             'margin:0;padding:0;accent-color:#89b4fa;cursor:pointer}',
@@ -1498,15 +1501,29 @@
     const BAR_ZOOM_GAP = 6;     // inside the cluster
     const BAR_ZOOM_W = 52;      // the readout slot, wide enough for "3,200%"
 
-    // What layoutChrome() reserves on the right for the buttons actually shown.
+    // Where the zoom cluster's right edge sits, measured in from the bar's right edge: clear of
+    // the buttons once placed, and of nothing but the padding while hovering.
     function btnGutter() {
+        if (!placed) return BAR_PAD;
         return BTN_RIGHT + BTN_STEP * (mediaEl === vidEl ? 3 : 2) + 2;
     }
 
-    // The narrowest frame whose bar still holds its controls. Filename and metadata are allowed to
-    // collapse to nothing, so only their two gaps count.
+    // How much of the bar the cluster covers right now.
+    function zctlW() {
+        if (!zctlEl || zctlEl.hidden) return 0;
+        return (zsliderEl.hidden ? 0 : BAR_SLIDER_W + BAR_ZOOM_GAP) + BAR_ZOOM_W;
+    }
+
+    // Everything on the right that the filename and metadata must stay clear of.
+    function textGutter() {
+        const w = zctlW();
+        return btnGutter() + (w ? w + BAR_GAP : 0);
+    }
+
+    // The narrowest frame that still shows the whole cluster clear of the buttons. Filename and
+    // metadata are allowed to be clipped away entirely, so they claim nothing here.
     function barMinW() {
-        return BAR_PAD + BAR_GAP * 2 + BAR_SLIDER_W + BAR_ZOOM_GAP + BAR_ZOOM_W + btnGutter();
+        return BAR_PAD + BAR_SLIDER_W + BAR_ZOOM_GAP + BAR_ZOOM_W + btnGutter();
     }
 
     let barTimer = 0;
@@ -1645,8 +1662,9 @@
         if (hasVid) { vidOffEl.style.right = px(right); right += BTN_STEP; }
         aaEl.style.right = px(right); right += BTN_STEP;
         markSmoothing();
-        capEl.style.paddingRight = px(placed
-            ? Math.min(btnGutter(), Math.max(BAR_PAD, view.frameW - BAR_PAD)) : BAR_PAD);
+        zctlEl.style.right = px(btnGutter());
+        capEl.style.paddingRight =
+            px(Math.min(textGutter(), Math.max(BAR_PAD, view.frameW - BAR_PAD)));
     }
 
     function layout() {
@@ -1661,6 +1679,7 @@
         gripEl.classList.toggle('hot', placed);
         box.style.width = view.frameW + 'px';
         box.style.height = view.frameH + 'px';
+        caption();          // sets what the bar shows; layoutChrome() reserves room for it
         layoutChrome();
         mediaEl.style.width = Math.round(view.imgW) + 'px';
         mediaEl.style.height = Math.round(view.imgH) + 'px';
@@ -1668,7 +1687,6 @@
         mediaEl.style.top = Math.round(view.oy) + 'px';
         box.classList.toggle('hot', placed);
         box.classList.toggle('pan', placed && pannable());
-        caption();
         if (spinDocked) moveSpinner();      // the dock rides with the frame
     }
 
