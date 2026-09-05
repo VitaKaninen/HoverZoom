@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.45.0
+// @version     0.46.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -1068,14 +1068,21 @@
     function outerW() { return view.frameW + insetX() * 2; }
     function outerH() { return view.frameH + insetY() * 2; }
 
+    // The element whose clientWidth/clientHeight IS the viewport — <body> on a quirks-mode page.
+    function vpEl() {
+        return (document.compatMode === 'BackCompat' && document.body) || document.documentElement;
+    }
+    function vpW() { return vpEl().clientWidth; }
+    function vpH() { return vpEl().clientHeight; }
+
     function usableHeight() {
         // The floor is because the Browser pane reports clientHeight 0 while it is hidden.
-        return Math.max(64, document.documentElement.clientHeight);
+        return Math.max(64, vpH());
     }
 
     // The box a preview OPENS into.
     function viewportBox() {
-        const vw = document.documentElement.clientWidth;
+        const vw = vpW();
         const vh = usableHeight();
         return {
             vw: vw,
@@ -1147,8 +1154,8 @@
     // Two different jobs behind one name.
     function clampPosition() {
         if (!view) return;
-        const vw = document.documentElement.clientWidth;
-        const vh = document.documentElement.clientHeight;
+        const vw = vpW();
+        const vh = vpH();
         if (!vw || !vh) return;      // the Browser pane reports 0 while hidden
         const ow = outerW();
         const oh = outerH();
@@ -2106,7 +2113,7 @@
         if (!/no-repeat/.test(s.backgroundRepeat) && /^auto/.test(s.backgroundSize))
             return 'tiled end to end';
         const r = el.getBoundingClientRect();
-        const vw = document.documentElement.clientWidth;
+        const vw = vpW();
         if (vw > 0 && r.width >= vw * BAND_WIDTH) return 'spans the full width of the page';
         if ((el.textContent || '').trim().length >= CONTENT_CHARS)
             return 'the page\'s own text sits on it';
@@ -2681,8 +2688,8 @@
 
         function placePanel() {
             if (!panelPos) return;
-            const vw = document.documentElement.clientWidth;
-            const vh = document.documentElement.clientHeight;
+            const vw = vpW();
+            const vh = vpH();
             if (vw && vh) {             // the Browser pane reports 0 while hidden
                 const keep = 80;
                 panelPos.left = Math.max(keep - panel.offsetWidth, Math.min(panelPos.left, vw - keep));
@@ -3313,8 +3320,8 @@
         (document.body || document.documentElement).appendChild(panelHost);
 
         if (!panelPos) {                    // first open in this tab: centred
-            const vw = document.documentElement.clientWidth || 1024;
-            const vh = document.documentElement.clientHeight || 768;
+            const vw = vpW() || 1024;
+            const vh = vpH() || 768;
             panelPos = {
                 left: Math.max(12, Math.round((vw - panel.offsetWidth) / 2)),
                 top: Math.max(12, Math.round((vh - panel.offsetHeight) / 2)),

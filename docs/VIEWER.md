@@ -193,6 +193,30 @@ merged with storage and the whole object is written back on Save, so a retired k
 save forever. They are not converted: the old pair capped the size a preview *opened* at, the new
 one caps how far it may *grow*, and there is no honest arithmetic between them.
 
+### The viewport is `<body>` on a quirks-mode page
+
+`document.documentElement.clientHeight` is the viewport height **only in standards mode**. CSSOM
+special-cases it: the root element answers with the viewport, *unless* the document is in quirks
+mode, and then `<html>` is an ordinary block that answers with its own padding box — the whole
+document's height. So a doctype-less page returns the scroll height, `viewportBox().h` is enormous,
+the `min` above never bites, and the preview opens many screens tall.
+
+Measured 2026-09-05 in the Browser pane, one page with a 4000px div at a 1024px viewport:
+
+| | `documentElement.clientHeight` | `body.clientHeight` |
+|---|---|---|
+| quirks (`BackCompat`) | **4016** | 1024 ✓ |
+| standards (`CSS1Compat`) | 1009 ✓ | 7281 |
+
+Neither element is right on its own — the branch is mandatory, and reaching for `<body>`
+unconditionally is the *worse* of the two failures. `vpEl()` / `vpW()` / `vpH()` are the only
+readers; nothing else may touch `clientWidth`/`clientHeight` for a viewport. Width survives quirks
+mode by luck (a block `<html>` fills the viewport anyway), so the symptom is a preview that is too
+**tall** and correctly wide — do not let that shape argue against a width fix.
+
+Found on `phun.org`, which ships no `<!DOCTYPE>`. Reported as "it isn't restricted to the browser
+window on all sites", which reads like a per-site resolver problem and is not one.
+
 ### Edge and corner resize · `E23`
 
 `resizeBy()` sets the frame directly with the opposite edge anchored, then:

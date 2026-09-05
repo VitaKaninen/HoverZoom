@@ -78,6 +78,9 @@ has already been misdiagnosed once. (The shared ones — `innerHTML` on Trusted-
 - **`[hidden]` loses to an explicit `display`.** `img[hidden]`, `video[hidden]` and `.row[hidden]`
   each need their own `display:none` rule, because the rule above sets `display:block`/`flex` and
   outranks the UA sheet. It has cost a version twice.
+- **Measure the viewport with `vpW()`/`vpH()`, never `documentElement.clientHeight` directly.** On a
+  quirks-mode page (no doctype) the root answers with the whole document's height. See
+  [`docs/VIEWER.md`](docs/VIEWER.md).
 - **The Browser pane reports `innerWidth`/`clientHeight` as ZERO while hidden**, and delivers zero
   animation frames while claiming to be visible. Pin a viewport with `resize_window` before
   measuring anything geometric, and never use `requestAnimationFrame` for something that must
