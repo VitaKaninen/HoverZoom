@@ -314,7 +314,11 @@ Click the level and it becomes a text field in the same slot.
 - **Accepts anything** — `200`, `200%`, `1,000%`. Out of range is clamped, not refused, and the
   readout then shows what actually stuck.
 - **Enter** applies and closes; **Escape** closes without applying and does **not** close the
-  window; clicking away applies and closes.
+  window.
+- **Anything else that means "done" applies it too:** a press anywhere but the readout itself —
+  picture, border, bar, the slider — and the pointer leaving the window. `blur` alone cannot
+  carry this: `onBoxDown` calls `preventDefault()`, so a press on the window never moves focus
+  off the field (`commitZoomField`).
 - The window's own keys are suspended while it is open, or `0`, `-` and Escape would be eaten by
   the window instead of typed (`E34`).
 
@@ -460,7 +464,7 @@ this table is a table.
 | Placed mode (`S10`–`S15`, `S19`) | `place`, `unplace`, `onPinKey`, `onPinWheel` |
 | Wheel zoom, both states (`T17`, `T22`, `T24`) | `enableWheelZoom`, `disableWheelZoom`, `onPinWheel` |
 | Geometry (`S12`, `E7`, `E21`, `E25`, `E26`) | `view`, `reflow`, `layout`, `zoomAt`, `pannable`, `viewportBox`, `growBox`, `clampPosition`, `fitScaleFor`, `minScaleFor`, `chrome`, `insetX`/`insetY`, `outerW`/`outerH` |
-| Zoom cluster (`S20`, `S21`, `E34`) | `buildZoomControl`, `syncZoom`, `openZoomField`, `closeZoomField`, `zoomAnchored`, `ZOOM_BANDS`/`walkStops`/`fitStops`/`zoomStops`/`zoomIndex`, `zoomLo`/`noBarsScale`/`zoomHi`, `parseZoom`, `capOwns`, `minFrameW` |
+| Zoom cluster (`S20`, `S21`, `E34`) | `buildZoomControl`, `syncZoom`, `openZoomField`, `closeZoomField`, `zoomAnchored`, `ZOOM_BANDS`/`walkStops`/`fitStops`/`zoomStops`/`zoomIndex`, `zoomLo`/`noBarsScale`/`zoomHi`, `parseZoom`, `commitZoomField`, `capOwns`, `minFrameW` |
 | Upgrades (`S06`, `S15`) | `resolve`, `upgradeViewer` |
 
 Function names are used rather than line numbers, which rot.

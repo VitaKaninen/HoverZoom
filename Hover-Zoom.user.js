@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.54.0
+// @version     0.55.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -996,14 +996,14 @@
         capMetaEl.className = 'meta';
         blockEl = document.createElement('span');
         blockEl.className = 'btn block';
-        blockEl.title = 'Never preview this image again';
+        setTip(blockEl, 'Never preview this image again');
         blockEl.textContent = '⊘';
         blockEl.addEventListener('mousedown', function (e) { e.preventDefault(); e.stopPropagation(); }, true);
         blockEl.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); togglePop(blockPopEl); }, true);
 
         vidOffEl = document.createElement('span');
         vidOffEl.className = 'btn vidoff';
-        vidOffEl.title = 'Stop showing clips in this tab — still images only, until you reload';
+        setTip(vidOffEl, 'Stop showing clips in this tab — still images only, until you reload');
         vidOffEl.textContent = '▶';
         vidOffEl.addEventListener('mousedown', function (e) { e.preventDefault(); e.stopPropagation(); }, true);
         vidOffEl.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); stopVideoPreviews(); }, true);
@@ -1128,6 +1128,63 @@
             w: Math.max(MIN_FRAME, vw - EDGE_GAP * 2 - insetX() * 2),
             h: Math.max(MIN_FRAME, vh - EDGE_GAP - bottomGap() - insetY() * 2),
         };
+    }
+
+    // ---- tooltips: drawn here, because a native `title`'s delay belongs to the browser
+
+    const TIP_DELAY_MS = 300;   // the one value; every control in the script waits exactly this
+
+    let tipEl = null, tipTimer = 0, tipFor = null;
+
+    function hideTip() {
+        clearTimeout(tipTimer);
+        tipTimer = 0;
+        tipFor = null;
+        if (tipEl && tipEl.parentNode) tipEl.parentNode.removeChild(tipEl);
+    }
+
+    // Inline styles, so this needs no rule in either of the two shadow roots it can land in.
+    function tipBox() {
+        if (tipEl) return tipEl;
+        tipEl = document.createElement('div');
+        tipEl.style.cssText = 'position:fixed;left:0;top:0;z-index:2147483647;pointer-events:none;' +
+            'max-width:320px;padding:3px 6px;border-radius:4px;background:#1e1e2e;color:#cdd6f4;' +
+            'border:1px solid #45475a;font:11px/1.45 system-ui,sans-serif;white-space:pre-wrap;' +
+            'overflow-wrap:anywhere;box-shadow:0 2px 8px rgba(0,0,0,.45)';
+        return tipEl;
+    }
+
+    function showTip(el) {
+        const text = el.__tip;
+        if (!text) return;
+        const root = el.getRootNode();
+        const t = tipBox();
+        t.textContent = text;
+        t.style.left = '0px';
+        t.style.top = '0px';
+        (root && root.nodeType === 11 ? root : document.body).appendChild(t);
+        const r = el.getBoundingClientRect(), b = t.getBoundingClientRect();
+        let x = r.left, y = r.bottom + 6;
+        if (x + b.width > vpW() - 4) x = vpW() - 4 - b.width;
+        if (y + b.height > vpH() - 4) y = r.top - 6 - b.height;
+        t.style.left = Math.max(4, Math.round(x)) + 'px';
+        t.style.top = Math.max(4, Math.round(y)) + 'px';
+    }
+
+    // Replaces `el.title = text` everywhere; the attribute is removed or both would show.
+    function setTip(el, text) {
+        if (!el) return;
+        el.__tip = text || '';
+        if (el.hasAttribute && el.hasAttribute('title')) el.removeAttribute('title');
+        if (el.__tipBound) return;
+        el.__tipBound = true;
+        el.addEventListener('mouseenter', function () {
+            clearTimeout(tipTimer);
+            tipFor = el;
+            tipTimer = setTimeout(function () { if (tipFor === el) showTip(el); }, TIP_DELAY_MS);
+        });
+        el.addEventListener('mouseleave', hideTip);
+        el.addEventListener('mousedown', hideTip, true);
     }
 
     const MAX_MULTIPLE_ABS = 4;
@@ -1307,7 +1364,7 @@
             capDims = dims;
             const info = fileInfo(view.url);
             capNameEl.textContent = info.name;
-            capNameEl.title = view.url;
+            setTip(capNameEl, view.url);
             const parts = [];
             if (info.type) parts.push(info.type);
             parts.push(dims);
@@ -1473,7 +1530,7 @@
         zsliderEl.min = '0';
         zsliderEl.max = '1';        // the real end is the stop count, written by syncZoom()
         zsliderEl.step = '1';
-        zsliderEl.title = 'Drag to zoom';
+        setTip(zsliderEl, 'Drag to zoom');
         zsliderEl.addEventListener('mousedown', function (e) {
             e.stopPropagation();
             zoomDrag = true;
@@ -1496,7 +1553,7 @@
         zoomWrapEl.className = 'zoom';
         zvalEl = document.createElement('span');
         zvalEl.className = 'zval';
-        zvalEl.title = 'Click to type a zoom level';
+        setTip(zvalEl, 'Click to type a zoom level');
         zinEl = document.createElement('input');
         zinEl.className = 'zin';
         zinEl.type = 'text';
@@ -1536,6 +1593,14 @@
         showBar();
         zinEl.focus();
         zinEl.select();
+    }
+
+    // The window swallows presses (onBoxDown preventDefaults), so `blur` never fires on its own:
+    // a press outside the readout, or the pointer leaving, is what commits. See the panel's `change`.
+    function commitZoomField(e) {
+        if (!zinEl || zinEl.hidden) return;
+        if (e && zoomWrapEl && zoomWrapEl.contains(e.target)) return;
+        closeZoomField(true);
     }
 
     function closeZoomField(apply) {
@@ -2018,6 +2083,7 @@
 
     function hideViewer() {
         if (!box) return;
+        hideTip();
         closePops();
         resetZoomControl();
         box.classList.remove('on', 'hot', 'pan', 'drag');
@@ -2150,9 +2216,9 @@
         if (!aaEl) return;
         const sharp = smoothingMode() === 'pixelated';
         aaEl.classList.toggle('sharp', sharp);
-        aaEl.title = sharp
+        setTip(aaEl, sharp
             ? 'Hard pixels when enlarged — click for smooth'
-            : 'Smooth when enlarged — click for hard pixels';
+            : 'Smooth when enlarged — click for hard pixels');
     }
 
     function toggleSmoothing() {
@@ -2195,6 +2261,8 @@
     }
 
     function onBoxDown(e) {
+        hideTip();
+        commitZoomField(e);
         if (isBoxControl(e.target)) return;
         closePops();                // a press anywhere else puts an open menu away
         if (e.button !== 0 && e.button !== 2) return;
@@ -2738,7 +2806,7 @@
         if (spinEl && spinEl.classList.contains('on')) moveSpinner();
         const over = !!view && !!box && box.classList.contains('on') &&
             pointInPreview(e.clientX, e.clientY);
-        if (over) showBar();
+        if (over) showBar(); else commitZoomField(null);
         if (box && placed && !drag) {
             const reg = hitRegion(e.clientX, e.clientY);
             const c = reg && reg.kind === 'resize' ? regionCursor(reg)
@@ -3126,7 +3194,7 @@
 
         const h = document.createElement('h2');
         h.className = 'head';
-        h.title = 'Drag anywhere that is not text to move this window';
+        setTip(h, 'Drag anywhere that is not text to move this window');
         h.textContent = 'Hover Zoom — settings';
         const ver = document.createElement('span');
         ver.className = 'ver';
@@ -3304,7 +3372,7 @@
                     label.textContent = item;
                     const rm = document.createElement('button');
                     rm.textContent = '✕';
-                    rm.title = 'Remove ' + item;
+                    setTip(rm, 'Remove ' + item);
                     rm.addEventListener('click', function () {
                         const at = items.indexOf(item);
                         if (at !== -1) items.splice(at, 1);
@@ -3336,7 +3404,7 @@
                 const cur = document.createElement('button');
                 cur.className = 'add';
                 cur.textContent = opts.addCurrentLabel;
-                cur.title = opts.addCurrentTitle || '';
+                setTip(cur, opts.addCurrentTitle || '');
                 cur.addEventListener('click', function () { add(opts.currentValue()); });
                 addRow.appendChild(cur);
             }
@@ -3350,7 +3418,7 @@
             editBtn.className = 'edittext';
             editBtn.type = 'button';
             editBtn.textContent = 'Edit as text';
-            editBtn.title = 'One entry per line — paste a list in, or copy this one out';
+            setTip(editBtn, 'One entry per line — paste a list in, or copy this one out');
 
             function editing() { return !textarea.hidden; }
 
@@ -3656,8 +3724,8 @@
         const reset = document.createElement('button');
         reset.className = 'danger';
         reset.textContent = 'Reset to defaults';
-        reset.title = 'Puts every option back to its default. Your site list, exceptions and ' +
-            'referrer sites are kept.';
+        setTip(reset, 'Puts every option back to its default. Your site list, exceptions and ' +
+            'referrer sites are kept.');
         reset.addEventListener('click', function () {
             const kept = {};
             RESET_KEEPS.forEach(function (k) { kept[k] = (cfg[k] || []).slice(); });
@@ -3671,8 +3739,8 @@
         // Back to the values this panel opened on, whatever has been saved since.
         const undo = document.createElement('button');
         undo.textContent = 'Undo changes';
-        undo.title = 'Puts everything back to how it was when you opened this window, ' +
-            'including the lists.';
+        setTip(undo, 'Puts everything back to how it was when you opened this window, ' +
+            'including the lists.');
         undo.addEventListener('click', function () {
             cfg = JSON.parse(JSON.stringify(panelOpened));
             saveSettings();

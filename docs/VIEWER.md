@@ -235,6 +235,23 @@ the point `0` returns to.
 does the rest, and the readout then shows what actually stuck, so a clamp is visible rather than
 mysterious.
 
+**The field cannot rely on `blur`, and that is why `commitZoomField()` exists.** The panel's inputs
+commit on the native `change` event, which fires on blur — nothing else needed. The zoom field has a
+`blur` handler that does the same thing, and until v0.55.0 it almost never ran: `onBoxDown` calls
+`preventDefault()` on every press that is not a box control, and a prevented mousedown **does not
+move focus**. So clicking the picture, the border or the bar left the field focused and the typed
+number uncommitted, and Enter was the only way out. Reported 2026-09-05.
+
+`commitZoomField()` is called from the two places that mean "done" without a blur: the top of
+`onBoxDown` (any press whose target is outside `zoomWrapEl` — so the readout and the field itself
+are exempt, everything else commits) and `onMove` when the pointer is no longer in
+`pointInPreview()`. It returns immediately when the field is hidden, so putting it on the move path
+costs a hidden-flag test per mousemove.
+
+**The pointer-leaves rule has a consequence worth knowing:** move the mouse off the window *before*
+typing and the field has already committed the unchanged value and closed. That is the trade the
+behaviour was asked for with, not an oversight.
+
 **The cluster is absolutely positioned, like the buttons — it is NOT a flex item.** This is the
 whole of why it stays still, and two versions were spent learning it. A flex item's position is
 whatever is left after the filename and metadata have taken their share, so it moves whenever
@@ -705,3 +722,25 @@ time the flip with a `MutationObserver`, not a polling loop. See [`TESTING.md`](
 looking. `upgradeViewer()` holds the frame's centre, and for a placed view also its on-screen size
 (`prevImgW / res.w`) and the fraction of the picture at the frame's middle, so a swap changes only
 the pixels, never what the eye is tracking.
+
+### Tooltips are drawn by the script, not by the browser
+
+**`TIP_DELAY_MS` is the one value, and it exists because a native `title` has no scriptable delay.**
+Every hint used to be `el.title = '…'`, whose appearance timing belongs to the browser and the OS —
+about a second in Chrome, different in Firefox, and settable from neither CSS nor JS. Asked on
+2026-09-05 for tooltips that are consistent and quicker, the only honest answer was to stop using
+`title`: `setTip(el, text)` now replaces every one of them, and `TIP_DELAY_MS` (300 ms) is what all
+of them wait.
+
+- **`setTip()` removes the `title` attribute.** Leave it on and the browser draws its own tooltip a
+  second later, underneath ours.
+- **The tip is appended to the hovered element's OWN root**, found with `getRootNode()`. The viewer
+  and the settings panel are separate shadow roots with their own stacking; a tip drawn in the
+  viewer's root would sit behind the panel.
+- **It is styled inline**, so it needs no rule added to either root's stylesheet, and it carries
+  `pointer-events: none` so it cannot take the hover it is describing.
+- **It flips above the element when there is no room below**, and clamps to the viewport — the
+  Reset/Undo buttons sit on the panel's bottom edge, where a tip below would be off-screen.
+- **`hideTip()` is called from `hideViewer()` and the top of `onBoxDown`.** A capture listener on
+  `.box` calls `stopPropagation()`, so a `mousedown` on a non-control child never reaches that
+  child's own listener — the tip's self-teardown cannot be relied on there.
