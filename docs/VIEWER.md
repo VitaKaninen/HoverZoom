@@ -158,9 +158,38 @@ filename and leave the slider on the moving end.
 The wheel keeps `zoomAt()` (anchored on the pointer, `E22`) and `+`/`−`/`0` keep `zoomCentre()` —
 there is no on-screen control to hold still for either.
 
-**The slider is logarithmic.** Linear over 25 %–3200 % puts 100 % one pixel from the left end and
-the whole useful range is unreachable. `zoomPos()`/`zoomScaleAt()` are `log`/`pow` inverses over
-`zoomLo()`→`zoomHi()`; equal travel is equal multiplier, matching the wheel.
+**The slider steps through a ladder of round percentages — one slider step is one stop.** A linear
+track is useless (25 %–3200 % puts 100 % one pixel from the left end), and the log/pow mapping that
+replaced it — `zoomPos()`/`zoomScaleAt()`, v0.47.0–v0.51.0 — was right about the *spacing* and
+wrong about the *values*: it lands wherever the arithmetic falls, so zooming back in from the left
+end read 84 %, 90 %, 95 %, 101 % and 100 % was not on the track at all.
+
+`ZOOM_STEPS` is percent bands paired with the step used inside each — 2 below 100 %, 5 to 200 %, 10
+to 500 %, 25 to 1000 %, 50 to 2000 %, 100 to 5000 %, 200 above; 1 below 30 % and 0.5 below 10 % for
+a picture whose fit is tiny. `buildStops()` walks that into `[lo, …round values…, hi]`,
+`zoomStops()` caches it per `lo/hi` pair, and `zoomIndex()` finds the nearest stop by ratio so a
+wheeled or typed level parks the thumb sensibly. `syncZoom()` writes `max` from the stop count
+**before** the value, or the value clamps against the previous ladder's end.
+
+Three properties this leans on, none of them accidental:
+
+- **Every step divides its own band's ends**, so a boundary — 100 % above all — is a stop reached
+  from both sides. This is why the bands are 2/5/10/25/50/100 and not the 3/15 the request opened
+  with: 100 is not a multiple of 3, so a 3 % ladder can only hit it by anchoring to 25 %, which
+  breaks the moment `lo` is a fit scale instead.
+- **The ladder is still logarithmic to within a few percent of the track**, because each step is
+  2–5 % of its own value. 25 %→100 % takes 40 of the 143 stops at `maxZoom` 32× (28 % of the
+  track); the log mapping gave it 28.6 %. The feel is unchanged, which is the point.
+- **Stops are finer than the slider's pixels** — 143 over 100 px at 32×, 1.4 per pixel — so no
+  reachable value is lost to snapping, and every pixel of travel still moves the picture. It goes
+  the other way at small ceilings (0.6/px at `maxZoom` 2×) and that is fine: the steps there are
+  2 % and 5 %, and one pixel simply skips one.
+
+The ladder also fixes the arrow keys, which under the old track moved 1/1000 of the range — a
+change too small to see. One press is now one round stop.
+
+`lo` and `hi` are exact first and last entries, so the ends stay reachable: dragging fully left
+gives the fit scale itself, not a rounded near-fit.
 
 **Its low end is `min(0.25, fitScale)`, not the zoom floor.** `minScaleFor()` is ~0.4 % for a large
 picture, which would spend most of the track on sizes nobody wants; the fit is the natural

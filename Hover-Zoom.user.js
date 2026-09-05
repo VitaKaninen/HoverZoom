@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.51.0
+// @version     0.52.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -1320,11 +1320,14 @@
 
     // ------------------------------------------------------- the zoom control
 
-    const ZOOM_TRACK = 1000;    // slider steps; the mapping below is what gives them meaning
     const ZOOM_LO_CAP = 0.25;   // the low end asked for, when the picture's own fit is above it
 
-    // The slider spans fit-or-25% up to the ceiling, LOGARITHMICALLY: linear over 25%–6400% puts
-    // 100% one pixel from the left and the whole useful range is unreachable.
+    // Percent bands and the step used inside each; every step divides its band's own ends, so a
+    // band boundary — 100% above all — is a stop reached from both sides.
+    const ZOOM_STEPS = [[10, 0.5], [30, 1], [100, 2], [200, 5], [500, 10],
+                        [1000, 25], [2000, 50], [5000, 100], [Infinity, 200]];
+
+    // The slider spans fit-or-25% up to the ceiling.
     function zoomLo() {
         if (!view) return ZOOM_LO_CAP;
         return Math.max(0.01, Math.min(ZOOM_LO_CAP, view.fitScale));
@@ -1334,14 +1337,43 @@
         return Math.max(zoomLo() * 1.01, Math.min(cfg.maxZoom, MAX_SCALE_ABS));
     }
 
-    function zoomPos(scale) {
-        const lo = zoomLo(), hi = zoomHi();
-        return Math.max(0, Math.min(1, Math.log(scale / lo) / Math.log(hi / lo)));
+    function zoomStepAt(pct) {
+        for (let i = 0; i < ZOOM_STEPS.length; i++) if (pct < ZOOM_STEPS[i][0]) return ZOOM_STEPS[i][1];
+        return ZOOM_STEPS[ZOOM_STEPS.length - 1][1];
     }
 
-    function zoomScaleAt(pos) {
-        const lo = zoomLo(), hi = zoomHi();
-        return lo * Math.pow(hi / lo, Math.max(0, Math.min(1, pos)));
+    // The stops themselves: lo, every round value above it, then hi. One slider step is one stop.
+    function buildStops(lo, hi) {
+        const out = [lo], end = hi * 100;
+        let pct = lo * 100;
+        for (let guard = 0; guard < 4000; guard++) {
+            const step = zoomStepAt(pct + 1e-9);
+            const next = Math.floor(pct / step + 1e-9) * step + step;
+            if (next >= end - 1e-9) break;
+            out.push(next / 100);
+            pct = next;
+        }
+        out.push(hi);
+        return out;
+    }
+
+    let stopsKey = '', stopsArr = null;
+
+    function zoomStops() {
+        const lo = zoomLo(), hi = zoomHi(), key = lo + '/' + hi;
+        if (key !== stopsKey) { stopsKey = key; stopsArr = buildStops(lo, hi); }
+        return stopsArr;
+    }
+
+    // Which stop a scale sits on — nearest by ratio, so a wheeled or typed level parks sensibly.
+    function zoomIndex(scale) {
+        const stops = zoomStops(), last = stops.length - 1;
+        if (!(scale > stops[0])) return 0;
+        if (scale >= stops[last]) return last;
+        let i = 0;
+        while (i < last && stops[i + 1] <= scale) i++;
+        if (i < last && Math.log(stops[i + 1] / scale) < Math.log(scale / stops[i])) i++;
+        return i;
     }
 
     function fmtZoom(scale) {
@@ -1399,7 +1431,7 @@
         zsliderEl.className = 'zslider';
         zsliderEl.type = 'range';
         zsliderEl.min = '0';
-        zsliderEl.max = String(ZOOM_TRACK);
+        zsliderEl.max = '1';        // the real end is the stop count, written by syncZoom()
         zsliderEl.step = '1';
         zsliderEl.title = 'Drag to zoom';
         zsliderEl.addEventListener('mousedown', function (e) {
@@ -1410,7 +1442,8 @@
         zsliderEl.addEventListener('input', function () {
             if (!view) return;
             zoomDrag = true;
-            slideZoom(zoomScaleAt(Number(zsliderEl.value) / ZOOM_TRACK));
+            const stops = zoomStops();
+            slideZoom(stops[Math.max(0, Math.min(stops.length - 1, Number(zsliderEl.value)))]);
         });
         zsliderEl.addEventListener('change', function () {
             flushSlide();
@@ -1451,7 +1484,8 @@
         zoomWrapEl.hidden = !showVal;
         zctlEl.hidden = !placed && !showVal;
         zvalEl.textContent = fmtZoom(view.scale);
-        if (!zoomDrag) zsliderEl.value = String(Math.round(zoomPos(view.scale) * ZOOM_TRACK));
+        zsliderEl.max = String(zoomStops().length - 1);   // before the value, or the value clamps
+        if (!zoomDrag) zsliderEl.value = String(zoomIndex(view.scale));
     }
 
     function openZoomField() {

@@ -237,7 +237,8 @@ growth ceiling, and only a hand resize pins its edges** (`E22`, `E23`).
   first (`E11`), ▶ stop showing clips in this tab (`E27`), AA smooth-or-hard-pixels, a plain
   toggle (`E31`). Only the ⊘ opens a popover, **upward** out of the bar; a press anywhere else in
   the frame closes it.
-- **And a zoom cluster left of those buttons:** a 100 px logarithmic slider and the current level,
+- **And a zoom cluster left of those buttons:** a 100 px slider stepping through round zoom
+  percentages, and the current level,
   which is clickable and becomes a text field (`S20`, `S21`). Zooming from either **holds the
   frame's bottom-right corner still**, so the control does not run away from the pointer driving
   it (`E34`). The level shows on a hover preview too, but only when it is off its fit; the slider
@@ -295,8 +296,10 @@ picture follows or does not depending on what it was doing (`E23`).
   ⊘ reachable at any size (`E25`). No larger than the growth ceiling.
 
 #### S20 · dragging (zoom slider), placed
-Press on the slider in the status bar. Zoom follows the thumb, logarithmically, from the picture's
-fit (or 25 %, whichever is lower) up to `maxZoom`.
+Press on the slider in the status bar. Zoom follows the thumb from the picture's fit (or 25 %,
+whichever is lower) up to `maxZoom`. One slider step is one **round** percentage — 2 % apart below
+100 %, 5 % to 200 %, widening with the level (`ZOOM_STEPS`) — so 100 % and its neighbours are
+always on the track.
 - **The frame's bottom-right corner does not move** while it grows or shrinks; the picture zooms
   about the frame's centre (`E34`).
 - **The bar cannot fade while the drag is live**, even when the pointer wanders off it.
@@ -454,7 +457,7 @@ this table is a table.
 | Placed mode (`S10`–`S15`, `S19`) | `place`, `unplace`, `onPinKey`, `onPinWheel` |
 | Wheel zoom, both states (`T17`, `T22`, `T24`) | `enableWheelZoom`, `disableWheelZoom`, `onPinWheel` |
 | Geometry (`S12`, `E7`, `E21`, `E25`, `E26`) | `view`, `reflow`, `layout`, `zoomAt`, `pannable`, `viewportBox`, `growBox`, `clampPosition`, `fitScaleFor`, `minScaleFor`, `chrome`, `insetX`/`insetY`, `outerW`/`outerH` |
-| Zoom cluster (`S20`, `S21`, `E34`) | `buildZoomControl`, `syncZoom`, `openZoomField`, `closeZoomField`, `zoomAnchored`, `zoomPos`/`zoomScaleAt`, `zoomLo`/`zoomHi`, `parseZoom`, `capOwns`, `minFrameW` |
+| Zoom cluster (`S20`, `S21`, `E34`) | `buildZoomControl`, `syncZoom`, `openZoomField`, `closeZoomField`, `zoomAnchored`, `ZOOM_STEPS`/`buildStops`/`zoomStops`/`zoomIndex`, `zoomLo`/`zoomHi`, `parseZoom`, `capOwns`, `minFrameW` |
 | Upgrades (`S06`, `S15`) | `resolve`, `upgradeViewer` |
 
 Function names are used rather than line numbers, which rot.
