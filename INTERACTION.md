@@ -50,6 +50,8 @@ bottom.
 | `S14` | dragging (move), placed | transient | the held button |
 | `S15` | placed, upgrading | placed | nothing |
 | `S19` | dragging (resize), placed | transient | the held button |
+| `S20` | dragging (zoom slider), placed | transient | the held button |
+| `S21` | typing a zoom level, placed | placed | nothing |
 | `S16` | suppressed | gone | — |
 | `S17` | fading out | gone | — |
 
@@ -234,6 +236,12 @@ growth ceiling, and only a hand resize pins its edges** (`E22`, `E23`).
   first (`E11`), ▶ stop showing clips in this tab (`E27`), AA smooth-or-hard-pixels, a plain
   toggle (`E31`). Only the ⊘ opens a popover, **upward** out of the bar; a press anywhere else in
   the frame closes it.
+- **And a zoom cluster left of those buttons:** a 100 px logarithmic slider and the current level,
+  which is clickable and becomes a text field (`S20`, `S21`). Zooming from either **holds the
+  frame's bottom-right corner still**, so the control does not run away from the pointer driving
+  it (`E34`). The level shows on a hover preview too, but only when it is off its fit; the slider
+  is placed-only. **A placed frame is never narrower than 250 px**, because that is what the bar's
+  controls need.
 - **May hang off the edges of the screen** (`E21`), which is the point of the growth ceiling
   being above 1×: shoved aside or upwards, the picture still reaches the screen edges instead of
   leaving a strip of empty page behind it.
@@ -281,8 +289,27 @@ picture follows or does not depending on what it was doing (`E23`).
 - **Cursor:** `nwse-resize` / `nesw-resize` on a corner, `ew-resize` / `ns-resize` on an edge.
 - **Aspect:** free — drag the window to any shape you like. **Shift** locks it to the frame's
   shape as it was when the edge was grabbed (`E23`).
-- **Bounds:** no smaller than 48 px of picture — a 50 px window at the default border, which is
-  what keeps the ⊘ reachable at any size (`E25`) — and no larger than the growth ceiling.
+- **Bounds:** no shorter than 48 px and **no narrower than 250 px** — the width the status bar's
+  controls need (`E34`); at the default border that is a 252 × 50 window, which is what keeps the
+  ⊘ reachable at any size (`E25`). No larger than the growth ceiling.
+
+#### S20 · dragging (zoom slider), placed
+Press on the slider in the status bar. Zoom follows the thumb, logarithmically, from the picture's
+fit (or 25 %, whichever is lower) up to `maxZoom`.
+- **The frame's bottom-right corner does not move** while it grows or shrinks; the picture zooms
+  about the frame's centre (`E34`).
+- **The bar cannot fade while the drag is live**, even when the pointer wanders off it.
+- Below-fit and above-`maxZoom` levels are still reachable by wheel and by typing; the thumb just
+  sits at its end there.
+
+#### S21 · typing a zoom level, placed
+Click the level and it becomes a text field in the same slot.
+- **Accepts anything** — `200`, `200%`, `1,000%`. Out of range is clamped, not refused, and the
+  readout then shows what actually stuck.
+- **Enter** applies and closes; **Escape** closes without applying and does **not** close the
+  window; clicking away applies and closes.
+- The window's own keys are suspended while it is open, or `0`, `-` and Escape would be eaten by
+  the window instead of typed (`E34`).
 
 #### S15 · placed, upgrading
 Placing is a reason to keep looking, not to stop, so the search runs on.
@@ -409,6 +436,7 @@ this table is a table.
 | `E31` | Smoothing — the AA toggle, and why there are only two answers | [`docs/SETTINGS.md`](docs/SETTINGS.md) |
 | `E32` | A pan that runs out of picture continues as a window move | [`docs/VIEWER.md`](docs/VIEWER.md) |
 | `E33` | The settings panel is never modal, and who owns the keyboard and wheel | [`docs/SETTINGS.md`](docs/SETTINGS.md) |
+| `E34` | The status bar's zoom slider and level, and the bottom-right corner anchor that keeps them still | [`docs/VIEWER.md`](docs/VIEWER.md) |
 
 `E3` is retired with the detached state (v0.28.0); `E4` and `E5` are retired as dangling.
 
@@ -425,6 +453,7 @@ this table is a table.
 | Placed mode (`S10`–`S15`, `S19`) | `place`, `unplace`, `onPinKey`, `onPinWheel` |
 | Wheel zoom, both states (`T17`, `T22`, `T24`) | `enableWheelZoom`, `disableWheelZoom`, `onPinWheel` |
 | Geometry (`S12`, `E7`, `E21`, `E25`, `E26`) | `view`, `reflow`, `layout`, `zoomAt`, `pannable`, `viewportBox`, `growBox`, `clampPosition`, `fitScaleFor`, `minScaleFor`, `chrome`, `insetX`/`insetY`, `outerW`/`outerH` |
+| Zoom cluster (`S20`, `S21`, `E34`) | `buildZoomControl`, `syncZoom`, `openZoomField`, `closeZoomField`, `zoomAnchored`, `zoomPos`/`zoomScaleAt`, `zoomLo`/`zoomHi`, `parseZoom`, `capOwns`, `minFrameW` |
 | Upgrades (`S06`, `S15`) | `resolve`, `upgradeViewer` |
 
 Function names are used rather than line numbers, which rot.

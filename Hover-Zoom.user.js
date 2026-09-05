@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.46.0
+// @version     0.47.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -775,6 +775,7 @@
     let host = null, root = null, box = null, imgEl = null, vidEl = null, mediaEl = null;
     let dimEl = null;
     let capEl = null, capNameEl = null, capHintEl = null, capMetaEl = null, blockEl = null;
+    let zctlEl = null, zsliderEl = null, zoomWrapEl = null, zvalEl = null, zinEl = null;
     let vidOffEl = null;        // "stop showing clips", only while the frame IS one
     let aaEl = null;            // smoothing, toggled between its two answers
     let blockPopEl = null;
@@ -903,6 +904,23 @@
             '.cap .block:hover{background:#f38ba8;border-color:#f38ba8;color:#1e1e2e}',
             '.cap .vidoff:hover{background:#f9e2af;border-color:#f9e2af;color:#1e1e2e}',
             '.cap .aa:hover{background:#89b4fa;border-color:#89b4fa;color:#1e1e2e}',
+
+            // ---- the zoom cluster: slider, then the readout that opens a field
+            '.cap .zctl{flex:none;display:flex;align-items:center;gap:6px}',
+            '.cap .zctl[hidden]{display:none}',
+            '.cap .zslider{flex:0 1 100px;min-width:60px;height:14px;margin:0;padding:0;',
+            'accent-color:#89b4fa;cursor:pointer}',
+            '.cap .zslider[hidden]{display:none}',
+            '.cap .zoom{flex:none;position:relative;display:flex;align-items:center;',
+            'justify-content:flex-end;width:52px;height:16px}',
+            '.cap .zoom[hidden]{display:none}',
+            '.cap .zval{cursor:pointer;padding:0 3px;border-radius:3px;white-space:nowrap}',
+            '.cap .zval[hidden]{display:none}',
+            '.box.hot .cap .zval:hover{background:#313244;color:#cdd6f4}',
+            '.cap .zin{width:100%;box-sizing:border-box;padding:0 3px;text-align:right;',
+            'font:11px/16px system-ui,sans-serif;color:#cdd6f4;background:#313244;',
+            'border:1px solid #89b4fa;border-radius:3px;outline:none}',
+            '.cap .zin[hidden]{display:none}',
             '.pop{position:absolute;right:8px;bottom:' + (BAR_MIN_H + 4) + 'px;display:none;',
             'z-index:4;max-width:250px;background:rgba(30,30,46,.98);border:1px solid #45475a;',
             'border-radius:6px;overflow:hidden;box-shadow:0 6px 20px rgba(0,0,0,.55);',
@@ -989,9 +1007,12 @@
         aaEl.addEventListener('mousedown', function (e) { e.preventDefault(); e.stopPropagation(); }, true);
         aaEl.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); toggleSmoothing(); }, true);
 
+        buildZoomControl();
+
         capEl.appendChild(capNameEl);
         capEl.appendChild(capHintEl);
         capEl.appendChild(capMetaEl);
+        capEl.appendChild(zctlEl);
         capEl.appendChild(blockEl);
         capEl.appendChild(vidOffEl);
         capEl.appendChild(aaEl);
@@ -1057,6 +1078,12 @@
     const EDGE_GAP = 4;
 
     const MIN_FRAME = 48;
+    const MIN_FRAME_BAR_W = 250;    // narrower than this and the bar's controls have nowhere to go
+
+    // Only a PLACED window carries controls, so only a placed one owes them room.
+    function minFrameW() {
+        return placed && cfg.showStatusBar ? MIN_FRAME_BAR_W : MIN_FRAME;
+    }
 
     function chrome() {
         return Math.max(0, Math.min(80, cfg.frameMargin | 0));
@@ -1126,8 +1153,9 @@
         const g = growBox();
         view.imgW = view.natW * view.scale;
         view.imgH = view.natH * view.scale;
+        const mw = Math.min(minFrameW(), g.w);
         view.frameW = Math.round(view.fixedW != null ? view.fixedW
-            : Math.max(MIN_FRAME, Math.min(view.imgW, g.w)));
+            : Math.max(mw, Math.min(view.imgW, g.w)));
         view.frameH = Math.round(view.fixedH != null ? view.fixedH
             : Math.max(MIN_FRAME, Math.min(view.imgH, g.h)));
         view.ox = view.imgW <= view.frameW
@@ -1265,10 +1293,145 @@
         parts.push(view.natW + ' × ' + view.natH);
         const bytes = transferBytes(view.url);
         if (bytes) parts.push(humanBytes(bytes));
-        if (placed || Math.abs(view.scale - view.fitScale) > 1e-6) {
-            parts.push(Math.round(view.scale * 100) + '%');
-        }
         capMetaEl.textContent = parts.join('  ·  ');
+        syncZoom();
+    }
+
+    // ------------------------------------------------------- the zoom control
+
+    const ZOOM_TRACK = 1000;    // slider steps; the mapping below is what gives them meaning
+    const ZOOM_LO_CAP = 0.25;   // the low end asked for, when the picture's own fit is above it
+
+    // The slider spans fit-or-25% up to the ceiling, LOGARITHMICALLY: linear over 25%–6400% puts
+    // 100% one pixel from the left and the whole useful range is unreachable.
+    function zoomLo() {
+        if (!view) return ZOOM_LO_CAP;
+        return Math.max(0.01, Math.min(ZOOM_LO_CAP, view.fitScale));
+    }
+
+    function zoomHi() {
+        return Math.max(zoomLo() * 1.01, Math.min(cfg.maxZoom, MAX_SCALE_ABS));
+    }
+
+    function zoomPos(scale) {
+        const lo = zoomLo(), hi = zoomHi();
+        return Math.max(0, Math.min(1, Math.log(scale / lo) / Math.log(hi / lo)));
+    }
+
+    function zoomScaleAt(pos) {
+        const lo = zoomLo(), hi = zoomHi();
+        return lo * Math.pow(hi / lo, Math.max(0, Math.min(1, pos)));
+    }
+
+    function fmtZoom(scale) {
+        const pct = scale * 100;
+        const s = pct < 10 ? pct.toFixed(1) : String(Math.round(pct));
+        return s.replace(/\B(?=(\d{3})+(?!\d))/g, ',') + '%';
+    }
+
+    // Anything goes in: "200", "200%", "1,000%". Out of range is clamped, not rejected.
+    function parseZoom(text) {
+        const n = parseFloat(String(text).replace(/[,\s%]/g, ''));
+        return isFinite(n) && n > 0 ? n / 100 : NaN;
+    }
+
+    let zoomDrag = false;
+
+    // The bar must not fade out from under a slider drag or an open field.
+    function zoomBusy() {
+        return zoomDrag || !!(zinEl && !zinEl.hidden);
+    }
+
+    function buildZoomControl() {
+        zctlEl = document.createElement('div');
+        zctlEl.className = 'zctl';
+
+        zsliderEl = document.createElement('input');
+        zsliderEl.className = 'zslider';
+        zsliderEl.type = 'range';
+        zsliderEl.min = '0';
+        zsliderEl.max = String(ZOOM_TRACK);
+        zsliderEl.step = '1';
+        zsliderEl.title = 'Drag to zoom';
+        zsliderEl.addEventListener('mousedown', function (e) {
+            e.stopPropagation();
+            zoomDrag = true;
+            showBar();
+        }, true);
+        zsliderEl.addEventListener('input', function () {
+            if (!view) return;
+            zoomDrag = true;
+            zoomAnchored(zoomScaleAt(Number(zsliderEl.value) / ZOOM_TRACK));
+        });
+        zsliderEl.addEventListener('change', function () {
+            zoomDrag = false;
+            syncZoom();
+            showBar();
+        });
+
+        zoomWrapEl = document.createElement('span');
+        zoomWrapEl.className = 'zoom';
+        zvalEl = document.createElement('span');
+        zvalEl.className = 'zval';
+        zvalEl.title = 'Click to type a zoom level';
+        zinEl = document.createElement('input');
+        zinEl.className = 'zin';
+        zinEl.type = 'text';
+        zinEl.spellcheck = false;
+        zinEl.hidden = true;
+        zvalEl.addEventListener('mousedown', function (e) {
+            e.preventDefault(); e.stopPropagation();
+        }, true);
+        zvalEl.addEventListener('click', function (e) {
+            e.preventDefault(); e.stopPropagation(); openZoomField();
+        }, true);
+        zinEl.addEventListener('mousedown', function (e) { e.stopPropagation(); }, true);
+        zinEl.addEventListener('blur', function () { closeZoomField(true); });
+        zoomWrapEl.appendChild(zvalEl);
+        zoomWrapEl.appendChild(zinEl);
+
+        zctlEl.appendChild(zsliderEl);
+        zctlEl.appendChild(zoomWrapEl);
+    }
+
+    function syncZoom() {
+        if (!zctlEl || !view) return;
+        const showVal = placed || Math.abs(view.scale - view.fitScale) > 1e-6;
+        zsliderEl.hidden = !placed;
+        zoomWrapEl.hidden = !showVal;
+        zctlEl.hidden = !placed && !showVal;
+        zvalEl.textContent = fmtZoom(view.scale);
+        if (!zoomDrag) zsliderEl.value = String(Math.round(zoomPos(view.scale) * ZOOM_TRACK));
+    }
+
+    function openZoomField() {
+        if (!view || !zinEl || !zinEl.hidden) return;
+        zinEl.value = String(Math.round(view.scale * 100));
+        zvalEl.hidden = true;
+        zinEl.hidden = false;
+        showBar();
+        zinEl.focus();
+        zinEl.select();
+    }
+
+    function closeZoomField(apply) {
+        if (!zinEl || zinEl.hidden) return;
+        const text = zinEl.value;
+        zinEl.hidden = true;
+        zvalEl.hidden = false;
+        if (apply && view) {
+            const s = parseZoom(text);
+            if (!isNaN(s)) zoomAnchored(s);     // clamped in there; the readout shows what stuck
+        }
+        syncZoom();
+        showBar();
+    }
+
+    function resetZoomControl() {
+        zoomDrag = false;
+        if (!zinEl) return;
+        zinEl.hidden = true;
+        if (zvalEl) zvalEl.hidden = false;
     }
 
     const BAR_SHOW_MS = 120;
@@ -1318,7 +1481,7 @@
 
     // Should it be up right now, asked only where there is no timer to ask it later.
     function barWanted() {
-        return pointerOverChrome() || popOpen() || !!drag;
+        return pointerOverChrome() || popOpen() || !!drag || zoomBusy();
     }
 
     // The class lives on the BOX, not on the bar. `nobar` kills the transition as well, or the
@@ -1441,12 +1604,16 @@
         if (spinDocked) moveSpinner();      // the dock rides with the frame
     }
 
+    function clampScale(s) {
+        const lo = minScaleFor(view.natW, view.natH);
+        const hi = Math.max(lo, Math.min(cfg.maxZoom, MAX_SCALE_ABS));
+        return Math.max(lo, Math.min(hi, s));
+    }
+
     // Zoom about a point given in SCREEN coordinates, keeping whatever pixel of the image sits under it there afterwards.
     function zoomAt(nextScale, screenX, screenY) {
         if (!view) return;
-        const lo = minScaleFor(view.natW, view.natH);
-        const hi = Math.max(lo, Math.min(cfg.maxZoom, MAX_SCALE_ABS));
-        nextScale = Math.max(lo, Math.min(hi, nextScale));
+        nextScale = clampScale(nextScale);
         if (Math.abs(nextScale - view.scale) < 1e-6) return;
 
         const ax = Math.max(0, Math.min(view.frameW, screenX - (view.left + insetX())));
@@ -1468,6 +1635,25 @@
         view.ox = ax2 - ix * nextScale;
         view.oy = ay2 - iy * nextScale;
         reflow();                       // clamp the offsets; frame size is already settled
+        layout();
+    }
+
+    // Zoom with the frame's bottom-right corner nailed in place, so the bar's own controls do not
+    // move under the pointer driving them; the picture still zooms about the frame's centre.
+    function zoomAnchored(nextScale) {
+        if (!view) return;
+        nextScale = clampScale(nextScale);
+        if (Math.abs(nextScale - view.scale) < 1e-6) return;
+        const rx = view.left + view.frameW, by = view.top + view.frameH;
+        const cx = (view.frameW / 2 - view.ox) / view.scale;
+        const cy = (view.frameH / 2 - view.oy) / view.scale;
+        view.scale = nextScale;
+        reflow();
+        view.left = rx - view.frameW;
+        view.top = by - view.frameH;
+        view.ox = view.frameW / 2 - cx * nextScale;
+        view.oy = view.frameH / 2 - cy * nextScale;
+        reflow();
         layout();
     }
 
@@ -1666,6 +1852,7 @@
     function hideViewer() {
         if (!box) return;
         closePops();
+        resetZoomControl();
         box.classList.remove('on', 'hot', 'pan', 'drag');
         box.style.cursor = '';      // onMove writes this inline over the bands; see hitRegion
         if (gripEl) { gripEl.classList.remove('hot'); gripEl.style.cursor = ''; }
@@ -1723,6 +1910,7 @@
         CAP_TARGET.addEventListener('keydown', onPinKey, true);
         // The wheel becomes the window's only now — see enableWheelZoom.
         enableWheelZoom();
+        reflow();       // the controls appear with `placed`, and minFrameW() grows with them
         layout();
     }
 
@@ -1740,7 +1928,7 @@
     // Controls that live INSIDE the box.
     function isBoxControl(t) {
         return blockEl.contains(t) || vidOffEl.contains(t) || aaEl.contains(t) ||
-            blockPopEl.contains(t);
+            blockPopEl.contains(t) || zctlEl.contains(t);
     }
 
     // ---- the popover the ⊘ opens
@@ -1888,7 +2076,7 @@
             else if (Math.abs(w - drag.w0) >= Math.abs(h - drag.h0)) h = w / drag.aspect;
             else w = h * drag.aspect;
         }
-        w = Math.max(MIN_FRAME, Math.min(w, g.w));
+        w = Math.max(Math.min(minFrameW(), g.w), Math.min(w, g.w));
         h = Math.max(MIN_FRAME, Math.min(h, g.h));
         if (drag.ex === 'l') view.left = drag.l0 + (drag.w0 - w);
         else if (!drag.ex) view.left = drag.l0 - (w - drag.w0) / 2;
@@ -1910,9 +2098,33 @@
         return e.composedPath().indexOf(panelHost) !== -1;
     }
 
+    // The zoom field is a text box and the slider answers the arrows: while either has the focus,
+    // the window's own keys are not the window's.
+    const SLIDER_KEYS = {
+        ArrowLeft: 1, ArrowRight: 1, ArrowUp: 1, ArrowDown: 1,
+        Home: 1, End: 1, PageUp: 1, PageDown: 1,
+    };
+
+    function capOwns(e) {
+        if (!e || !e.composedPath) return false;
+        const path = e.composedPath();
+        if (zinEl && !zinEl.hidden && path.indexOf(zinEl) !== -1) return true;
+        return !!zsliderEl && !!SLIDER_KEYS[e.key] && path.indexOf(zsliderEl) !== -1;
+    }
+
     function onPinKey(e) {
         if (!placed || !view) return;
         if (panelOwns(e)) return;
+        if (capOwns(e)) {
+            // Escape and Enter never reach the field: onPinKey is capture on `window`, and the
+            // document-level Escape below it would cancel the whole preview.
+            if (zinEl && !zinEl.hidden && (e.key === 'Escape' || e.key === 'Enter')) {
+                closeZoomField(e.key === 'Enter');
+                e.preventDefault();
+                e.stopPropagation();
+            }
+            return;
+        }
         // The panel is the window on top, so Escape is ITS exit before it is this one's —
         // wherever the focus happens to be. One press must not close both.
         if (e.key === 'Escape' && panelHost) return;
@@ -3078,7 +3290,10 @@
             'Drag the frame around the image, or its status bar, to move the window; drag an ' +
             'edge or a corner to resize it, holding Shift to keep its shape. The wheel grows the ' +
             'whole window until you resize it by hand, after which it zooms the image inside ' +
-            'the frame instead. Arrow keys pan, + and − zoom, 0 fits.');
+            'the frame instead. Arrow keys pan, + and − zoom, 0 fits. The status bar carries a ' +
+            'zoom slider and the current level; click the level to type an exact one. Zooming ' +
+            'from either of those holds the window’s bottom-right corner still, so the controls ' +
+            'stay under the pointer.');
         para('Saving a copy.',
             'Right-click a pinned preview and you get the browser’s own menu — Save image ' +
             'as…, Copy image, Copy image address, Open image in new tab — all of them acting ' +

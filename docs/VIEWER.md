@@ -48,7 +48,7 @@ the bottom", so the size cap, the opening position and `clampPosition()` cannot 
 
 | `view.fixedW` | set by | `frameW` |
 |---|---|---|
-| `null` | nothing yet | `max(MIN_FRAME, min(imgW, growBox().w))` — follows the picture to the ceiling |
+| `null` | nothing yet | `max(minFrameW(), min(imgW, growBox().w))` — follows the picture to the ceiling |
 | a number | `resizeBy()`, i.e. a **hand resize** | `fixedW` — pinned, whatever the picture does inside |
 
 **Nothing else pins the size. Not placing, not moving.** v0.29.0–v0.33.0 froze it on the move; that
@@ -117,6 +117,55 @@ states.
 A **hover** preview is deliberately not free: it is positioned by the script, so it stays fully on
 screen while it fits, and is only stopped from sliding a gap in at an edge once grown past the
 window.
+
+### The zoom cluster, and the corner anchor that makes it usable · `E34`
+
+The bar carries a slider and the zoom level, in that order, immediately left of the ⊘/AA/▶
+buttons. Clicking the level swaps it for a text field in the same 52 px slot.
+
+**The problem the anchor solves:** the frame follows the picture, so a control living on the frame
+runs away from the pointer driving it. `zoomAnchored()` nails the frame's **bottom-right** corner —
+`view.left`/`view.top` are recomputed from `right`/`bottom` after `reflow()` — while the picture
+still zooms about the frame's centre. Those are two separate anchors and `zoomAt()` couples them,
+which is why this is its own function rather than a call with corner coordinates.
+
+**Bottom-right and not bottom-left**, because `.cap` is `name{flex:1}` then `meta`, with the
+buttons `position:absolute; right:N`. Everything except the filename is already pinned to the right
+edge, so a bottom-right anchor freezes the whole cluster; a bottom-left one would freeze only the
+filename and leave the slider on the moving end.
+
+The wheel keeps `zoomAt()` (anchored on the pointer, `E22`) and `+`/`−`/`0` keep `zoomCentre()` —
+there is no on-screen control to hold still for either.
+
+**The slider is logarithmic.** Linear over 25 %–3200 % puts 100 % one pixel from the left end and
+the whole useful range is unreachable. `zoomPos()`/`zoomScaleAt()` are `log`/`pow` inverses over
+`zoomLo()`→`zoomHi()`; equal travel is equal multiplier, matching the wheel.
+
+**Its low end is `min(0.25, fitScale)`, not the zoom floor.** `minScaleFor()` is ~0.4 % for a large
+picture, which would spend most of the track on sizes nobody wants; the fit is the natural
+zoomed-all-the-way-out point. Below-fit scales are still reachable by wheel and by typing, and the
+thumb simply clamps to the left end there. The high end is `min(cfg.maxZoom, MAX_SCALE_ABS)`.
+
+**Nothing restricts what may be typed.** `parseZoom()` strips commas, spaces and `%`; `clampScale()`
+does the rest, and the readout then shows what actually stuck, so a clamp is visible rather than
+mysterious.
+
+**`MIN_FRAME_BAR_W` (250) applies only while placed**, via `minFrameW()` — a hover preview has no
+controls and owes them no room. `place()` therefore calls `reflow()` before `layout()`, or a small
+window pinned would keep its old width until something else happened to reflow it.
+
+Four things this walks into, each silent:
+
+- **`isBoxControl()` must list `zctlEl`** — `onBoxDown`/`onBoxClick` are capture listeners on the
+  box and eat a child's events first.
+- **`onPinKey` is capture on `window`, so it sees the field's keys first.** `capOwns()` stands
+  aside for the field, and for the arrow/Home/End/PageUp-Down set while the slider has focus. It
+  must also *handle* Escape and Enter rather than passing them: the document-level Escape listener
+  below it cancels the whole preview.
+- **`barWanted()` needs `zoomBusy()`** — a slider drag legitimately leaves the bar vertically, and
+  a faded bar is `pointer-events:none`.
+- **Every `[hidden]` here needs its own `display:none`** (`.zctl`, `.zoom`, `.zval`, `.zin`,
+  `.zslider`), for the reason in the project `CLAUDE.md`.
 
 **A hint on the bar says what a press does.** `capHintEl` — *(click this window to pin it)* — sits
 between filename and metadata; `.box.placed .cap .hint{display:none}` drops it once placed. It is
@@ -269,10 +318,11 @@ minimum window. Overlaying costs nothing and needs no minimum beyond what the �
   them: they replaced ~15 copies of `view.frameW + cfg.borderWidth * 2`, the expression most likely
   to be half-updated.
 
-**Minimum window is 48 px of picture — 50 px at the default border.** `MIN_FRAME` is applied in
-`reflow()` (bounding the opening size and the wheel) **and** in `resizeBy()` (bounding a hand
-resize); both are needed. Without it, `minDisplayed: 0` on a page of tiny pictures produced previews
-a few pixels across.
+**Minimum window is 48 px of picture, and 250 px wide once placed** (`minFrameW()`, see the zoom
+cluster above) — 50 px and 252 px at the default border. Both are applied in `reflow()` (bounding
+the opening size and the wheel) **and** in `resizeBy()` (bounding a hand resize); both places are
+needed. Without a floor, `minDisplayed: 0` on a page of tiny pictures produced previews a few pixels
+across.
 
 **The ⊘ is absolutely positioned, 20 px in from the right edge.** As a flex item after a `flex:none`
 dimensions field it was pushed past the end and clipped — invisible on exactly the previews where it
