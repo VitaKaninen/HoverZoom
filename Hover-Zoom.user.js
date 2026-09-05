@@ -15,11 +15,6 @@
 // @updateURL   https://raw.githubusercontent.com/VitaKaninen/HoverZoom/master/Hover-Zoom.user.js
 // ==/UserScript==
 
-// @noframes was previously written as `@noframes false`, which does NOT disable it —
-// Tampermonkey treats the tag as a presence flag and ignores the value, so that line was
-// switching frames OFF while reading as if it left them on. Removed rather than corrected:
-// this script is meant to run in subframes.
-
 /*
  * Design note — why this does no DOM scanning.
  *
@@ -51,15 +46,7 @@
         minRatio: 1.2,              // full size must be at least this much bigger
         showEvenIfNotLarger: false, // show at natural size even when it isn't an upgrade
         previewVideos: false,       // preview video THUMBNAILS and player surfaces too. Off by
-                                    // default: pointing at a video is nearly always aiming to
-                                    // play it. Says nothing about gifs — a short muted clip
-                                    // already playing with no controls is an animated picture
-                                    // and previews either way, see gifLike()
         skipFurniture: true,        // never preview the page's own furniture: its background, a
-                                    // tiled or fixed one, a full-width band, one the page's own
-                                    // text sits on, the banner across the top, and anything the
-                                    // page itself marks as decoration (aria-hidden,
-                                    // role=presentation). One switch because they are one idea
         siteMode: 'blacklist',      // 'blacklist' | 'whitelist'
         siteList: [],               // hostnames, matched by suffix
         blockList: [],              // image URLs never to preview; '*' matches anything
@@ -72,9 +59,6 @@
 
         // how to display
         maxSizeMultiple: 2,         // how far the frame may GROW, as a multiple of the window.
-                                    // Above 1 on purpose: a frame bigger than the window can be
-                                    // shoved aside or upwards and still reach the screen edges,
-                                    // so it never leaves a strip of empty page behind it
         zoomFactor: 1.0,            // scale applied to natural size before clamping
         position: 'cursor',         // 'cursor' | 'center'
         cursorGap: 24,              // px between pointer and frame edge
@@ -83,10 +67,6 @@
         borderColor: '#45475a',
         cornerRadius: 6,
         frameMargin: 24,            // px of frame drawn ON TOP of the picture, on all four
-                                    // sides, the way the status bar always was. It is a move
-                                    // handle: the middle pans, the edge resizes, this ring
-                                    // moves the window at any zoom. It fades with the bar, and
-                                    // stops being a handle while faded. 0 leaves only the bar
         shadow: true,
         showStatusBar: true,        // filename / type / size / dimensions strip, also the move handle; auto-fades
         spinnerTheme: 'auto',       // 'auto' (follows the browser) | 'dark' | 'light'
@@ -97,45 +77,16 @@
 
     const KEY = 'hoverZoomSettings';
 
-    // Settings that no longer exist are DELETED on read, not merely ignored. cfg is
-    // DEFAULTS merged with what is stored and the whole object is written back on Save, so
-    // a retired key survives every save forever and reappears the moment someone greps for
-    // it. maxWidthPct/maxHeightPct do not convert into maxSizeMultiple — the old pair capped
-    // the size a preview OPENED at (below the window), the new one caps how far it may GROW
-    // (above it), so they do not measure the same thing and there is no honest arithmetic
-    // between them. A preview now opens filling the window instead of 92% of it.
-    //
-    // THIS MUST BE DECLARED BEFORE `cfg`, and the reason is worth keeping. `readSettings()` is
-    // a hoisted function declaration, so the `cfg` initialiser below could call it while
-    // `const RETIRED` was still in its temporal dead zone — reading it threw a ReferenceError,
-    // the catch below swallowed it, and readSettings() returned {} on EVERY page load. Stored
-    // settings then took effect only after something called reloadSettings() (opening the
-    // panel, or another tab writing), so the script ran on defaults until the user opened
-    // its settings. Shipped broken in v0.28.0, found in v0.33.0 while testing a menu label
-    // that would not follow the stored site mode.
-    //
-    // v0.39.0 retired seven switches that had only one sane answer, and the reason is the
-    // same for all of them: a setting nobody can decide from its own label is not a choice,
-    // it is a thing the script should get right. sameShapeOnly, keepSearching, followLinks,
-    // hoverThroughOverlays and skipWhileMouseDown are now unconditional; skipVideos was
-    // INVERTED into previewVideos, and skipBanners/skipDecorative folded into skipFurniture.
-    // playVideos left the stored settings entirely — it is a per-tab session flag now, turned
-    // off from the preview's own status bar, because whether a clip is wanted is a judgement
-    // about the picture in front of you rather than a standing preference.
     const RETIRED = ['maxWidthPct', 'maxHeightPct', 'dimOpacity', 'bottomReserve',
         'sameShapeOnly', 'keepSearching', 'followLinks', 'hoverThroughOverlays',
         'skipWhileMouseDown', 'playVideos', 'skipVideos', 'skipPageBackgrounds',
         'skipBanners', 'skipDecorative'];
 
-    // The two retirements that DO convert. Both are read before RETIRED deletes the old key,
-    // and both are skipped if the new key is already stored, so this is idempotent — it has
-    // to be, since the whole object is written back on every Save.
+    // The two retirements that DO convert.
     function migrate(o) {
         if (o.previewVideos === undefined && o.skipVideos !== undefined) {
             o.previewVideos = !o.skipVideos;
         }
-        // Three furniture switches collapsed into one. Only the page-background key carries
-        // over: it is the one that was ever plausibly turned off on purpose.
         if (o.skipFurniture === undefined && o.skipPageBackgrounds !== undefined) {
             o.skipFurniture = !!o.skipPageBackgrounds;
         }
@@ -149,9 +100,6 @@
             RETIRED.forEach(function (k) { delete o[k]; });
             return o;
         } catch (e) {
-            // Corrupt stored JSON is a real possibility and defaults are the right answer to
-            // it. A programming error reaching here is NOT, and silence is what let the bug
-            // above live for five versions — dbg() cannot be used, since cfg does not exist yet.
             try { console.warn('[Hover Zoom] settings could not be read, using defaults:', e); }
             catch (e2) { /* no console */ }
             return {};
@@ -160,23 +108,13 @@
 
     let cfg = Object.assign({}, DEFAULTS, readSettings());
 
-    // NOT a stored setting, and that is the point. "May the preview be a clip rather than a
-    // still" is a judgement about the thing currently on screen — some animated posts have no
-    // image form at all, so the answer is usually yes, and the times it is no are one page,
-    // one session. So it starts on, is turned off from the ▶ button in the preview's own
-    // status bar, and resets on reload. Nothing writes it to storage.
     let playVideos = true;
 
     function saveSettings() {
         GM_setValue(KEY, JSON.stringify(cfg));
     }
 
-    // Every tab holds its own `cfg`, read once at load. Without these two, a tab that has
-    // been open a while is editing a stale snapshot: the panel renders old values, and
-    // saving writes that whole snapshot back, silently reverting anything changed in
-    // another tab since. reloadSettings() before rendering the panel is the fix that
-    // always works; the change listener is the better one where the manager provides it,
-    // because it also keeps the *running* script current, not just the panel.
+    // Every tab holds its own `cfg`, read once at load.
     function reloadSettings() {
         cfg = Object.assign({}, DEFAULTS, readSettings());
         return cfg;
@@ -210,13 +148,6 @@
         return cfg.siteMode === 'whitelist' ? siteListed() : !siteListed();
     }
 
-    // ----------------------------------------------------- the manager's menu
-    //
-    // One command, whose label is the ACTION rather than the mode — "Enable for this site"
-    // when pressing it would enable, "Disable for this site" when it would disable — because
-    // the two site modes invert what being on the list means and a fixed label would be wrong
-    // in one of them. It saves opening the panel and scrolling to the site list for what is
-    // the most common single change there is.
     let siteMenuId = null;
 
     function siteMenuLabel() {
@@ -224,9 +155,7 @@
         return on ? 'Disable for this site' : 'Enable for this site';
     }
 
-    // Re-registering is how the label is kept honest, so a manager without
-    // GM_unregisterMenuCommand gets the label it had at load rather than a second entry
-    // stacked under the first.
+    // Re-registering is how the label is kept honest.
     function refreshSiteMenu() {
         if (typeof GM_registerMenuCommand !== 'function') return;
         if (siteMenuId != null) {
@@ -239,15 +168,10 @@
         } catch (e) { /* nothing to fall back to; the panel still has the list */ }
     }
 
-    // reloadSettings() first for the same reason blockCurrent() does it: the site list is
-    // written from outside the panel, so a stale cfg here would silently drop another tab's
-    // entries when the whole object is written back.
+    // reloadSettings() first for the same reason blockCurrent() does it.
     function toggleSite() {
         reloadSettings();
         const host = location.hostname.toLowerCase();
-        // Remove EVERY entry that covers this host, not just an exact match — otherwise
-        // "disable for this site" on www.example.com would leave example.com listed and the
-        // menu would report that nothing had changed.
         const kept = cfg.siteList.filter(function (entry) { return !entryCovers(entry, host); });
         if (kept.length === cfg.siteList.length) kept.push(host);
         cfg.siteList = kept;
@@ -256,14 +180,6 @@
         if (!siteEnabled()) cancel();
         dbg('site toggled', { host: host, list: cfg.siteList, enabledHere: siteEnabled() });
     }
-
-    // ------------------------------------------------------------------- debug
-    //
-    // Off by default and completely silent when off. It exists for the one class of bug
-    // this script cannot reason about from the source: "it behaves differently in my
-    // browser than in yours". Every gate here is a DOM read, so only the DOM in front of
-    // the user can say which one did or did not fire — and the answer to "is the installed
-    // copy even the current one" is the first line it prints.
 
     function version() {
         try {
@@ -286,8 +202,7 @@
 
     // ------------------------------------------------------------- url helpers
 
-    // Parse a srcset into candidates sorted widest first. Handles both w and x
-    // descriptors, and URLs containing commas (data: URIs, CDN transform paths).
+    // Parse a srcset into candidates sorted widest first.
     function parseSrcset(srcset) {
         const out = [];
         let i = 0;
@@ -314,11 +229,6 @@
 
     const MEDIA_RE = /\.(avif|bmp|gif|heic|heif|ico|jfif|jpe|jpeg|jpg|jxl|png|svg|tif|tiff|webp)(?=$|[?#])/i;
 
-    // The moving originals. Deliberately a SEPARATE list from MEDIA_RE rather than an
-    // addition to it, because the two answer different questions: MEDIA_RE asks "is this a
-    // picture", this asks "does the frame need a <video> rather than an <img> to show it".
-    // Every candidate goes through one or the other, and which one decides how it is
-    // measured and which face of the viewer displays it.
     const VIDEO_EXT_RE = /\.(mp4|m4v|webm|mov|ogv)(?=$|[?#])/i;
 
     function isVideoUrl(url) {
@@ -338,11 +248,6 @@
         }
     }
 
-    // Viewer, redirect and proxy links carry the real image URL as a query parameter:
-    // Google Images' /imgres?imgurl=…, share endpoints, CMS lightboxes, image proxies.
-    // The href itself is an HTML page, so looksLikeImage() rejects it and the original is
-    // never seen. Nothing here names a host — it is the generic form of the trick HZ+'s
-    // Google plugin does with its `a[href*="imgurl="]` selector.
     const THUMB_PARAM = /(?:^|[_-])(?:thumb|thumbnail|tn|small|preview|icon|avatar)(?:$|[_-])/i;
 
     function linkParamCandidates(href) {
@@ -357,14 +262,7 @@
         return out;
     }
 
-    // Images the user has said never to preview: a page's tiled wallpaper, a watermark, a
-    // sprite sheet, anything that keeps popping a preview nobody asked for. An entry is an
-    // exact URL, or a glob when it contains '*' — which is what a background carrying a
-    // cache-busting query needs, since its URL is never twice the same.
-    //
-    // Pure, and deliberately inside the slice test-resolver.js evaluates, so the matching
-    // can be exercised offline like the URL rules. A wrong match here is silent: the image
-    // simply stops previewing, with nothing on screen to say why.
+    // Images the user has said never to preview.
     function blockMatch(url, list) {
         if (!url || !list || !list.length) return false;
         for (let i = 0; i < list.length; i++) {
@@ -383,11 +281,6 @@
     }
 
     // Site-agnostic rewrites that turn a thumbnail URL into its original.
-    // Each returns a new URL string, or null when it doesn't apply.
-    // The post id inside an i.imgur.com path, or null. Both imgur rules below need it and
-    // the restraint documented on the first one is the entire safety of the pair, so it is
-    // written once: a second copy is a second place for the "leave a bare id alone" bound to
-    // be got wrong, and getting it wrong shows the WRONG PICTURE rather than none.
     function imgurId(u) {
         if (!/(^|\.)imgur\.com$/.test(u.hostname)) return null;
         const m = u.pathname.match(/^\/([A-Za-z0-9]+(?:_d)?)(\.[a-z0-9]+)$/);
@@ -399,76 +292,17 @@
     }
 
     const UPGRADES = [
-        // Imgur, the MOVING original — before the still rule below, and the order is the
-        // whole point. For a video post the two candidates have IDENTICAL pixel dimensions,
-        // and resolve() only replaces a hit with something strictly bigger, so whichever is
-        // probed first is what you get. Measured 2026-09-03, both ids live:
-        //
-        //   EDiKb3d.jpg  image/jpeg   36 KB  480×854   a STILL FRAME
-        //   EDiKb3d.mp4  video/mp4   2.6 MB  480×854   10.85 s — the actual post
-        //   T22ZUhZ.jpg  image/gif   3.1 MB  800×450   animated
-        //   T22ZUhZ.mp4  video/mp4   1.8 MB  800×450   5.04 s
-        //
-        // There are two kinds of animated imgur post and only one has an image form at all:
-        // a legacy GIF post answers `.jpg` with image/gif, a video post answers it with one
-        // frame. For the second kind NO url rule can ever make the preview move, which is
-        // why the viewer had to learn video rather than this rule being enough.
-        //
-        // COST, stated because it is real: imgur ignores the extension you ask for, so on a
-        // STATIC post `<id>.mp4` answers 200 with image/jpeg and this spends one probe that
-        // cannot succeed. probeVideo()'s timeout is what bounds that; `playVideos` turns the
-        // whole thing off. There is nothing in a thumbnail URL that says whether the post
-        // behind it moves, so the choice is this or no gifs.
         function (u) {
             const hit = imgurId(u);
             if (!hit) return null;
             const url = 'https://i.imgur.com/' + hit.id + '.mp4';
             return url === u.href ? null : url;
         },
-        // gifwow.com: the grid shows /gifs/<id>.jpg — a poster frame — or the .webp
-        // animation, and the post page's player is /gifs/<id>.mp4. Same directory, same
-        // basename, extension swapped. Measured 2026-09-03: grid item /gifs/gp-1tnq3g.jpg
-        // under a /go/gp-1tnq3g link, and that page's <video src="/gifs/gp-1tnq3g.mp4">.
-        // Host-checked and anchored to /gifs/, so it cannot reach any other path shape.
         function (u) {
             if (!/(^|\.)gifwow\.com$/.test(u.hostname)) return null;
             const m = u.pathname.match(/^\/gifs\/([A-Za-z0-9_-]+)\.(?:jpe?g|png|webp|gif)$/i);
             return m ? u.origin + '/gifs/' + m[1] + '.mp4' : null;
         },
-        // Imgur: reduce a thumbnail URL to the stored original. Early in the list because it
-        // is host-checked and high-confidence, and because the generic query-strip rule below
-        // actively goes the WRONG WAY here. All measured 2026-09-03 against i.imgur.com:
-        //
-        //   T22ZUhZ_d.jpg?maxwidth=520&shape=thumb   15.9 KB   435×244   (what the grid shows)
-        //   T22ZUhZ_d.jpg   (query stripped)          1.9 KB   145× 81   SMALLER than displayed
-        //   T22ZUhZ.jpg     (suffix stripped)         3.1 MB   800×450   image/gif — the original
-        //
-        // That third row is the whole reason for this rule. A GIF post's grid thumbnail is a
-        // STATIC frame, and with no suffix rule the only candidate that ever cleared the ratio
-        // gate was that still — reported as "it is not working for gifs".
-        //
-        // TWO facts about imgur, both worth stating because neither is guessable:
-        //
-        // 1. The extension you ask for is IGNORED, except `.webp`. `.jpg`, `.png` and `.gif`
-        //    all return the stored original bytes with its real content-type — T22ZUhZ.jpg
-        //    comes back as image/gif and animates in an <img>, KlprxXs.jpg comes back as
-        //    image/png. So there is no need to guess the true extension; ask for anything.
-        // 2. `.webp` is a TRANSCODE at the same pixel size, and for an animated post it is a
-        //    STILL. zFAj8eD.webp?tb is 240×210 animated, zFAj8eD.webp is 412×360 and static,
-        //    zFAj8eD.jpg is 412×360 and animated. So a `.webp` source is rewritten to `.jpg`,
-        //    which is the difference between a moving preview and a frozen one.
-        //
-        // The suffix has two forms, both unambiguous, and the ambiguous one is excluded:
-        //   `_d`  — imgur ids never contain an underscore, so this is always a suffix.
-        //   a single trailing [sbtmlhg] on a 6- or 8-character basename — imgur issues 5- and
-        //   7-character ids, so those lengths can only be id+suffix. Verified: KlprxXsb.jpg
-        //   (7 KB), KlprxXsm.webp (20 KB) and KlprxXsh.jpg (150 KB) are all thumbnails of
-        //   KlprxXs (1080×1080).
-        //
-        // A BARE 5- or 7-character id keeps its id, and that restraint is the load-bearing
-        // part: T22ZUh.jpg — T22ZUhZ.jpg with its last character taken off — is a real 90 KB
-        // image of something else entirely. Over-matching here would silently show the WRONG
-        // PICTURE, which is far worse than showing none. See the negative tests.
         function (u) {
             const hit = imgurId(u);
             if (!hit) return null;
@@ -479,14 +313,6 @@
             u.search = '';      // ?maxwidth= and ?tb both just ask for a smaller picture
             return u.href === was ? null : u.href;
         },
-        // strip common resize/quality query parameters
-        //
-        // ONLY when the path names a media file. On `photo.jpg?w=400` the query is decoration
-        // over a file that exists either way, and dropping it asks for the same picture
-        // bigger. On `/banner.php?loc=header` or `/image?id=7` the query is the REQUEST —
-        // dropping it asks a different question, and a rotator answers with an unrelated
-        // picture that probe and frame then agree on perfectly. Measured against the reported
-        // forum banner shape 2026-09-03; the shape gate is the backstop, this is the fix.
         function (u) {
             if (!MEDIA_RE.test(u.pathname) && !VIDEO_EXT_RE.test(u.pathname)) return null;
             const drop = ['w', 'h', 'width', 'height', 'size', 's', 'fit', 'resize', 'crop',
@@ -519,11 +345,6 @@
             u.pathname = p;
             return u.href;
         },
-        // Cloudinary / Imgix style transform segments: /w_400,h_300,c_fill/ -> /
-        // Deliberately strict: a segment must be entirely key_value pairs drawn from the
-        // known transform keys AND carry a numeric w_ or h_. A loose version of this rule
-        // ate ordinary path segments like /en_US/ and /v_2/, which silently resolves to a
-        // different image rather than to no image.
         function (u) {
             const KEYS = /^(?:w|h|c|q|f|g|e|b|o|r|x|y|z|a|d|t|ar|dpr|fl|bo|cs|vc)$/;
             const segs = u.pathname.split('/');
@@ -544,11 +365,6 @@
             u.pathname = kept.join('/');
             return u.href;
         },
-        // Google user content / Blogger. The size token appears in two forms — appended
-        // with '=' (…/abc=s400-c) or as its own path segment (…/s400/photo.jpg) — and
-        // 's0' means "no downscale". The segment form is why a Blogger or Photos image
-        // used to come back at its thumbnail size. Host-checked, because `/s400/` is an
-        // ordinary path segment anywhere else.
         function (u) {
             if (!/(^|\.)(googleusercontent\.com|ggpht\.com|blogspot\.com)$/.test(u.hostname)) return null;
             const p = u.pathname.replace(
@@ -609,11 +425,7 @@
         'data-lazy', 'data-lazy-src', 'data-defer-src', 'data-echo', 'data-url',
         'data-hoverzoom', 'data-actualsrc'];
 
-    // Ordered best-first list of candidates worth trying for this element, each as
-    // `{ url, from }`. `from` is carried purely so the debug log can name the mechanism
-    // that produced the preview: "the preview is the wrong picture" is unanswerable without
-    // it — there are six mechanisms here and the log used to print only the winning URL,
-    // which says nothing about which one to go and look at.
+    // Ordered best-first list of candidates worth trying for this element, each as `{ url, from }`.
     function collectCandidates(el) {
         const seen = new Set();
         const out = [];
@@ -624,9 +436,6 @@
             if (abs.startsWith('data:') || abs.startsWith('blob:')) return;
             if (blocked(abs)) return;       // never probe something the user has ruled out
             if (unstable.has(abs)) return;  // it has already been caught changing under us
-            // `playVideos` off means the frame cannot display one, so a video candidate is
-            // not merely useless — probing it would spend one of MAX_PROBES on a result
-            // that has to be thrown away, ahead of the image candidate behind it.
             if (!playVideos && isVideoUrl(abs)) return;
             if (seen.has(abs)) return;
             seen.add(abs);
@@ -663,8 +472,6 @@
         // 2b. the widest srcset entry is itself often a resized derivative
         if (bestSrcset) upgradeCandidates(bestSrcset).forEach(adder('url rule on the widest srcset entry'));
 
-        // 3. an ancestor link pointing at media — directly, via a query parameter, or
-        //    after a rewrite
         const a = el.closest && el.closest('a[href]');
         if (a && a.href) {
             if (looksLikeImage(a.href) || (playVideos && isVideoUrl(a.href))) add(a.href, 'the ancestor link itself');
@@ -693,13 +500,9 @@
         return m ? m[2] : null;
     }
 
-    // What this element is actually showing right now — the only URL that exists for it
-    // without a probe. Three places wanted this expression; it is one function so a change
-    // to how "displayed" is read cannot land in two of them and miss the third.
+    // What this element is actually showing right now — the only URL that exists for it without a probe.
     function shownUrl(el) {
         if (el.tagName === 'IMG') return el.currentSrc || el.src;
-        // currentSrc rather than src: a clip is often given <source> children with no src
-        // attribute of its own, and then src is the empty string.
         if (el.tagName === 'VIDEO') return el.currentSrc || el.src || null;
         return backgroundUrl(el);
     }
@@ -708,29 +511,6 @@
         return blockMatch(url, cfg.blockList);
     }
 
-    // ---------------------------------------------------------- unstable URLs
-    //
-    // A URL THAT ANSWERS WITH A DIFFERENT PICTURE EACH REQUEST breaks the one assumption
-    // every part of this script rests on: that the thing measured and the thing displayed
-    // are the same picture. Rotating forum banners, "random image" endpoints, ad slots and
-    // daily-header scripts are all this shape, and the failure is silent and bizarre —
-    // measure 1200×125, display 600×600, and the preview is a picture the user never
-    // pointed at. Reported 2026-09-03 as "hovering the banner gives me the sidebar image,
-    // and it varies".
-    //
-    // Nothing about the URL says it will do this, so it is caught by CONTRADICTION, at two
-    // points where the answer is already known and costs nothing:
-    //
-    //  1. Against the browser's own copy. For an <img> on screen, naturalWidth/Height are
-    //     the exact bytes being displayed. Re-probing that same URL must return the same
-    //     numbers. This is an identity test — no tolerance, no false positives — and it
-    //     needs no extra request, because the probe was going to happen anyway.
-    //  2. Against the probe, when the frame loads it. Catches the same thing for a
-    //     candidate that is NOT the displayed URL — a rewrite of a rotator, or a linked
-    //     page's og:image — which (1) cannot see. Also free: the frame loads it regardless.
-    //
-    // Once a URL has contradicted itself it is refused for the life of the tab, so the
-    // preview does not come back on the next hover with yet another wrong picture.
     const unstable = new Set();
 
     function markUnstable(url, was, got) {
@@ -746,27 +526,6 @@
         });
     }
 
-    // ------------------------------------------------------- is it the same picture?
-    //
-    // A bigger version of a picture has the SAME SHAPE as the picture. That is the one
-    // property a genuine upgrade cannot lose, and it is the only cheap handle on the
-    // question the user is really asking — "is this the thing I pointed at?".
-    //
-    // It is what catches a rotator that the two tests above cannot see. Measured in Chrome
-    // 2026-09-03 and it is the crux: a second load of an ALREADY-DISPLAYED url does not hit
-    // the network at all — four `new Image()` loads of one no-store URL produced ONE request
-    // and one identical picture. So an unstable *displayed* src cannot mislead in that
-    // browser, and the case that actually bites is a DIFFERENT url — `/banner.php` derived
-    // from `/banner.php?loc=header` by the query-strip rule, or a linked page's `og:image`.
-    // Those roll once, and probe and frame then agree with each other perfectly while
-    // showing something unrelated. Nothing about the URL says so; the shape does.
-    //
-    // The tolerance is deliberately loose. A thumbnail is often a CROP of its original — a
-    // square thumb of a 3:2 photo is 1.5× off, a 16:9 crop of 4:3 is 1.34× — and those must
-    // all pass. The reported case is a 1200×125 masthead (9.6:1) answering with a 600×600
-    // sidebar picture (1:1): 9.6× apart. There is a wide gap between "cropped differently"
-    // and "not the same picture", and 4 sits in it. A wrong refusal here is silent, so the
-    // number errs toward letting things through.
     const ASPECT_TOL = 4;
 
     function sameShape(a, b) {
@@ -788,16 +547,6 @@
 
     const probeCache = new Map(); // url -> Promise<{w,h}|null>
 
-    // A video is measured exactly the way an image is — load it and ask how big it came out
-    // — only the event is `loadedmetadata` and the size is videoWidth/videoHeight. preload
-    // is 'metadata', so a probe costs the container header rather than the file; the frames
-    // are only fetched if this candidate wins and the viewer actually plays it.
-    //
-    // The TIMEOUT is not belt-and-braces. imgur ignores the extension you ask for, so
-    // <id>.mp4 on a static post answers 200 with image/jpeg — a response that is neither a
-    // playable video nor an error the element is obliged to report promptly. A probe that
-    // never settles stalls the whole sequential resolve behind it, and the symptom is the
-    // one this script's spinner exists to apologise for: hovering appears to do nothing.
     const VIDEO_PROBE_MS = 6000;
 
     function probeVideo(url) {
@@ -809,8 +558,6 @@
             const done = function (ok) {
                 clearTimeout(timer);
                 v.onloadedmetadata = v.onerror = null;
-                // Read every measurement BEFORE tearing the element down: clearing src and
-                // calling load() resets videoWidth to 0 and duration to NaN.
                 const out = ok && v.videoWidth > 0
                     ? { w: v.videoWidth, h: v.videoHeight, video: true, duration: v.duration }
                     : null;
@@ -848,42 +595,8 @@
         return p;
     }
 
-    // Walk candidates until one is a real upgrade. Per-element, no shared state.
-    //
-    // Two modes. First-match stops at the first candidate that clears the ratio gate:
-    // one extra request per hover, and it honours whatever the site declared as its
-    // largest. Keep-searching carries on past that hit and reports every strictly larger
-    // one after it, so the caller can show something immediately and improve it in place.
-    //
-    // This is why the probes stay SEQUENTIAL and in list order. The list is ordered by
-    // heuristic confidence, not by measured size; racing it and taking the first response
-    // would hand the decision to whichever server answers fastest, which systematically
-    // favours the smallest file. Order is the selection rule, so order has to be kept.
     const MAX_PROBES = 8;
 
-    // ------------------------------------------------- the page behind the thumbnail
-    //
-    // Every other mechanism in this script GUESSES a full-size URL from strings already on
-    // the page and then verifies it by loading it. This one asks the site directly: fetch
-    // the page the thumbnail links to and read what it declares as its own media. That is
-    // authoritative in a way no guess can be — it is the page you would have landed on —
-    // so the result does NOT face the ratio gate and it ends the search. Some originals are
-    // not derivable from a thumbnail URL by any rule, and this is the only thing that
-    // reaches them.
-    //
-    // Bounded deliberately, because it is the one part of this script that makes a request
-    // for a document rather than for an image:
-    //
-    //  - SAME ORIGIN ONLY. A listing and its item pages are on the same site essentially by
-    //    definition; a cross-origin href is an outbound link, not "the page for this
-    //    thumbnail". It also means plain fetch() with the user's own cookies, so the HTML is
-    //    what they would see — no GM_xmlhttpRequest, no new @grant, no @connect prompt.
-    //  - Once per URL, cached for the tab, and only after `hoverDelay` has already elapsed.
-    //  - Never for a link that is already a media URL: that is an ordinary candidate and is
-    //    handled by collectCandidates().
-    //  - Unconditional since v0.39.0. It used to be `followLinks`, and it was retired for
-    //    the reason the others were: the linked page is the site itself saying what the
-    //    thumbnail stands for, so there was never a case for preferring a guess over it.
     const pageCache = new Map();    // page url -> Promise<{url, video}|null>
 
     function metaContent(doc, names) {
@@ -895,25 +608,14 @@
         return null;
     }
 
-    // What a fetched page says its media is. Separate from the fetch so it can be tested
-    // against a parsed document with no network involved.
+    // What a fetched page says its media is.
     function pageMediaFrom(doc, pageUrl) {
-        // THE PAGE YOU GET IS NOT ALWAYS THE PAGE YOU ASKED FOR, and the failure is silent.
-        // Measured 2026-09-03: fetching one imgur gallery URL returned another post's
-        // document entirely — same byte count, wrong id — and a second attempt returned a
-        // generic shell whose og:image is the imgur logo. Either would have put a confident,
-        // completely wrong picture on screen, and this candidate skips the ratio gate that
-        // would otherwise have caught the logo. So the page has to agree about which page it
-        // is: og:url must name the path we requested, or nothing here is trusted.
         const declared = metaContent(doc, ['og:url']);
         if (declared) {
             let d = null;
             try { d = new URL(declared, pageUrl.href); } catch (e) { d = null; }
             if (!d || d.pathname.replace(/\/+$/, '') !== pageUrl.pathname.replace(/\/+$/, '')) return null;
         }
-        // Video first: on a post that has both, the video IS the post and the og:image is
-        // its poster frame. isVideoUrl() is required because og:video is often a player
-        // PAGE (an embed url) rather than a media file, and that would never load.
         const vid = metaContent(doc, ['og:video:secure_url', 'og:video:url', 'og:video',
             'twitter:player:stream']);
         if (vid && playVideos && isVideoUrl(vid)) {
@@ -932,8 +634,6 @@
         try {
             const res = await fetch(pageUrl.href, { credentials: 'same-origin', redirect: 'follow' });
             if (!res.ok) return null;
-            // Only ever parse HTML. A link to a PDF or a zip would otherwise be pulled in
-            // full just to be thrown away.
             if (!/text\/html|application\/xhtml/i.test(res.headers.get('content-type') || '')) return null;
             doc = new DOMParser().parseFromString(await res.text(), 'text/html');
         } catch (e) {
@@ -967,20 +667,10 @@
         let best = null;
         let trusted = null;
 
-        // Started here, NOT awaited here. A document fetch is slow next to an image probe,
-        // and there is usually a decent local candidate that can be on screen meanwhile —
-        // so the ordinary sequence paints something immediately and this replaces it in
-        // place through the same progressive-upgrade path when it arrives. Awaiting it up
-        // front would turn every hover into a page load before anything appeared.
         const linked = linkedMedia(el).then(async function (hit) {
             if (!hit || token.cancelled || blocked(hit.url)) return null;
             const dim = await probe(hit.url);
             if (!dim || token.cancelled) return null;
-            // The one gate that still applies to the authoritative answer. It skips the
-            // RATIO check because the page is the site telling us what this thumbnail
-            // stands for — but a forum banner links to the section it heads, and that
-            // page's og:image is the section's own artwork, which is a different picture
-            // rather than a smaller one. Shape is what separates those two cases.
             if (!sameShape(native, dim)) {
                 dbg('linked page rejected — a different shape, so a different picture', {
                     url: hit.url,
@@ -991,9 +681,6 @@
             }
             trusted = { url: hit.url, w: dim.w, h: dim.h, video: !!dim.video, duration: dim.duration,
                 from: 'the page the thumbnail links to (og: media)' };
-            // No ratio gate, no comparison with `best`: the linked page is the site telling
-            // us what this thumbnail stands for, and a smaller answer from it still beats a
-            // bigger guess.
             dbg('hit (declared by the linked page)', trusted);
             if (onHit && !token.cancelled) onHit(trusted);
             return trusted;
@@ -1006,15 +693,10 @@
             const dim = await probe(url);
             if (!dim) continue;
             const isSameAsShown = (url === shown);
-            // THE URL IS NOT STABLE. Re-fetching what is already on screen came back a
-            // different size, so this URL hands out a different picture each request and
-            // nothing it returns is the thing under the pointer. See markUnstable().
             if (isSameAsShown && native && (dim.w !== native.w || dim.h !== native.h)) {
                 markUnstable(url, native, dim);
                 continue;
             }
-            // NOT THE SAME PICTURE. See sameShape() — a candidate shaped nothing like the
-            // thumbnail is a different image, not a bigger one, whatever its pixel count.
             if (!sameShape(native, dim)) {
                 dbg('rejected — a different shape, so a different picture', {
                     url: url, from: c.from,
@@ -1026,21 +708,12 @@
             const usable = bigEnough || (cfg.showEvenIfNotLarger && !isSameAsShown);
             if (!usable) continue;
             if (best && dim.w * dim.h <= best.w * best.h) continue;   // not an improvement
-            // An upgrade may not trade MOTION for a bigger still. "Bigger wins" is the right
-            // rule between two pictures, but a moving original is the thing being asked for
-            // here — a 1600×1200 frozen frame is not an improvement on a 640×480 clip of the
-            // same post, it is a different and worse answer to the question. On imgur the
-            // two happen to be the same pixel size so probe order settles it; this is what
-            // settles it everywhere else. A bigger VIDEO still replaces a smaller one.
             if (best && best.video && !dim.video) continue;
             best = { url: url, w: dim.w, h: dim.h, video: !!dim.video, duration: dim.duration,
                 from: c.from };
             dbg('hit', best);
             if (onHit && !token.cancelled) onHit(best);
         }
-        // The search is not over until the page lookup settles — the spinner keeps turning
-        // because something really is still running, and a late authoritative answer still
-        // replaces whatever the guesses produced.
         await linked;
         if (trusted) return trusted;
         if (best) return best;
@@ -1049,14 +722,6 @@
             if (dim && native && (dim.w !== native.w || dim.h !== native.h)) {
                 markUnstable(shown, native, dim);
             } else if (dim && dim.w <= displayed.w && dim.h <= displayed.h) {
-                // NOTHING TO SHOW. `showEvenIfNotLarger` means "display it at natural size
-                // even though it does not clear minRatio" — it does not mean "display a
-                // pixel-for-pixel copy of what is already on screen". This branch is the
-                // only one where the candidate is the SAME URL as the thumbnail, so when it
-                // is also the same size the frame would hold the identical bytes at the
-                // identical scale, floating over the picture they were copied from.
-                // Reported 2026-09-04: a 1000×557 masthead served at exactly 1000×557,
-                // where this was the only thing producing a preview at all.
                 dbg('nothing to show — the original is no bigger than what is on screen', {
                     url: shown, onScreen: displayed.w + '×' + displayed.h,
                     original: dim.w + '×' + dim.h,
@@ -1064,10 +729,6 @@
             } else if (dim) {
                 best = { url: shown, w: dim.w, h: dim.h, video: !!dim.video, duration: dim.duration,
                     from: 'the displayed src itself (shown anyway — not larger)' };
-                // This branch paints a preview too, so it MUST log one. Without it a hover
-                // that showed something produced no 'hit' line at all, and a debug log with
-                // a silent success path is worse than none — it reads as proof that nothing
-                // was shown. Found while reading a real report, 2026-09-03.
                 dbg('hit (not larger — shown anyway)', best);
                 if (onHit && !token.cancelled) onHit(best);
             }
@@ -1075,30 +736,6 @@
         return best;
     }
 
-    // ------------------------------------------------------------------ viewer
-    //
-    // The viewer has three states.
-    //
-    // UNPINNED it is a transient preview: it opens beside the pointer, is hit-testable,
-    // and vanishes when the pointer leaves the image it came from.
-    //
-    // DETACHED (after dragging it anywhere) it stops tracking the source image: only
-    // leaving the PREVIEW takes it down. Dragging is the cheap "keep this, I'm not done
-    // with it" gesture — no click, no modal, no backdrop.
-    //
-    // PINNED (after a click) it becomes a modal: the backdrop starts swallowing
-    // clicks, an X appears, and wheel / +− / arrows / drag turn it into a zoom-and-pan
-    // surface that keeps going past the point where the frame fills the window.
-    //
-    // `view` is the only source of truth for geometry. reflow() derives frame size and
-    // clamps the pan offsets; layout() is the only thing that writes any of it to the
-    // DOM. Nothing else may set box/img styles, or the two will drift.
-
-    // The frame has two possible faces and `mediaEl` is whichever one is currently showing.
-    // layout() writes geometry to `mediaEl` and to nothing else, so "one thing owns the
-    // DOM" survives the frame being able to hold a picture or a clip. setMedia() is the
-    // only function that reassigns it, and it is also the only place either element's src
-    // is set, so the two can never both be loaded at once.
     let host = null, root = null, box = null, imgEl = null, vidEl = null, mediaEl = null;
     let dimEl = null;
     let capEl = null, capNameEl = null, capHintEl = null, capMetaEl = null, blockEl = null;
@@ -1122,14 +759,7 @@
         return c;
     }
 
-    // The spinner is the one part of the overlay that sits on the bare page rather than on
-    // the frame's own dark background, so it has to read against whatever is behind it.
-    //
-    // `prefers-color-scheme` is the primary signal — it IS the browser's colour mode, which
-    // is what "match the browser" means, and it is what the user is looking at everywhere
-    // else. v0.7.0 keyed off the PAGE's computed background instead, which put a near-white
-    // disc on a white page: technically "matching", and nearly invisible. That is kept only
-    // as the fallback for a browser with no media-query support.
+    // The spinner is the one part of the overlay that sits on the bare page rather than on the frame's own dark background.
     function parseColor(s) {
         const m = String(s).match(/^rgba?\(([^)]+)\)$/i);
         if (!m) return null;
@@ -1154,10 +784,7 @@
         return false;
     }
 
-    // Catppuccin Mocha in dark mode, near-white in light. Both carry a hard rim and a
-    // visible track: the disc lands on arbitrary page content, so the rim is what separates
-    // it from whatever is behind it, and a rim too faint to see was the whole of the
-    // "I can hardly see it" report.
+    // Catppuccin Mocha in dark mode, near-white in light.
     function applySpinTheme() {
         if (!host) return;
         const dark = darkMode();
@@ -1167,9 +794,6 @@
         host.style.setProperty('--spin-arc', dark ? '#89b4fa' : '#1e66f5');
     }
 
-    // { url, natW, natH, scale, fitScale, imgW, imgH, frameW, frameH, ox, oy, left, top }
-    // ox/oy are the image's top-left within the frame's content box: 0 or negative once
-    // the image outgrows the frame, centred while it still fits.
     let view = null;
     let placed = false;
 
@@ -1186,45 +810,20 @@
         const style = document.createElement('style');
         style.textContent = [
             ':host{all:initial}',
-            // Invisible, and never anything else. It exists only to catch the click that
-            // dismisses a placed window before the page can act on it — no dimming, because
-            // the whole point of placing a window is to compare it with what is behind it.
-            // It does not block SCROLLING: a wheel over it finds no scrollable ancestor
-            // until the document, so the page still moves under a placed window.
             '.dim{position:fixed;inset:0;background:transparent;pointer-events:none}',
             '.dim.catch{pointer-events:auto}',
-            // The window's outer resize strip. It sits above the backdrop and below the frame,
-            // so the only part of it anything can reach is the RESIZE_OUT collar sticking out
-            // past the frame's edges — which is exactly the region it exists to catch. Only
-            // hit-testable while placed, like everything else that can be clicked.
             '.grip{position:fixed;background:transparent;pointer-events:none}',
             '.grip.hot{pointer-events:auto}',
             '.box{position:fixed;opacity:0;pointer-events:none;transition:opacity var(--fade) ease;',
             'background:#1e1e2e;box-sizing:content-box;overflow:hidden}',
             '.box.on{opacity:1}',
-            // POINTER-TRANSPARENT until it is placed. This is what lets a scan across a row
-            // of thumbnails work: the preview never intercepts the pointer, so leaving an
-            // image really does leave it, and the next image under the preview still gets
-            // its own mouseover. The press that places one is decided by GEOMETRY at window
-            // level instead — see pointInPreview() and hitRegion().
             '.box.hot{pointer-events:auto}',
-            // With nothing to pan the frame moves, so it says so. onMove overrides this with
-            // an inline cursor over the edges and the corners.
             '.box.placed:not(.pan){cursor:move}',
             '.box.pan{cursor:grab}',
             '.box.pan.drag{cursor:grabbing}',
             'img,video{display:block;position:absolute;background:#1e1e2e;-webkit-user-drag:none;user-select:none}',
-            // The frame margin: three strips drawn ON TOP of the picture, matching the status
-            // bar along the bottom. Mostly transparent, because unlike the bar they carry no
-            // text and their whole job is to say "there is a handle here" without hiding the
-            // picture. Pointer-transparent decoration — hitRegion() decides what a press on
-            // them does, so they never enter the isBoxControl() capture trap.
             '.edge{position:absolute;pointer-events:none;background:rgba(30,30,46,.30)}',
-            // `display:block` above outranks the hidden attribute's UA rule, so the face
-            // that is not in use would keep its box and sit under the other one.
             'img[hidden],video[hidden]{display:none}',
-            // The status bar doubles as the frame's move handle, so unlike the rest of the
-            // overlay it must stay hit-testable.
             '.cap{position:absolute;left:0;right:0;bottom:0;height:' + BAR_MIN_H + 'px;',
             'display:flex;align-items:center;gap:10px;box-sizing:border-box;',
             'padding:0 8px;font:11px/16px system-ui,sans-serif;color:#cdd6f4;',
@@ -1233,57 +832,24 @@
             '.cap .name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;',
             'font-family:ui-monospace,SFMono-Regular,Consolas,monospace;color:#a6adc8}',
             '.cap .meta{flex:none;white-space:nowrap}',
-            // What a press on the window does, said on the window, because it is the one
-            // thing about this UI that is not guessable — a hover preview is
-            // pointer-transparent, so nothing on it invites a click. It is dropped the moment
-            // the window is placed, when it would be describing something already done, and
-            // it shrinks before the dimensions do on a narrow bar.
             '.cap .hint{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;',
             'white-space:nowrap;color:#7f849c;font-style:italic}',
             '.box.placed .cap .hint{display:none}',
-            // "Never this image again". Only on a PLACED window: a hover preview is
-            // pointer-transparent, so a button on it cannot be clicked at all. Hover it,
-            // click to pin, then press this.
-            // ABSOLUTE, not a flex item, plus a reserved gutter on the bar. As a flex item it
-            // sat after a `flex:none` dimensions field, so on a narrow bar it was pushed past
-            // the end and clipped away entirely - on a preview of a small picture, which is
-            // the case where the button is most wanted. Its position no longer depends on
-            // anything else in the bar.
             '.cap .block{position:absolute;right:' + BLOCK_RIGHT + 'px;top:50%;',
             'transform:translateY(-50%);display:none;width:18px;height:18px;line-height:16px;',
             'text-align:center;border-radius:4px;border:1px solid #45475a;',
             'background:rgba(49,50,68,.9);color:#a6adc8;cursor:pointer;font-size:12px}',
             '.box.hot .cap .block{display:block}',
             '.cap .block:hover{background:#f38ba8;border-color:#f38ba8;color:#1e1e2e}',
-            // "Stop showing clips" — same shape as the ⊘ and the same rules: absolute so a
-            // narrow bar cannot push it off the end, and PLACED only, since a hover preview
-            // cannot be clicked. It is shown only while the frame is actually holding a clip
-            // (`.cap.hasvid`, set by caption()), because that is the moment the question
-            // arises — a standing preference in the settings panel is the wrong shape for it.
             '.cap .vidoff{position:absolute;right:' + VIDOFF_RIGHT + 'px;top:50%;',
             'transform:translateY(-50%);display:none;width:18px;height:18px;line-height:16px;',
             'text-align:center;border-radius:4px;border:1px solid #45475a;',
             'background:rgba(49,50,68,.9);color:#a6adc8;cursor:pointer;font-size:10px}',
             '.box.hot .cap.hasvid .vidoff{display:block}',
             '.cap .vidoff:hover{background:#f9e2af;border-color:#f9e2af;color:#1e1e2e}',
-            // The bar sits ON the picture, so on anything with text near the bottom — a meme,
-            // a screenshot, a comic panel — it covers the thing you are reading. It fades out
-            // after BAR_IDLE_MS of pointer stillness and comes back the moment the pointer
-            // moves over the window. pointer-events go with the opacity, so a faded bar is not
-            // an invisible move handle waiting to be pressed by mistake.
-            //
-            // The fade itself takes BAR_FADE_MS, kept deliberately long: the whole of it is
-            // reaction time, and the bar carries the ⊘ button. It comes BACK instantly
-            // (BAR_SHOW_MS) — a slow return would read as lag on a control you just asked for.
             '.cap,.edge{transition:opacity ' + BAR_SHOW_MS + 'ms ease}',
             '.box.idle .cap{opacity:0;pointer-events:none;transition:opacity ' + BAR_FADE_MS + 'ms ease}',
             '.box.idle .edge{opacity:0;transition:opacity ' + BAR_FADE_MS + 'ms ease}',
-            // Resolve progress: an INDETERMINATE ring — a fixed arc sweeping a full track.
-            // It says "still working" and nothing else. The determinate version it replaces
-            // could not be honest: the denominator was the candidate count, most runs stop
-            // well before the end of that list, so the arc never once finished where it
-            // said it would. The disc behind it is mostly opaque and themed to the page,
-            // so the ring reads on a white page as well as a dark one.
             '.spin{position:fixed;width:34px;height:34px;display:none;pointer-events:none;',
             'filter:drop-shadow(0 2px 6px rgba(0,0,0,.5))}',
             '.spin.on{display:block}',
@@ -1297,13 +863,6 @@
 
         dimEl = document.createElement('div');
         dimEl.className = 'dim';
-        // Only reachable while `.catch` is on, i.e. while placed. Killing the mousedown
-        // as well as the click stops the page beneath from starting a selection or
-        // following a link with the same gesture that dismissed us.
-        //
-        // dismiss() rather than unplace(): the click that gets rid of a window very often
-        // lands on the thumbnail it came from, and a plain close would let the next mouse
-        // movement re-open the thing just thrown away.
         dimEl.addEventListener('mousedown', function (e) { e.preventDefault(); e.stopPropagation(); }, true);
         dimEl.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); dismiss(); }, true);
         root.appendChild(dimEl);
@@ -1320,11 +879,6 @@
         imgEl = document.createElement('img');
         imgEl.draggable = false;
 
-        // The frame's other face. An imgur video post has no animated image form at all, so
-        // "the better version of this gif" is an mp4 or it is nothing. It is muted, looping
-        // and autoplaying because it stands in for an animated picture rather than offering
-        // a player — and deliberately WITHOUT `controls`, which would put a play button and
-        // a scrubber under the same clicks that pin, drag and dismiss the window.
         vidEl = document.createElement('video');
         vidEl.muted = true;
         vidEl.loop = true;
@@ -1333,9 +887,6 @@
         vidEl.draggable = false;
         vidEl.hidden = true;
 
-        // The second half of the unstable-URL test. Permanent listeners on the two faces
-        // rather than a per-load handler, so there is nothing to attach, detach or leak;
-        // verifyMedia() is a no-op whenever the sizes agree, which is every ordinary load.
         imgEl.addEventListener('load', verifyMedia);
         vidEl.addEventListener('loadedmetadata', verifyMedia);
 
@@ -1352,9 +903,6 @@
         blockEl.className = 'block';
         blockEl.title = 'Never preview this image again';
         blockEl.textContent = '⊘';
-        // Both halves swallowed, and both needed: onBoxDown/onBoxClick are capture
-        // listeners on an ANCESTOR, so they run first — isBoxControl() is what stops them
-        // eating this button's own events. See the note on isBoxControl().
         blockEl.addEventListener('mousedown', function (e) { e.preventDefault(); e.stopPropagation(); }, true);
         blockEl.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); blockCurrent(); }, true);
 
@@ -1371,8 +919,6 @@
         capEl.appendChild(blockEl);
         capEl.appendChild(vidOffEl);
 
-        // After the picture and before the bar, so the bar is drawn over the bottom strip
-        // where the two overlap.
         edgeEls = ['t', 'l', 'r', 'b'].map(function (k) {
             const d = document.createElement('div');
             d.className = 'edge ' + k;
@@ -1405,43 +951,15 @@
 
     // ----------------------------------------------------------------- geometry
 
-    // The one gutter between the frame and the edge of the window, applied wherever WE place
-    // a frame rather than the user. It is subtracted from the opening size as well as the
-    // opening position, or a preview would open exactly 8px wider than it is allowed to sit.
     const EDGE_GAP = 4;
 
-    // Where the bottom of the screen is, for everything that has to agree about it: the size
-    // cap, the opening position and clampPosition().
-    //
-    // It used to subtract `bottomReserve` (30px), because the browser paints its link and
-    // status text along the bottom edge of the content area, over anything we draw there.
-    // Retired in v0.33.0: that mattered when a preview was clamped inside the browser window
-    // and its status bar could end up permanently under that chrome with nothing to be done
-    // about it. A window can now be dragged anywhere and resized freely, so "the browser is
-    // covering the bar" is answered by moving the window — and the reserve's only remaining
-    // effect was to stop the bar from ever reaching the true bottom of the screen.
-    // The frame around the picture, and the smallest window worth having.
-    //
-    // THE MARGIN IS DRAWN ON TOP OF THE PICTURE, exactly as the status bar always has been,
-    // and it costs the frame no size at all (v0.31.0 — v0.30.0 laid it out around the
-    // picture, which made every preview 48px wider and taller than it needed to be). It is a
-    // move handle, and the answer to the old objection that a move band is an invisible
-    // second meaning for the edge is that this one is painted and carries the `move` cursor.
-    // While it is FADED it stops being a handle at all, which is the same rule the bar has
-    // always had — see hitRegion().
-    //
-    // MIN_FRAME is the whole picture area, so the smallest window is 50px at the default
-    // border. It exists because `minDisplayed: 0` otherwise gives a preview a few pixels
-    // across, with nowhere for the status bar or the block button to be.
     const MIN_FRAME = 48;
 
     function chrome() {
         return Math.max(0, Math.min(80, cfg.frameMargin | 0));
     }
 
-    // What sits between view.left/top and the picture's own top-left, and the window's outer
-    // size. The margin is NOT part of this: it floats over the picture. Every geometry site
-    // goes through these four so there is one place to change if that ever stops being true.
+    // What sits between view.left/top and the picture's own top-left, and the window's outer size.
     function insetX() { return cfg.borderWidth; }
     function insetY() { return cfg.borderWidth; }
     function outerW() { return view.frameW + insetX() * 2; }
@@ -1452,10 +970,7 @@
         return Math.max(64, document.documentElement.clientHeight);
     }
 
-    // The box a preview OPENS into. Never larger than the window, whatever the growth
-    // ceiling says: a preview appears without being asked for, so one that arrived taller
-    // than the screen would be a nuisance rather than a feature. Growing past this point is
-    // something the user does on purpose, with the wheel or a corner.
+    // The box a preview OPENS into.
     function viewportBox() {
         const vw = document.documentElement.clientWidth;
         const vh = usableHeight();
@@ -1467,8 +982,6 @@
         };
     }
 
-    // A setting this high is a compositing cost, not a feature: 4x a 1920x1080 window is a
-    // 33-megapixel frame.
     const MAX_MULTIPLE_ABS = 4;
 
     // How far the frame may grow. Deliberately bigger than the window — see the setting.
@@ -1482,52 +995,22 @@
         return !!view && (view.imgW > view.frameW + 0.5 || view.imgH > view.frameH + 0.5);
     }
 
-    // The zoom floor, and what `0` returns to. While the frame still follows the picture
-    // that is "fit the window"; once the frame is frozen it has to become "fit the FRAME",
-    // or `0` on a window the user sized by hand would spring it back to the window's shape
-    // and throw away the size they chose.
+    // The zoom floor, and what `0` returns to.
     function fitScaleFor(w, h) {
         if (!w || !h) return 1;
-        // Against the hand-set box rather than the frame's current size, which on a free
-        // frame is only ever whatever the picture happens to need at this zoom.
         if (view && view.fixedW != null) return Math.min(view.fixedW / w, view.fixedH / h);
         const m = viewportBox();
         return Math.min(cfg.zoomFactor, m.w / w, m.h / h);
     }
 
-    // The zoom FLOOR is no longer "fit". A frame may now be bigger than the picture inside
-    // it: zoom out past fit and the picture shrinks in place, with the frame's own
-    // background behind it, the way any image viewer behaves. What stops it is an absolute
-    // size rather than the frame's - below this there is nothing left to look at.
     const MIN_MEDIA = 32;
 
     function minScaleFor(w, h) {
         if (!w || !h) return 1;
-        // Never a floor ABOVE where the picture opens, or a thumbnail smaller than MIN_MEDIA
-        // would be forced to open enlarged.
         return Math.min(MIN_MEDIA / Math.max(w, h), fitScaleFor(w, h));
     }
 
-    // The frame follows the picture, up to the growth ceiling: zooming a small picture is
-    // how you get a preview big enough to be worth placing, and having to resize every one
-    // of them by hand on a page full of small images is the thing that made this necessary.
-    //
-    // ONE thing stops it, and since v0.34.0 only one: a hand resize (view.fixedW, written by
-    // resizeBy). Moving the window used to freeze the size as well — v0.32.0's `sizeLock`
-    // 'max' — on the reasoning that putting a window somewhere is the moment its size is
-    // settled, so zooming out afterwards shrank it back and zooming in stopped where it had
-    // stopped before.
-    //
-    // That reasoning did not survive v0.31.0 handing the wheel back to the page on a hover
-    // preview. Zooming now requires placing first; placing is a press, and a press that
-    // wanders three pixels was a move — so in practice every window was frozen at its opening
-    // size, which is never larger than the browser window, before it could ever be grown. The
-    // ceiling was not a ceiling on deliberate growth, it was a ban on it, and it is what made
-    // maxSizeMultiple unreachable. Reported as "it stops at the edges of the browser window".
-    //
-    // What replaces it is zoomAt() anchoring on the POINTER: a window that grows expands away
-    // from the cursor rather than about its own centre, so growing one no longer walks its
-    // edges over the thing being pointed at, which is most of what the freeze was protecting.
+    // The frame follows the picture, up to the growth ceiling.
     function reflow() {
         if (!view) return;
         const g = growBox();
@@ -1545,11 +1028,6 @@
             : Math.min(0, Math.max(view.frameH - view.imgH, view.oy));
     }
 
-    // Placed beside the pointer, the frame does not contain it, so reaching the preview
-    // means crossing page content that dismisses it. Centring it on the cursor fixed that
-    // but moved the preview much further than it needed to go. This shifts it by the
-    // smallest amount that puts the pointer just inside the frame's edge — with the
-    // default 24px gap, about 34px, and only along the axis that needs it.
     const REACH_INSET = 10;
 
     function nudgeIntoReach() {
@@ -1561,22 +1039,9 @@
         else if (pointer.y > view.top + oh - REACH_INSET) view.top = pointer.y - oh + REACH_INSET;
     }
 
-    // Enough of a placed frame to grab hold of. It must be at least the width of the edge
-    // band that moves the frame (hitRegion), because that is what makes the rule safe:
-    // whatever strip of a half-offscreen window is still visible runs along one of its
-    // edges, so it is always in the band, so the window can always be dragged back. Drop
-    // below the band width and a window can be stranded with nothing but Escape.
     const KEEP_ON_SCREEN = 72;
 
     // Two different jobs behind one name.
-    //
-    // A HOVER preview was placed by us, not by the user, so it is kept fully on screen while
-    // it fits — and once the wheel has grown it past the window there is nothing left to
-    // keep inside, so it is only stopped from sliding a gap in at an edge.
-    //
-    // A PLACED window was put where it is on purpose. It may hang off any edge, which is the
-    // whole point of the growth ceiling being above 1x: shove it aside or upwards and the
-    // picture still reaches the screen edges instead of leaving a strip of page behind it.
     function clampPosition() {
         if (!view) return;
         const vw = document.documentElement.clientWidth;
@@ -1599,41 +1064,6 @@
         view.top = Math.max(keep - oh, Math.min(view.top, vh - keep));
     }
 
-    // ------------------------------------------------------- where a press landed
-    //
-    // GEOMETRY, not child elements. Four corner divs and four edge divs would be the
-    // obvious build, and they would land straight in the documented isBoxControl() trap:
-    // onBoxDown is a capture listener on an ANCESTOR, so it eats a child's events before
-    // the child sees them and the symptom is silence rather than an error. Doing it from
-    // `view` also means one code path for both states — on a hover preview the frame is
-    // pointer-transparent and there is nothing to hit-test at all.
-    //
-    // An ordinary desktop window, and deliberately nothing cleverer:
-    //
-    //   corner       resize both axes
-    //   edge strip   resize that one axis
-    //   the middle   move the frame, or pan the picture once it is spilling
-    //   status bar   move the frame, always — this is the title bar (see below)
-    //
-    // EDGES RESIZE, not move. An earlier cut had a move band sitting just inside the resize
-    // strip, so that a window dragged half off the screen always had something to drag it
-    // back by. Two bands within 30px of each other is a mis-grab waiting to happen, and it
-    // made the edge mean two things depending on a number nobody can see.
-    //
-    // Corners AND edges both resize because corners are not always reachable: the growth
-    // ceiling is above 1x, so a frame can be larger than the window and have no corner on
-    // screen at all, while an edge is a whole strip and there is nearly always one in view.
-    //
-    // WHAT MOVES A SPILLING FRAME IS THE STATUS BAR. Once the picture spills, the middle
-    // pans, so the bar is the only handle left — exactly as a title bar is on any window
-    // manager. That is the reason it always moves the frame regardless of zoom, and the
-    // reason `showStatusBar` off is a real trade rather than a cosmetic one: a spilling
-    // frame with no bar can be resized and panned but not moved, and Escape is the way out.
-    // The three grab bands, measured from the window's outer edge. The resize band straddles
-    // that edge — RESIZE_OUT of it lies OUTSIDE the window, on the invisible `.grip` that
-    // extends past the frame, so the cursor turns into a double arrow before the pointer has
-    // reached the border rather than only after it. That outer half only exists while the
-    // window is placed; there is nothing to resize on one you are merely hovering.
     const RESIZE_OUT = 6;     // px outside the window edge that still resizes
     const RESIZE_IN = 6;      // px inside it — together, a 12px strip centred on the edge
     const MOVE_BAND = 13;     // px further in that moves the window
@@ -1644,14 +1074,9 @@
         const ow = outerW();
         const oh = outerH();
         const rx = x - view.left, ry = y - view.top;
-        // The tested rectangle is the window GROWN by RESIZE_OUT, so dl/dr/dt/db go negative
-        // in the outer half of the resize strip and every `<=` below reads the same way on
-        // both sides of the edge.
         if (rx < -RESIZE_OUT || ry < -RESIZE_OUT ||
             rx > ow + RESIZE_OUT || ry > oh + RESIZE_OUT) return null;
         const dl = rx, dr = ow - rx, dt = ry, db = oh - ry;
-        // Both rings shrink on a small frame, or together they swallow the whole of it and
-        // there is no middle left to grab.
         const corner = Math.min(CORNER_REACH, ow / 3, oh / 3);
         const rb = Math.min(RESIZE_IN, ow / 6, oh / 6);
         const cl = dl <= corner, cr = dr <= corner, ct = dt <= corner, cb = db <= corner;
@@ -1662,18 +1087,7 @@
         if (dr <= rb) return { kind: 'resize', ex: 'r', ey: null };
         if (dt <= rb) return { kind: 'resize', ex: null, ey: 't' };
         if (db <= rb) return { kind: 'resize', ex: null, ey: 'b' };
-        // Past the resize strip and inside the frame margin: the drawn ring, which moves the
-        // window whatever the zoom. Bounded by a third of the frame so that on a small one it
-        // cannot swallow the middle entirely.
-        //
-        // ONLY WHILE IT IS VISIBLE. The ring fades with the status bar, and a faded bar has
-        // always dropped its pointer-events so that a press there falls through to the
-        // ordinary pan-or-move rule rather than being an invisible handle. The ring is drawn
-        // rather than hit-tested, so the same rule has to be applied here by hand.
         if (!chromeVisible() || !chromeThickness()) return null;
-        // At least MOVE_BAND past the resize strip, and never less than the ring that is
-        // actually drawn — a painted handle with a dead strip along its inside edge would be
-        // the worst of both.
         const m = Math.max(rb + MOVE_BAND, chromeThickness() + cfg.borderWidth);
         if (dl < m || dr < m || dt < m || db < m) return { kind: 'move' };
         return null;    // the middle — the pan-or-move rule decides
@@ -1692,8 +1106,7 @@
     const TYPE_NAMES = { jpg: 'JPEG', jpeg: 'JPEG', jpe: 'JPEG', jfif: 'JPEG',
         tif: 'TIFF', tiff: 'TIFF', ico: 'ICO', svg: 'SVG' };
 
-    // Filename and format, both taken from the URL — the only source available without a
-    // second request. An extension-less CDN path can still declare its format in the query.
+    // Filename and format, both taken from the URL — the only source available without a second request.
     function fileInfo(url) {
         const out = { name: url, type: '' };
         try {
@@ -1708,8 +1121,7 @@
         return out;
     }
 
-    // Byte size for free: the probe already fetched it, so the Resource Timing entry is
-    // there. Cross-origin without Timing-Allow-Origin reports 0, and then we just omit it.
+    // Byte size for free: the probe already fetched it, so the Resource Timing entry is there.
     function transferBytes(url) {
         try {
             const entries = performance.getEntriesByName(url);
@@ -1743,53 +1155,24 @@
         parts.push(view.natW + ' × ' + view.natH);
         const bytes = transferBytes(view.url);
         if (bytes) parts.push(humanBytes(bytes));
-        // A hover preview can be grown with the wheel, so the scale shows whenever it is
-        // placed or has moved off the scale it opened at.
         if (placed || Math.abs(view.scale - view.fitScale) > 1e-6) {
             parts.push(Math.round(view.scale * 100) + '%');
         }
         capMetaEl.textContent = parts.join('  ·  ');
     }
 
-    // ------------------------------------------------------------- status bar fade
-    //
-    // The bar is drawn ON the picture, so on a meme, a screenshot or a comic panel it covers
-    // the text you are trying to read. It fades after BAR_IDLE_MS of pointer stillness and
-    // returns the moment the pointer moves over the window — which is also how you get the
-    // move handle back, so nothing becomes unreachable.
-    //
-    // The ⋮ image-actions menu that used to live at the right end of this bar is gone
-    // (v0.12.0). Its Save and Copy could not work: both ran in page JavaScript and needed the
-    // host to send Access-Control-Allow-Origin, which most do not. A placed window hands
-    // right-click to the BROWSER instead, whose own menu has no such limit — see the
-    // image-actions section of CLAUDE.md.
-
-    // BAR_IDLE_MS is how long the pointer must be still before the fade STARTS;
-    // BAR_FADE_MS is how long the fade itself takes. They are separate on purpose — the
-    // second one is pure reaction time, so it is generous, while the first stays short
-    // enough that the bar gets out of the way of the picture.
     const BAR_IDLE_MS = 1000;
     const BAR_FADE_MS = 1200;
     const BAR_SHOW_MS = 120;
 
     // The bar's height, fixed so the ring around it can be a matching thickness.
     const BAR_MIN_H = 24;
-    // How far the block button sits in from the right edge. Off the corner on purpose: the
-    // corner is where the hand goes to resize or to move, and a destructive button there is
-    // a trap.
     const BLOCK_RIGHT = 20;
-    // The ▶ toggle sits immediately inboard of it, on the same row, and only exists while
-    // the frame is holding a clip.
     const VIDOFF_RIGHT = BLOCK_RIGHT + 24;
 
     let barTimer = 0;
 
-    // The bar must not fade while the pointer is ON it: it holds the ⊘ button and the
-    // filename, and a control that disappears under a resting cursor is unusable. A still
-    // pointer fires no mousemove, so showBar()'s own timer is the only thing that can
-    // notice — it re-arms instead of fading. Geometry, not hit-testing, for the same reason
-    // pinning is: on a hover preview the bar is pointer-transparent and `e.target` is the
-    // page beneath.
+    // The bar must not fade while the pointer is ON it.
     function pointerOverBar() {
         if (!capEl || !view || !box || !box.classList.contains('on')) return false;
         if (capEl.style.display === 'none') return false;
@@ -1799,9 +1182,7 @@
                pointer.y >= r.top && pointer.y <= r.bottom;
     }
 
-    // The margin ring counts too, for the same reason the bar does: it is a control, and a
-    // control that vanishes under a resting cursor is unusable. Geometry rather than a hit
-    // test, because the strips are pointer-transparent decoration.
+    // The margin ring counts too, for the same reason the bar does.
     function pointerOverChrome() {
         if (pointerOverBar()) return true;
         if (!view || !box || !box.classList.contains('on') || !chrome()) return false;
@@ -1812,15 +1193,12 @@
         return rx < m || ry < m || ow - rx < m || oh - ry < m;
     }
 
-    // Whether the frame's own furniture — bar and margin — is showing. hitRegion() reads it,
-    // so the ring is a move handle exactly while it can be seen.
+    // Whether the frame's own furniture — bar and margin — is showing.
     function chromeVisible() {
         return !!box && !box.classList.contains('idle');
     }
 
-    // The class lives on the BOX, not on the bar: the margin strips are siblings of the bar
-    // and CSS cannot select backwards, so one class on their common ancestor is what keeps
-    // the two halves of the frame fading as one thing.
+    // The class lives on the BOX, not on the bar.
     function showBar() {
         if (!box) return;
         box.classList.remove('idle');
@@ -1839,10 +1217,7 @@
         if (box) box.classList.remove('idle');
     }
 
-    // Point the frame at a resolved candidate, picking the face that can display it. The
-    // one being put away has its src cleared as well as being hidden: a <video> left with a
-    // src goes on buffering behind a hidden element, and an <img> left with one holds its
-    // decoded bitmap for the life of the tab.
+    // Point the frame at a resolved candidate, picking the face that can display it.
     function setMedia(res) {
         const wantsVideo = !!res.video;
         mediaEl = wantsVideo ? vidEl : imgEl;
@@ -1853,9 +1228,6 @@
         if (!wantsVideo && cfg.noReferrer) imgEl.referrerPolicy = 'no-referrer';
         mediaEl.src = res.url;
         if (wantsVideo) {
-            // Autoplay is muted, so this is allowed everywhere — but it still returns a
-            // promise that rejects if the element is torn down mid-start, and an unhandled
-            // rejection in a hover handler is noise in every page's console.
             const started = vidEl.play();
             if (started && started.catch) started.catch(function () { /* torn down or blocked */ });
         }
@@ -1867,16 +1239,7 @@
         else el.removeAttribute('src');
     }
 
-    // WHAT LOADED IS NOT WHAT WAS MEASURED. The probe and the frame fetch the same URL under
-    // the same referrer policy, so the only thing that produces a disagreement is a URL that
-    // answers with different bytes each time — see markUnstable(). The picture in the frame
-    // is then one the user never pointed at, and the honest thing is to take it down rather
-    // than relabel it.
-    //
-    // A PINNED window is not yanked away: the user deliberately kept it, and closing a
-    // window under a click is worse than showing an unexpected picture. Its geometry is
-    // corrected to the size that actually loaded instead, and the URL is still refused from
-    // then on, so the next hover does not produce yet another wrong picture.
+    // WHAT LOADED IS NOT WHAT WAS MEASURED.
     function verifyMedia() {
         if (!view || !mediaEl) return;
         const w = mediaEl === vidEl ? vidEl.videoWidth : imgEl.naturalWidth;
@@ -1893,21 +1256,13 @@
         layout();
     }
 
-    // How thick the drawn margin actually is. Capped at a third of the frame so the smallest
-    // window is not entirely chrome. hitRegion() reads the same number, or the ring you can
-    // see and the ring you can grab would not be the same ring.
+    // How thick the drawn margin actually is.
     function chromeThickness() {
         if (!view) return 0;
         return Math.round(Math.min(chrome(), view.frameW / 3, view.frameH / 3));
     }
 
-    // The margin strips, which float over the picture and therefore have to be re-placed
-    // whenever the frame changes size.
-    //
-    // The sides run the full height under the bar rather than stopping at it: stopping at
-    // whichever of the two is thicker leaves a gap in the ring just above the bar whenever
-    // they disagree. The bar is drawn after them and is nearly opaque, so the overlap reads
-    // as the bar. The bottom strip only appears when there is no bar to be the bottom edge.
+    // The margin strips, which float over the picture and therefore have to be re-placed whenever the frame changes size.
     function layoutChrome() {
         const m = chromeThickness();
         const px = function (n) { return n + 'px'; };
@@ -1916,13 +1271,6 @@
         edgeEls[2].style.cssText = 'right:0;top:' + px(m) + ';bottom:0;width:' + px(m);
         edgeEls[3].style.cssText = cfg.showStatusBar ? 'display:none'
             : 'left:' + px(m) + ';right:' + px(m) + ';bottom:0;height:' + px(m);
-        // The gutter the block button sits in, reserved so the filename and the dimensions
-        // can never run under it. Clamped rather than fixed in CSS: the bar is positioned
-        // left:0/right:0 with border-box sizing, so a padding wider than the frame does not
-        // shrink the text, it forces the whole bar wider than the window it is in.
-        // The ▶ toggle is offered only while there is a clip to turn off. CSS cannot ask which
-        // face is live, so the answer is put on the bar as a class — set HERE rather than in
-        // caption(), because layout() calls this first and the gutter below has to read it.
         const hasVid = mediaEl === vidEl;
         capEl.classList.toggle('hasvid', hasVid);
         const gutter = (placed && hasVid ? VIDOFF_RIGHT : BLOCK_RIGHT) + 26;
@@ -1953,18 +1301,7 @@
         if (spinDocked) moveSpinner();      // the dock rides with the frame
     }
 
-    // Zoom about a point given in SCREEN coordinates, keeping whatever pixel of the image
-    // sits under it there afterwards. The frame may resize in between, so the anchor's
-    // frame-relative position is derived twice: once against the old frame to find the image
-    // pixel, once against the new one to put it back.
-    //
-    // The FRAME is anchored on the same point, as a fraction of its own size (v0.34.0). It
-    // used to hold its centre instead, which meant a frame still free to grow walked its
-    // edges outward past the pointer on the way in and inward past it on the way out — and
-    // once the pointer is outside the frame, onPinWheel stops claiming the wheel, so zooming
-    // out repeatedly meant chasing the window across the screen with the mouse. zoomCentre()
-    // passes the frame's own centre, so the fraction is 0.5 there and the keyboard still gets
-    // exactly the old hold-the-centre behaviour.
+    // Zoom about a point given in SCREEN coordinates, keeping whatever pixel of the image sits under it there afterwards.
     function zoomAt(nextScale, screenX, screenY) {
         if (!view) return;
         const lo = minScaleFor(view.natW, view.natH);
@@ -2009,27 +1346,8 @@
         layout();
     }
 
-    // ---------------------------------------------------------- resolve spinner
-    //
-    // Probing is sequential and each step waits on a real image load, so a hover over a
-    // slow or many-candidate image can sit silent for seconds and read as "nothing
-    // happened". The ring says work is in progress. That is ALL it says, deliberately.
-    //
-    // It used to be determinate, filling against the candidate count. That number is the
-    // worst case — the run stops at the first candidate that clears the ratio gate, which
-    // is usually the first or second of up to eight — so the arc never finished anywhere
-    // near where it claimed it would. A progress bar that is wrong every single time is
-    // worse than no progress bar; there is no honest denominator available here, so the
-    // ring stopped pretending to have one.
-
     const SPINNER_DELAY = 150;   // don't flash it for a cached or instant resolve
 
-    // setInterval, not requestAnimationFrame, and not a CSS animation. rAF is starved
-    // whenever the compositor decides the page is not worth animating — a fully occluded
-    // window, some power-saving modes, and the Claude Code Browser pane, which reports
-    // visibilityState "visible" and still delivers zero frames. A frozen ring is
-    // indistinguishable from a hung script, so the animation must not depend on frames
-    // being offered.
     const SPIN_MS = 60;          // ~16fps, one style write per tick
     const SPIN_STEP = 24;        // degrees per tick — 400°/s
 
@@ -2057,9 +1375,6 @@
         }, SPINNER_DELAY);
     }
 
-    // Two homes. Before anything is on screen it trails the cursor, which is the only
-    // place the user is looking. Once a preview is up it docks into the frame's lower
-    // right, just above the status bar, where it means "this is not the final image yet".
     let spinDocked = false;
 
     function dockSpinner() {
@@ -2095,8 +1410,6 @@
         buildViewer();
 
         const m = viewportBox();
-        // Equivalent to the old "scale by zoomFactor, then shrink to fit, never enlarge":
-        // whichever of the three constraints binds first.
         const fit = Math.min(cfg.zoomFactor, m.w / res.w, m.h / res.h);
 
         view = {
@@ -2135,10 +1448,7 @@
         showBar();
     }
 
-    // A better original arrived while the preview is already up. Swap the pixels without
-    // moving anything the eye is tracking: the frame keeps its centre, and a placed view
-    // keeps both its on-screen size and the part of the picture it was looking at. The
-    // decode is instant because the probe already pulled this URL into cache.
+    // A better original arrived while the preview is already up.
     function upgradeViewer(res) {
         if (!view) return;
         const centreX = view.left + outerW() / 2;
@@ -2147,20 +1457,12 @@
         const fx = view.imgW ? (view.frameW / 2 - view.ox) / view.imgW : 0.5;
         const fy = view.imgH ? (view.frameH / 2 - view.oy) / view.imgH : 0.5;
         const prevImgW = view.imgW;
-        // Read against the OLD fit, before it is recomputed for the new picture.
-        // Either side of fit counts: since the frame may now be bigger than the picture, a
-        // view deliberately zoomed OUT is as hand-made as one zoomed in, and re-fitting it on
-        // an upgrade would undo that just as visibly.
         const userSized = view.fixedW != null || Math.abs(view.scale - view.fitScale) > 1e-6;
 
         view.url = res.url;
         view.natW = res.w;
         view.natH = res.h;
         view.fitScale = fitScaleFor(res.w, res.h);
-        // Hold the on-screen size whenever the user has had a hand in it — placed, or grown
-        // with the wheel while still hovering. Only a preview nobody has touched re-fits.
-        // Missing the wheel-grown case would mean a late upgrade quietly undoing the sizing
-        // that had just been done by hand.
         view.scale = userSized && prevImgW
             ? Math.max(minScaleFor(res.w, res.h), prevImgW / res.w)   // same size, better pixels
             : view.fitScale;
@@ -2178,28 +1480,15 @@
     }
 
     function deferredCaption(url) {
-        // Resource Timing can land a tick after the load the probe saw, so the byte size
-        // is often missing on the first pass. One re-read catches it.
         if (!cfg.showStatusBar || transferBytes(url)) return;
         setTimeout(function () { if (view && view.url === url) caption(); }, 300);
     }
 
     function hideViewer() {
         if (!box) return;
-        // `hot` is what makes the frame hit-testable, and it is added by layout(), which no
-        // longer runs once the frame is down — so it has to come off HERE. Left on, the box
-        // stays a full-size invisible rectangle with pointer-events:auto and cursor:move at
-        // the frame's last position: it shows the move cursor, swallows every click through
-        // its own onBoxDown, and makes onOver's `ours(e.target)` true so no image under it
-        // can ever preview again. Reported as "a phantom window where the preview used to
-        // be"; it appeared only after a preview had been placed at least once.
         box.classList.remove('on', 'hot', 'pan', 'drag');
         box.style.cursor = '';      // onMove writes this inline over the bands; see hitRegion
-        // Same reasoning as `hot` on the box: this grants pointer-events, so it comes off on
-        // the path that hides the window, not on the one that lays it out.
         if (gripEl) { gripEl.classList.remove('hot'); gripEl.style.cursor = ''; }
-        // Release the decoded image, or stop the clip, so long sessions accumulate
-        // neither bitmaps nor a video quietly buffering behind a hidden element.
         setTimeout(function () {
             if (box && !box.classList.contains('on')) {
                 clearMedia(imgEl);
@@ -2212,31 +1501,9 @@
 
     // ------------------------------------------------------------- placed mode
 
-    // Every placed-mode key and wheel listener lives on this one node, in capture, so
-    // teardown cannot drift and so we outrank document-level listeners belonging to the
-    // page or to a sibling userscript (the capture path reaches window first).
     const CAP_TARGET = window;
     const WHEEL_OPTS = { capture: true, passive: false };
 
-    // ---------------------------------------------- the cross-userscript click claim
-    //
-    // Binding on window/capture beats every DOCUMENT-level listener, but two userscripts
-    // both on window/capture are settled by registration order — which is the manager's
-    // to decide and not ours. Open Links in New Tab moved its own click handling to
-    // window/capture in v1.19.0 for exactly the same reason, and on a site it early-captures
-    // it was taking the click that pins a preview: the press landed on the transparent
-    // preview, OLINT saw a link under the pointer, and the page navigated instead.
-    //
-    // The order-independent fact is that MOUSEDOWN always precedes CLICK. So the press —
-    // which every script sees, because nobody stops mousedown — is where ownership is
-    // declared, and the click handler that runs first can read it. The channel is an
-    // attribute on <html>: `document` is the one object two sandboxed userscripts reliably
-    // share, needing no @grant and no unsafeWindow.
-    //
-    // The value is a timestamp and consumers check freshness (OLINT allows 1500 ms), because
-    // there is no reliable "last" event to clear it on: mouseup fires BEFORE click, so
-    // clearing there would clear it too early. It is cleared on the next press we do not
-    // claim, and a stale one expires on its own.
     const CLAIM_ATTR = 'data-userscript-click-claim';
 
     function claimClick() {
@@ -2251,26 +1518,9 @@
         } catch (e) { /* no document element yet */ }
     }
 
-    // ONE rule, both states: a wheel over the frame is the frame's, a wheel anywhere else
-    // scrolls the page. What it DOES differs — it grows a hover preview and zooms inside a
-    // placed one — but who owns it does not, and that is what makes it predictable.
-    //
-    // The cost, and it is real: a hover preview is nudged to sit under the cursor, so while
-    // one is up the wheel almost never reaches the page. Scrolling means moving off the
-    // image first, which takes the preview down instantly, and then scrolling.
-    //
-    // Bound on demand rather than for the life of the script: this is a non-passive capture
-    // listener on window, and leaving one attached on every page makes every wheel event on
-    // every page cancellable for nothing. One flag so add and remove cannot drift, and the
-    // same WHEEL_OPTS object for both, or the removal silently no-ops.
     let wheelZoomOn = false;
 
-    // Bound when the window is PLACED, not when it appears. A wheel over a preview you are
-    // merely hovering belongs to the PAGE: it scrolls, and the scroll takes the preview down.
-    // v0.30.0 had the wheel place the window and grow it, which made growing-before-placing
-    // possible but stole the scroll wheel from every hover — reverted deliberately in
-    // v0.31.0. Growing the frame still works, one click later: placing does not freeze the
-    // size, so the wheel over a placed-but-unmoved window grows it exactly as before.
+    // Bound when the window is PLACED, not when it appears.
     function enableWheelZoom() {
         if (wheelZoomOn) return;
         wheelZoomOn = true;
@@ -2283,31 +1533,11 @@
         CAP_TARGET.removeEventListener('wheel', onPinWheel, WHEEL_OPTS);
     }
 
-    // Hovering becomes placed, and there is nothing in between. The old middle rung —
-    // dragged aside but still dying the moment the pointer left it — was the thing that
-    // made a deliberately positioned window disappear on its own, which is the opposite of
-    // what positioning it means.
-    //
-    // Entered by any deliberate act on the frame: a wheel notch, a click, a drag, or a
-    // resize. The press does it, not the release, so click-to-place and drag-to-place are
-    // the same code path and there is no travel threshold to get wrong.
-    //
-    // THE WHEEL PLACES IT TOO, which is what makes growing a preview a stable gesture: while
-    // it was still hover-held, growing one and then moving the pointer anywhere — including
-    // towards the window you had just enlarged — killed it. The cost is that an idle scroll
-    // over a picture now leaves a window that has to be dismissed, where before it merely
-    // grew and then died on its own.
-    //
-    // Placing does not settle the size, and since v0.34.0 neither does moving: the frame
-    // keeps following the picture up to the growth ceiling until an edge is dragged by hand.
-    // See reflow() for why the move-freeze went.
+    // Hovering becomes placed, and there is nothing in between.
     function place() {
         if (placed || !view) return;
         placed = true;
         clearTimeout(timer);
-        // The in-flight resolve is deliberately NOT cancelled: placing is a reason to keep
-        // looking for a better original, not to stop. upgradeViewer() preserves the placed
-        // geometry when one arrives.
         box.classList.add('placed');
         dimEl.classList.add('catch');
         CAP_TARGET.addEventListener('keydown', onPinKey, true);
@@ -2327,23 +1557,12 @@
         cancel();
     }
 
-    // Controls that live INSIDE the box. onBoxDown/onBoxClick are capture listeners on the
-    // box, and capture descends from the ancestor, so without an explicit exemption their
-    // stopPropagation() runs before a child's own handlers and the control does nothing —
-    // the old X button looked correct, hovered correctly and did nothing until this existed.
-    // Any new control added inside the box goes in here; the symptom of forgetting is
-    // silence. Two of them: the ⊘ and the ▶. The X was removed in v0.34.0, because a placed
-    // window already closes on Escape and on a click anywhere outside it, and the button sat
-    // in the corner where the hand goes to resize.
+    // Controls that live INSIDE the box.
     function isBoxControl(t) {
         return blockEl.contains(t) || vidOffEl.contains(t);
     }
 
-    // "Stop showing clips in this tab", from the ▶ in the status bar. Session-scoped and
-    // deliberately not stored: whether a moving preview is wanted is a judgement about the
-    // page in front of you, so it costs one click to answer and a reload to undo. The cache
-    // is cleared because a video candidate that was probed and shown must stop being the
-    // answer for the same thumbnail a moment later.
+    // "Stop showing clips in this tab", from the ▶ in the status bar.
     function stopVideoPreviews() {
         playVideos = false;
         dbg('video previews off for this tab');
@@ -2351,13 +1570,7 @@
         dismiss();
     }
 
-    // "Never preview this image again", from the ⊘ in the status bar. Records the URL on
-    // screen AND the source element's own src, because those differ whenever the preview is
-    // an upgrade — blocking only the resolved one would leave the thumbnail still opening a
-    // preview that then failed to upgrade.
-    //
-    // reloadSettings() first: the list is the one setting written from outside the panel, so
-    // it is the one place a stale in-memory cfg would silently discard another tab's entries.
+    // "Never preview this image again", from the ⊘ in the status bar.
     function blockCurrent() {
         if (!view) return;
         reloadSettings();
@@ -2371,8 +1584,7 @@
         dismiss();
     }
 
-    // Placing happens on the PRESS, so by the time a click arrives the window is already
-    // placed and there is nothing left for this to do but keep the click off the page.
+    // Placing happens on the PRESS, so by the time a click arrives the window is already placed and there is nothing left f...
     function onBoxClick(e) {
         if (isBoxControl(e.target)) return;
         e.preventDefault();
@@ -2383,11 +1595,6 @@
         if (isBoxControl(e.target)) return;
         if (e.button !== 0 && e.button !== 2) return;
 
-        // A PLACED window hands the right button to the browser: its own context menu is the
-        // only thing that can Save or Copy the picture, because ours would run in page
-        // JavaScript and need the host's CORS headers. The left button always drives the
-        // window, whichever way pinButton points, or a window could end up with no way to
-        // be moved at all.
         if (placed) {
             if (e.button !== 0) return;
         } else if (e.button !== (cfg.pinButton === 'right' ? 2 : 0)) {
@@ -2395,30 +1602,12 @@
             return;
         }
 
-        // Swallow it either way: on a hover preview the press really does land on the page
-        // beneath, and a link there would otherwise be followed.
         e.preventDefault();
         e.stopPropagation();
         if (!view) return;
         swallowNextClick = true;    // the click half of this press is ours too
         if (!placed) place();
 
-        // Edges and corners resize; everything else is the middle — see hitRegion(). The
-        // middle keeps the older rule: pan when there is something to pan, move the frame
-        // when there is not. pannable() is read per press, so zooming in and back out
-        // restores dragging by itself with no state to keep in step.
-        //
-        // THE STATUS BAR NO LONGER OUTRANKS A RESIZE (v0.33.0). It used to outrank the edge
-        // regions outright, from when it was the only move handle there was; once the whole
-        // frame margin became one (E25) that made the bar a dead spot for resizing, and the
-        // two BOTTOM CORNERS in particular answered a grab with a move cursor instead of a
-        // resize one. It still outranks the *middle*, which is not redundant either: with
-        // `frameMargin: 0` hitRegion() has no move ring to return at all, and with a small one
-        // the ring is thinner than the bar, so without this the bar's upper rows would pan.
-        //
-        // contains(e.target), not geometry: a faded bar has `pointer-events: none` (E10), so
-        // this is false and the press falls through to the ordinary rule — which is exactly
-        // the "a faded bar is not an invisible handle" behaviour.
         const reg = hitRegion(e.clientX, e.clientY);
         const onBar = capEl.contains(e.target) && !(reg && reg.kind === 'resize');
         if (reg && reg.kind === 'resize') {
@@ -2427,18 +1616,10 @@
                 x0: e.clientX, y0: e.clientY,
                 w0: view.frameW, h0: view.frameH, l0: view.left, t0: view.top,
                 aspect: view.frameH ? view.frameW / view.frameH : 1,
-                // Captured at grab time: a frame whose picture already spills is an
-                // aperture, and widening it should reveal more rather than undo the zoom.
                 spilling: pannable(),
-                // Only a picture sitting EXACTLY at fit follows the frame. One deliberately
-                // zoomed OUT below fit keeps its scale, or a resize would undo the zoom-out
-                // exactly the way it is forbidden to undo a zoom-in.
                 refit: !pannable() && Math.abs(view.scale - view.fitScale) < 1e-6,
             };
         } else {
-            // The frame margin moves the window for the same reason the bar does, and it is
-            // what makes the bar optional again: a spilling frame is now movable by any of
-            // its four sides rather than by the bar alone.
             const onFrame = onBar || (reg && reg.kind === 'move');   // reg is never 'resize' here
             const mode = onFrame || !pannable() ? 'move' : 'pan';
             drag = { x: e.clientX, y: e.clientY, mode: mode };
@@ -2446,27 +1627,7 @@
         box.classList.add('drag');
     }
 
-    // A corner or an edge drag. `ex`/`ey` name which edges are being pulled, and either may
-    // be null — that is what makes an edge a one-axis version of a corner rather than a
-    // separate gesture.
-    //
-    // Aspect is FREE by default and Shift keeps it (v0.32.0 — it was the other way round).
-    // The lock existed because an edge drag that changes one dimension only just grows bands
-    // of background down the sides, and that used to be an incoherent state; since the frame
-    // is allowed to be a different shape from the picture (E26) it is an ordinary one, and
-    // "drag the window to whatever shape I want" is what a window does. Shift still locks it,
-    // to the frame's shape as it was at GRAB TIME — locking to the picture's shape instead
-    // would snap the frame the instant it was touched.
-    //
-    // On the axis NOT being dragged, the frame grows about its centre. Anchoring that axis
-    // to its top or left instead would make the window crawl diagonally while you pull one
-    // edge straight.
-    //
-    // What happens to the PICTURE depends on whether it was already spilling, which keeps
-    // one gesture honest in both cases: a picture at fit stays at fit, so the window gets
-    // bigger and so does the picture, and a picture already zoomed in keeps its zoom and
-    // simply shows more of itself. With a free aspect "at fit" means fitted on whichever axis
-    // binds, so pulling one edge grows the picture only until the other axis takes over.
+    // A corner or an edge drag.
     function resizeBy(e) {
         const g = growBox();
         let w = drag.w0, h = drag.h0;
@@ -2484,10 +1645,6 @@
         else if (!drag.ex) view.left = drag.l0 - (w - drag.w0) / 2;
         if (drag.ey === 't') view.top = drag.t0 + (drag.h0 - h);
         else if (!drag.ey) view.top = drag.t0 - (h - drag.h0) / 2;
-        // Fixed from here on: these edges were put where they are on purpose, so the frame
-        // stops following the picture. fitScale is recomputed with them because it is the
-        // zoom floor and what `0` returns to, and on a fixed frame that has to mean "fit the
-        // FRAME" or `0` would spring a hand-sized window back to the window's shape.
         view.fixedW = w;
         view.fixedH = h;
         view.fitScale = fitScaleFor(view.natW, view.natH);
@@ -2515,13 +1672,7 @@
         if (handled) { e.preventDefault(); e.stopPropagation(); }
     }
 
-    // A wheel over a PLACED window is the window's; anywhere else, and in every other state,
-    // it is the page's. What it does is decided by reflow(), not here: while the frame is
-    // still free it grows with the picture, and once a move has frozen it the picture spills
-    // inside it.
-    //
-    // The listener is only bound while placed, so the `placed` test is belt and braces
-    // against a stray wheel arriving between place() and unplace().
+    // A wheel over a PLACED window is the window's; anywhere else, and in every other state, it is the page's.
     function onPinWheel(e) {
         if (!view || !placed) return;
         if (!pointInPreview(e.clientX, e.clientY)) return;
@@ -2538,16 +1689,8 @@
     let token = null;       // cancellation token for the in-flight resolve
     let timer = null;
     let drag = null;        // { mode:'pan'|'move'|'resize', … } while a button is held
-    // The press that places a window also produces a click, and by then the backdrop is
-    // catching — so without this the window would be dismissed by the very gesture that
-    // placed it, or the click would reach a link on the page. Set when a press is claimed,
-    // consumed by the next click, cleared by any press we do not claim.
     let swallowNextClick = false;
     let suppressed = null;  // element whose preview was dismissed; skipped until re-entered
-    // Whether `active` / `suppressed` were reached by looking THROUGH a cover. It changes
-    // what "the pointer left the image" means: the pointer is never on the picture itself
-    // in that case, so mouseout's element containment test — which is what makes a scan
-    // across a row give one preview per image — cannot answer it and the stack has to.
     let activeCovered = false;
     let suppressedCovered = false;
     let swallowMenu = false;
@@ -2555,14 +1698,7 @@
     let mouseDown = false;
     let modifierDown = false;
 
-    // There is no grace period on the hide any more, and no `hideTimer`. One existed so the
-    // pointer could travel onto the preview before it vanished — which mattered only while
-    // the preview was hit-testable. It is pointer-transparent now, so leaving the image is
-    // unambiguous and the preview goes at once. That is what makes scanning a row of
-    // thumbnails give one preview per thumbnail.
-
-    // A hover preview cannot be hit-tested, so "is the pointer on it" is answered from
-    // `view` instead. Outer rect: the frame plus its border, which is what layout() writes.
+    // A hover preview cannot be hit-tested, so "is the pointer on it" is answered from `view` instead.
     function pointInPreview(x, y) {
         if (!view || !box || !box.classList.contains('on')) return false;
         const w = outerW();
@@ -2581,28 +1717,9 @@
         return false;
     }
 
-    // Images only, by design — so nothing that IS a media element or a plugin surface is a
-    // candidate, whatever CSS background it happens to carry.
     const NEVER = { VIDEO: 1, AUDIO: 1, IFRAME: 1, CANVAS: 1, OBJECT: 1, EMBED: 1,
         SOURCE: 1, TRACK: 1 };
 
-    // A video thumbnail is a plain <img>: at the DOM level there is nothing to tell it from
-    // any other image, so three independent signals are used and any one is enough.
-    //
-    // 0. GEOMETRY — the element sits inside the rectangle of a laid-out <video>. Exact for
-    //    a player surface of any shape; see overVideoSurface().
-    // 1. STRUCTURE — a <video> in the element itself or in one of three ancestors. This
-    //    catches players and the inline preview a card swaps in on hover. It is exact when
-    //    it fires, but on a card whose player has not been injected yet it fires late or
-    //    not at all, which is why (2) exists.
-    // 2. THE LINK — the nearest ancestor <a href> pointing at something that is plainly a
-    //    video. This is a heuristic and it is the one that can be wrong; it is bounded to
-    //    unmistakable shapes and is switchable (`previewVideos`). The asymmetry favours it:
-    //    a false positive costs one preview that will not open, a false negative is the
-    //    reported bug — a preview covering the video you are trying to click.
-    //
-    // Three ancestors, not "walk to the top": querySelector on a high ancestor scans its
-    // whole subtree, and this runs on every mouseover.
     const VIDEO_LINK_RE = new RegExp([
         'youtu\\.be/',
         '/watch\\?',
@@ -2612,64 +1729,9 @@
         '\\.(?:mp4|webm|m3u8|mov|mkv|avi)(?:$|[?#])',
     ].join('|'), 'i');
 
-    // GEOMETRY — is this element sitting on top of a real, laid-out <video>? A player's
-    // poster, its cued-thumbnail overlay and its endscreen images all occupy the same
-    // rectangle as the <video> itself, so a containment test names them exactly, whatever
-    // the DOM between them looks like. This is what the ancestor walk below cannot do on a
-    // watch page: the player element holds the <video> AND several <img>, so the "still one
-    // card" bound ends the walk before the video test is ever reached, and a preview opens
-    // over the video you were trying to click. Reported on YouTube video pages.
-    //
-    // A zero-sized <video> (the 1x1 fixture in test case 18, a player not yet laid out)
-    // contains nothing, so this cannot poison a page the way an unbounded walk does.
-    // THE VIDEO'S OWN RECTANGLE IS NOT ALWAYS WHERE THE PLAYER APPEARS. Measured on a
-    // LibreWolf YouTube watch page in the cued (not-yet-playing) state, 2026-09-03:
-    //
-    //     poster overlay   0,56   1903×798     (top 56, bottom 854)
-    //     <video>          0,-742 1903×798     (top -742, bottom 56)
-    //
-    // The video is laid out exactly its own height ABOVE the player — touching the poster's
-    // top edge, overlapping it nowhere. Testing the poster against the video's rect missed by
-    // precisely 798px, the gate reported "not a video", and the poster previewed. Chrome puts
-    // the video where the player is and never showed this.
-    //
-    // So the surface to test against is the player BOX, not the video element: the nearest
-    // ancestors of the <video> that the video substantially FILLS. On a watch page that is
-    // 100% of the player container, which is exactly the poster's rectangle. On a page whose
-    // only video is a small one in a grid, the video fills ~0% of the grid, so the walk stops
-    // at once — that fill test is what stops one <video> anywhere on a page from suppressing
-    // every image on it, and it is why the walk can be anchored at the video rather than
-    // needing the "still one card" img bound that the ancestor walk below uses.
     const PLAYER_UP = 3;
     const PLAYER_FILL = 0.5;
 
-    // A <video> on the page is not by itself a reason to suppress anything — it depends
-    // entirely on which of two kinds it is, and they behave nothing alike.
-    //
-    //   A PLAYER. A site dedicated to video: a listing page, and behind each entry a page
-    //   holding one player with a play button, a volume slider, a quality menu. A preview
-    //   opening over that covers the thing you are trying to click, which is the reported
-    //   bug every gate below exists to stop.
-    //
-    //   A GIF. Imgur's gallery, gifwow's grid: a wall of short muted clips ALREADY PLAYING,
-    //   no controls, nothing to click but the link underneath — they are animated pictures
-    //   that happen to be encoded as video, and the page they sit on is an ordinary picture
-    //   page where previews belong. (Clicking one leads to a player page; that page is the
-    //   first kind and is still refused.)
-    //
-    // Four properties are required together, because every one of them alone has a false
-    // positive: `controls` is false on YouTube too (it draws its own chrome), `muted` is
-    // true of any player started under an autoplay policy, and `autoplay`/`loop` say
-    // nothing about length. The DURATION is what carries the argument — a clip that loops
-    // in under a minute is not something you sit and watch — and an UNKNOWN duration
-    // (metadata not in yet, a cued player that has never been started) reads as PLAYER,
-    // which is the safe direction to be wrong in: it costs one preview that does not open,
-    // where the other direction covers the video you were reaching for.
-    //
-    // What this deliberately does NOT try to do is judge the destination. A muted, playing,
-    // controls-less clip on a video site's listing page is pixel-for-pixel the imgur shape
-    // and nothing in the DOM separates them; the ancestor-link gate below is the only
-    // signal left for that case, and it stays.
     const GIF_MAX_SECS = 60;
 
     function gifLike(v) {
@@ -2680,8 +1742,7 @@
         return isFinite(d) && d > 0 && d <= GIF_MAX_SECS;
     }
 
-    // The first non-gif <video> inside `n`, or null. Used instead of querySelector('video')
-    // wherever "is there a player here" is the question being asked.
+    // The first non-gif <video> inside `n`, or null.
     function playerIn(n) {
         if (!n || !n.querySelectorAll) return null;
         const vs = n.querySelectorAll('video');
@@ -2695,8 +1756,6 @@
         for (let i = 0; i < vids.length; i++) {
             const v = vids[i].getBoundingClientRect();
             if (v.width < 2 || v.height < 2) continue;   // not laid out; contains nothing
-            // Listed, so the debug log still accounts for every video on the page, but
-            // flagged: a gif suppresses nothing and gets no player box derived from it.
             if (gifLike(vids[i])) { out.push({ what: 'gif (not a player)', rect: v, gif: true }); continue; }
             out.push({ what: 'video', rect: v });
             const area = v.width * v.height;
@@ -2705,11 +1764,6 @@
                 const r = n.getBoundingClientRect();
                 if (r.width < 2 || r.height < 2) continue;
                 if (area < r.width * r.height * PLAYER_FILL) break;   // too big to be this video's player
-                // An area test alone admits an oddly-shaped ancestor: a 40×7006 column passed
-                // it against a 640×360 video during testing. A player box cannot be NARROWER
-                // or SHORTER than the video it holds, whatever the area works out to. Skip and
-                // keep climbing rather than stop — a wrapper can be odd while its parent is
-                // the real player box. (1px of tolerance for sub-pixel layout.)
                 if (r.width < v.width - 1 || r.height < v.height - 1) continue;
                 out.push({ what: 'player box', rect: r });
             }
@@ -2735,11 +1789,7 @@
         return false;
     }
 
-    // closest() and parentElement both stop dead at a shadow-root boundary. A site that
-    // builds its cards out of custom elements — YouTube's entire feed — can therefore put
-    // the <img> inside a shadow root and the <a> that wraps it outside, and the link gate
-    // below sees no link at all. This is the composed walk: ordinary closest() first, then
-    // hop to the shadow host and keep going.
+    // closest() and parentElement both stop dead at a shadow-root boundary.
     function closestAcross(el, sel) {
         let n = el;
         while (n) {
@@ -2753,17 +1803,10 @@
         return null;
     }
 
-    // Returns WHY this element counts as video, or null. A string rather than a boolean
-    // because the debug log prints it: when a preview opens over a video it should not have,
-    // "which of the four gates fired, and what did the fourth one see" is the whole
-    // question, and it can only be answered on the machine showing the bug.
+    // Returns WHY this element counts as video, or null.
     function videoReason(el) {
         if (el.closest && el.closest('video')) return 'inside a <video>';
         if (overVideoSurface(el)) return 'over a laid-out <video> rectangle';
-        // Walk up only while the ancestor still looks like ONE card. The moment it holds
-        // more than one image it is a grid or a page, and a <video> anywhere else in it
-        // would poison every image on the page. Measured 2026-09-03: without this bound the
-        // single 1×1 <video> fixture on the test page disabled all nineteen cases.
         let n = el;
         for (let up = 0; n && up < 4; up++, n = n.parentElement) {
             if (up > 0 && n.querySelectorAll && n.querySelectorAll('img').length > 1) break;
@@ -2774,12 +1817,7 @@
         return null;
     }
 
-    // Split out of videoReason() because a gif-style clip that is ITSELF the hover target
-    // needs this gate and none of the others: it is trivially "inside a <video>" and sits
-    // inside its own rectangle, so the structural and geometric tests self-match and would
-    // refuse every clip on every page. The link is the one signal that still means
-    // something there — it is what separates a wall of animations from a video site's
-    // listing page, where the clips look identical and previews are not wanted.
+    // Split out of videoReason() because a gif-style clip that is ITSELF the hover target needs this gate and none of the o...
     function videoLinkReason(el) {
         const a = closestAcross(el, 'a[href]');
         const href = a ? (a.getAttribute('href') || '') : '';
@@ -2791,170 +1829,31 @@
         return !!videoReason(el);
     }
 
-    // PAGE FURNITURE — a CSS background that is part of the page rather than a picture on
-    // it. Returns WHY, or null, for the same reason videoReason() does: the decision is a
-    // read of the user's own DOM and a silent exclusion is the worst kind of bug here — a
-    // wrongly-skipped image just stops previewing, with nothing on screen to say so.
-    //
-    // Every test below is a MEASUREMENT, not a guess at intent. Deliberately absent: class
-    // and id matching (/hero|banner|bg|masthead/), filename patterns, and "require a
-    // positive signal before previewing" — those are the guesses, and this script's whole
-    // premise is that it decides nothing before hover time and keeps no allowlist.
-    //
-    // NOTE these apply to CSS backgrounds ONLY, never to an <img>. A full-width <img>, an
-    // <img> with text over it, an <img> in a header — those are all ordinary shapes for a
-    // picture that is genuinely the content, and the reported bug ("blank space previews
-    // the tile") is a background bug.
     const BAND_WIDTH = 0.98;    // of the viewport — a full-bleed band reaches both edges
     const CONTENT_CHARS = 40;   // text this long is a paragraph, not a tile's caption
 
     function wallpaperReason(el) {
         if (el === document.body || el === document.documentElement) return 'the page background';
         const s = getComputedStyle(el);
-        // Does not scroll with the page. A parallax or fixed backdrop is decoration by
-        // construction — a picture you are meant to look at moves with the text beside it.
         if (s.backgroundAttachment.indexOf('fixed') >= 0)
             return 'background-attachment: fixed — it does not scroll with the page';
-        // Laid end to end. `background-repeat: repeat` alone does NOT mean tiled — it is the
-        // CSS default, so a hero with `background-size: cover` computes to it too and would
-        // be caught (test case 9 is exactly that shape). It is repeat AND an auto size
-        // together that mean the image is being stepped across the element at natural size.
         if (!/no-repeat/.test(s.backgroundRepeat) && /^auto/.test(s.backgroundSize))
             return 'tiled end to end';
         const r = el.getBoundingClientRect();
-        // Full-bleed band: masthead, hero, section stripe, footer. 98% rather than something
-        // looser because a gallery tile inside a centred container never reaches the window
-        // edges, while a band does by definition. (clientWidth is 0 in a hidden Browser pane,
-        // hence the guard — without it every element would span a zero-width viewport.)
         const vw = document.documentElement.clientWidth;
         if (vw > 0 && r.width >= vw * BAND_WIDTH) return 'spans the full width of the page';
-        // The page's own content is sitting ON it, so it is a backdrop, not a picture. The
-        // threshold keeps a tile's caption ("Sunset, 2019") from counting; a hero carries
-        // real copy. Only reachable by hovering the element's own blank space, since the
-        // text itself is a different element and hit-tests first.
         if ((el.textContent || '').trim().length >= CONTENT_CHARS)
             return 'the page\'s own text sits on it';
         return null;
     }
 
-    // THE PICTURE ACROSS THE TOP OF THE PAGE. A channel banner, a forum masthead, a site
-    // header image — an <img>, so none of the background rules above can see it, and often
-    // linked and often rotated daily so the never-preview list cannot hold it either.
-    //
-    // Measured on youtube.com/@TheOnion, 2026-09-03: `<img>` 1193×192 at 56 px from the top
-    // of the document, natural 1707×282, inside `#page-header-banner`. Nothing usable in
-    // the markup — no role, no aria-hidden, and alt="" is on every image YouTube renders
-    // including the video thumbnails, so it separates nothing. The geometry is all there is.
-    //
-    // REWRITTEN IN v0.38.0 AGAINST A MEASURED CORPUS — see `banner-test-sites.md`, which
-    // holds ~40 live pages probed in two browsers on 2026-09-04, with the operands the old
-    // gate decided on. Read it before touching any number here; every threshold below is
-    // sitting next to a row in that file.
-    //
-    // The old gate was four conditions: near the top, at least 400px wide, nothing beside
-    // it, and FEWER THAN TWO OTHER PICTURES ON THE PAGE SHARE ITS WIDTH. The corpus says
-    // what is wrong with it in one sentence: **it reasoned about one picture's width against
-    // a bag of other widths, and never about the picture itself.** So every miss was a
-    // coincidence of widths and every false positive was the absence of one:
-    //
-    //  - homedepot.com's promo banner previewed because four MORE full-width promo banners
-    //    down the page formed the "set" that proved none of them was a banner. A page built
-    //    out of banners inverts the condition completely.
-    //  - avsforum.com's 1280×307 masthead was saved by the site logo below it and something
-    //    4,257px down the page. Membership asked only "is another picture this wide" — no
-    //    shared x, no spacing, no distance bound.
-    //  - xkcd.com's store banner previewed because two unrelated 520px images happened to
-    //    fall within 10% of 540. Nothing about the page changed; the arithmetic did.
-    //  - and symmetrically: unsplash, flickr, pexels, wallhaven, safebooru and furaffinity
-    //    DETAIL pages were all refused, because one big picture near the top with nothing
-    //    beside it and nothing sharing its width is exactly a masthead by those four rules.
-    //    FurAffinity is the sharpest: the artwork was refused while three ads above it
-    //    previewed — the precise inverse of what anyone wants, on one screen.
-    //
-    // THE REPLACEMENT IS THE SHAPE OF THE PICTURE, which is a property of the thing itself
-    // and cannot be moved by what else the page happens to hold. A banner is a BAND: wide
-    // and short. Measured across the corpus the separation is not close —
-    //
-    //   banners      homedepot 12.9:1  city-data 13.1  qc 13.6  aliexpress 14.2  steam 33.8
-    //                furaffinity ad 8.1  phpbb 8.9  4chan ad 7.8  youtube 6.2  bandcamp 5.4
-    //                xkcd 5.4  spacebattles 5.9  linustechtips 5.2  avsforum 4.2  newegg 4.1
-    //                soundcloud 4.8  natgeo 3.9  macrumors 3.5  4chan board banner 3.0
-    //   content      nasa hero 2.4  allbirds 1.9  itch 1.8  tumblr 1.8  alrincon 1.8
-    //                newgrounds tile 1.7  flickr 1.6  unsplash 1.5  pexels 1.5  500px 1.5
-    //                wallhaven 1.5  safebooru 1.0  furaffinity artwork 1.0  artstation 0.65
-    //
-    // — a clean gap between 3.0 and 2.4 with nothing in it. So:
-    //
-    //  1. Its top is within BANNER_TOP of the top of the DOCUMENT — above where a page's
-    //     content begins. Document, not viewport: scrolled down, an ordinary picture would
-    //     otherwise drift into the band. RAISED 200 → 300 because the shape test now carries
-    //     the decision and the old cutoff was cutting through the middle of the corpus:
-    //     newgrounds refused a content tile at 192px and previewed the same tile at 208,
-    //     homedepot's banner was caught at 197 and steam's page backdrop escaped at 206.
-    //     300 picks up spacebattles' masthead at 294. It does not go higher because xkcd's
-    //     COMIC is 3.1:1 at 388px down and questionablecontent's is at 333 — those two are
-    //     the only measured content that is band-shaped, and position is all that saves them.
-    //  2. At least BANNER_MIN wide on screen. LOWERED 400 → 240: the corpus measured real
-    //     mastheads at 250 (macrumors), 300 (4chan's rotating board banner), 304
-    //     (linustechtips) and 340 (spacebattles), all escaping on width alone, and 400 was
-    //     only ever that high because nothing else was protecting content.
-    //  3. IT IS A BAND — width ÷ height at least BANNER_BAND. This is the new condition and
-    //     it is the one doing the work. It is what refuses homedepot and xkcd, which nothing
-    //     that looks at other pictures ever could, and it is what lets every photo-site
-    //     detail page through without depending on a coincidence.
-    //  4. NO ROW-MATE SITS BESIDE IT. A picture with a comparable one to its left or right
-    //     is one item in a row. Kept — the corpus records no failure of its direction — but
-    //     narrowed twice:
-    //       - THE ROW-MATE MUST BE THE SAME HEIGHT (within PEER_HEIGHT). Items in a row are;
-    //         furniture that merely shares a horizontal band is not. This is what stops
-    //         furaffinity's 320×50 skyscraper ad from rescuing the 728×90 leaderboard beside
-    //         it, the one measured miss on this condition.
-    //       - BESIDE_PEER drops 0.25 → 0.15, because the height test now independently kills
-    //         the case the quarter-width floor was invented for (YouTube's 24px subscription
-    //         avatar beside a 1284×207 banner: 24 against 207 is nowhere near). 0.25 was the
-    //         single most fragile number in the corpus — 500px.com's photo page passed it on
-    //         EXACT equality, 276 / 1104 = 0.250000, so a 275px avatar would have refused the
-    //         photograph. It is moot now (the photo is 1.5:1 and never reaches this test) but
-    //         a threshold sitting on a real site's geometry is not a threshold.
-    //
-    // WHAT WAS DELETED, and the cost, stated plainly. The old condition (4) — "fewer than two
-    // other pictures share its width" — is GONE, with `BANNER_SIMILAR` and `BANNER_SET_MIN`.
-    // It existed to save a single-column gallery, where a row test is useless; the shape test
-    // does that job better, since gallery tiles are picture-shaped. It cannot be repaired: a
-    // stack of same-width bands down a page is Home Depot's promo column AND a hypothetical
-    // column of banner-shaped content, and no layout test separates them. Home Depot is
-    // measured; the column of bands is not. RESIDUAL COST: a one-column gallery whose tiles
-    // are wider than 3:1, whose first tile starts in the top 300px, loses that first tile.
-    // If that ever turns up on a real page, it is evidence to weigh — not a reason to bring
-    // back a rule whose every measured effect was a miss.
-    //
-    // The page-wide scan is only reached once (1), (2) and (3) hold, so it costs nothing on
-    // an ordinary hover — a band-shaped picture at the top of the document is rare.
-    //
-    // Unlike the background rules this DOES apply to an <img>, which is a deliberate
-    // narrowing of "a full-width photo is still a photo": that stays true of a photo in the
-    // body of a page, and stops being true of the one thing above all the content that is
-    // as wide as the page and shaped like nothing else on it. IT ALSO APPLIES TO CSS
-    // BACKGROUNDS, which `CLAUDE.md` used to deny — `eligibleDirect()` calls it on whatever
-    // was hovered, and it only ever reads `getBoundingClientRect()`. That is now deliberate
-    // rather than accidental: soundcloud's profile banner (4.8:1) escapes all five
-    // `wallpaperReason()` tests and is caught correctly here, and it is the only thing that
-    // catches it.
     const BANNER_TOP = 300;         // px from the top of the document
     const BANNER_MIN = 240;         // px wide on screen
     const BANNER_BAND = 3;          // width ÷ height — below this it is picture-shaped
     const BESIDE_PEER = 0.15;       // a neighbour this fraction of the width may be a row-mate
     const PEER_HEIGHT = 0.3;        // ...and only if its height is within this much of ours
 
-    // Conditions (1) to (3) — everything that needs only the picture's OWN rectangle, and
-    // therefore nothing from the DOM at all. Split out so `test-resolver.js` can slice it
-    // and run it offline, which is what turns `banner-test-sites.md` from a document into a
-    // regression suite: ~40 measured live pages, each asserted here as three numbers and an
-    // expected answer. A threshold that is moved without a reason now fails a named site.
-    //
-    // The band ratio is measured from the DISPLAYED rect, not the natural size. A banner is
-    // a band because of how the page lays it out — `object-fit: cover` on a square file is
-    // one of the commonest ways to build one — and the natural aspect says nothing about it.
+    // Conditions (1) to (3) — everything that needs only the picture's OWN rectangle.
     function bannerShape(w, h, docTop) {
         const band = h > 0 ? w / h : 0;
         const where = Math.round(w) + '×' + Math.round(h) + ' (' + band.toFixed(1) + ':1) at ' +
@@ -2970,22 +1869,6 @@
     }
 
     // Returns WHICH condition decided and the numbers it decided on, for both answers.
-    // A bare "not a banner" is useless in a bug report — the whole class of report this
-    // exists for is "it works in your browser and not in mine", where the only thing that
-    // can settle it is the operands the gate actually saw on the machine showing the bug.
-    // Same rule as the video log: print the operands, not a summary of one of them.
-    //
-    // A PICTURE NOBODY CAN SEE IS NOT BESIDE ANYTHING. `opacity: 0` and `visibility: hidden`
-    // both leave a full-size rectangle behind, so a zero-size filter does not catch them.
-    // That matters here more than anywhere else, because the elements this gate judges are
-    // BANNERS and a rotating banner is very often a cross-fader: stacked <img> of identical
-    // size, one fading out. Confirmed still earning its place by the 2026-09-04 corpus —
-    // carousel-bearing pages at Samsung (27 slides), Best Buy (27), Allbirds (23), Newegg,
-    // Steam and AliExpress all had their off-screen slides and duplicate clones correctly
-    // discarded by this.
-    //
-    // Called last of all the peer tests, so the computed-style read happens at most once or
-    // twice per hover rather than for every image on the page.
     function reallyVisible(n) {
         if (n.checkVisibility)
             return n.checkVisibility({ opacityProperty: true, visibilityProperty: true });
@@ -3013,27 +1896,13 @@
                 if (n === el) continue;
                 const q = n.getBoundingClientRect();
                 if (q.width < 2 || q.height < 2) continue;
-                // Cheap geometry first: the expensive reads (shownUrl, computed style) are
-                // only paid for a candidate that has already passed every shape test.
                 if (q.width < r.width * BESIDE_PEER) continue;
-                // SAME HEIGHT, or it is not a row-mate. Measured on furaffinity.net, where a
-                // 320×50 skyscraper ad sat beside a 728×90 leaderboard and rescued it from
-                // refusal — two pieces of furniture sharing a horizontal band is not a row.
                 if (Math.abs(q.height - r.height) > Math.max(q.height, r.height) * PEER_HEIGHT)
                     continue;
                 const mid = q.top + q.height / 2;
                 if (mid < r.top || mid > r.bottom) continue;
-                // BESIDE, not on top of. Overlapping rects are a stack — a cross-fader's
-                // outgoing slide, a blurred backdrop copy — never an item in a row.
                 if (q.right > r.left && q.left < r.right) continue;
-                // A COPY OF ITSELF IS NOT A SIBLING ITEM. Banners are routinely rendered
-                // twice, a blurred backdrop behind the sharp one or a low-res placeholder
-                // left in the tree; the overlap test above catches the usual stacked case,
-                // this catches one laid out beside it.
                 if (src && (shownUrl(n) || '') === src) continue;
-                // A PICTURE NOBODY CAN SEE IS NOT BESIDE ANYTHING. `opacity: 0` and
-                // `visibility: hidden` both leave a full-size rect behind, and a rotating
-                // banner is very often a cross-fader built out of exactly those.
                 if (!reallyVisible(n)) continue;
                 beside = Math.round(q.width) + '×' + Math.round(q.height) + ' at x=' +
                     Math.round(q.left);
@@ -3051,14 +1920,7 @@
         return c.banner ? c.why : null;
     }
 
-    // What the page itself says is not content. ARIA is the one place an author states this
-    // outright rather than us inferring it, so it is worth reading — but only on the element
-    // itself, never inherited: carousels routinely mark cloned slides aria-hidden, and those
-    // are real pictures a user can see and will hover.
-    //
-    // `alt=""` is NOT used, though it is the same convention. Too many sites ship real
-    // content images with an empty or missing alt for it to be safe, and the cost of being
-    // wrong is a picture that silently never previews.
+    // What the page itself says is not content.
     function decorativeReason(el) {
         if (!el.getAttribute) return null;
         if (el.getAttribute('aria-hidden') === 'true') return 'aria-hidden="true"';
@@ -3067,28 +1929,6 @@
         return null;
     }
 
-    // THE PICTURE UNDER A LID. A card whose whole face is covered by an absolutely
-    // positioned <a>, a caption layer, a hover overlay or a click-catcher hands us that
-    // cover as the hover target, and the picture beneath is never considered — gifwow's
-    // grid, measured 2026-09-03: `figcaption > a[href="/go/…"]`, 393x510, exactly over the
-    // <img> it belongs to. Nothing about that is site-specific; it is one of the most
-    // common ways a thumbnail grid is built.
-    //
-    // Two bounds, and the second is the one that keeps this from being dangerous:
-    //
-    //  - ONLY an <img> or <video> is picked up this way, never a CSS background. Reaching
-    //    down through a paragraph onto the section behind it is precisely the hero/backdrop
-    //    case the gates above exist to refuse, and "content is stacked on top of it" is the
-    //    signal that it IS a backdrop. The same fact means opposite things for the two, and
-    //    which element type it is, is what separates them.
-    //  - SAME CARD: an ancestor of the cover, within COVER_UP levels, that holds the
-    //    picture and holds only that one laid-out picture. This is the "still one card"
-    //    bound the video gate already uses. Without it the walk reaches the grid or the
-    //    page and a full-page backdrop <img> — or an arbitrary neighbour — becomes the
-    //    answer to hovering anything.
-    //
-    // Hidden media does not count toward that one: gifwow's grid item also holds a
-    // `display:none` loader <img>, and counting it would bound the walk one level too early.
     const COVER_UP = 4;
 
     function laidOutMedia(n) {
@@ -3120,32 +1960,17 @@
         return null;
     }
 
-    // `x`/`y` are the pointer, and are what makes the cover walk possible; called without
-    // them this is the plain element test and nothing is looked through.
+    // `x`/`y` are the pointer, and are what makes the cover walk possible; called without them this is the plain element te...
     function eligible(el, x, y) {
         const direct = eligibleDirect(el);
         if (direct) return direct;
         if (typeof x !== 'number') return null;
         const under = coveredMedia(el, x, y);
-        // The picture found under the lid faces every gate the lid did — video, blocked,
-        // decorative — so looking through a cover can never reach something a direct hover
-        // would have refused.
         return under ? eligibleDirect(under) : null;
     }
 
     function eligibleDirect(el) {
         if (!el) return null;
-        // A PLAYING GIF IS THE PICTURE. On imgur's gallery and gifwow's grid the animation
-        // in the grid is a <video> element, so the thing under the pointer is not an <img>
-        // at all and `NEVER` below refused it outright — hovering a gif did nothing, no
-        // preview and no spinner, while every still beside it worked. That was the whole of
-        // "it does not work on gifs": v0.18.0 taught the FRAME to show video and v0.19.0
-        // taught the resolver to ask the linked page, but the entry point stayed shut, so
-        // neither could ever be reached from the one element that needed them.
-        //
-        // Only a gif-like clip, and only the link gate applies to it — see videoLinkReason()
-        // for why the other three video tests cannot be used on a video. A real player is
-        // still refused, so a watch page is unaffected.
         if (el.tagName === 'VIDEO') {
             if (!playVideos || !gifLike(el)) return null;
             if (!cfg.previewVideos && videoLinkReason(el)) return null;
@@ -3165,24 +1990,12 @@
         return el;
     }
 
-    // One console line per hover, when `debug` is on. Every field is something that differs
-    // between browsers or between installs, and that nothing on screen reveals: which gate
-    // decided, whether an ancestor link was findable at all, whether the element is inside a
-    // shadow root, and how many laid-out <video> elements the page is offering.
+    // One console line per hover, when `debug` is on.
     function hoverReport(t, el) {
         const a = closestAcross(t, 'a[href]');
         const rect = t.getBoundingClientRect();
         const cx = rect.left + rect.width / 2;
         const cy = rect.top + rect.height / 2;
-        // POSITIONS, not just sizes. The first version of this printed `1903×798` for the
-        // page's video and left the real question unanswerable: gate 0 compares the
-        // element's centre against the video's RECTANGLE, so a video of exactly the right
-        // size sitting somewhere else entirely looks identical in the log to one sitting
-        // under the pointer. Each entry now says whether it contains the centre, so the
-        // gate's own verdict is readable rather than inferred.
-        // The SURFACES actually tested, derived player boxes included — not the raw <video>
-        // list. Printing the raw list was what hid this bug for a round: the one video on the
-        // page had exactly the right size, so nothing in the log looked wrong.
         const sizes = videoSurfaces().map(function (s) {
             return s.what + ' ' + rectStr(s.rect) +
                 (s.gif ? ' [ignored: muted, no controls, short loop — suppresses nothing]'
@@ -3196,24 +2009,16 @@
             targetRect: rectStr(rect),
             showing: (shownUrl(t) || '(nothing)').slice(0, 160),
             eligible: !!el,
-            // Which element the preview is actually FOR. Not always the hover target: a
-            // cover over a card hands us the lid, and the answer is the picture under it.
             resolvedFrom: !el ? '(nothing)'
                 : el === t ? 'the hover target itself'
                     : 'looked through the cover to ' + el.tagName +
                       (el.id ? '#' + el.id : '') + ' — ' + (shownUrl(el) || '').slice(0, 120),
             previewVideos: cfg.previewVideos,
             videoGate: videoReason(t) || 'none — NOT treated as video',
-            // Only meaningful for an element that HAS a CSS background image — an <img> is
-            // never page furniture, and reporting a reason for an element with no background
-            // at all reads as a gate that fired when nothing was ever tested.
             backgroundGate: t.tagName === 'IMG' || t.tagName === 'VIDEO' ? 'n/a — not a background'
                 : !backgroundUrl(t) ? 'n/a — no background image'
                     : (wallpaperReason(t) || 'none — NOT treated as page furniture'),
             decorativeGate: decorativeReason(t) || 'none — not marked decorative',
-            // `el || t`, not `t`: when a cover was looked through (E18) the gate judged the
-            // picture underneath, and reporting the lid's geometry instead would describe an
-            // element no decision was made about.
             bannerGate: (function () {
                 const c = bannerCheck(el || t);
                 return (c.banner ? 'BANNER, refused: ' : 'not a banner: ') + c.why;
@@ -3245,34 +2050,13 @@
         hideViewer();
     }
 
-    // ---- pin / dismiss, and the switch that swaps which button does which
-    //
-    // Dismiss is for "the preview is in my way but my cursor is staying on this image":
-    // it takes the preview down and keeps it down until the pointer actually leaves the
-    // element and comes back. Without `suppressed` the next mousemove would just re-show
-    // it, which is the whole reason Escape alone was not enough.
-
     function dismiss() {
         suppressed = active;            // read it before unplace()/cancel() clear it
         suppressedCovered = activeCovered;
         if (placed) unplace(); else cancel();
     }
 
-    // The button that does NOT place. Returns true when it acted, which is the signal to
-    // swallow the context menu that a right press is about to raise.
-    //
-    // A PLACED window deliberately does NOT act on the right button, so the browser raises
-    // its own context menu over our <img> — whose src is the resolved full-size URL. That is
-    // the only way "Save image as…" and "Copy image" work at all: ours ran in page
-    // JavaScript and needed the host to send Access-Control-Allow-Origin, which most do not,
-    // while the browser's use its own network stack and the bitmap it has already decoded.
-    // Verified in a real browser 2026-09-03 — native chrome does target an <img> inside an
-    // open shadow root, and Save gives the full-size file.
-    //
-    // So dismiss-by-button belongs to the HOVER preview alone, which has no choice: it is
-    // pointer-transparent, so a native menu there would come up for the thumbnail underneath
-    // and offer to save *that*. A placed window is dismissed with Escape or a click outside
-    // it.
+    // The button that does NOT place.
     function altButton(e) {
         if (placed) return false;       // hands the press to the browser; see above
         if (!active && !view) return false;
@@ -3302,19 +2086,8 @@
         if (spinEl && spinEl.classList.contains('on')) moveSpinner();
         const over = !!view && !!box && box.classList.contains('on') &&
             pointInPreview(e.clientX, e.clientY);
-        // The status bar comes back when the pointer moves OVER the window, and only then —
-        // moving anywhere else lets it fade, which is the whole point of it. Geometry, not
-        // ours(e.target): while a window is placed the backdrop is hit-testable across the
-        // whole viewport, so ours() is true everywhere and the bar would never fade again.
         if (over) showBar();
-        // Which region the pointer is in, said in the cursor. Only readable once placed — a
-        // hover preview is pointer-transparent, so the page's own cursor is what shows
-        // there, for the same reason the ⊘ is absent from one.
         if (box && placed && !drag) {
-            // Mirrors onBoxDown exactly, including the bar's narrowed precedence: a resize
-            // region wins over the bar, and the bar only claims what is left. Geometry rather
-            // than e.target, because a mousemove seen on `document` has been retargeted to the
-            // shadow host and can never name the bar.
             const reg = hitRegion(e.clientX, e.clientY);
             const c = reg && reg.kind === 'resize' ? regionCursor(reg)
                 : (chromeVisible() && pointerOverBar() ? 'move' : regionCursor(reg));
@@ -3322,12 +2095,6 @@
             if (gripEl) gripEl.style.cursor = c;
         }
         if (!drag || !view) return;
-        // A drag OUTLIVES the frame's edges and the browser's: this listener is on
-        // `document`, and while a button is held the browser keeps delivering mousemove with
-        // coordinates outside the viewport, so a pan started inside carries on wherever the
-        // pointer goes. What does NOT arrive is the mouseup, if the button is released out
-        // there — so the drag would stay live and the picture would follow the pointer back
-        // with no button held. `buttons` is the only thing that can notice.
         if (e.buttons === 0) { endDrag(); return; }
         if (drag.mode === 'resize') { resizeBy(e); return; }
         const dx = e.clientX - drag.x;
@@ -3346,8 +2113,6 @@
 
     function onOver(e) {
         if (placed) return;
-        // A drag can outrun the frame it is moving; without this, the page elements
-        // sliding under the pointer would cancel the very preview being dragged.
         if (drag) return;
         if (ours(e.target)) return;         // on our own overlay
         if (!cfg.enabled || !siteEnabled()) return;
@@ -3357,8 +2122,6 @@
         const el = eligible(e.target, e.clientX, e.clientY);
         if (cfg.debug) dbg('hover', hoverReport(e.target, el));
         if (!el) {
-            // moving onto the page background closes an open viewer — unless the picture is
-            // still under the pointer, one layer down, which is the covered-card case again.
             if (active && !active.contains(e.target) &&
                 !(activeCovered && stillUnderPointer(active, e.clientX, e.clientY))) cancel();
             return;
@@ -3380,25 +2143,17 @@
             try {
                 await resolve(el, displayed, myToken,
                     function (hit) {
-                        // First hit paints the preview; every later one is strictly bigger
-                        // and replaces it in place, placed or not.
                         if (myToken.cancelled || active !== el) return;
                         if (view && box.classList.contains('on')) upgradeViewer(hit);
                         else { showViewer(hit, pointer); dockSpinner(); }
                     });
             } finally {
-                // Off whatever the outcome — found, rejected, cancelled or thrown. A ring
-                // still turning after the search stopped would be a lie.
                 if (!myToken.cancelled) hideSpinner();
             }
         }, cfg.hoverDelay);
     }
 
-    // Is the picture still under the pointer? Only asked of a preview that was found under
-    // a cover, where the pointer is on the lid and never on the picture, so the containment
-    // test below cannot answer it. Not used for a direct hover: at the exact boundary pixel
-    // the stack still holds the image, which would hold the preview open a moment too long
-    // and cost the one-preview-per-image scan across a row.
+    // Is the picture still under the pointer?
     function stillUnderPointer(el, x, y) {
         if (!el || !document.elementsFromPoint) return false;
         const stack = document.elementsFromPoint(x, y);
@@ -3412,8 +2167,6 @@
         if (suppressed) {
             const inside = (to && suppressed.contains && suppressed.contains(to)) ||
                 (suppressedCovered && stillUnderPointer(suppressed, e.clientX, e.clientY));
-            // A covered picture is never the mouseout target itself, so the target test is
-            // only right for a direct hover; the stack answers for the other.
             if (!inside && (suppressedCovered || e.target === suppressed)) {
                 suppressed = null;  // left the image; hovering it again may preview again
                 suppressedCovered = false;
@@ -3421,13 +2174,7 @@
         }
         if (!active) return;
         if (to && active.contains && active.contains(to)) return;   // still inside the image
-        // Under a lid, moving from one layer of the card to another — the cover anchor to
-        // the caption to the badge — is not leaving the picture, and every such crossing
-        // would otherwise close and reopen the preview.
         if (activeCovered && stillUnderPointer(active, e.clientX, e.clientY)) return;
-        // Off the image — the preview goes at once, even though it is sitting under the
-        // pointer. It cannot be hit-tested, so there is nothing to travel to and no reason
-        // to wait, and this is what makes a scan across a row give one preview per image.
         cancel();
     }
 
@@ -3435,36 +2182,20 @@
     document.addEventListener('mouseover', onOver, true);
     document.addEventListener('mouseout', onOut, true);
 
-    // A press on the preview is a MODAL gesture — pinning or dragging a window that is
-    // floating over the page — so per ../CLAUDE.md it binds on CAP_TARGET (= window) in
-    // capture, ahead of every document-level listener on the page and in sibling
-    // userscripts. On a pointer-transparent hover preview the press really does land on the
-    // page beneath, and a link there would otherwise be followed.
     CAP_TARGET.addEventListener('mousedown', function (e) {
         swallowNextClick = false;
         if (ours(e.target)) { claimClick(); return; }   // onBoxDown / the backdrop own this one
-        // A HOVER preview is pointer-transparent, so a press ON it lands on the page beneath
-        // and never reaches onBoxDown. Geometry decides ownership instead, and hands the
-        // press to that same handler so there is still only one state machine.
         if (!placed && view && box && box.classList.contains('on') &&
             (e.button === 0 || e.button === 2) && pointInPreview(e.clientX, e.clientY)) {
             claimClick();
             onBoxDown(e);
             return;
         }
-        // The right button has to be claimed here, not on contextmenu: mousedown fires
-        // first, and letting it fall through to cancel() would clear `active` before the
-        // menu event could see what to dismiss.
         if (e.button === 2 && overOurs(e) && altButton(e)) { claimClick(); return; }
         releaseClick();
         mouseDown = true;
         cancel();
     }, true);
-    // The click half of the same handoff, and the reason placing on the PRESS needs one.
-    // Between that press and its click the window becomes placed and the backdrop starts
-    // catching, so the click lands on something new: on the backdrop, whose own handler
-    // would dismiss the window that press just placed, or on the page, where it could
-    // follow a link. Either way it is ours and it goes no further.
     CAP_TARGET.addEventListener('click', function (e) {
         if (swallowNextClick) {
             swallowNextClick = false;
@@ -3472,12 +2203,6 @@
             e.stopPropagation();
             return;
         }
-        // The click that dismisses a placed window is caught HERE rather than being left to
-        // the backdrop's own handler. The backdrop sits inside the shadow host, so capture
-        // reaches document and body first, and a page listening for clicks there would see a
-        // phantom one — nothing on the page can act on it, since the event's target is the
-        // backdrop, but being observed at all is avoidable. composedPath()[0] because
-        // `e.target` is retargeted to the host once the event leaves the shadow tree.
         if (dimEl && dimEl.classList.contains('catch') && e.composedPath &&
             e.composedPath()[0] === dimEl) {
             e.preventDefault();
@@ -3505,9 +2230,6 @@
     window.addEventListener('resize', function () {
         if (!placed) { cancel(); return; }
         if (!view) return;
-        // The frame the user sized is left exactly as it is — re-fitting it to the new
-        // window would throw away the size they chose. clampPosition() still runs, so a
-        // window narrowed to nothing cannot leave the frame stranded off the edge.
         view.fitScale = fitScaleFor(view.natW, view.natH);
         const lo = minScaleFor(view.natW, view.natH);
         if (view.scale < lo) view.scale = lo;
@@ -3518,13 +2240,6 @@
         if (e.key === 'Escape') {
             cancel();                           // onPinKey has already handled the placed case
         }
-        // Arming the key is the SAME gesture whichever order it happens in. Holding it first
-        // and then pointing at a picture worked from the start, because the pointer arriving
-        // fires a mouseover the gate can read. Pointing first and then pressing the key fired
-        // nothing at all — the pointer is already where it is going, and mouseover only ever
-        // fires on a crossing — so the preview simply never appeared and the mode read as
-        // half-broken. There is no event to wait for here; the keypress IS the event, and the
-        // element under the pointer has to be looked up rather than handed to us.
         if (cfg.activation === 'modifier' && modifierHeld(e) && !modifierDown) {
             modifierDown = true;
             hoverAtPointer();
@@ -3534,11 +2249,7 @@
         if (cfg.activation === 'modifier' && !modifierHeld(e)) { modifierDown = false; cancel(); }
     }, true);
 
-    // The pointer is not moving, so onOver is synthesised from where it already is. A plain
-    // object rather than a real MouseEvent: onOver reads `target`, `clientX` and `clientY` and
-    // nothing else, and going through the same function is what keeps the key path and the
-    // pointer path from drifting apart. `modifierDown` is already set, so the gate inside it
-    // passes without this object needing to carry a ctrlKey.
+    // The pointer is not moving, so onOver is synthesised from where it already is.
     function hoverAtPointer() {
         if (placed || drag || active) return;
         if (!document.elementFromPoint) return;
@@ -3560,9 +2271,6 @@
 
     function openPanel() {
         closePanel();
-        // Always render from storage, never from this tab's in-memory copy — see
-        // reloadSettings(). Without this, a long-lived tab shows stale values and saving
-        // reverts whatever another tab changed in the meantime.
         reloadSettings();
         panelHost = document.createElement('div');
         panelHost.style.cssText = 'all:initial;position:fixed;inset:0;z-index:2147483647;';
@@ -3581,8 +2289,6 @@
             'letter-spacing:.06em;color:' + C.sub + ';border-bottom:1px solid ' + C.surface + ';padding-bottom:5px}',
             '.row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:5px 0}',
             '.row label{flex:1;cursor:pointer}',
-            // display:flex above outranks the UA's [hidden] rule, so a hidden row would keep
-            // its box — the same trap as img[hidden] on the viewer's two faces.
             '.row[hidden]{display:none}',
             '.hint{display:block;font-size:11px;color:' + C.sub + ';margin-top:1px}',
             'input[type=checkbox]{accent-color:' + C.blue + ';width:15px;height:15px;cursor:pointer;flex:none}',
@@ -3592,9 +2298,6 @@
             'input[type=color]{width:40px;height:26px;padding:0;border:1px solid ' + C.surface2 + ';',
             'border-radius:5px;background:' + C.surface + ';cursor:pointer}',
             'textarea{width:100%;height:64px;resize:vertical;font-family:ui-monospace,monospace}',
-            // Sticky, so Save is reachable without scrolling to the end of a long panel. The
-            // negative margins pull it out to the panel's own edges and down into its bottom
-            // padding, so nothing shows underneath it when it is stuck.
             '.foot{position:sticky;bottom:0;z-index:2;display:flex;gap:8px;justify-content:flex-end;',
             'margin:18px -20px -18px;padding:14px 20px 18px;background:' + C.base + ';',
             'border-top:1px solid ' + C.surface + '}',
@@ -3605,11 +2308,6 @@
             'button.add{background:' + C.green + ';color:' + C.base + ';border-color:' + C.green + ';font-weight:600}',
             'button.danger{color:' + C.red + '}',
             '.listbtns{display:flex;gap:8px;justify-content:flex-end;margin-top:6px}',
-            // The list widget, matched to the one in Open Links in New Tab: a description,
-            // an italic examples line, then input + Add + "+ This site" on one row, then the
-            // entries as removable rows. Same shape, same colours, same button order — these
-            // panels are read side by side, so a second dialect of the same control is a
-            // cost with no benefit.
             '.listwrap{margin-top:4px}',
             '.listdesc{font-size:12px;color:#9399b2;line-height:1.45}',
             '.listex{margin-top:4px;color:#6c7086;font-style:italic}',
@@ -3628,22 +2326,15 @@
             'font-size:14px;padding:0 4px;flex:none}',
             '.entry button:hover{background:none;color:' + C.text + '}',
             '.empty{color:#6c7086;font-size:13px;text-align:center;padding:12px 0}',
-            // Edit-as-text mode: the same entries as one-per-line plain text, so a list can
-            // be pasted in or copied out. It replaces the rows in place rather than sitting
-            // beside them, because two editable views of one list is how they get out of step.
             '.listtext{width:100%;height:150px;margin-top:8px;resize:vertical;',
             'font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12px;line-height:1.5}',
             '.edittext{padding:4px 10px;font-size:11px}',
-            // The fold at the bottom. <details> gives the whole thing — the disclosure
-            // triangle, the keyboard behaviour, the state — for no script at all.
             'details.adv{margin-top:20px;border-top:1px solid ' + C.surface + ';padding-top:4px}',
             'details.adv summary{cursor:pointer;list-style:revert;padding:8px 0;font-size:12px;',
             'font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:' + C.sub + '}',
             'details.adv summary:hover{color:' + C.text + '}',
             'details.adv summary .hint{text-transform:none;letter-spacing:0;font-weight:400}',
             'details.adv h3:first-of-type{margin-top:6px}',
-            // The two paragraphs at the top: what this is, and — behind a button, because it
-            // is three times as long — how every part of it works.
             '.intro{font-size:12.5px;line-height:1.55;color:' + C.text + ';margin:0 0 10px}',
             '.intro b{color:' + C.blue + ';font-weight:600}',
             '.guide{display:none;margin:2px 0 14px;padding:12px 14px;border-radius:8px;',
@@ -3666,17 +2357,11 @@
         sr.appendChild(panel);
 
         const h = document.createElement('h2');
-        // The version is here so "which copy is installed in this browser" is answerable
-        // without opening the manager. Read from GM_info, so it cannot drift from the header.
         h.textContent = 'Hover Zoom — settings  ·  ' + version();
         panel.appendChild(h);
 
         const controls = [];
 
-        // Every helper below appends to `mount`, not to `panel`, so a group of them can be
-        // redirected into a collapsed <details> without any of them knowing. advanced() is
-        // the only thing that moves it, and it never moves back — the advanced block is the
-        // last thing on the panel by construction.
         let mount = panel;
 
         function section(title) {
@@ -3685,9 +2370,7 @@
             mount.appendChild(s);
         }
 
-        // The fold at the bottom. Most of what used to be on this panel is timings, pixel
-        // counts and colours — real settings, but ones nobody opens the panel to change, and
-        // together they buried the four that matter. They are not removed, they are folded.
+        // The fold at the bottom.
         function advanced(title, summaryHint) {
             const d = document.createElement('details');
             d.className = 'adv';
@@ -3754,22 +2437,12 @@
             return { el: el, row: row(labelText, hintText, el) };
         }
 
-        // A list editor for one of the array settings, laid out the same way as the one in
-        // Open Links in New Tab: description, examples, an add row (text field, Add, and an
-        // optional "+ This site"), then the entries as rows you can remove one at a time.
-        // It replaced a raw textarea in v0.16.0 — the two panels sit side by side in daily
-        // use and were asking the user to learn the same list twice.
-        //
-        // Staging, not saving: entries live in a local array until Save, exactly like every
-        // other control on this panel. That is the one deliberate difference from OLINT,
-        // whose lists write straight through; changing it here would make Cancel a lie.
+        // A list editor for one of the array settings, laid out the same way as the one in Open Links in New Tab.
         function list(key, opts) {
             const items = cfg[key].slice();
             controls.push(function () { cfg[key] = items.slice(); });
 
-            // Alphabetical, case-insensitively, and kept that way after every mutation
-            // rather than only at save time — a list that reorders itself when you press
-            // Save is a list you cannot proof-read before pressing it.
+            // Alphabetical, case-insensitively, and kept that way after every mutation rather than only at save time.
             function sortItems() {
                 items.sort(function (a, b) {
                     return a.toLowerCase().localeCompare(b.toLowerCase()) || a.localeCompare(b);
@@ -3829,8 +2502,6 @@
                     rm.textContent = '✕';
                     rm.title = 'Remove ' + item;
                     rm.addEventListener('click', function () {
-                        // Remove by VALUE, not by index: the rendered order and the stored
-                        // order need not agree, and entries are unique because add() dedupes.
                         const at = items.indexOf(item);
                         if (at !== -1) items.splice(at, 1);
                         render();
@@ -3863,17 +2534,6 @@
                 addRow.appendChild(cur);
             }
 
-            // Edit-as-text, because the row-with-an-✕ list and a plain textarea are good at
-            // opposite things and neither one replaces the other. Removing one entry is a
-            // click here and a careful selection there; pasting a list of forty sites in from
-            // somewhere else, or copying this one out, is impossible here and trivial there.
-            // So both, with the text form as a mode rather than a second permanent control.
-            //
-            // It commits on BLUR — "click away and it turns back into the list" — and blur is
-            // the only exit, so there is no Done button to miss and no way to leave the panel
-            // holding text that was never parsed. Save also flushes it (see flush()), for the
-            // one case blur cannot cover: clicking Save moves focus, but the click handler
-            // may run before the blur is delivered.
             const textarea = document.createElement('textarea');
             textarea.className = 'listtext';
             textarea.spellcheck = false;
@@ -3956,14 +2616,6 @@
             row(labelText, null, el);
         }
 
-        // ------------------------------------------------------------- what this is
-        //
-        // Three sentences and a button. The panel used to open on a checkbox and run straight
-        // into thirty controls, several of which the person who ASKED for them could not name
-        // the effect of — which is the test a settings panel actually has to pass. The short
-        // version says what the script is for and how to use it; the long version is one press
-        // away rather than absent, and it is where the instructions that used to be scattered
-        // through the panel as instruction rows now live.
         const intro = document.createElement('p');
         intro.className = 'intro';
         intro.textContent =
@@ -4038,8 +2690,6 @@
             'either order works with the key — hold it and then point, or point and then press it', [
                 ['hover', 'When I point at a picture'],
                 ['modifier', 'Only while a key is held']]);
-        // Which key only means anything in the second mode, and a control that does nothing is
-        // the thing this rewrite is mostly about. It follows the select live, not just on open.
         const modKey = pick('modifierKey', 'The key', null, [
             ['ctrl', 'Ctrl'], ['alt', 'Alt'], ['shift', 'Shift']]);
         function syncModKey() { modKey.row.hidden = act.el.value !== 'modifier'; }
@@ -4078,8 +2728,6 @@
             clearable: true,
         });
 
-        // Everything below here is a number, a colour or a keystroke — real settings, but ones
-        // nobody opens this panel to change, and together they buried the four above.
         advanced('Advanced options', '  timings, sizes, appearance');
 
         section('Matching');
@@ -4157,8 +2805,6 @@
         save.className = 'primary';
         save.textContent = 'Save';
         save.addEventListener('click', function () {
-            // A list left in text mode has not been parsed yet, and blur is not
-            // guaranteed to have been delivered before this click handler runs.
             sites.flush();
             blocks.flush();
             controls.forEach(function (fn) { fn(); });
@@ -4181,9 +2827,6 @@
         refreshSiteMenu();
     }
 
-    // First line in the console when debug is on: which copy of the script is actually
-    // installed here, and whether the gates that matter are even armed. "Works in one
-    // browser, not another" is a stale install until proved otherwise.
     dbg('loaded', {
         version: version(),
         url: location.href,
@@ -4193,9 +2836,6 @@
         playVideos: playVideos,
         skipFurniture: cfg.skipFurniture,
         blockList: cfg.blockList.length,
-        // These three decide whether a probed candidate becomes a preview, so a log without
-        // them cannot be read: 'no hit line' means "nothing was big enough" under the
-        // defaults, but showEvenIfNotLarger turns the ratio gate off entirely.
         showEvenIfNotLarger: cfg.showEvenIfNotLarger,
         minRatio: cfg.minRatio,
         minDisplayed: cfg.minDisplayed,
