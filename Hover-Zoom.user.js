@@ -3260,9 +3260,10 @@
             'buttons — AA is where smoothing is chosen, on the image you are looking at. It ' +
             'doubles as the window’s title bar, and fades out with the grab border');
         pick('spinnerTheme', 'Loading ring',
-            'the ring shown while it is still searching. Matching means the light-or-dark ' +
-            'preference the browser reports to pages, which on every desktop browser is the ' +
-            'operating system’s setting — the browser’s own theme does not change it', [
+            'the ring shown while it is still searching. Matching follows the light-or-dark ' +
+            'preference your browser reports to web pages, which is the operating system’s ' +
+            'setting — changing the browser’s own theme does not move it. Firefox is the ' +
+            'exception: it has a separate Website appearance setting that does', [
                 ['auto', 'Match the system'], ['dark', 'Always dark'], ['light', 'Always light']]);
         section('Diagnostics');
         check('debug', 'Log every hover to the console',
