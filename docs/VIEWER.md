@@ -802,6 +802,31 @@ sitting on the growth ceiling. Reported 2026-09-06.
 `fullApi` distinguishes the real API from the maximise fallback, so `leaveFull()` knows whether to
 ask the browser (and wait for `fullscreenchange`) or restore directly.
 
+## Clicking the picture of a placed window · `E39`
+
+Once the window is pinned its first click has been spent, so the picture itself is free: **one
+click pauses a clip, two fill the screen**, in every placed variant including hand-resized and
+fullscreen. Added v0.67.0.
+
+**There is no `dblclick` listener, and there is no delayed single click.** The pair arrives as two
+`click` events with `detail` 1 then 2; click 1 pauses immediately and records `tapPaused`, and
+click 2 undoes that toggle before calling `toggleFull()`. The alternative — waiting ~250 ms to see
+whether a second click follows — makes every pause feel late, which is the more common action of
+the two.
+
+**The handler is `boxTap()`, called from the `swallowNextClick` branch of the window-level `click`
+listener, NOT from `onBoxClick`.** `onBoxDown` sets `swallowNextClick`, and that branch
+`stopPropagation()`s on `window` capture — which is *above* the box, so `onBoxClick`'s own capture
+listener never runs for a press the window owns. Putting the logic in `onBoxClick` looks right and
+is dead code.
+
+**What counts as "the picture":** `onBoxDown` records `tap = {x, y, mid}` where `mid` requires the
+window to have been placed *before* this press (so the pinning click is not also a pause), the left
+button, `hitRegion()` returning null (not a grab band, not a resize edge) and not the status bar.
+`isBoxControl()` has already returned early, so the strip and its popups never reach here.
+`onMove()` clears `tap` once the pointer has travelled more than `TAP_SLOP` (4 px) with a button
+held, so a pan or a move is not also a pause.
+
 ## The floating video strip · `E36`
 
 Play/pause, elapsed time, a scrubber, playback speed and sound, over the picture rather than in the
@@ -867,15 +892,26 @@ names the shadow host — and leaves the cursor alone over anything `isBoxContro
 
 ## Sound is remembered per site · `E38`
 
-`cfg.siteAudio` maps host to `{muted, volume}`, and **every site starts muted** (`AUDIO_DEFAULT`):
-a preview that made noise on a page nobody asked it to would be the worst possible first
-impression. After that the site's own answer is what a new preview opens with.
+`cfg.siteAudio` maps host to `{muted, volume}` — **two independent values**, and both start silent
+(`AUDIO_DEFAULT = {muted:true, volume:0}`): a preview that made noise on a page nobody asked it to
+would be the worst possible first impression. After that the site's own answer is what a new
+preview opens with.
 
+- **`volume` is the UNMUTED level and is never overwritten by muting.** The mute flag overrides the
+  output to silence; the level underneath survives, so the button toggles between silence and
+  whatever was last set. A stored level of 0 is legal and means the button toggles 0 ↔ 0 — the
+  icon changes and nothing else does. v0.67.0 removed a `toggleMute()` line that bumped a zero
+  level to a default, because that made a deliberate 0 unstorable: it is the user's answer, not a
+  gap to fill.
 - **`saveAudio()` reloads before it writes.** The map is shared with every other tab on every other
   site; a read-modify-write against our own stale `cfg` would drop their entries.
-- **The volume column and the mute button are one state.** Unmuting into a zero volume is a button
-  that does nothing, so `toggleMute()` gives it `AUDIO_DEFAULT.volume`; dragging the column to zero
-  mutes. `syncVideoCtl()` shows a muted element as 0 rather than the level it will come back to.
+- **The volume column and the mute button are one state.** Dragging the column to zero mutes.
+  `syncVideoCtl()` shows a muted element as 0 rather than the level it will come back to, and puts
+  `.muted` on `.vsound` so the icon goes red (`#f38ba8`).
+- **An audio change never resumes a paused clip.** `applyAudioWish(wasPlaying)` takes the play
+  state read *before* the change and only restarts what the change itself stopped — unmuting a
+  clip that autoplayed because it was muted. It used to play unconditionally on any audio change,
+  so touching the volume of a paused preview started it.
 - **`volDrag` guards the column exactly as `zoomDrag` guards the zoom slider** — `syncVideoCtl()`
   writing `.value` mid-drag is a slider fighting the hand on it.
 - **The column and the speed menu pop ABOVE the strip**, outside `vctlEl`'s rect, so
@@ -928,6 +964,16 @@ of them look correct and are not:
 
 Two details the delay alone does not cover:
 
+- **The listeners are `mouseover`/`mouseout` on the wrapper, NOT `mouseenter`/`mouseleave`.**
+  `.vvol` is a DOM child of `.vsound`, so enter/leave never fire for a crossing between the two —
+  which is fine going *up* into the column (nothing closes it) and broken coming back *down*: the
+  leave from the column armed the close timer and no enter on the wrapper existed to cancel it, so
+  the column vanished while the pointer sat on the button. `mouseover`/`mouseout` bubble from
+  descendants and fire on every internal crossing, so the close is always re-cancelled. Fixed in
+  v0.67.0.
+- **`toggleMute()` calls `openVol()`.** Once the column had been lost with the pointer still on the
+  button, no further crossing existed to reopen it and clicking did nothing visible; the click is
+  now itself a request to see the column.
 - **The gap between button and popup is `padding`, not `margin`.** Margin is dead space outside
   the hover target; padding is inside it. The delay would have papered over this, but the dead
   pixels would still be there for the pointer to fall into.

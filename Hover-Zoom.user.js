@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.66.0
+// @version     0.67.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -128,9 +128,9 @@
         GM_setValue(KEY, JSON.stringify(cfg));
     }
 
-    // Sound is remembered per site, and every site starts muted: a preview that made noise on a
-    // page the user had not asked it to would be the worst possible first impression.
-    const AUDIO_DEFAULT = { muted: true, volume: 0.6 };
+    // Sound is remembered per site as two values — the mute flag and the level it comes back to.
+    // Both start silent: a preview that made noise on a page unasked is the worst first impression.
+    const AUDIO_DEFAULT = { muted: true, volume: 0 };
 
     function audioFor() {
         const m = cfg.siteAudio && cfg.siteAudio[pageHost()];
@@ -1189,6 +1189,7 @@
             'justify-content:center;width:' + VOL_BTN + 'px;height:' + VOL_BTN + 'px}',
             '.vctl .vsound .vbtn{width:100%;height:100%}',
             '.vctl .vsound .vbtn svg{width:17px;height:17px}',
+            '.vctl .vsound.muted .vbtn{color:#f38ba8}',
             '.vvol{position:absolute;left:50%;bottom:100%;transform:translateX(-50%);display:none;',
             'padding:9px 6px 11px;border-radius:7px;',
             'background:rgba(17,17,27,.92);border:1px solid rgba(205,214,244,.14);',
@@ -2013,11 +2014,12 @@
         vvolInEl.addEventListener('input', function () {
             const v = Number(vvolInEl.value) / 100;
             if (mediaEl !== vidEl) return;
+            const wasPlaying = !vidEl.paused;
             volDrag = true;
             vidEl.volume = v;
             // Touching the column is a request for sound; zero is the way to ask for silence.
             vidEl.muted = v <= 0;
-            applyAudioWish();
+            applyAudioWish(wasPlaying);
         });
         vvolInEl.addEventListener('change', function () {
             volDrag = false;
@@ -2027,14 +2029,11 @@
         vvolEl.appendChild(vvolInEl);
         vsoundEl.appendChild(vmuteEl);
         vsoundEl.appendChild(vvolEl);
-        // Hover-driven, with a close DELAY. Plain CSS :hover lost the column to the dead
-        // pixels between button and popup, and whether it did depended on how fast the pointer
-        // crossed them; a grace period cannot be outrun. The popup is a DOM child of the
-        // wrapper, so moving into it never counts as leaving.
-        vsoundEl.addEventListener('mouseenter', openVol);
-        vsoundEl.addEventListener('mouseleave', laterCloseVol);
-        vvolEl.addEventListener('mouseenter', openVol);
-        vvolEl.addEventListener('mouseleave', laterCloseVol);
+        // Hover-driven, with a close DELAY, on the wrapper only. mouseover/mouseout, not
+        // enter/leave: the popup is a DOM child, so crossing back from it to the button fires
+        // no enter on the wrapper and the pending close was never cancelled.
+        vsoundEl.addEventListener('mouseover', openVol);
+        vsoundEl.addEventListener('mouseout', laterCloseVol);
 
         vctlEl.appendChild(vplayEl);
         vctlEl.appendChild(vtimeEl);
@@ -2101,6 +2100,7 @@
         setIcon(vplayEl, vidEl.paused ? ICON_PLAY : ICON_PAUSE);
         setIcon(vmuteEl, vidEl.muted ? ICON_MUTE : ICON_LOUD);
         setTip(vmuteEl, vidEl.muted ? 'Sound on' : 'Mute');
+        vsoundEl.classList.toggle('muted', !!vidEl.muted);
         // A muted element still reports its volume; the column must show silence, not the level
         // it will come back to.
         if (!volDrag) vvolInEl.value = String(Math.round((vidEl.muted ? 0 : vidEl.volume) * 100));
@@ -2119,16 +2119,18 @@
     // muted is stopped the moment it is not, unless the browser counts this click as the gesture.
     function toggleMute() {
         if (mediaEl !== vidEl) return;
+        const wasPlaying = !vidEl.paused;
         vidEl.muted = !vidEl.muted;
-        // Unmuting into a zero volume is a button that does nothing; give it something to play.
-        if (!vidEl.muted && vidEl.volume <= 0) vidEl.volume = AUDIO_DEFAULT.volume;
-        applyAudioWish();
+        // The stored level is not touched: unmuting returns to it, zero included.
+        applyAudioWish(wasPlaying);
         rememberAudio();
+        openVol();      // clicking the button is also a request to see the column
     }
 
     // One place decides what the tab wants, so the icon, the column and the element agree.
-    function applyAudioWish() {
-        if (vidEl.paused) playVideo();
+    // Only a clip that WAS playing is restarted — unmuting is not a request to resume.
+    function applyAudioWish(wasPlaying) {
+        if (wasPlaying && vidEl.paused) playVideo();
         syncVideoCtl();
     }
 
@@ -2822,6 +2824,7 @@
         if (fullActive()) leaveFull();
         placed = false;
         drag = null;
+        tap = null;
         box.classList.remove('placed', 'drag');
         box.style.cursor = '';
         dimEl.classList.remove('catch');
@@ -3073,9 +3076,25 @@
         e.stopPropagation();
     }
 
+    // A click on the picture of an already-pinned window: once pauses a clip, twice fills the
+    // screen. The pair arrives as two clicks with `detail` 1 then 2 — there is no dblclick
+    // listener, so click 2 undoes the pause click 1 just made.
+    function boxTap(e) {
+        if (!tap || !tap.mid || !view || !placed) return;
+        if (e.detail === 1) {
+            if (mediaEl === vidEl && vidEl) { togglePlay(); tapPaused = true; }
+            return;
+        }
+        if (e.detail !== 2) return;
+        if (tapPaused) { togglePlay(); tapPaused = false; }
+        toggleFull();
+    }
+
     function onBoxDown(e) {
         hideTip();
         commitZoomField(e);
+        tap = null;
+        if (e.detail <= 1) tapPaused = false;
         if (isBoxControl(e.target)) return;
         closePops();                // a press anywhere else puts an open menu away
         if (e.button !== 0 && e.button !== 2) return;
@@ -3091,10 +3110,15 @@
         e.stopPropagation();
         if (!view) return;
         swallowNextClick = true;    // the click half of this press is ours too
+        const wasPlaced = placed;
         if (!placed) place();
 
         const reg = hitRegion(e.clientX, e.clientY);
         const onBar = capEl.contains(e.target) && !(reg && reg.kind === 'resize');
+        // The picture itself: not a grab band, not the bar, not a control, and not the press
+        // that pinned the window. boxTap() acts on it if the pointer never moved.
+        tap = { x: e.clientX, y: e.clientY,
+                mid: wasPlaced && e.button === 0 && !reg && !onBar };
         if (reg && reg.kind === 'resize') {
             drag = {
                 mode: 'resize', ex: reg.ex, ey: reg.ey,
@@ -3227,6 +3251,9 @@
     let token = null;       // cancellation token for the in-flight resolve
     let timer = null;
     let drag = null;        // { mode:'pan'|'move'|'resize', … } while a button is held
+    const TAP_SLOP = 4;     // px of pointer travel a click is allowed before it counts as a drag
+    let tap = null;         // the last press, while it could still turn out to be a plain click
+    let tapPaused = false;  // did click 1 of a double-click toggle playback, to be undone by click 2
     let swallowNextClick = false;
     let suppressed = null;  // element whose preview was dismissed; skipped until re-entered
     let activeCovered = false;
@@ -3668,6 +3695,8 @@
             if (gripEl) gripEl.style.cursor = c;
         }
         if (!drag || !view) return;
+        if (tap && (Math.abs(e.clientX - tap.x) > TAP_SLOP ||
+                    Math.abs(e.clientY - tap.y) > TAP_SLOP)) tap = null;
         if (e.buttons === 0) { endDrag(); return; }
         if (drag.mode === 'resize') { resizeBy(e); return; }
         const dx = e.clientX - drag.x;
@@ -3772,6 +3801,7 @@
             swallowNextClick = false;
             e.preventDefault();
             e.stopPropagation();
+            boxTap(e);      // onBoxClick never sees this one; the stop above is on `window`
             return;
         }
         if (dimEl && dimEl.classList.contains('catch') && e.composedPath &&
@@ -4374,7 +4404,8 @@
         para('One press keeps it.',
             'A click — or the start of a drag — pins the preview. It then stays until you press ' +
             'Escape or click outside the preview to close it. Nothing else holds it open, and the page underneath ' +
-            'stays readable and scrollable while it is there.');
+            'stays readable and scrollable while it is there. Once it is pinned, a single click on ' +
+            'the picture pauses or resumes a clip and a double click fills the screen.');
         para('Moving, sizing and zooming.',
             'Drag the frame around the image, or its status bar, to move the window; drag an ' +
             'edge or a corner to resize it, holding Shift to keep its shape. The wheel grows the ' +

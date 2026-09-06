@@ -247,8 +247,9 @@ growth ceiling, and only a hand resize pins its edges** (`E22`, `E23`).
   time, a scrubber, playback speed and sound. It overlays the picture and reserves no layout, so
   it costs the zoom floor nothing. Hidden on a frame shorter than 110 px.
   - **Speed** opens a menu upward (`S23`) — 10/25/50/100/125/150/200/300 % plus a custom field.
-  - **Sound** — the button mutes and unmutes; hovering it reveals a vertical volume column
-    (`S24`). Both are remembered **per site**, and every site starts muted (`E38`).
+  - **Sound** — the button mutes and unmutes and turns red while muted; hovering or clicking it
+    reveals a vertical volume column (`S24`). The mute flag and the unmuted level are two
+    separate values remembered **per site**, and every site starts muted at level 0 (`E38`).
 - **And a zoom cluster left of those buttons:** a 100 px slider stepping through round zoom
   percentages, and the current level,
   which is clickable and becomes a text field (`S20`, `S21`). Zooming from either **holds the
@@ -353,13 +354,16 @@ Click the speed readout and a menu opens **upward** out of the strip.
   it is up.
 
 #### S24 · volume column showing, placed (clip only)
-Hover the sound button and a vertical column appears above it.
+Hover the sound button and a vertical column appears above it; clicking the button also opens it.
 - **Ends on:** the pointer leaving both the button and the column, after a grace period
   (`VOL_CLOSE_MS`). The delay is load-bearing — without it the crossing between the two loses
-  the column (`E38`). A drag that ends outside the box still counts as held.
-- **Dragging it to zero mutes**; the button itself toggles, and unmuting into a zero volume
-  restores a default level rather than doing nothing.
-- Released, the level and the mute state are written to the **site's** entry (`E38`).
+  the column (`E38`). Crossing *back* from the column to the button keeps it (`E38`). A drag that
+  ends outside the box still counts as held.
+- **Dragging it to zero mutes**; the button toggles between silence and the stored unmuted level,
+  which may itself be zero — then the button only changes the icon. Muted, the icon is red.
+- **Changing the volume never starts a paused clip** (`E38`).
+- Released, the level and the mute state are written to the **site's** entry as two separate
+  values (`E38`).
 - The column reaches above the strip, so the bar counts it as its own and will not fade under it.
 
 #### S15 · placed, upgrading
@@ -409,6 +413,8 @@ inert.
 | `T22` | `S05` | Wheel over the window | `S01` — the wheel is the page's here; it scrolls, and the scroll closes the preview (`K2`, `E22`) |
 | `T23` | `S10` | Drag a corner or an edge | `S19` → `S10` at the new size, frozen there (`E23`) |
 | `T24` | `S10` | Wheel anywhere **but** the frame | `S10` unchanged — the page scrolls under it |
+| `T26` | `S10` | Single click on the picture — not a grab band, not the bar, not a control | `S10`; a clip pauses or resumes, a still image does nothing (`E39`) |
+| `T27` | `S10` | Double click in the same place | `S10` fullscreen, or back out of it if already there. Click 1's pause is undone (`E39`) |
 | `T25` | — | *Retired in v0.34.0.* Moving the window used to freeze its size as a ceiling; it no longer touches the size at all (`E22`) |
 
 ---
@@ -494,7 +500,8 @@ this table is a table.
 | `E35` | Fullscreen — why the DOCUMENT goes fullscreen, and why maximise IS the implementation | [`docs/VIEWER.md`](docs/VIEWER.md) |
 | `E36` | The floating video strip: why it overlays rather than reserves, and why not native `controls` | [`docs/VIEWER.md`](docs/VIEWER.md) |
 | `E37` | Every control clears the frame's grab bands, and the padding trap that broke it | [`docs/VIEWER.md`](docs/VIEWER.md) |
-| `E38` | Sound is remembered per site, and starts muted everywhere | [`docs/VIEWER.md`](docs/VIEWER.md) |
+| `E38` | Sound is remembered per site as two values, and starts muted everywhere | [`docs/VIEWER.md`](docs/VIEWER.md) |
+| `E39` | Clicking the picture of a placed window: one click pauses, two fill the screen | [`docs/VIEWER.md`](docs/VIEWER.md) |
 
 `E3` is retired with the detached state (v0.28.0); `E4` and `E5` are retired as dangling.
 
@@ -515,6 +522,7 @@ this table is a table.
 | Video strip (`S22`, `E36`) | `buildVideoControls`, `syncVideoCtl`, `syncVideoTime`, `togglePlay`, `playVideo`, `clipSecs`, `isBoxControl`, `pointerOverBar` |
 | Speed menu (`S23`) | `buildRateMenu`, `toggleRateMenu`, `syncRateMenu`, `commitRateField`, `setRate`, `RATES`, `capOwns` |
 | Sound (`S24`, `E38`) | `audioFor`, `saveAudio`, `AUDIO_DEFAULT`, `toggleMute`, `applyAudioWish`, `rememberAudio`, `openVol`/`laterCloseVol`/`closeVol`, `volDrag` |
+| Click on the picture (`T26`, `T27`, `E39`) | `boxTap`, `tap`/`tapPaused`/`TAP_SLOP`, `onBoxDown`, `onMove`, the `swallowNextClick` branch of the `window` click listener |
 | Grab-band clearance (`E37`) | `grabBand`, `grabInset`, `btnGutter`, `barMinW`, `layoutChrome`, `pointerOverControl` |
 | Zoom cluster (`S20`, `S21`, `E34`) | `buildZoomControl`, `syncZoom`, `openZoomField`, `closeZoomField`, `zoomAnchored`, `ZOOM_BANDS`/`walkStops`/`fitStops`/`zoomStops`/`zoomIndex`, `zoomLo`/`noBarsScale`/`zoomHi`, `parseZoom`, `commitZoomField`, `capOwns`, `minFrameW` |
 | Upgrades (`S06`, `S15`) | `resolve`, `upgradeViewer` |

@@ -175,6 +175,10 @@ ancestor-link candidate ever comes back missing on a shadow-DOM site.
   pane resize — the emulated viewport is letterboxed into the pane, so a stale scale factor puts
   every click off-target.
 
+- **`computer{action:"zoom"}` ignores its `region`** in this pane — "region crop not yet supported"
+  — and returns the whole screenshot, so there is no way to magnify a 24 px control. Read the
+  computed style instead (`getComputedStyle(el).color` settled the red mute icon in one call).
+
 - **The pane cannot place a click at a single-pixel position, so per-pixel behaviour of a control
   is NOT measurable here.** Clicking a 100 px `input[type=range]` at x, x+2, x+4, x+6 returned the
   same value every time, with pointer moves in between to rule out click coalescing — while probes
