@@ -52,6 +52,7 @@ bottom.
 | `S19` | dragging (resize), placed | transient | the held button |
 | `S20` | dragging (zoom slider), placed | transient | the held button |
 | `S21` | typing a zoom level, placed | placed | nothing |
+| `S22` | holding the scrubber, placed (clip only) | placed | the held button |
 | `S16` | suppressed | gone | — |
 | `S17` | fading out | gone | — |
 
@@ -235,17 +236,20 @@ growth ceiling, and only a hand resize pins its edges** (`E22`, `E23`).
   arrows → pan (`panStep` 80 px, Shift for 3×); **a corner or an edge → resize** (`S19`, `E23`);
   **the frame margin or the status bar → move, always** (`S14`, `E25`, `E21`); **the middle
   → move the frame, or pan the picture once it is spilling** (`S14` / `S13`).
-- **Its status bar carries three buttons, and only here:** ⊘ never preview this image, which asks
-  first (`E11`), ▶ stop showing clips in this tab (`E27`), AA smooth-or-hard-pixels, a plain
-  toggle (`E31`). Only the ⊘ opens a popover, **upward** out of the bar; a press anywhere else in
-  the frame closes it.
+- **Its status bar carries four buttons, and only here**, right to left: ⛶ fill the screen
+  (`E35`), ⊘ never preview this image, which asks first (`E11`), ▶ stop showing clips in this
+  tab (`E27`, clip only), AA smooth-or-hard-pixels, a plain toggle (`E31`). Only the ⊘ opens a
+  popover, **upward** out of the bar; a press anywhere else in the frame closes it.
+- **Over a clip, a translucent strip floats above the bar** (`S22`, `E36`): play/pause, elapsed
+  time, a scrubber, playback speed and sound. It overlays the picture and reserves no layout, so
+  it costs the zoom floor nothing. Hidden on a frame shorter than 110 px.
 - **And a zoom cluster left of those buttons:** a 100 px slider stepping through round zoom
   percentages, and the current level,
   which is clickable and becomes a text field (`S20`, `S21`). Zooming from either **holds the
   frame's bottom-right corner still**, so the control does not run away from the pointer driving
   it (`E34`). The level shows on a hover preview too, but only when it is off its fit; the slider
   is placed-only. **A placed frame is never narrower than its bar's controls** —
-  236 px, or 260 px while the ▶ is there (`barMinW()`).
+  260 px, or 284 px while the ▶ is there (`barMinW()`).
 - **May hang off the edges of the screen** (`E21`), which is the point of the growth ceiling
   being above 1×: shoved aside or upwards, the picture still reaches the screen edges instead of
   leaving a strip of empty page behind it.
@@ -293,8 +297,8 @@ picture follows or does not depending on what it was doing (`E23`).
 - **Cursor:** `nwse-resize` / `nesw-resize` on a corner, `ew-resize` / `ns-resize` on an edge.
 - **Aspect:** free — drag the window to any shape you like. **Shift** locks it to the frame's
   shape as it was when the edge was grabbed (`E23`).
-- **Bounds:** no shorter than 48 px and **no narrower than `barMinW()`** — 236 px, or 260 px while
-  the ▶ is there (`E34`); at the default border that is a 238 × 50 window, which is what keeps the
+- **Bounds:** no shorter than 48 px and **no narrower than `barMinW()`** — 260 px, or 284 px while
+  the ▶ is there (`E34`); at the default border that is a 262 × 50 window, which is what keeps the
   ⊘ reachable at any size (`E25`). No larger than the growth ceiling.
 
 #### S20 · dragging (zoom slider), placed
@@ -323,6 +327,14 @@ Click the level and it becomes a text field in the same slot.
   off the field (`commitZoomField`).
 - The window's own keys are suspended while it is open, or `0`, `-` and Escape would be eaten by
   the window instead of typed (`E34`).
+
+#### S22 · holding the scrubber, placed (clip only)
+Drag the scrubber in the floating strip to move through the clip.
+- **The bar and the strip cannot fade while it is held** — `pointerOverBar()` counts the strip's
+  rect as well as the bar's (`E36`).
+- `timeupdate` keeps writing the readout but **must not write the thumb** while `seekDrag` is set,
+  or the value fights the hand holding it — the same rule the zoom slider's `zoomDrag` follows.
+- Arrow keys nudge it while it has focus, and the window's own pan keys stand aside (`capOwns`).
 
 #### S15 · placed, upgrading
 Placing is a reason to keep looking, not to stop, so the search runs on.
@@ -453,6 +465,8 @@ this table is a table.
 | `E32` | A pan that runs out of picture continues as a window move | [`docs/VIEWER.md`](docs/VIEWER.md) |
 | `E33` | The settings panel is never modal, and who owns the keyboard and wheel | [`docs/SETTINGS.md`](docs/SETTINGS.md) |
 | `E34` | The status bar's zoom slider and level, and the bottom-right corner anchor that keeps them still | [`docs/VIEWER.md`](docs/VIEWER.md) |
+| `E35` | Fullscreen — why the DOCUMENT goes fullscreen, and why maximise IS the implementation | [`docs/VIEWER.md`](docs/VIEWER.md) |
+| `E36` | The floating video strip: why it overlays rather than reserves, and why not native `controls` | [`docs/VIEWER.md`](docs/VIEWER.md) |
 
 `E3` is retired with the detached state (v0.28.0); `E4` and `E5` are retired as dangling.
 
@@ -469,6 +483,8 @@ this table is a table.
 | Placed mode (`S10`–`S15`, `S19`) | `place`, `unplace`, `onPinKey`, `onPinWheel` |
 | Wheel zoom, both states (`T17`, `T22`, `T24`) | `enableWheelZoom`, `disableWheelZoom`, `onPinWheel` |
 | Geometry (`S12`, `E7`, `E21`, `E25`, `E26`) | `view`, `reflow`, `layout`, `zoomAt`, `pannable`, `viewportBox`, `growBox`, `clampPosition`, `fitScaleFor`, `minScaleFor`, `chrome`, `insetX`/`insetY`, `outerW`/`outerH` |
+| Fullscreen (`E35`) | `toggleFull`, `maximise`, `restoreFull`, `fitFull`, `onFullChange`, `fullActive` |
+| Video strip (`S22`, `E36`) | `buildVideoControls`, `syncVideoCtl`, `syncVideoTime`, `togglePlay`, `toggleMute`, `cycleRate`, `playVideo`, `clipSecs`, `isBoxControl`, `pointerOverBar` |
 | Zoom cluster (`S20`, `S21`, `E34`) | `buildZoomControl`, `syncZoom`, `openZoomField`, `closeZoomField`, `zoomAnchored`, `ZOOM_BANDS`/`walkStops`/`fitStops`/`zoomStops`/`zoomIndex`, `zoomLo`/`noBarsScale`/`zoomHi`, `parseZoom`, `commitZoomField`, `capOwns`, `minFrameW` |
 | Upgrades (`S06`, `S15`) | `resolve`, `upgradeViewer` |
 

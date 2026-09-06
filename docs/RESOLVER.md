@@ -299,9 +299,12 @@ the frame grew a second face.
 - **`img[hidden],video[hidden]{display:none}` is required**, because the rule above sets
   `display:block` on both and outranks the UA's `[hidden]` rule. Without it the idle face keeps its
   box and sits under the live one.
-- **No `controls`, on purpose.** A play button and a scrubber would sit under the very clicks that
-  pin, drag and dismiss the window. It is `muted` + `loop` + `autoplay` because it stands in for an
-  animated picture, not a player — which also means the autoplay policy never blocks it.
+- **No native `controls`, on purpose — but there ARE controls since v0.63.0.** The element still
+  never gets the `controls` attribute: a click on the native strip retargets to `vidEl`, the same
+  target as dragging the picture, so `isBoxControl()` cannot separate them. The script draws its
+  own floating strip instead — see [`VIEWER.md`](VIEWER.md) `E36`. It opens `muted` + `loop` +
+  `autoplay` because it stands in for an animated picture, which is also what keeps the autoplay
+  policy from blocking it; `playVideo()` owns the one case where sound takes that permission away.
 - **`probeVideo()` measures with `loadedmetadata` → `videoWidth`/`videoHeight`, `preload: 'metadata'`,
   and a 6 s timeout.** The timeout is load-bearing, not caution: imgur ignores the extension you ask
   for, so `<id>.mp4` on a *static* post answers 200 with `image/jpeg` — neither playable nor an error

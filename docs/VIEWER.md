@@ -215,10 +215,11 @@ typing, and the thumb simply clamps to the left end there. The high end is
 `min(cfg.maxZoom, MAX_SCALE_ABS)`.
 
 **`noBarsScale()` is the letterbox floor, and it is per-picture.** `reflow()` will not shrink the
-frame below `minFrameW()` — the width its own controls need, 236 px — so under
+frame below `minFrameW()` — the width its own controls need, 260 px — so under
 `minFrameW() / natW` the frame stops following the picture and centres it instead, with background
-showing either side. Measured: a 1600 px picture is clean to 15 % and letterboxes at 14.5 %
-(236/1600 = 14.75 %); a 600 px one letterboxes at anything under 39.3 %. The same applies to height
+showing either side. Measured at the pre-v0.63.0 236 px: a 1600 px picture was clean to 15 % and
+letterboxed at 14.5 % (236/1600 = 14.75 %); a 600 px one letterboxed under 39.3 %. Each button
+added to the bar moves both numbers by `BTN_STEP`/`natW`. The same applies to height
 against `MIN_FRAME` (48 px), which only bites on a very wide, very short picture.
 
 **This is why the fix is not "raise the floor to 30 %".** 30 % is the letterbox point of an ~790 px
@@ -271,7 +272,7 @@ which is still a dependency.
 
 **The minimum width is computed, not chosen** — `barMinW()` is the bar's padding, the slider, the
 readout and `btnGutter()`, every one of them the same constant the stylesheet is built from:
-236 px for a picture, 260 px with the ▶ present. Filename and metadata claim nothing, because at
+260 px for a picture, 284 px with the ▶ present. Filename and metadata claim nothing, because at
 that width they are clipped to nothing. `layoutChrome()` positions the cluster and sets
 `padding-right` from `textGutter()`, which is `btnGutter()` plus the cluster, so the reserve and
 the thing it reserves for cannot disagree.
@@ -744,3 +745,60 @@ of them wait.
 - **`hideTip()` is called from `hideViewer()` and the top of `onBoxDown`.** A capture listener on
   `.box` calls `stopPropagation()`, so a `mousedown` on a non-control child never reaches that
   child's own listener — the tip's self-teardown cannot be relied on there.
+
+## Fullscreen · `E35`
+
+The bar's rightmost button. It fills the screen and puts the frame back exactly as it was — the
+prior `fixedW`/`fixedH`/`left`/`top`/`scale` are snapshotted into `fullPrev` and restored verbatim.
+
+**The DOCUMENT goes fullscreen, not our host.** Every coordinate in this script is
+`position:fixed` against the viewport, and `vpW()`/`vpH()` read
+`documentElement.clientWidth`/`clientHeight`. Fullscreening the document is the one route that
+makes the viewport *be* the screen in every engine, so the entire geometry model keeps working
+untouched. Fullscreening `host` instead depends on whether the fullscreen element resizes the
+initial containing block — which is a subtlety that differs between engines and was not worth
+betting the layout on. The page is still behind us, so `.dim.full` blacks it out.
+
+**`maximise()` is not just the fallback, it is the whole implementation.** The API call only
+changes what the viewport measures; `onFullChange()` then calls `maximise()`/`restoreFull()`, which
+are the same two functions the fallback uses directly. So an iframe without `allow="fullscreen"`,
+or a rejected request, degrades to a viewport-filling window rather than to nothing.
+
+**`fitFull()` must `reflow()` BEFORE it centres.** `outerW()`/`outerH()` read `view.frameW`/`frameH`,
+which are stale until `reflow()` has consumed the new `fixedW`/`fixedH` — centring first offsets the
+window by half the size change. Shipped wrong once and caught in browser testing: a 1142→1265 grow
+put the frame at `left: 62` instead of `0`.
+
+**Escape is layered:** `onPinKey` leaves fullscreen and returns, so one press does not also unpin.
+The browser eats Escape itself when the API is what put us there, and `fullscreenchange` restores;
+this branch is what covers the maximise fallback. `unplace()` leaves fullscreen too — it cannot
+outlive the window that asked for it.
+
+## The floating video strip · `E36`
+
+Play/pause, elapsed time, a scrubber, playback speed and sound, over the picture rather than in the
+bar. Only over a clip (`.box.hasvid`), only placed (`.box.hot`), and only above `VCTL_MIN_H`
+(`.box.tall`) — below that it would cover the clip instead of sitting on it.
+
+**It floats, so it reserves nothing.** No `btnGutter()` slot, no `barMinW()`, no `bottomGap()`. This
+is the whole reason it is an overlay and not a second row: a reserved strip would have pushed the
+zoom floor up again for every video, and a scrubber does not fit in the bar beside a 100 px zoom
+slider anyway.
+
+**Every element in it must be in `isBoxControl()`** — `vctlEl.contains(t)` covers the lot. The
+capture listeners on `.box` eat a child's events otherwise, and the symptom is silence.
+`pointerOverBar()` includes its rect for the same class of reason: without it the strip fades out
+from under the hand reaching for the scrubber.
+
+**Sound is the one control that can un-permit playback.** A clip autoplays *because* it is muted;
+unmuting is allowed only because the click is a gesture. `playVideo()` therefore catches `play()`'s
+rejection and falls back to muted rather than leaving a frozen preview. `soundWanted` carries the
+choice from one preview to the next — `vidEl.muted` cannot, since `setMedia()` rewrites it.
+
+**Native `controls` was rejected, and not only on looks.** A click on the native strip retargets to
+`vidEl`, which is also the target for dragging the picture, so `isBoxControl()` cannot tell the two
+apart and the control strip would be either dead or would eat every drag. Its fullscreen button also
+escapes the frame, taking the bare video and losing zoom, pan and the bar.
+
+**`clipSecs()`, not `secsOf()`.** `secsOf()` formats a string for the gate's debug line
+(`"2s"` / `"length unknown"`); using it as a number silently makes every scrubber position `NaN`.

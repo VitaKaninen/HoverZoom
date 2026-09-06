@@ -3,8 +3,13 @@
 A single-purpose replacement for the Hover Zoom+ browser extension. **Pictures only** — no
 galleries, downloads, or action keys, by design. It said *images* only until v0.18.0; the preview
 may now be a muted looping clip, because a large class of animated posts has no image form at all
-and "no video" meant "no answer" for them. That is a display capability, not a change of purpose:
-nothing here plays sound, offers controls, or previews a video *player*. Inherits the shared rules in
+and "no video" meant "no answer" for them. v0.63.0 gave that clip a
+floating strip — play/pause, scrubber, speed, sound — and the bar a fullscreen button, so the
+"no controls, no sound" half of that sentence is retired: asked for directly, and the objection it
+rested on (a native control strip cannot be told apart from the picture under it) is answered by
+drawing our own. **What still holds is that this does not preview a video *player***: a page with a
+real player on it refuses previews on it, and `videoMode` still decides what may play at all.
+Inherits the shared rules in
 `../CLAUDE.md` (version bumps, commit+push, no `innerHTML`, `#89b4fa` checkboxes).
 
 > **[`INTERACTION.md`](INTERACTION.md) is the ID vocabulary for the preview window** — every

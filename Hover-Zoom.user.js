@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.62.0
+// @version     0.63.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -937,6 +937,12 @@
     let edgeEls = null;         // [top, left, right, bottom] — the drawn frame margin
     let gripEl = null;          // invisible collar that carries the outer half of the resize strip
     let spinEl = null, spinSvg = null;
+    let fsEl = null;            // the bar's fullscreen button
+    let vctlEl = null, vplayEl = null, vtimeEl = null, vseekEl = null,
+        vrateEl = null, vmuteEl = null;
+    let seekDrag = false;       // the scrubber is being held; timeupdate must not fight it
+    let soundWanted = false;    // survives one preview to the next, unlike vidEl.muted
+    let fullPrev = null;        // geometry to put back when fullscreen ends
 
     const SVG_NS = 'http://www.w3.org/2000/svg';
     const SPIN_SIZE = 34;                           // px, matches the .spin rule
@@ -951,6 +957,32 @@
         c.setAttribute('cy', '18');
         c.setAttribute('r', String(r === undefined ? RING_R : r));
         return c;
+    }
+
+    // ---- button icons, drawn rather than typed: the emoji a glyph would need render in colour
+    // and break the monochrome bar, and the geometric alternatives are not portable.
+    const ICON_FULL = 'M4 9V4h5v2H6v3H4zm11-5h5v5h-2V6h-3V4zM4 15h2v3h3v2H4v-5zm14 0h2v5h-5v-2h3v-3z';
+    const ICON_EXIT = 'M9 4v5H4V7h3V4h2zm6 0h2v3h3v2h-5V4zM4 15h5v5H7v-3H4v-2zm11 0h5v2h-3v3h-2v-5z';
+    const ICON_PLAY = 'M7 4l12 8-12 8V4z';
+    const ICON_PAUSE = 'M6 4h4v16H6V4zm8 0h4v16h-4V4z';
+    const ICON_LOUD = 'M3 9v6h4l5 4V5L7 9H3zm12.5 3a3.5 3.5 0 0 0-2-3.15v6.3A3.5 3.5 0 0 0 15.5 12z' +
+        'M14 4.2v2.06a5.75 5.75 0 0 1 0 11.48v2.06a7.75 7.75 0 0 0 0-15.6z';
+    const ICON_MUTE = 'M3 9v6h4l5 4V5L7 9H3zm12.6-.9l1.4 1.4 1.4-1.4 1.4 1.4-1.4 1.4 1.4 1.4-1.4 1.4' +
+        '-1.4-1.4-1.4 1.4-1.4-1.4 1.4-1.4-1.4-1.4 1.4-1.4z';
+
+    function mkIcon(d) {
+        const svg = document.createElementNS(SVG_NS, 'svg');
+        svg.setAttribute('viewBox', '0 0 24 24');
+        const p = document.createElementNS(SVG_NS, 'path');
+        p.setAttribute('d', d);
+        svg.appendChild(p);
+        return svg;
+    }
+
+    // Swap an icon button's glyph without rebuilding the button.
+    function setIcon(btn, d) {
+        const p = btn.querySelector('path');
+        if (p) p.setAttribute('d', d);
     }
 
     // The spinner is the one part of the overlay that sits on the bare page rather than on the frame's own dark background.
@@ -1023,6 +1055,8 @@
             ':host{all:initial}',
             '.dim{position:fixed;inset:0;background:transparent;pointer-events:none}',
             '.dim.catch{pointer-events:auto}',
+            // Fullscreen puts the whole document on the screen, so the page is still behind us.
+            '.dim.full{background:#11111b}',
             '.grip{position:fixed;background:transparent;pointer-events:none}',
             '.grip.hot{pointer-events:auto}',
             '.box{position:fixed;opacity:0;pointer-events:none;transition:opacity var(--fade) ease;',
@@ -1052,9 +1086,11 @@
             'width:18px;height:18px;line-height:16px;text-align:center;border-radius:4px;',
             'border:1px solid #45475a;background:rgba(49,50,68,.9);color:#a6adc8;',
             'cursor:pointer;font-size:12px}',
-            '.box.hot .cap .block,.box.hot .cap .aa{display:block}',
+            '.box.hot .cap .block,.box.hot .cap .aa,.box.hot .cap .fs{display:block}',
             '.box.hot .cap.hasvid .vidoff{display:block}',
             '.cap .vidoff{font-size:10px}',
+            '.cap .fs svg{display:block;width:12px;height:12px;margin:2px auto;fill:currentColor}',
+            '.cap .fs:hover{background:#a6e3a1;border-color:#a6e3a1;color:#1e1e2e}',
             '.cap .aa{font-size:9px;font-weight:700;letter-spacing:-.06em}',
             '.cap .aa.sharp{background:#89b4fa;border-color:#89b4fa;color:#1e1e2e}',
             '.cap .block:hover{background:#f38ba8;border-color:#f38ba8;color:#1e1e2e}',
@@ -1082,6 +1118,28 @@
             'font:11px/16px system-ui,sans-serif;color:#cdd6f4;background:#313244;',
             'border:1px solid #89b4fa;border-radius:3px;outline:none}',
             '.cap .zin[hidden]{display:none}',
+            // ---- the video strip: floats OVER the picture, so it costs no layout at all —
+            // no gutter, no minFrameW(), no reserved height. Shown only over a clip.
+            '.vctl{position:absolute;left:' + VCTL_SIDE + 'px;right:' + VCTL_SIDE + 'px;',
+            'bottom:' + (BAR_MIN_H + VCTL_GAP) + 'px;height:' + VCTL_H + 'px;display:none;',
+            'align-items:center;gap:8px;box-sizing:border-box;padding:0 8px;border-radius:7px;',
+            'background:rgba(17,17,27,.55);backdrop-filter:blur(7px) saturate(1.4);',
+            '-webkit-backdrop-filter:blur(7px) saturate(1.4);border:1px solid rgba(205,214,244,.12);',
+            'font:11px/16px system-ui,sans-serif;color:#cdd6f4;',
+            'text-shadow:0 1px 2px rgba(0,0,0,.6)}',
+            '.box.hot.hasvid.tall .vctl{display:flex}',
+            '.vctl .vbtn{flex:none;display:flex;align-items:center;justify-content:center;',
+            'width:20px;height:20px;border-radius:4px;cursor:pointer;color:#cdd6f4}',
+            '.vctl .vbtn svg{display:block;width:14px;height:14px;fill:currentColor}',
+            '.vctl .vbtn:hover{background:rgba(205,214,244,.18)}',
+            '.vctl .vtime{flex:none;min-width:62px;font-variant-numeric:tabular-nums;',
+            'letter-spacing:.02em;color:#bac2de;white-space:nowrap}',
+            '.vctl .vseek{flex:1;min-width:0;height:14px;margin:0;padding:0;',
+            'accent-color:#89b4fa;cursor:pointer}',
+            '.vctl .vrate{flex:none;padding:0 5px;height:18px;line-height:18px;border-radius:4px;',
+            'cursor:pointer;font-variant-numeric:tabular-nums;font-weight:600;color:#bac2de}',
+            '.vctl .vrate:hover{background:rgba(205,214,244,.18);color:#cdd6f4}',
+            '.vctl .vrate.off{color:#f9e2af}',
             '.pop{position:absolute;right:8px;bottom:' + (BAR_MIN_H + 4) + 'px;display:none;',
             'z-index:4;max-width:250px;background:rgba(30,30,46,.98);border:1px solid #45475a;',
             'border-radius:6px;overflow:hidden;box-shadow:0 6px 20px rgba(0,0,0,.55);',
@@ -1093,12 +1151,13 @@
             '.pop .acts button{font:11px system-ui,sans-serif;padding:4px 10px;border-radius:5px;',
             'border:1px solid #45475a;background:#313244;color:#cdd6f4;cursor:pointer}',
             '.pop .acts button.go{background:#f38ba8;border-color:#f38ba8;color:#1e1e2e;font-weight:700}',
-            '.cap,.edge{transition:opacity ' + BAR_SHOW_MS + 'ms ease}',
-            '.box.idle .cap{opacity:0;pointer-events:none;transition:opacity var(--barfade) ease}',
+            '.cap,.edge,.vctl{transition:opacity ' + BAR_SHOW_MS + 'ms ease}',
+            '.box.idle .cap,.box.idle .vctl{opacity:0;pointer-events:none;',
+            'transition:opacity var(--barfade) ease}',
             '.box.idle .edge{opacity:0;transition:opacity var(--barfade) ease}',
             // `idle` still decides whether they show; this only takes the animation off it.
             // Equal specificity to the two rules above, so source order is what beats them.
-            '.box.nobar .cap,.box.nobar .edge{transition:none}',
+            '.box.nobar .cap,.box.nobar .edge,.box.nobar .vctl{transition:none}',
             '.spin{position:fixed;width:34px;height:34px;display:none;pointer-events:none;',
             'filter:drop-shadow(0 2px 6px rgba(0,0,0,.5))}',
             '.spin.on{display:block}',
@@ -1168,7 +1227,15 @@
         aaEl.addEventListener('mousedown', function (e) { e.preventDefault(); e.stopPropagation(); }, true);
         aaEl.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); toggleSmoothing(); }, true);
 
+        fsEl = document.createElement('span');
+        fsEl.className = 'btn fs';
+        fsEl.appendChild(mkIcon(ICON_FULL));
+        setTip(fsEl, 'Fill the screen');
+        fsEl.addEventListener('mousedown', function (e) { e.preventDefault(); e.stopPropagation(); }, true);
+        fsEl.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); toggleFull(); }, true);
+
         buildZoomControl();
+        buildVideoControls();
 
         capEl.appendChild(capNameEl);
         capEl.appendChild(capHintEl);
@@ -1177,6 +1244,7 @@
         capEl.appendChild(blockEl);
         capEl.appendChild(vidOffEl);
         capEl.appendChild(aaEl);
+        capEl.appendChild(fsEl);
 
         blockPopEl = buildPop();
         popHead(blockPopEl, 'Never preview this image again.',
@@ -1208,6 +1276,7 @@
         box.appendChild(imgEl);
         box.appendChild(vidEl);
         edgeEls.forEach(function (d) { box.appendChild(d); });
+        box.appendChild(vctlEl);
         box.appendChild(capEl);
         box.appendChild(blockPopEl);
         box.addEventListener('mousedown', onBoxDown, true);
@@ -1782,6 +1851,142 @@
         if (zvalEl) zvalEl.hidden = false;
     }
 
+    // ------------------------------------------------- the floating video strip
+
+    const RATES = [1, 1.5, 2, 0.5];
+
+    function mkVBtn(icon, tip, onClick) {
+        const b = document.createElement('span');
+        b.className = 'vbtn';
+        b.appendChild(mkIcon(icon));
+        setTip(b, tip);
+        b.addEventListener('mousedown', function (e) { e.preventDefault(); e.stopPropagation(); }, true);
+        b.addEventListener('click', function (e) {
+            e.preventDefault(); e.stopPropagation(); onClick(); showBar();
+        }, true);
+        return b;
+    }
+
+    // Play/pause, elapsed time, scrubber, speed and sound — over the picture, not in the bar.
+    function buildVideoControls() {
+        vctlEl = document.createElement('div');
+        vctlEl.className = 'vctl';
+
+        vplayEl = mkVBtn(ICON_PAUSE, 'Play / pause', togglePlay);
+
+        vtimeEl = document.createElement('span');
+        vtimeEl.className = 'vtime';
+        vtimeEl.textContent = '0:00 / 0:00';
+
+        vseekEl = document.createElement('input');
+        vseekEl.className = 'vseek';
+        vseekEl.type = 'range';
+        vseekEl.min = '0';
+        vseekEl.max = '1000';
+        vseekEl.step = '1';
+        vseekEl.value = '0';
+        setTip(vseekEl, 'Drag to scrub');
+        vseekEl.addEventListener('mousedown', function (e) {
+            e.stopPropagation(); seekDrag = true; showBar();
+        }, true);
+        vseekEl.addEventListener('input', function () {
+            const d = clipSecs();
+            if (!d) return;
+            seekDrag = true;
+            vidEl.currentTime = d * (Number(vseekEl.value) / 1000);
+            syncVideoTime();
+        });
+        vseekEl.addEventListener('change', function () { seekDrag = false; showBar(); });
+
+        vrateEl = document.createElement('span');
+        vrateEl.className = 'vrate';
+        vrateEl.textContent = '1×';
+        setTip(vrateEl, 'Playback speed');
+        vrateEl.addEventListener('mousedown', function (e) { e.preventDefault(); e.stopPropagation(); }, true);
+        vrateEl.addEventListener('click', function (e) {
+            e.preventDefault(); e.stopPropagation(); cycleRate(); showBar();
+        }, true);
+
+        vmuteEl = mkVBtn(ICON_MUTE, 'Sound on / off', toggleMute);
+
+        vctlEl.appendChild(vplayEl);
+        vctlEl.appendChild(vtimeEl);
+        vctlEl.appendChild(vseekEl);
+        vctlEl.appendChild(vrateEl);
+        vctlEl.appendChild(vmuteEl);
+
+        vidEl.addEventListener('timeupdate', syncVideoTime);
+        vidEl.addEventListener('durationchange', syncVideoTime);
+        vidEl.addEventListener('play', syncVideoCtl);
+        vidEl.addEventListener('pause', syncVideoCtl);
+        vidEl.addEventListener('volumechange', syncVideoCtl);
+    }
+
+    function fmtTime(s) {
+        if (!isFinite(s) || s < 0) s = 0;
+        const m = Math.floor(s / 60);
+        const r = Math.floor(s % 60);
+        return m + ':' + (r < 10 ? '0' : '') + r;
+    }
+
+    // Not secsOf(), which formats a string for the gate's debug line.
+    function clipSecs() {
+        const d = vidEl ? vidEl.duration : 0;
+        return isFinite(d) && d > 0 ? d : 0;
+    }
+
+    function syncVideoTime() {
+        if (!vtimeEl || mediaEl !== vidEl) return;
+        const d = clipSecs();
+        const t = isFinite(vidEl.currentTime) ? vidEl.currentTime : 0;
+        vtimeEl.textContent = fmtTime(t) + ' / ' + fmtTime(d);
+        if (!seekDrag) vseekEl.value = String(d ? Math.round((t / d) * 1000) : 0);
+    }
+
+    function syncVideoCtl() {
+        if (!vctlEl || mediaEl !== vidEl) return;
+        setIcon(vplayEl, vidEl.paused ? ICON_PLAY : ICON_PAUSE);
+        setIcon(vmuteEl, vidEl.muted ? ICON_MUTE : ICON_LOUD);
+        vrateEl.textContent = String(vidEl.playbackRate).replace(/\.0$/, '') + '×';
+        vrateEl.classList.toggle('off', vidEl.playbackRate !== 1);
+        syncVideoTime();
+    }
+
+    function togglePlay() {
+        if (mediaEl !== vidEl) return;
+        if (vidEl.paused) playVideo(); else vidEl.pause();
+    }
+
+    // Sound is the one thing that can un-permit playback: a clip that autoplayed BECAUSE it was
+    // muted is stopped the moment it is not, unless the browser counts this click as the gesture.
+    function toggleMute() {
+        if (mediaEl !== vidEl) return;
+        vidEl.muted = !vidEl.muted;
+        soundWanted = !vidEl.muted;
+        if (!vidEl.paused) return;
+        playVideo();
+    }
+
+    function cycleRate() {
+        if (mediaEl !== vidEl) return;
+        const i = RATES.indexOf(vidEl.playbackRate);
+        vidEl.playbackRate = RATES[(i + 1) % RATES.length];
+        syncVideoCtl();
+    }
+
+    // The autoplay policy refuses an unmuted clip that has no gesture behind it. Rather than
+    // leave a frozen preview, fall back to muted and keep the picture moving.
+    function playVideo() {
+        const started = vidEl.play();
+        if (!started || !started.catch) return;
+        started.catch(function () {
+            if (vidEl.muted || mediaEl !== vidEl) return;   // torn down, or already silent
+            vidEl.muted = true;
+            const retry = vidEl.play();
+            if (retry && retry.catch) retry.catch(function () { /* gone */ });
+        });
+    }
+
     const BAR_SHOW_MS = 120;
 
     // The bar's height, fixed so the ring around it can be a matching thickness.
@@ -1796,11 +2001,19 @@
     const BAR_ZOOM_GAP = 6;     // inside the cluster
     const BAR_ZOOM_W = 52;      // the readout slot, wide enough for "3,200%"
 
+    // The floating video strip. It overlays the picture and reserves nothing, so none of these
+    // reach btnGutter(), barMinW() or bottomGap() — that is the whole point of floating it.
+    const VCTL_H = 30;
+    const VCTL_SIDE = 8;        // inset from the frame's left and right edges
+    const VCTL_GAP = 6;         // clearance above the status bar
+    // Below this the strip would cover the clip instead of sitting on it.
+    const VCTL_MIN_H = 110;
+
     // Where the zoom cluster's right edge sits, measured in from the bar's right edge: clear of
     // the buttons once placed, and of nothing but the padding while hovering.
     function btnGutter() {
         if (!placed) return BAR_PAD;
-        return BTN_RIGHT + BTN_STEP * (mediaEl === vidEl ? 3 : 2) + 2;
+        return BTN_RIGHT + BTN_STEP * (mediaEl === vidEl ? 4 : 3) + 2;
     }
 
     // How much of the bar the cluster covers right now.
@@ -1824,13 +2037,19 @@
     let barTimer = 0;
 
     // The bar must not fade while the pointer is ON it.
-    function pointerOverBar() {
-        if (!capEl || !view || !box || !box.classList.contains('on')) return false;
-        if (capEl.style.display === 'none') return false;
-        const r = capEl.getBoundingClientRect();
+    function overRect(el) {
+        if (!el) return false;
+        const r = el.getBoundingClientRect();
         if (!r.width || !r.height) return false;
         return pointer.x >= r.left && pointer.x <= r.right &&
                pointer.y >= r.top && pointer.y <= r.bottom;
+    }
+
+    // The video strip counts too, or it fades out from under the hand reaching for the scrubber.
+    function pointerOverBar() {
+        if (!capEl || !view || !box || !box.classList.contains('on')) return false;
+        if (capEl.style.display !== 'none' && overRect(capEl)) return true;
+        return mediaEl === vidEl && overRect(vctlEl);
     }
 
     // The margin ring counts too, for the same reason the bar does.
@@ -1905,8 +2124,11 @@
         if (!wantsVideo && noReferrerHere()) imgEl.referrerPolicy = 'no-referrer';
         mediaEl.src = res.url;
         if (wantsVideo) {
-            const started = vidEl.play();
-            if (started && started.catch) started.catch(function () { /* torn down or blocked */ });
+            vidEl.muted = !soundWanted;
+            vidEl.playbackRate = 1;
+            seekDrag = false;
+            playVideo();
+            syncVideoCtl();
         }
     }
 
@@ -1950,9 +2172,13 @@
             : 'left:' + px(m) + ';right:' + px(m) + ';bottom:0;height:' + px(m);
         const hasVid = mediaEl === vidEl;
         capEl.classList.toggle('hasvid', hasVid);
+        box.classList.toggle('hasvid', hasVid);
+        // The strip would cover the clip rather than sit on it once the frame is this short.
+        box.classList.toggle('tall', view.frameH >= VCTL_MIN_H);
         // Right to left, skipping the ▶ when the frame is not holding a clip; the gutter has to
         // clear whatever is actually there or the filename runs under the buttons.
         let right = BTN_RIGHT;
+        fsEl.style.right = px(right); right += BTN_STEP;
         blockEl.style.right = px(right); right += BTN_STEP;
         if (hasVid) { vidOffEl.style.right = px(right); right += BTN_STEP; }
         aaEl.style.right = px(right); right += BTN_STEP;
@@ -2240,6 +2466,7 @@
         hideTip();
         closePops();
         resetZoomControl();
+        seekDrag = false;
         box.classList.remove('on', 'hot', 'pan', 'drag');
         box.style.cursor = '';      // onMove writes this inline over the bands; see hitRegion
         if (gripEl) { gripEl.classList.remove('hot'); gripEl.style.cursor = ''; }
@@ -2303,6 +2530,9 @@
 
     function unplace() {
         if (!placed) return;
+        // Fullscreen outlives nothing: the window that asked for it is going away.
+        if (document.fullscreenElement) exitFull();
+        else if (fullPrev) restoreFull();
         placed = false;
         drag = null;
         box.classList.remove('placed', 'drag');
@@ -2312,10 +2542,98 @@
         cancel();
     }
 
+    // ------------------------------------------------------------- fullscreen
+
+    // The DOCUMENT goes fullscreen, not our host: our whole coordinate system is `position:fixed`
+    // against the viewport, and fullscreening the document is the one route that makes the
+    // viewport BE the screen in every engine. The page behind is blacked out by `.dim.full`.
+    function fullActive() {
+        return !!(document.fullscreenElement || fullPrev);
+    }
+
+    function toggleFull() {
+        if (!view) return;
+        if (document.fullscreenElement) { exitFull(); return; }
+        if (fullPrev) { restoreFull(); return; }        // maximised without the API
+        const el = document.documentElement;
+        const req = el.requestFullscreen || el.webkitRequestFullscreen;
+        if (!req || !document.fullscreenEnabled) { maximise(); return; }
+        const p = req.call(el);
+        // An iframe without allow="fullscreen" rejects; maximising is the honest fallback.
+        if (p && p.catch) p.catch(function () { maximise(); });
+    }
+
+    function exitFull() {
+        const fn = document.exitFullscreen || document.webkitExitFullscreen;
+        if (fn) {
+            const p = fn.call(document);
+            if (p && p.catch) p.catch(function () { /* already gone */ });
+        }
+    }
+
+    // Remember what to put back, then fill whatever the viewport is now.
+    function maximise() {
+        if (!view || fullPrev) return;
+        fullPrev = {
+            fixedW: view.fixedW, fixedH: view.fixedH,
+            left: view.left, top: view.top, scale: view.scale,
+        };
+        dimEl.classList.add('full');
+        setIcon(fsEl, ICON_EXIT);
+        setTip(fsEl, 'Leave fullscreen');
+        fitFull();
+    }
+
+    function restoreFull() {
+        if (!fullPrev) return;
+        const p = fullPrev;
+        fullPrev = null;
+        dimEl.classList.remove('full');
+        setIcon(fsEl, ICON_FULL);
+        setTip(fsEl, 'Fill the screen');
+        if (!view) return;
+        view.fixedW = p.fixedW;
+        view.fixedH = p.fixedH;
+        view.left = p.left;
+        view.top = p.top;
+        view.scale = p.scale;
+        view.fitScale = fitScaleFor(view.natW, view.natH);
+        reflow();
+        layout();
+    }
+
+    // Edge to edge, and the picture refitted to it.
+    function fitFull() {
+        if (!view) return;
+        view.fixedW = Math.max(MIN_FRAME, vpW() - insetX() * 2);
+        view.fixedH = Math.max(MIN_FRAME, usableHeight() - insetY() * 2);
+        view.fitScale = fitScaleFor(view.natW, view.natH);
+        view.scale = view.fitScale;
+        reflow();       // outerW()/outerH() read view.frameW/H, so they must be settled first
+        view.left = Math.round((vpW() - outerW()) / 2);
+        view.top = Math.round((usableHeight() - outerH()) / 2);
+        layout();
+    }
+
+    function onFullChange() {
+        if (document.fullscreenElement) {
+            if (!view) { exitFull(); return; }
+            maximise();
+            // Chrome reports the old viewport for a frame after the event.
+            setTimeout(function () { if (fullActive()) fitFull(); }, 0);
+        } else if (fullPrev) {
+            restoreFull();
+        }
+    }
+
+    document.addEventListener('fullscreenchange', onFullChange);
+    document.addEventListener('webkitfullscreenchange', onFullChange);
+
     // Controls that live INSIDE the box.
     function isBoxControl(t) {
         return blockEl.contains(t) || vidOffEl.contains(t) || aaEl.contains(t) ||
-            blockPopEl.contains(t) || zctlEl.contains(t);
+            fsEl.contains(t) || blockPopEl.contains(t) || zctlEl.contains(t) ||
+            vctlEl.contains(t);
     }
 
     // ---- the popover the ⊘ opens
@@ -2498,7 +2816,10 @@
         if (!e || !e.composedPath) return false;
         const path = e.composedPath();
         if (zinEl && !zinEl.hidden && path.indexOf(zinEl) !== -1) return true;
-        return !!zsliderEl && !!SLIDER_KEYS[e.key] && path.indexOf(zsliderEl) !== -1;
+        if (!SLIDER_KEYS[e.key]) return false;
+        // The scrubber answers the arrows exactly as the zoom slider does.
+        return (!!zsliderEl && path.indexOf(zsliderEl) !== -1) ||
+               (!!vseekEl && path.indexOf(vseekEl) !== -1);
     }
 
     function onPinKey(e) {
@@ -2518,10 +2839,21 @@
         // wherever the focus happens to be. One press must not close both.
         if (e.key === 'Escape' && panelHost) return;
         if (e.ctrlKey || e.metaKey || e.altKey) return;   // leave browser/page chords alone
+        // Fullscreen is the layer above the pin, so Escape leaves it first. The browser eats the
+        // key itself when the API is what put us there; this covers the maximise fallback.
+        if (e.key === 'Escape' && fullActive()) {
+            toggleFull();
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+        }
         const step = e.shiftKey ? cfg.panStep * 3 : cfg.panStep;
         let handled = true;
         switch (e.key) {
             case 'Escape': unplace(); break;
+            case ' ': if (mediaEl === vidEl) togglePlay(); else handled = false; break;
+            case 'f': case 'F': toggleFull(); break;
+            case 'm': case 'M': if (mediaEl === vidEl) toggleMute(); else handled = false; break;
             case 'ArrowLeft': panBy(step, 0); break;
             case 'ArrowRight': panBy(-step, 0); break;
             case 'ArrowUp': panBy(0, step); break;
@@ -3125,6 +3457,7 @@
     window.addEventListener('resize', function () {
         if (!placed) { cancel(); return; }
         if (!view) return;
+        if (fullActive()) { fitFull(); return; }        // the screen IS the new viewport
         view.fitScale = fitScaleFor(view.natW, view.natH);
         const lo = minScaleFor(view.natW, view.natH);
         if (view.scale < lo) view.scale = lo;
