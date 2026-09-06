@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.58.0
+// @version     0.59.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -41,7 +41,8 @@
         hoverDelay: 120,            // ms before resolving
         minDisplayed: 16,           // ignore images displayed smaller than this — the only size gate
         minRatio: 1,                // full size must be this much bigger; below 1 previews anything
-        previewVideos: true,        // preview video THUMBNAILS and player surfaces too
+        videoMode: 'clips',         // 'none' | 'clips' (animated clips) | 'all' (+ links to a video page)
+        previewOverPlayer: false,   // preview while a real player is on the page, on the player
         skipFurniture: true,        // never preview the page's own furniture: its background, a
         siteMode: 'blacklist',      // 'blacklist' | 'whitelist'
         siteList: [],               // hostnames, matched by suffix
@@ -82,12 +83,16 @@
         'sameShapeOnly', 'keepSearching', 'followLinks', 'hoverThroughOverlays',
         'skipWhileMouseDown', 'playVideos', 'skipVideos', 'skipPageBackgrounds',
         'skipBanners', 'skipDecorative', 'enabled', 'maxDisplayed', 'cursorGap', 'noReferrer',
-        'showEvenIfNotLarger'];
+        'showEvenIfNotLarger', 'previewVideos'];
 
     // The retirements that DO convert.
     function migrate(o) {
         if (o.previewVideos === undefined && o.skipVideos !== undefined) {
             o.previewVideos = !o.skipVideos;
+        }
+        // One checkbox asked three questions; the one it actually answered is the middle one.
+        if (o.videoMode === undefined && o.previewVideos !== undefined) {
+            o.videoMode = o.previewVideos ? 'all' : 'clips';
         }
         if (o.skipFurniture === undefined && o.skipPageBackgrounds !== undefined) {
             o.skipFurniture = !!o.skipPageBackgrounds;
@@ -112,7 +117,10 @@
 
     let cfg = Object.assign({}, DEFAULTS, readSettings());
 
-    let playVideos = true;
+    let playVideos = true;      // the tab's own copy of videoMode 'none', from the bar's play button
+
+    // Anything that moves: the stored setting and the per-tab button ask the same question.
+    function videoPreviewsOn() { return playVideos && cfg.videoMode !== 'none'; }
 
     function saveSettings() {
         GM_setValue(KEY, JSON.stringify(cfg));
@@ -500,7 +508,7 @@
             if (abs.startsWith('data:') || abs.startsWith('blob:')) return;
             if (blocked(abs)) return;       // never probe something the user has ruled out
             if (unstable.has(abs)) return;  // it has already been caught changing under us
-            if (!playVideos && isVideoUrl(abs)) return;
+            if (!videoPreviewsOn() && isVideoUrl(abs)) return;
             if (seen.has(abs)) return;
             seen.add(abs);
             out.push({ url: abs, from: from });
@@ -538,7 +546,7 @@
 
         const a = el.closest && el.closest('a[href]');
         if (a && a.href) {
-            if (looksLikeImage(a.href) || (playVideos && isVideoUrl(a.href))) add(a.href, 'the ancestor link itself');
+            if (looksLikeImage(a.href) || (videoPreviewsOn() && isVideoUrl(a.href))) add(a.href, 'the ancestor link itself');
             else {
                 linkParamCandidates(a.href).forEach(adder('a url inside the ancestor link\'s query'));
                 upgradeCandidates(a.href).forEach(function (u) {
@@ -683,7 +691,7 @@
             let u;
             try { u = new URL(raw, pageUrl.href); } catch (e) { return; }
             if (u.origin !== pageUrl.origin || seen.has(u.href)) return;
-            if (!looksLikeImage(u.href) && !(playVideos && isVideoUrl(u.href))) return;
+            if (!looksLikeImage(u.href) && !(videoPreviewsOn() && isVideoUrl(u.href))) return;
             seen.add(u.href);
             out.push(u.href);
         });
@@ -701,7 +709,7 @@
         let og = null;
         const vid = metaContent(doc, ['og:video:secure_url', 'og:video:url', 'og:video',
             'twitter:player:stream']);
-        if (vid && playVideos && isVideoUrl(vid)) {
+        if (vid && videoPreviewsOn() && isVideoUrl(vid)) {
             try { og = { url: new URL(vid, pageUrl.href).href }; } catch (e) { /* fall through */ }
         }
         if (!og) {
@@ -2590,30 +2598,30 @@
         return null;
     }
 
-    // Returns WHY this element counts as video, or null.
-    function videoReason(el) {
-        if (el.closest && el.closest('video')) return 'inside a <video>';
+    // Returns WHY a real player on THIS page covers this element, or null.
+    function playerSurfaceReason(el) {
+        const own = el.closest && el.closest('video');
+        if (own && own !== el && !gifLike(own)) return 'inside a <video>';
         if (overVideoSurface(el)) return 'over a laid-out <video> rectangle';
         let n = el;
         for (let up = 0; n && up < 4; up++, n = n.parentElement) {
             if (up > 0 && n.querySelectorAll && n.querySelectorAll('img').length > 1) break;
             if (playerIn(n)) return '<video> in ancestor #' + up;
         }
-        const linked = videoLinkReason(el);
-        if (linked) return linked;
         return null;
     }
 
-    // Split out of videoReason() because a gif-style clip that is ITSELF the hover target needs this gate and none of the o...
+    // Reporting only — the two halves are gated separately, by different settings.
+    function videoReason(el) {
+        return playerSurfaceReason(el) || videoLinkReason(el);
+    }
+
+    // Returns WHY this element leads AWAY to a video page, or null.
     function videoLinkReason(el) {
         const a = closestAcross(el, 'a[href]');
         const href = a ? (a.getAttribute('href') || '') : '';
         if (href && VIDEO_LINK_RE.test(href)) return 'video link: ' + href;
         return null;
-    }
-
-    function inVideoContext(el) {
-        return !!videoReason(el);
     }
 
     const BAND_WIDTH = 0.98;    // of the viewport — a full-bleed band reaches both edges
@@ -2759,12 +2767,14 @@
     function eligibleDirect(el) {
         if (!el) return null;
         if (el.tagName === 'VIDEO') {
-            if (!playVideos || !gifLike(el)) return null;
-            if (!cfg.previewVideos && videoLinkReason(el)) return null;
+            if (!videoPreviewsOn() || !gifLike(el)) return null;
+            if (!cfg.previewOverPlayer && playerSurfaceReason(el)) return null;
+            if (cfg.videoMode !== 'all' && videoLinkReason(el)) return null;
             return blocked(shownUrl(el)) ? null : el;
         }
         if (NEVER[el.tagName]) return null;
-        if (!cfg.previewVideos && inVideoContext(el)) return null;
+        if (!cfg.previewOverPlayer && playerSurfaceReason(el)) return null;
+        if (cfg.videoMode !== 'all' && videoLinkReason(el)) return null;
         if (cfg.skipFurniture && decorativeReason(el)) return null;
         // Before the <img> branch, because this is the one furniture rule that applies to one.
         if (cfg.skipFurniture && bannerReason(el)) return null;
@@ -2800,8 +2810,9 @@
                 : el === t ? 'the hover target itself'
                     : 'looked through the cover to ' + el.tagName +
                       (el.id ? '#' + el.id : '') + ' — ' + (shownUrl(el) || '').slice(0, 120),
-            previewVideos: cfg.previewVideos,
-            videoGate: videoReason(t) || 'none — NOT treated as video',
+            videoMode: cfg.videoMode + (playVideos ? '' : ' (turned off in this tab)'),
+            playerGate: playerSurfaceReason(t) || 'none — no player on this page covers it',
+            videoLinkGate: videoLinkReason(t) || 'none — does not lead to a video page',
             backgroundGate: t.tagName === 'IMG' || t.tagName === 'VIDEO' ? 'n/a — not a background'
                 : !backgroundUrl(t) ? 'n/a — no background image'
                     : (wallpaperReason(t) || 'none — NOT treated as page furniture'),
@@ -3606,11 +3617,13 @@
             'below, which is the answer to a tiled background or a watermark that previews from ' +
             'everywhere. For a whole site, the userscript manager’s menu has an ' +
             'enable/disable entry for the page you are on.');
-        para('Clips.',
-            'A short muted clip already looping with no controls is an animated image, not a ' +
-            'video, and previews as one — some posts have no still form at all. Press ▶ in a ' +
-            'pinned preview’s status bar to go back to still images for the rest of the ' +
-            'tab; reloading the page restores it.');
+        para('Clips, and what counts as a video.',
+            'A short muted clip already looping with no controls is an animated image whatever ' +
+            'it is encoded as, and previews as one — some posts have no still form at all. A ' +
+            'real player, or a thumbnail linking to a video page, is a video, and those are two ' +
+            'separate settings above. Either way, pointing at a player already on the page gives ' +
+            'no preview unless you ask for one. Press ▶ in a pinned preview’s status bar to go ' +
+            'back to still images for the rest of the tab; reloading the page restores it.');
 
         guideBtn.addEventListener('click', function () {
             const open = guide.classList.toggle('open');
@@ -3645,10 +3658,15 @@
             'following the link underneath', [
                 ['left', 'Left click  (right click dismisses)'],
                 ['right', 'Right click  (left click dismisses)']]);
-        check('previewVideos', 'Preview videos as well',
-            'video thumbnails and player surfaces. Turn it off if previews get in the way of ' +
-            'clicking play — pointing at a video is often aiming to start it. A short looping ' +
-            'clip with no controls counts as an animated image and previews either way');
+        pick('videoMode', 'Moving pictures',
+            'a short muted clip looping with no controls is an animated image, whatever it ' +
+            'is encoded as; a link to a video page is a video', [
+                ['clips', 'Animated clips only'],
+                ['all', 'Clips and video thumbnails'],
+                ['none', 'Nothing that moves']]);
+        check('previewOverPlayer', 'Preview on the player itself',
+            'pointing at a player already on the page gives no preview, because the player ' +
+            'shows it full size itself. Turn on to get one there anyway');
         check('skipFurniture', 'Ignore backgrounds and banners',
             'page furniture rather than images on the page: the page’s own background, a ' +
             'tiled or fixed one, a strip spanning the window, one the page’s text sits on, ' +
@@ -3858,7 +3876,8 @@
         url: location.href,
         topFrame: isTopFrame,
         siteEnabled: siteEnabled(),
-        previewVideos: cfg.previewVideos,
+        videoMode: cfg.videoMode,
+        previewOverPlayer: cfg.previewOverPlayer,
         playVideos: playVideos,
         skipFurniture: cfg.skipFurniture,
         blockList: cfg.blockList.length,

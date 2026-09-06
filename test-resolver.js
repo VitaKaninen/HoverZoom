@@ -12,7 +12,7 @@ if (start < 0 || end < 0) { console.error('markers not found'); process.exit(1);
 
 // The video-link heuristic lives further down the file, outside the pure-URL slice.
 const vStart = src.indexOf('    const VIDEO_LINK_RE');
-const vEnd = src.indexOf('    function inVideoContext');
+const vEnd = src.indexOf('    const PLAYER_UP');
 if (vStart < 0 || vEnd < 0) { console.error('video markers not found'); process.exit(1); }
 const VIDEO_LINK_RE = new Function(
     src.slice(vStart, vEnd) + '\nreturn VIDEO_LINK_RE;')();
@@ -26,6 +26,13 @@ const bEnd = src.indexOf('    // Returns WHICH condition decided');
 if (bStart < 0 || bEnd < 0) { console.error('banner markers not found'); process.exit(1); }
 const bannerShape = new Function(
     src.slice(bStart, bEnd) + '\nreturn bannerShape;')();
+
+// gifLike() is the whole animated-image/player distinction and it reads only element
+// properties, so it slices out and runs against plain objects with no DOM at all.
+const gStart = src.indexOf('    const GIF_MAX_SECS');
+const gEnd = src.indexOf('    // The first non-gif');
+if (gStart < 0 || gEnd < 0) { console.error('gifLike markers not found'); process.exit(1); }
+const gifLike = new Function(src.slice(gStart, gEnd) + '\nreturn gifLike;')();
 
 const location = { href: 'https://example.com/page/index.html' };
 const body = src.slice(start, end);
@@ -328,6 +335,33 @@ noisy.forEach(function (u) {
     if (!VIDEO_LINK_RE.test(u)) pass++;
     else { fail++; console.log('FAIL video link over-matched: ' + u); }
 });
+
+// ---- gifLike(): which <video> is an animated image and which is a player.
+// The four properties are ANDed and each alone has a false positive, so every case below
+// turns exactly one of them off. `duration` carries the argument; an unknown one reads as a
+// player, which is the safe direction and is what keeps an empty <video> refused.
+function vid(o) {
+    const v = { controls: false, muted: true, loop: true, autoplay: false, duration: 4 };
+    Object.keys(o).forEach(function (k) { v[k] = o[k]; });
+    v.hasAttribute = function (a) { return a === 'controls' && !!v.controls; };
+    return v;
+}
+eq('a muted looping controls-less short clip is an animated image', gifLike(vid({})), true);
+eq('autoplay alone satisfies the loop-or-autoplay half',
+    gifLike(vid({ loop: false, autoplay: true })), true);
+eq('neither loop nor autoplay is not a clip',
+    gifLike(vid({ loop: false, autoplay: false })), false);
+eq('controls make it a player', gifLike(vid({ controls: true })), false);
+eq('sound makes it a player', gifLike(vid({ muted: false })), false);
+eq('over a minute is a player', gifLike(vid({ duration: 61 })), false);
+eq('exactly a minute is still a clip', gifLike(vid({ duration: 60 })), true);
+eq('an unknown duration reads as a player', gifLike(vid({ duration: NaN })), false);
+eq('an empty <video> reads as a player', gifLike(vid({ duration: 0 })), false);
+eq('an endless stream reads as a player', gifLike(vid({ duration: Infinity })), false);
+// A site that draws its own chrome leaves `controls` false, and an autoplay policy leaves it
+// muted: duration is the only test still standing, and it is the one that must hold.
+eq('a custom-chrome player is caught by duration alone',
+    gifLike(vid({ autoplay: true, loop: false, duration: 212 })), false);
 
 // ---- the never-preview list
 // A wrong match here is SILENT — the image just stops previewing, with nothing on screen to

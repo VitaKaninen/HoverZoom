@@ -51,7 +51,7 @@ command) re-renders without moving the baseline; and closing and re-opening re-a
 Two sweeps, both asked for after reading the panel end to end:
 
 - **"Image", never "picture".** Both were in use with no distinction being drawn, so one of them
-  was noise. `previewVideos` is the only place a *contrast* is meant, and it says so in words —
+  was noise. The video rows are the only place a *contrast* is meant, and they say so in words —
   a looping clip with no controls is an *animated image*, not a video.
 - **A numeric hint states the unit at the END of its first clause**, not the front: "time the
   preview window takes to fade in when it opens, and out when it closes, **in ms**". Anything
@@ -364,6 +364,9 @@ in `migrate()`, which runs before `RETIRED` deletes the old keys:
 - **`skipVideos` → `previewVideos`, off by default.** Same behaviour, stated as the thing you
   would turn ON. A double negative in a checkbox label is a reliable way to make a panel
   unreadable, and this one was "Never preview videos", which two negatives deep.
+  (`previewVideos` itself was retired in v0.59.0 — see below. v0.44.0 had flipped its default to
+  on as part of a bulk defaults pass, which is why the gates read as switched off on a fresh
+  install for fifteen versions while these notes still said "off by default".)
 - **`skipPageBackgrounds` → `skipFurniture`.** Only that key converts; the other two are dropped,
   because it is the one that was ever plausibly turned off on purpose.
 
@@ -425,6 +428,33 @@ permanent control, because two editable views of one list is how they get out of
 - **Entries are sorted after every mutation, not at save time.** A list that reorders itself when
   you press Save is a list you cannot proof-read before pressing it. Case-insensitive, with an
   exact comparison as the tie-break so the order is stable.
+
+## One video checkbox became two controls (v0.59.0) · `E31`
+
+`previewVideos` switched all four video gates together, so "I don't want a video site's listing
+thumbnails previewing" and "I don't want a preview on top of the player I am watching" could not
+be answered differently. They are different questions — the full argument is in
+[`GATES.md`](GATES.md) `E31`, including which half of the underlying test is robust and which
+will break. What the panel shows:
+
+- **Moving pictures** — a `pick()`, not a checkbox, because the answers are a ladder rather than
+  a yes/no: *Animated clips only* (default) ⊂ *Clips and video thumbnails* ⊂ *Nothing that
+  moves*. Stored as `videoMode`: `'clips'` | `'all'` | `'none'`.
+- **Preview on the player itself** — `previewOverPlayer`, default **off**. Orthogonal to the
+  ladder, because it is about where you are standing, not what you are pointing at. Off, a page
+  with a real player on it gives no preview on that player; the player already shows the thing
+  full size, and on the sites where this bites you had the preview on the listing page a click
+  ago.
+
+**`videoMode: 'none'` and the ▶ are the same switch**, one stored and one per-tab:
+`videoPreviewsOn()` is `playVideos && cfg.videoMode !== 'none'`. Keeping them as one function is
+what stops a candidate being probed under one and displayed under the other.
+
+**Migration is deliberately not faithful on the second control.** `migrate()` converts
+`previewVideos` → `videoMode` (`true` → `'all'`, `false` → `'clips'`), which is the question that
+checkbox was really answering. `previewOverPlayer` takes its new default `false` for everyone,
+including users whose stored `true` used to mean "preview over the player too" — that behaviour
+was the reported complaint, not a preference anyone recorded.
 
 ## The ▶ in the status bar — clips, per tab (v0.39.0)  · `E27`
 

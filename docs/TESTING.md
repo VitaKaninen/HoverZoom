@@ -12,11 +12,13 @@ this script is a DOM read, so only the DOM in front of the user can say which on
   cannot drift from the header. The settings panel shows the same string in its heading. For a
   "works in Chrome, not in Firefox" report, *is the installed copy even current* is the first
   question and this is how it gets answered without opening the manager.
-- `hoverReport()` prints one line per hover: what was under the pointer, `videoGate` (which of the
-  four video rules fired, or none), whether an `<a href>` ancestor was findable **at all**, how
-  many laid-out `<video>` elements the page has, and whether the element sits in a shadow root.
-- `videoReason()` returns a *string* rather than a boolean for exactly this — `inVideoContext()`
-  is now a `!!` wrapper over it. Keep it that way; a boolean cannot be reported.
+- `hoverReport()` prints one line per hover: what was under the pointer, `playerGate` and
+  `videoLinkGate` (the two halves of the old `videoGate`, reported separately since v0.59.0
+  because they answer to different settings), whether an `<a href>` ancestor was findable **at
+  all**, how many laid-out `<video>` elements the page has, and whether the element sits in a
+  shadow root.
+- `playerSurfaceReason()` and `videoLinkReason()` return a *string* rather than a boolean for
+  exactly this. Keep it that way; a boolean cannot be reported.
 
 Two lessons from reading the first real report back (2026-09-03, v0.14.0 fixed both):
 

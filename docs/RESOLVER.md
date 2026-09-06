@@ -314,11 +314,12 @@ the frame grew a second face.
   Test case 23 is built to fail if this regresses.
 - **The video candidate is offered FIRST** (the imgur mp4 rule is `UPGRADES[0]`) — with identical
   dimensions, first probed is what shows.
-- **`playVideos` is checked in `collectCandidates`' `add()`**, so a video candidate is not merely
-  unusable but never *probed*; it would otherwise spend one of `MAX_PROBES`. It is a session flag, not
-  a stored setting — see [`SETTINGS.md`](SETTINGS.md) `E27`. Do not confuse it with `previewVideos`:
-  **`previewVideos` is about what on the page may be hovered, `playVideos` about what the frame may
-  display.**
+- **`videoPreviewsOn()` is checked in `collectCandidates`' `add()`**, so a video candidate is not
+  merely unusable but never *probed*; it would otherwise spend one of `MAX_PROBES`. It is
+  `playVideos && cfg.videoMode !== 'none'` — the bar's play button and the stored setting asking one
+  question, so they cannot disagree (`E27`, `E31`). Do not confuse it with the *gates*:
+  **`videoMode`/`previewOverPlayer` decide what on the page may be hovered, `videoPreviewsOn()` what
+  the frame may display.**
 - **Our own `<video>` cannot poison the video gates.** `videoSurfaces()` uses
   `document.getElementsByTagName('video')`, which does not cross a shadow boundary. It would read as
   `gifLike` anyway — a second, independent reason it is harmless.
@@ -338,7 +339,7 @@ revisited — a limitation recorded in the docs is not a limitation the user agr
 `eligible()` takes a `VIDEO` branch **before** the `NEVER` test:
 
 - **Only a `gifLike()` clip**, so a real player is still refused and a watch page is unaffected.
-- **`playVideos` gates it** — a clip the frame cannot display is not worth hovering.
+- **`videoPreviewsOn()` gates it** — a clip the frame cannot display is not worth hovering.
 - **Only the LINK gate applies** (`videoLinkReason()`, split out of `videoReason()` for this). The
   other three video tests cannot be used on a video: it is trivially "inside a `<video>`", its own
   ancestor walk finds it, and it sits inside its own rectangle — **all three self-match and would

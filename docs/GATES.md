@@ -41,9 +41,35 @@ Test cases 21 and 22 are the same card twice, differing **only** in the `control
 must preview, 22 must not. The fixture is a real 2-second silent mp4 because the gate reads
 `duration`, and an empty `<video>` reports `NaN`.
 
-## Videos are never previewed — four gates, any one sufficient
+## Three questions, not one · `E31`
 
-`previewVideos` is OFF by default and switches gate 3 only.
+Until v0.59.0 a single `previewVideos` checkbox switched every gate below at once, which made a
+setting about *video sites* also decide what happens on a *player page*. Those are different
+questions with different right answers, and there is a third one underneath both:
+
+| Question | About | What answers it |
+|---|---|---|
+| Is the thing under the pointer an animated picture, or a player? | the media itself | `gifLike()` — no setting |
+| Am I standing on a player that is already on this page? | where I am | `previewOverPlayer`, default **off** |
+| Does this thumbnail lead away to a video page? | where it goes | `videoMode`, default **`clips`** |
+
+`videoMode` is a ladder: `none` (nothing that moves ever reaches the frame) ⊂ `clips`
+(animated clips, the default) ⊂ `all` (also a still that links to a video page). `none` is the
+stored form of the bar's play button — `videoPreviewsOn()` is `playVideos && videoMode !== 'none'`
+and is the single test every video *candidate* passes through, so the two cannot disagree.
+
+**The decomposition is what makes the imgur / gifwow / angryduck family work without naming
+them.** All three are a wall of short muted clips whose item page is another short muted clip;
+the first question answers yes for every one of them and no setting is consulted. A dedicated
+video site differs in exactly one place — its item page holds a real player — and that is the
+third question, asked of the link. See "Where the line actually is" below for which half of that
+is robust and which will break.
+
+### The four gates, any one sufficient
+
+Gates 0 and 2 belong to the second question (`previewOverPlayer`), gate 3 to the third
+(`videoMode`). Gate 1 is unconditional. `playerSurfaceReason()` is 0 and 2 together;
+`videoLinkReason()` is 3; `videoReason()` is both, and exists only for the debug line.
 
 ### 0 · Geometry
 
@@ -104,8 +130,11 @@ exactly as it was.
 
 The nearest ancestor `a[href]` matching `VIDEO_LINK_RE` (`/watch?`, `/shorts/`, `/embed/`,
 `/video(s)/`, `youtu.be/`, `.mp4|webm|m3u8|mov|mkv|avi`). This is the heuristic, and the one that can
-be wrong. **The asymmetry favours having it**: a false positive costs one preview that never opens,
-a false negative is the reported bug. Positive *and* negative cases live in `test-resolver.js`.
+be wrong. **The asymmetry favoured having it** when `previewVideos` defaulted on: a false positive
+cost one preview that never opens, a false negative was the reported bug. That reversed in v0.59.0
+— `videoMode` defaults to `clips`, so this gate is now live by default and an over-match is the
+silent failure. See "Where the line actually is" below. Positive *and* negative cases live in
+`test-resolver.js`.
 
 **`closestAcross()` — `closest()` does not cross a shadow boundary**, and neither does
 `parentElement`. A site building cards from custom elements can put the `<img>` inside a shadow root
@@ -115,7 +144,42 @@ and the wrapping `<a>` outside, and this gate then sees no link at all. The comp
 ancestor-link candidate ever comes back missing on a shadow-DOM site.
 
 Cases 17, 18 and 19 (video link, video in the card, and an ordinary `/gallery/` control) exist so a
-regression shows as a test-page failure rather than in the wild.
+regression shows as a test-page failure rather than in the wild. 17 now moves with `videoMode`
+while 18 and 22 move with `previewOverPlayer` — the whole point of the split, and the thing to
+re-check if either ever stops being independent of the other.
+
+## Where the line actually is — and where it will break
+
+The two halves are not of equal quality and it is worth knowing which one to distrust.
+
+**`gifLike()` is a property test and it generalises.** It reads four things the site had to set
+for functional reasons: a site that wants a gif must mute it, loop or autoplay it, and leave the
+controls off; a site that wants a player must give it controls or draw its own. It never looks at
+layout, so a new site's grid markup cannot break it. Its one real gap is a player that draws its
+own chrome — `controls` false, `muted` true under an autoplay policy — and there **`duration`
+carries the whole gate alone**. That is the fragile hinge, and it is one number: `GIF_MAX_SECS`,
+60. A 90-second looping background clip is refused; a three-minute muted autoplaying banner video
+is refused. Both are the safe direction. Asserted against plain objects in `test-resolver.js`,
+one case per property.
+
+**`VIDEO_LINK_RE` is a URL guess and it does not generalise.** `/watch?`, `/shorts/`, `/embed/`,
+`/video(s)/`, `youtu.be/` are five shapes out of an open set; `/v/12345` is deliberately a
+negative because it over-matches. A video site whose item URL is `/p/12345` or `/media/abc` is
+invisible to it and its listing thumbnails will preview.
+
+**Do not answer that by growing the regex.** Every pattern added is a new way to refuse an
+ordinary gallery, and the cost is asymmetric in the *opposite* direction from the note in gate 3:
+now that `videoMode` defaults to `clips`, an over-match silently kills previews on a picture site,
+which is the complaint this whole script exists to fix. The escape hatch when the guess is wrong
+is a setting away in either direction — `all` if it is refusing too much, the site list if one
+site is hopeless — and that is the intended answer.
+
+**What could replace the guess, and why it is not in yet.** `probeVideo()` already returns
+`duration`, so a resolved candidate could face the same 60-second rule the DOM clip faces, making
+`GIF_MAX_SECS` the single line for both. It is not wired up because the link gate has to fire
+*before* the fetch, and following every thumbnail on a video site's listing page to find out is
+the one cost the resolver's linked-page lookup was careful not to pay. If the regex ever becomes
+the top source of complaints, this is the direction — not more patterns.
 
 ## Looking through a cover · `E18`
 
