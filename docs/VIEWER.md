@@ -159,13 +159,9 @@ screen stays the same size: `(830 − 2·insetY)/854 = 0.97`, `(1080 − 2·inse
 picture is the same physical size in both rows — only the label moves. **A ruler held to the screen
 therefore matches the reading only at 100 % browser zoom.**
 
-The correction, if the reading is ever wanted in screen pixels, is `view.scale * devicePixelRatio`
-at the display sites only (`fmtZoom`, `parseZoom`) — it reproduced all four measured readings
-exactly. It is **not** applied, and the reason is that `devicePixelRatio` folds display scaling in
-with browser zoom, and the two want opposite treatment: browser zoom changes apparent size at a
-fixed `scale`, HiDPI does not. On a 2× laptop every preview would open reading ~200 % and typing
-100 would render it half-size. Ask before changing this — it redefines every zoom number in the UI,
-`zoomFactor` included.
+**The fix is designed and agreed but NOT built** — a `displayScale` setting divided back out of
+`devicePixelRatio`. [`ZOOM-UNITS.md`](ZOOM-UNITS.md) holds the formula, the setting, every code
+site it touches and its traps; do not re-derive it here.
 
 **The problem the anchor solves:** the frame follows the picture, so a control living on the frame
 runs away from the pointer driving it. `zoomAnchored()` nails the frame's **bottom-right** corner —
@@ -479,7 +475,13 @@ left alone unless Shift fills it from the aspect lock. On the axis not being dra
 about its **centre** — anchoring to top or left makes the window crawl diagonally while you pull one
 edge straight.
 
-### The frame is a margin drawn ON the picture · `E25`
+### The frame is a margin drawn ON the picture · `E25` — RETIRED v0.71.0
+
+> **The grab border is gone.** `frameMargin`, `borderMode`, `chrome()`, `chromeThickness()`,
+> `MOVE_BAND`, the four `.edge` strips and `hitRegion()`'s `'move'` kind all went with it; the
+> status bar is the only move handle now. Kept below because the geometry it describes — what a
+> painted-on ring costs, and why the hit band and the paint had to be the same number — is the
+> argument against bringing one back. Everything below is history.
 
 `frameMargin` (24 px, a setting) is a ring painted **over** the edges of the picture, exactly as the
 status bar always has been — the bar *is* the bottom of that ring. Outer 12 px resize, rest of the
@@ -679,9 +681,10 @@ and `e.target` is the page underneath.
 
 #### The two settings that turn it off, and what 0 actually means (v0.43.0, corrected in v0.44.0)
 
-`barFade` (a checkbox, on by default) gates `barIdleMs` and `barFadeMs` in the panel and the
-behaviour: off means the bar and grab border stay up for as long as the window does, and
-`showBar()` returns without arming a timer.
+`barFade` (a checkbox, on by default) gated `barIdleMs` and `barFadeMs` in the panel and the
+behaviour: off meant the bar and grab border stayed up for as long as the window did, and
+`showBar()` returned without arming a timer. **Retired in v0.70.0 — see the two modes below;
+`anyFades()` is what that sentence now reads.**
 
 **`barIdleMs` of 0 means no delay and no fade — NOT "never shown".** The complaint was precise
 and easy to over-read: *"when moving the mouse over the preview, the bar would briefly appear and
@@ -890,6 +893,87 @@ CSS, and a live drag kept whatever inline value the last hover had written. The 
 `.box.placed:not(.pan)` / `.box.full:not(.pan)` rules survive as the fallback for the moment
 between `place()` and the first mousemove; they are no longer what decides anything.
 
+## Grab border and status bar are two independent three-way modes · `E41`
+
+`borderMode` and `barMode` each answer `'always' | 'hover' | 'off'` for themselves, replacing the
+`barFade` checkbox (may the pair fade) and `showStatusBar` (is the bar drawn). Added v0.70.0
+because the old pair could not say "border always, bar only on hover", and "border off" was only
+reachable by setting `frameMargin` to 0 — a size doing a visibility job.
+
+- **`chrome()` returns 0 when `borderMode` is `'off'`.** That one line is the whole switch: the
+  drawn strips, the insets, `chromeThickness()`, and `hitRegion()`'s move band all read it, so
+  turning the visual off correctly takes the move handle with it.
+- **Two idle classes, not one.** `baridle` hides `.cap` and `.vctl`; `edgeidle` hides `.edge`.
+  `applyIdle(idle)` sets each only when that element's own mode is `'hover'`, so `'always'` never
+  takes its class and one timer still drives both.
+- **`borderVisible()` / `barVisible()` replaced `chromeVisible()`**, which could not answer for
+  two elements at once. `hitRegion()` asks the border (the move band is the border's), `pressMode()`
+  asks the bar.
+- **The panel relabels itself.** `syncFurniture()` writes the subject of the two fade rows from
+  which modes are `'hover'` — "Grab border and status bar fade after", or just one of them — and
+  hides both rows when neither fades. `relabel()` rewrites `label.childNodes[0]`, so a row that
+  will ever be relabelled must be **built with a hint**, or there is no `.hint` span to write into.
+
+### Three questions about the bar, and they are NOT the same question · `E41`
+
+This bit twice in one session, in both directions, so the three are now separate functions:
+
+| | What it covers | Who asks |
+|---|---|---|
+| `pointerOverCap()` | the status bar rectangle, nothing else | `pressMode()` — the move handle |
+| `pointerOverBar()` | that, plus the video strip, volume column and speed menu | fade-keeping |
+| `pointerNearBar()` | a band up from the frame's bottom edge, `barHoverBand()` tall | fade-keeping |
+
+**`pressMode()` may only ever use the narrowest one.** `onBoxDown` decides a move from
+`capEl.contains(e.target)` — the literal bar — so anything wider makes the cursor promise a move
+where the press pans. Folding the hover band in did it once; the pre-existing `overRect(vctlEl)`
+in `pointerOverBar()` had been doing it since the strip shipped, over the strip's own background.
+
+**`barHoverBand()` is `BAR_MIN_H`, or `BAR_MIN_H + VCTL_GAP + VCTL_H` (60 px) over a clip.** The
+band has to clear the gap between the bar and the video strip, or the strip fades out from under a
+hand crossing it on the way to the scrubber. Measured: parked 10, 40 and 55 px up from the bottom
+all hold it open; 70 px lets it fade.
+
+## The grab border is gone; the bar is the only handle · `E41`
+
+v0.71.0 deleted the border outright rather than leaving it off by default. What that removed, so a
+future session does not go looking: `frameMargin` and `borderMode` (both retired keys), `chrome()`,
+`chromeThickness()`, `borderShown`/`borderFades`/`borderVisible`, `MOVE_BAND`, the `edgeEls` array
+and its `.edge` CSS, the `edgeidle` class, and `hitRegion()`'s `'move'` kind — that function now
+returns a resize region or null, nothing else.
+
+**The status bar is the only move handle.** `pressMode()` and `onBoxDown()` both reduce to: on the
+bar → move; otherwise pan if the picture spills, move if it does not. The two were already required
+to agree (`E40`); with one handle left there is much less to disagree about.
+
+### `barMode` docks the bar when it is 'always'
+
+`'always'` puts the bar **below** the picture instead of over it; `'hover'` and `'off'` leave the
+geometry alone. `barDock()` returns `BAR_MIN_H` or 0 and is added to `outerH()`, to the box's own
+height, to `viewportBox().h` and to `fitFull()`'s `fixedH`.
+
+- **Only 'always' docks.** A bar that fades cannot own layout — the picture would resize itself
+  every time the bar came and went, which is the one thing worse than a bar drawn over it.
+- **`.box.bardock .cap` is opaque.** The media is still absolutely positioned and clipped by the
+  box's `overflow:hidden`, so a spilling picture runs on *under* the docked bar; the normal
+  `rgba(30,30,46,.86)` would show it through. Measured with an 8-step zoom: image 4357 px tall in a
+  903 px box, clipped, nothing visible through the bar.
+- **The video strip needs no change.** It sits at `bottom: BAR_MIN_H + VCTL_GAP`, and the dock is
+  exactly `BAR_MIN_H`, so it lands just above the docked bar on its own.
+
+### Outside fullscreen the whole preview holds the bar open
+
+`barWanted()` splits on `fullActive()`: outside fullscreen it is `pointInPreview()`, so the bar
+never fades out from under a picture you are still looking at — **leaving the window is what starts
+the fade**. In fullscreen the still-pointer rule stays, because there is nowhere to leave to: the
+window is the screen.
+
+**`onMove` calls `showBar()` once on the way OUT**, guarded by a `barOver` flag. Calling it on every
+move outside the window would push the fade back on any movement anywhere on screen — which is the
+failure the old "only call it when over" rule was avoiding, and the reason that rule cannot simply
+be dropped. Measured: parked mid-picture for 1800 ms at a 300 ms idle, still shown; one move off the
+window, faded; back on, shown.
+
 ## The floating video strip · `E36`
 
 Play/pause, elapsed time, a scrubber, playback speed and sound, over the picture rather than in the
@@ -919,7 +1003,11 @@ escapes the frame, taking the bare video and losing zoom, pan and the bar.
 **`clipSecs()`, not `secsOf()`.** `secsOf()` formats a string for the gate's debug line
 (`"2s"` / `"length unknown"`); using it as a number silently makes every scrubber position `NaN`.
 
-## The bar's controls clear the grab bands · `E37`
+## The bar's controls clear the grab bands · `E37` — partly retired v0.71.0
+
+> With the grab border gone, `grabBand()` is just `CORNER_REACH` (24 px) and the clearance now
+> keeps controls out of the **corner resize zones**, which still exist. The reasoning below about
+> reading the setting rather than the clamped thickness is moot; the padding trap is not.
 
 The frame's own edges are draggable and the bar sits inside them, so a control under the bottom
 corners (resize) or the side strips (move) is unreachable: `onBoxDown` gives the frame the press

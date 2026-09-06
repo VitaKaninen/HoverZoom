@@ -1,8 +1,11 @@
 # What the zoom percentage counts · `E34`
 
-**Status: designed, agreed, NOT implemented.** Nothing in `Hover-Zoom.user.js` does any of this
-yet. Decided 2026-09-06; the user asked for the design to be written down rather than built, so
-build it when asked and do not re-derive it.
+**Status: IMPLEMENTED in v0.72.0.** Designed 2026-09-06, built the same day, to the letter of
+what is below — every site in the table was changed and the setting exists. The design text is kept
+as written because it is the argument, not a plan; see *Verification* at the bottom for what was
+actually measured. The one deviation: the setting went into the panel's **first** section rather
+than *The preview window*, because leaving `displayScale` at 1 on a scaled display makes the
+readout worse than before the feature existed, so it must not sit behind the Advanced fold.
 
 ## The defect
 
@@ -108,3 +111,34 @@ types and then reads back, so leaving them in `scale` makes the panel disagree w
   is safe, but do not claim the fix is universal without checking.
 - `fmtZoom` is also used for the `0`/fit readout and the wheel; there is no second formatter to
   keep in step, which is why the conversion belongs in it rather than at its call sites.
+
+---
+
+## Verification (v0.72.0)
+
+`devicePixelRatio` was stubbed and the CSS viewport divided by the same factor, which is what a
+browser-zoom change actually does. 1600×1200 original, `displayScale` 1:
+
+| | CSS viewport | DPR | image CSS px | image device px | reads |
+|---|---|---|---|---|---|
+| 100 % browser zoom | 1100 | 1 | 1007 | 1007 | **63 %** |
+| 130 % browser zoom | 846 | 1.3 | 760 | 988 | **62 %** |
+
+The picture is the same physical size in both rows and the label now agrees. Before the fix the
+second row read 48 % (`760/1600`). The 63 → 62 and 1007 → 988 drift is integer rounding of the
+viewport (1100/1.3 = 846.15) and the frame, not the conversion.
+
+**`displayScale` divides correctly:** DPR 1.3 with `displayScale` 1.3 — a 130 % monitor at 100 %
+browser zoom — gives `zoomUnit()` 1 and reads 48 %, the raw CSS ratio, which is what the script
+showed before the feature existed. That is the intended no-op.
+
+**The ladder stays round in shown terms.** At `zoomUnit()` 1.3 the slider stops read
+25, 65, 115, 165, 275, 550, 1,100, 2,200, 3,200 % — clean readings over ugly `scale` values, which
+is the whole reason `zoomStops()` builds in shown terms and maps back. Top stop is `maxZoom` 32 as
+3,200 %, so that setting is in shown terms too, as designed.
+
+**Typing round-trips.** At `zoomUnit()` 1.3, typing 100 / 250 / 50 gives `scale` 0.7694 / 1.9231 /
+0.3844 against an expected 0.7692 / 1.9231 / 0.3846, and each reads back as the number typed.
+
+**Still unverified:** Safari. The trap about its page zoom possibly not moving `devicePixelRatio`
+stands — nothing here tested it.

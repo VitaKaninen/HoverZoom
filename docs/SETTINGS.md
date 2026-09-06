@@ -635,3 +635,94 @@ consequences worth knowing:
 
 The full argument for per-site rather than global, and why the default is muted everywhere, is in
 [`VIEWER.md`](VIEWER.md) `E38`.
+
+## `barFade` + `showStatusBar` → `borderMode` + `barMode` (v0.70.0)
+
+Two booleans became two three-way modes, `'always' | 'hover' | 'off'`, one per element. The
+mechanism is in [`VIEWER.md`](VIEWER.md) under `E41`; what belongs here is the conversion and the
+panel shape.
+
+**`migrate()` converts:** `barMode` is `'off'` when `showStatusBar` was false, else `'always'` when
+`barFade` was false, else `'hover'`. `borderMode` is `'off'` when `frameMargin` was 0, else the same
+`barFade` test. Both are skipped when the new key already exists, so a partial old profile cannot
+overwrite a new answer.
+
+**`barIdleMs` of 0 still means no delay and no fade, not "never shown"** — unchanged, and still the
+easiest thing to misread here. See `E10`.
+
+**Panel order in *Appearance*:** the two mode pickers, then *Grab border size* (hidden when the
+border is off), then the two fade rows (hidden unless at least one mode is `'hover'`, and titled
+after whichever ones are). *Show the status bar* moved up out of its old spot below the shadow
+settings — it was three rows away from the settings that control it.
+
+## Descriptions: the reader is not the author (v0.70.0)
+
+Every hint was rewritten against one rule — **more words made it more confusing, not less** — and
+the panel's prose went from 865 words to 401. What got cut, in order of how much it saved:
+
+- **The reason the option exists.** *Ignore images smaller than* opened with "This is the ONLY size
+  filter — nothing separately singles out icons, avatars or emoji". That answers *why isn't there
+  an avatar setting*, which nobody is asking while reading it.
+- **Mechanism where a symptom would do.** The referrer list spent four lines explaining referrers.
+  You arrive at that setting because previews are blank, so the hint is now the symptom and the
+  action. 74 words to 18.
+- **Restatement of the control.** *Show a preview* described hovering versus the modifier key; its
+  two options already say exactly that. Hint deleted rather than shortened.
+- **Facts about other controls.** *Show the status bar* explained the AA button. AA, ⊘ and ▶ each
+  carry their own tooltip.
+
+**Numeric hints end with `(default: N)`.** There is no other way to find the default short of
+Reset to defaults, which throws away every other answer at the same time.
+
+What was deliberately kept: the below-1 case on `minRatio`, "larger originals still shrink to fit"
+on `zoomFactor`, and the 0 case on `barIdleMs`. Each is behaviour a reader cannot infer from the
+label, and each was already the answer to a real question.
+
+## The grab border went entirely (v0.71.0)
+
+`frameMargin` and `borderMode` are retired keys. There is no drawn frame any more and no setting for
+one; the status bar is the only move handle. Mechanism and what was deleted: [`VIEWER.md`](VIEWER.md)
+under `E41`.
+
+**`barMode` lost a meaning and gained one.** `'always'` now *docks* the bar below the picture rather
+than only pinning it visible, because a bar that never goes away has no business covering the bottom
+of the image. `'hover'` still draws it over the picture — it is temporary, so it may.
+
+**Fade defaults are 1000 / 500** (were 1200 / 600), and the *fades after* hint now says what the
+delay is measured from, which changed: outside fullscreen it counts from the pointer **leaving the
+preview**, not from the pointer going still.
+
+## `displayScale`, and why it is not an Advanced setting (v0.72.0)
+
+The zoom-percentage fix from [`ZOOM-UNITS.md`](ZOOM-UNITS.md) needs one number the browser cannot
+tell us. It sits in **The preview** — the first section, under *Ignore backgrounds and banners* —
+not in Advanced, and the reason is asymmetric harm:
+
+**Left at 1 on a scaled display, the readout is worse than it was before the feature existed.**
+`zoomUnit()` becomes the raw `devicePixelRatio`, so a 150 % Windows laptop reads 150 % where a 1:1
+picture used to read 100 %. Set correctly it is a no-op at 100 % browser zoom and a fix at every
+other zoom. A setting that silently degrades a large group of users until they find it does not
+belong behind a fold, and scaled displays are most laptops sold in the last decade.
+
+**The hint carries the live `devicePixelRatio`**, because that is the number needed to answer the
+question: at 100 % browser zoom it *is* the display scaling. Static prose about Windows and Retina
+cannot do that job.
+
+## `barIdleMs` and `barFadeMs` are completely independent (v0.72.0)
+
+Reported: the delay setting was changing the fade as well. It was — `barInstant()` was
+`anyFades() && !barIdleMs()` and it drove a `nobar` class whose only job was `transition: none`, so
+**a zero delay silently disabled the fade duration**. The two questions had been fused since
+v0.44.0, when a zero delay genuinely was meant to mean "no fade either".
+
+- **`nobar` is gone entirely.** The out-transition is already `var(--barfade)`, which is `0ms` when
+  the setting is 0 — a class to force instantness was never needed for that.
+- **`barNoDelay()` replaces `barInstant()`** and now answers only the timer question: at 0 the
+  answer is given synchronously rather than a frame later, which is still the fix for `E10`'s
+  flicker.
+
+Measured both ways: delay 0 / fade 250 hides the moment the pointer leaves and still animates over
+0.25 s; delay 1000 / fade 0 is still showing 400 ms after leaving, gone by 1300 ms, with a computed
+transition of 0 s.
+
+Defaults are **250 / 250**.

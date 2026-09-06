@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.69.0
+// @version     0.72.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -53,6 +53,7 @@
         wheelZoomStep: 15,          // % per wheel notch
         panStep: 80,                // px per arrow-key press (Shift = 3x)
         maxZoom: 32,                // hard ceiling, multiples of natural size
+        displayScale: 1,            // the OS display scaling, divided back out of the readout
 
         // how to display
         maxSizeMultiple: 1.2,       // how far the frame may GROW, as a multiple of the window.
@@ -62,15 +63,13 @@
         borderWidth: 1,
         borderColor: '#45475a',
         cornerRadius: 6,
-        frameMargin: 24,            // px of frame drawn ON TOP of the image, on all four
-        barFade: true,              // may the bar and grab border fade at all
-        barIdleMs: 1200,            // still pointer before they fade; 0 = instant, and no fade
-        barFadeMs: 600,             // how long that fade takes
+        barMode: 'hover',           // 'always' | 'hover' | 'off' — the status bar
+        barIdleMs: 250,             // delay before it starts fading; 0 = starts at once
+        barFadeMs: 250,             // how long the fade itself takes; 0 = no animation
         shadow: true,
         shadowSize: 24,             // px of blur
         shadowStrength: 50,         // % opacity
         smoothing: 'auto',          // 'auto' | 'pixelated' | 'crisp-edges' — image-rendering
-        showStatusBar: true,        // filename / type / size / dimensions strip, also the move handle; auto-fades
         spinnerTheme: 'auto',       // 'auto' (follows the browser) | 'dark' | 'light'
         referrerSites: [],          // sites to load previews from WITHOUT a referrer
         siteAudio: {},              // host -> {muted, volume}; absent means muted, which is the
@@ -85,7 +84,8 @@
         'sameShapeOnly', 'keepSearching', 'followLinks', 'hoverThroughOverlays',
         'skipWhileMouseDown', 'playVideos', 'skipVideos', 'skipPageBackgrounds',
         'skipBanners', 'skipDecorative', 'enabled', 'maxDisplayed', 'cursorGap', 'noReferrer',
-        'showEvenIfNotLarger', 'previewVideos', 'previewOverPlayer'];
+        'showEvenIfNotLarger', 'previewVideos', 'previewOverPlayer', 'barFade', 'showStatusBar',
+        'frameMargin', 'borderMode'];
 
     // The retirements that DO convert.
     function migrate(o) {
@@ -101,6 +101,11 @@
         }
         // "Preview images that are already full size" is a minRatio below 1 now.
         if (o.showEvenIfNotLarger && !(o.minRatio < 1)) o.minRatio = 0.9;
+        // Two checkboxes became two three-way modes. `barFade` answered "may they fade" for the
+        // pair; a zero frame margin was the only way to turn the border visual off.
+        if (o.barMode === undefined && (o.barFade !== undefined || o.showStatusBar !== undefined)) {
+            o.barMode = o.showStatusBar === false ? 'off' : (o.barFade === false ? 'always' : 'hover');
+        }
         return o;
     }
 
@@ -961,7 +966,6 @@
     let aaEl = null;            // smoothing, toggled between its two answers
     let blockPopEl = null;
 
-    let edgeEls = null;         // [top, left, right, bottom] — the drawn frame margin
     let gripEl = null;          // invisible collar that carries the outer half of the resize strip
     let spinEl = null, spinSvg = null;
     let fsEl = null;            // the bar's fullscreen button
@@ -1105,7 +1109,6 @@
             // the move cursor would still win.
             '.box.full:not(.pan){cursor:default}',
             'img,video{display:block;position:absolute;background:#1e1e2e;-webkit-user-drag:none;user-select:none}',
-            '.edge{position:absolute;pointer-events:none;background:rgba(30,30,46,.30)}',
             'img[hidden],video[hidden]{display:none}',
             '.cap{position:absolute;left:0;right:0;bottom:0;height:' + BAR_MIN_H + 'px;',
             'display:flex;align-items:center;gap:' + BAR_GAP + 'px;box-sizing:border-box;',
@@ -1233,13 +1236,14 @@
             '.pop .acts button{font:11px system-ui,sans-serif;padding:4px 10px;border-radius:5px;',
             'border:1px solid #45475a;background:#313244;color:#cdd6f4;cursor:pointer}',
             '.pop .acts button.go{background:#f38ba8;border-color:#f38ba8;color:#1e1e2e;font-weight:700}',
-            '.cap,.edge,.vctl{transition:opacity ' + BAR_SHOW_MS + 'ms ease}',
-            '.box.idle .cap,.box.idle .vctl{opacity:0;pointer-events:none;',
+            '.cap,.vctl{transition:opacity ' + BAR_SHOW_MS + 'ms ease}',
+            '.box.baridle .cap,.box.baridle .vctl{opacity:0;pointer-events:none;',
             'transition:opacity var(--barfade) ease}',
-            '.box.idle .edge{opacity:0;transition:opacity var(--barfade) ease}',
-            // `idle` still decides whether they show; this only takes the animation off it.
+            // The idle classes still decide whether they show; this only takes the animation off.
             // Equal specificity to the two rules above, so source order is what beats them.
-            '.box.nobar .cap,.box.nobar .edge,.box.nobar .vctl{transition:none}',
+            // Docked: the bar sits BELOW the picture rather than on it, so it must be opaque —
+            // a spilling image runs on under it and would otherwise show through.
+            '.box.bardock .cap{background:#1e1e2e}',
             '.spin{position:fixed;width:' + SPIN_SIZE + 'px;height:' + SPIN_SIZE + 'px;',
             'display:none;pointer-events:none;',
             'filter:drop-shadow(0 2px 6px rgba(0,0,0,.5))}',
@@ -1350,15 +1354,8 @@
         acts.appendChild(yesBtn);
         blockPopEl.appendChild(acts);
 
-        edgeEls = ['t', 'l', 'r', 'b'].map(function (k) {
-            const d = document.createElement('div');
-            d.className = 'edge ' + k;
-            return d;
-        });
-
         box.appendChild(imgEl);
         box.appendChild(vidEl);
-        edgeEls.forEach(function (d) { box.appendChild(d); });
         box.appendChild(vctlEl);
         box.appendChild(capEl);
         box.appendChild(blockPopEl);
@@ -1402,18 +1399,25 @@
     const MIN_FRAME = 48;
     // Only a PLACED window carries controls, so only a placed one owes them room.
     function minFrameW() {
-        return placed && cfg.showStatusBar ? barMinW() : MIN_FRAME;
+        return placed && barShown() ? barMinW() : MIN_FRAME;
     }
 
-    function chrome() {
-        return Math.max(0, Math.min(80, cfg.frameMargin | 0));
+    // The status bar answers 'always' | 'hover' | 'off' for itself.
+    function barShown() { return cfg.barMode !== 'off'; }
+    function barFades() { return cfg.barMode === 'hover'; }
+    function anyFades() { return barFades(); }
+
+    // Height the bar claims BELOW the picture instead of over it. Only 'always' docks: a bar that
+    // fades cannot own layout, or the picture would resize itself every time the bar came and went.
+    function barDock() {
+        return barShown() && cfg.barMode === 'always' ? BAR_MIN_H : 0;
     }
 
     // What sits between view.left/top and the picture's own top-left, and the window's outer size.
     function insetX() { return cfg.borderWidth; }
     function insetY() { return cfg.borderWidth; }
     function outerW() { return view.frameW + insetX() * 2; }
-    function outerH() { return view.frameH + insetY() * 2; }
+    function outerH() { return view.frameH + insetY() * 2 + barDock(); }
 
     // The element whose clientWidth/clientHeight IS the viewport — <body> on a quirks-mode page.
     function vpEl() {
@@ -1435,7 +1439,7 @@
             vw: vw,
             vh: vh,
             w: Math.max(MIN_FRAME, vw - EDGE_GAP * 2 - insetX() * 2),
-            h: Math.max(MIN_FRAME, vh - EDGE_GAP - bottomGap() - insetY() * 2),
+            h: Math.max(MIN_FRAME, vh - EDGE_GAP - bottomGap() - insetY() * 2 - barDock()),
         };
     }
 
@@ -1514,7 +1518,7 @@
         if (!w || !h) return 1;
         if (view && view.fixedW != null) return Math.min(view.fixedW / w, view.fixedH / h);
         const m = viewportBox();
-        return Math.min(cfg.zoomFactor, m.w / w, m.h / h);
+        return Math.min(fromShown(cfg.zoomFactor), m.w / w, m.h / h);
     }
 
     const MIN_MEDIA = 32;
@@ -1581,7 +1585,6 @@
 
     const RESIZE_OUT = 6;     // px outside the window edge that still resizes
     const RESIZE_IN = 6;      // px inside it — together, a 12px strip centred on the edge
-    const MOVE_BAND = 13;     // px further in that moves the window
     const CORNER_REACH = 24;  // px from a corner where a drag resizes both axes at once
 
     function hitRegion(x, y) {
@@ -1603,15 +1606,11 @@
         if (dr <= rb) return { kind: 'resize', ex: 'r', ey: null };
         if (dt <= rb) return { kind: 'resize', ex: null, ey: 't' };
         if (db <= rb) return { kind: 'resize', ex: null, ey: 'b' };
-        if (!chromeVisible() || !chromeThickness()) return null;
-        const m = Math.max(rb + MOVE_BAND, chromeThickness() + cfg.borderWidth);
-        if (dl < m || dr < m || dt < m || db < m) return { kind: 'move' };
         return null;    // the middle — the pan-or-move rule decides
     }
 
     function regionCursor(reg) {
         if (!reg) return '';        // the middle: leave it to the .pan / .placed CSS rules
-        if (reg.kind === 'move') return 'move';
         if (!reg.ey) return 'ew-resize';
         if (!reg.ex) return 'ns-resize';
         return (reg.ex === 'l') === (reg.ey === 't') ? 'nwse-resize' : 'nesw-resize';
@@ -1623,8 +1622,8 @@
         if (!placed || !view) return '';
         if (reg && reg.kind === 'resize') return 'resize';
         if (fullActive()) return pannable() ? 'pan' : '';
-        const onFrame = (reg && reg.kind === 'move') || (chromeVisible() && pointerOverBar());
-        return onFrame || !pannable() ? 'move' : 'pan';
+        // The status bar is the only move handle left: the grab border went in v0.71.0.
+        return (barVisible() && pointerOverCap()) || !pannable() ? 'move' : 'pan';
     }
 
     // The one writer of the box cursor. Panning gets the hand in every state that pans.
@@ -1693,7 +1692,7 @@
     // Everything but the zoom changes only with the URL or the measured size, and layout() calls
     // this on every frame of a drag — fileInfo() and transferBytes() are not frame work.
     function caption() {
-        if (!cfg.showStatusBar) {
+        if (!barShown()) {
             capEl.style.display = 'none';
             return;
         }
@@ -1720,6 +1719,18 @@
 
     const ZOOM_LO_CAP = 0.25;   // the low end asked for, when the picture's own fit is above it
 
+    // ---- what the percentage counts. `view.scale` is CSS px per media px, and a CSS pixel is not
+    // a fixed size — browser zoom at 130% paints it 1.3 screen px wide, so the number moved when
+    // the picture did not. devicePixelRatio is displayScale × browserZoom and the two are not
+    // separable, so the display half is asked for and divided out. See docs/ZOOM-UNITS.md.
+    function zoomUnit() {
+        const s = cfg.displayScale > 0 ? cfg.displayScale : 1;
+        return (window.devicePixelRatio || 1) / s;
+    }
+
+    function toShown(scale) { return scale * zoomUnit(); }
+    function fromShown(pct) { return pct / zoomUnit(); }
+
     // Percent bands and the step wanted inside each; every step divides its band's own ends, and
     // so does its neighbour in ZOOM_NICE, because fitStops() may coarsen a band by one notch.
     const ZOOM_BANDS = [[10, 1], [30, 2], [200, 5], [500, 25],
@@ -1739,12 +1750,13 @@
 
     // The slider spans fit-or-25% up to the ceiling, but never down into the letterbox.
     function zoomLo() {
-        if (!view) return ZOOM_LO_CAP;
-        return Math.max(0.01, Math.min(view.fitScale, Math.max(ZOOM_LO_CAP, noBarsScale())));
+        if (!view) return fromShown(ZOOM_LO_CAP);
+        return Math.max(0.01, Math.min(view.fitScale,
+            Math.max(fromShown(ZOOM_LO_CAP), noBarsScale())));
     }
 
     function zoomHi() {
-        return Math.max(zoomLo() * 1.01, Math.min(cfg.maxZoom, MAX_SCALE_ABS));
+        return Math.max(zoomLo() * 1.01, fromShown(Math.min(cfg.maxZoom, MAX_SCALE_ABS)));
     }
 
     // lo, every round value above it, then hi — with each band's stop count and the log distance
@@ -1794,11 +1806,15 @@
 
     let stopsKey = '', stopsArr = null;
 
+    // The ladder must be round in what is READ, not in `scale`, so it is built in shown terms
+    // and converted back. zoomUnit() is in the key: browser zoom moves it without moving lo or
+    // hi, and a stale ladder lands the thumb on non-round readings.
     function zoomStops() {
-        const lo = zoomLo(), hi = zoomHi(), key = lo + '/' + hi;
+        const lo = zoomLo(), hi = zoomHi(), key = lo + '/' + hi + '/' + zoomUnit();
         if (key !== stopsKey) {
             stopsKey = key;
-            stopsArr = fitStops(lo, hi, Math.max(8, BAR_SLIDER_W - ZOOM_THUMB));
+            stopsArr = fitStops(toShown(lo), toShown(hi),
+                Math.max(8, BAR_SLIDER_W - ZOOM_THUMB)).map(fromShown);
         }
         return stopsArr;
     }
@@ -1815,7 +1831,7 @@
     }
 
     function fmtZoom(scale) {
-        const pct = scale * 100;
+        const pct = toShown(scale) * 100;
         const s = pct < 10 ? pct.toFixed(1) : String(Math.round(pct));
         return s.replace(/\B(?=(\d{3})+(?!\d))/g, ',') + '%';
     }
@@ -1823,7 +1839,7 @@
     // Anything goes in: "200", "200%", "1,000%". Out of range is clamped, not rejected.
     function parseZoom(text) {
         const n = parseFloat(String(text).replace(/[,\s%]/g, ''));
-        return isFinite(n) && n > 0 ? n / 100 : NaN;
+        return isFinite(n) && n > 0 ? fromShown(n / 100) : NaN;
     }
 
     let zoomDrag = false;
@@ -1928,7 +1944,7 @@
 
     function openZoomField() {
         if (!view || !zinEl || !zinEl.hidden) return;
-        zinEl.value = String(Math.round(view.scale * 100));
+        zinEl.value = String(Math.round(toShown(view.scale) * 100));
         zvalEl.hidden = true;
         zinEl.hidden = false;
         showBar();
@@ -2306,12 +2322,8 @@
     // sides. It is derived from the same constants `hitRegion()` tests, so raising the frame
     // margin widens the clearance instead of burying the slider.
     //
-    // It reads `chrome()` (the SETTING) and not `chromeThickness()` (the setting clamped to the
-    // frame): `barMinW()` feeds `minFrameW()` feeds `reflow()`, which is what sets `frameW` —
-    // asking about the frame here is a loop. The setting is the larger of the two, so the
-    // clearance errs wide, which is the direction the user asked for.
     function grabBand() {
-        return Math.max(CORNER_REACH, RESIZE_IN + MOVE_BAND, chrome() + cfg.borderWidth);
+        return Math.max(CORNER_REACH, RESIZE_IN);
     }
 
     // The same distance measured from the FRAME's edge, which is what the bar is laid out in.
@@ -2345,6 +2357,7 @@
     }
 
     let barTimer = 0;
+    let barOver = false;        // was the pointer on the preview last move; see onMove
 
     // The bar must not fade while the pointer is ON it.
     function overRect(el) {
@@ -2355,73 +2368,101 @@
                pointer.y >= r.top && pointer.y <= r.bottom;
     }
 
+    // How far up from the frame's bottom edge counts as reaching for the bar. Over a clip it
+    // clears the video strip and the gap under it, or the strip fades out from under the hand
+    // crossing that gap on the way to the scrubber.
+    function barHoverBand() {
+        let h = barShown() ? BAR_MIN_H : 0;
+        if (mediaEl === vidEl && box && box.classList.contains('tall')) {
+            h = Math.max(h, BAR_MIN_H + VCTL_GAP + VCTL_H);
+        }
+        return h;
+    }
+
+    // The status bar and nothing else. This is the ONE thing onBoxDown treats as a move handle
+    // (`capEl.contains(e.target)`), so it is the only thing `pressMode()` may call one. Widen
+    // this and the cursor promises a move where the press pans. See E40.
+    function pointerOverCap() {
+        if (!capEl || !view || !box || !box.classList.contains('on')) return false;
+        return capEl.style.display !== 'none' && overRect(capEl);
+    }
+
     // The video strip counts too, or it fades out from under the hand reaching for the scrubber.
     function pointerOverBar() {
-        if (!capEl || !view || !box || !box.classList.contains('on')) return false;
-        if (capEl.style.display !== 'none' && overRect(capEl)) return true;
+        if (pointerOverCap()) return true;
+        if (!view || !box || !box.classList.contains('on')) return false;
         if (mediaEl !== vidEl) return false;
         return overRect(vctlEl) || overRect(vvolEl) ||
                (rateMenuOpen() && overRect(ratePopEl));
     }
 
-    // The margin ring counts too, for the same reason the bar does.
-    function pointerOverChrome() {
-        if (pointerOverBar()) return true;
-        if (!view || !box || !box.classList.contains('on') || !chrome()) return false;
+    // Reaching for the bar, which is what keeps it up. Wider than the bar, and never a handle.
+    function pointerNearBar() {
+        const band = barHoverBand();
+        if (!band || !view || !box || !box.classList.contains('on')) return false;
         const ow = outerW(), oh = outerH();
         const rx = pointer.x - view.left, ry = pointer.y - view.top;
-        if (rx < 0 || ry < 0 || rx > ow || ry > oh) return false;
-        const m = chromeThickness() + cfg.borderWidth;
-        return rx < m || ry < m || ow - rx < m || oh - ry < m;
+        return rx >= 0 && rx <= ow && ry <= oh && oh - ry <= band;
     }
 
-    // Whether the frame's own furniture — bar and margin — is showing.
-    function chromeVisible() {
-        return !!box && !box.classList.contains('idle');
+    function pointerOverChrome() {
+        return pointerOverBar() || pointerNearBar();
+    }
+
+    function barVisible() {
+        return !!box && barShown() && !box.classList.contains('baridle');
     }
 
     function barIdleMs() {
         return Math.max(0, Math.min(60000, cfg.barIdleMs | 0));
     }
 
-    // Zero idle means no delay and no fade: the answer is given on the spot instead of a frame
-    // later, which is what the flicker across the middle of the picture was.
-    function barInstant() {
-        return !!cfg.barFade && !barIdleMs();
+    // The DELAY only. At 0 the answer is given on the spot rather than a frame later, which is
+    // what the flicker across the middle of the picture was. It says NOTHING about how long the
+    // fade takes — that is barFadeMs, and coupling the two is the bug fixed in v0.72.0.
+    function barNoDelay() {
+        return anyFades() && !barIdleMs();
     }
 
     // Should it be up right now, asked only where there is no timer to ask it later.
+    // Outside fullscreen the whole preview holds the bar open, so it never fades out from under
+    // the picture you are reading — only leaving the window starts the fade. Fullscreen keeps the
+    // still-pointer rule, because there is nowhere to leave to: the window IS the screen.
     function barWanted() {
-        return pointerOverChrome() || popOpen() || !!drag || zoomBusy();
+        if (popOpen() || !!drag || zoomBusy()) return true;
+        if (!fullActive()) return pointInPreview(pointer.x, pointer.y);
+        return pointerOverChrome();
     }
 
-    // The class lives on the BOX, not on the bar. `nobar` kills the transition as well, or the
-    // instant answer still animates over barFadeMs.
+    // The class lives on the BOX, not on the bar. 'always' simply never takes it.
+    function applyIdle(idle) {
+        box.classList.toggle('baridle', barFades() && idle);
+    }
+
     function showBar() {
         if (!box) return;
         clearTimeout(barTimer);
         barTimer = 0;
-        box.classList.toggle('nobar', barInstant());
-        if (barInstant()) {
-            box.classList.toggle('idle', !barWanted());     // on the chrome: still shown
+        if (barNoDelay()) {
+            applyIdle(!barWanted());            // on the chrome: still shown
             return;
         }
-        box.classList.remove('idle');
-        if (!cfg.barFade) return;               // stays up for as long as the window does
+        applyIdle(false);
+        if (!anyFades()) return;                // stays up for as long as the window does
         barTimer = setTimeout(function () {
             barTimer = 0;
             if (!box || !view) return;
             if (barWanted()) { showBar(); return; }         // parked on it: keep it
-            box.classList.add('idle');
+            applyIdle(true);
         }, barIdleMs());
     }
 
     function resetBar() {
         clearTimeout(barTimer);
         barTimer = 0;
+        barOver = false;
         if (!box) return;
-        box.classList.toggle('nobar', barInstant());
-        box.classList.toggle('idle', barInstant() && !barWanted());
+        applyIdle(barNoDelay() && !barWanted());
     }
 
     // Point the frame at a resolved candidate, picking the face that can display it.
@@ -2474,21 +2515,9 @@
         layout();
     }
 
-    // How thick the drawn margin actually is.
-    function chromeThickness() {
-        if (!view) return 0;
-        return Math.round(Math.min(chrome(), view.frameW / 3, view.frameH / 3));
-    }
-
     // The margin strips, which float over the picture and therefore have to be re-placed whenever the frame changes size.
     function layoutChrome() {
-        const m = chromeThickness();
         const px = function (n) { return n + 'px'; };
-        edgeEls[0].style.cssText = 'left:0;right:0;top:0;height:' + px(m);
-        edgeEls[1].style.cssText = 'left:0;top:' + px(m) + ';bottom:0;width:' + px(m);
-        edgeEls[2].style.cssText = 'right:0;top:' + px(m) + ';bottom:0;width:' + px(m);
-        edgeEls[3].style.cssText = cfg.showStatusBar ? 'display:none'
-            : 'left:' + px(m) + ';right:' + px(m) + ';bottom:0;height:' + px(m);
         const hasVid = mediaEl === vidEl;
         capEl.classList.toggle('hasvid', hasVid);
         box.classList.toggle('hasvid', hasVid);
@@ -2527,7 +2556,8 @@
         gripEl.style.height = Math.round(outerH() + RESIZE_OUT * 2) + 'px';
         gripEl.classList.toggle('hot', placed);
         box.style.width = view.frameW + 'px';
-        box.style.height = view.frameH + 'px';
+        box.style.height = (view.frameH + barDock()) + 'px';
+        box.classList.toggle('bardock', !!barDock());
         caption();          // sets what the bar shows; layoutChrome() reserves room for it
         layoutChrome();
         mediaEl.style.width = Math.round(view.imgW) + 'px';
@@ -2541,7 +2571,7 @@
 
     function clampScale(s) {
         const lo = minScaleFor(view.natW, view.natH);
-        const hi = Math.max(lo, Math.min(cfg.maxZoom, MAX_SCALE_ABS));
+        const hi = Math.max(lo, fromShown(Math.min(cfg.maxZoom, MAX_SCALE_ABS)));
         return Math.max(lo, Math.min(hi, s));
     }
 
@@ -2653,7 +2683,7 @@
         if (!spinEl) return;
         const m = viewportBox();
         if (spinDocked && view && box && box.classList.contains('on')) {
-            const capH = cfg.showStatusBar ? capEl.offsetHeight : 0;
+            const capH = barShown() ? capEl.offsetHeight : 0;
             spinEl.style.left =
                 Math.round(view.left + insetX() + view.frameW - SPIN_SIZE - 8) + 'px';
             spinEl.style.top =
@@ -2706,7 +2736,7 @@
         buildViewer();
 
         const m = viewportBox();
-        const fit = Math.min(cfg.zoomFactor, m.w / res.w, m.h / res.h);
+        const fit = Math.min(fromShown(cfg.zoomFactor), m.w / res.w, m.h / res.h);
 
         view = {
             url: res.url, natW: res.w, natH: res.h,
@@ -2780,7 +2810,7 @@
     }
 
     function deferredCaption(url) {
-        if (!cfg.showStatusBar || transferBytes(url)) return;
+        if (!barShown() || transferBytes(url)) return;
         setTimeout(function () {
             if (!view || view.url !== url) return;
             resetCaption();         // the byte count is the one part that arrives late
@@ -2964,7 +2994,7 @@
     function fitFull() {
         if (!view) return;
         view.fixedW = Math.max(MIN_FRAME, vpW() - insetX() * 2);
-        view.fixedH = Math.max(MIN_FRAME, usableHeight() - insetY() * 2);
+        view.fixedH = Math.max(MIN_FRAME, usableHeight() - insetY() * 2 - barDock());
         view.fitScale = fitScaleFor(view.natW, view.natH);
         view.scale = view.fitScale;
         reflow();       // outerW()/outerH() read view.frameW/H, so they must be settled first
@@ -3176,8 +3206,7 @@
             // would slide the window off its own black backdrop.
             if (pannable()) drag = { x: e.clientX, y: e.clientY, mode: 'pan' };
         } else {
-            const onFrame = onBar || (reg && reg.kind === 'move');   // reg is never 'resize' here
-            const mode = onFrame || !pannable() ? 'move' : 'pan';
+            const mode = onBar || !pannable() ? 'move' : 'pan';
             drag = { x: e.clientX, y: e.clientY, mode: mode };
         }
         if (drag) box.classList.add('drag');
@@ -3732,7 +3761,11 @@
         if (spinEl && spinEl.classList.contains('on')) moveSpinner();
         const over = !!view && !!box && box.classList.contains('on') &&
             pointInPreview(e.clientX, e.clientY);
-        if (over) showBar(); else commitZoomField(null);
+        // Leaving is a one-shot: showBar() once on the way out arms the fade, where calling it on
+        // every move outside would push the fade back on any movement anywhere on screen.
+        if (over) showBar();
+        else { commitZoomField(null); if (barOver) showBar(); }
+        barOver = over;
         applyCursor();
         // Before the drag guard: fullscreen with a picture that fits starts no drag at all, and
         // a tap only cleared inside that guard survives any distance. See E39.
@@ -4223,6 +4256,15 @@
             return { el: el, row: row(labelText, hintText, el) };
         }
 
+        // A row whose wording depends on another control. It must have been built WITH a hint,
+        // or there is no .hint span to write into.
+        function relabel(r, labelText, hintText) {
+            const l = r.row.querySelector('label');
+            l.childNodes[0].textContent = labelText;
+            const hint = l.querySelector('.hint');
+            if (hint) hint.textContent = hintText || '';
+        }
+
         function pick(key, labelText, hintText, opts) {
             const el = document.createElement('select');
             opts.forEach(function (o) {
@@ -4422,10 +4464,9 @@
         const intro = document.createElement('p');
         intro.className = 'intro';
         intro.textContent =
-            'Point at any image and Hover Zoom finds the full-size original and shows it. ' +
-            'Click that preview to keep it on screen — then scroll to make it bigger, drag it ' +
-            'anywhere, and right-click it to save or copy. Hit Escape or click outside the ' +
-            'preview to close it.';
+            'Point at any image and Hover Zoom shows the full-size original. Click to keep it ' +
+            'on screen, then scroll to resize, drag to move, and double-click for fullscreen. ' +
+            'Right-click to save or copy. Escape closes it.';
         body.appendChild(intro);
 
         const guideBtn = document.createElement('button');
@@ -4445,47 +4486,39 @@
         }
 
         para('Finding the original.',
-            'Nothing is decided until you point at something. It then works from what the page ' +
-            'itself offers — a bigger version named in the markup, the same URL with the ' +
-            'thumbnail’s size stripped out of it — and, when the image links to its own ' +
-            'page on the same site, it reads that page and takes whatever the site declares ' +
-            'there. Every candidate is loaded and measured, so a preview is verified to be ' +
-            'bigger rather than guessed at. There is no list of supported sites.');
+            'Nothing is decided until you point at something. It works from what the page ' +
+            'offers — a larger version named in the markup, the thumbnail’s URL with the size ' +
+            'stripped out, or the image’s own page on the same site. Every candidate is loaded ' +
+            'and measured, so a preview is verified to be larger rather than guessed at. There ' +
+            'is no list of supported sites.');
         para('A ring means it is still looking.',
-            'The first thing found appears immediately; if something better turns up a moment ' +
-            'later it replaces it in place, without moving what you are looking at.');
+            'The first thing found appears immediately. If something better turns up it ' +
+            'replaces it in place, without moving what you are looking at.');
         para('One press keeps it.',
-            'A click — or the start of a drag — pins the preview. It then stays until you press ' +
-            'Escape or click outside the preview to close it. Nothing else holds it open, and the page underneath ' +
-            'stays readable and scrollable while it is there. Once it is pinned, a single click on ' +
-            'the picture pauses or resumes a clip and a double click fills the screen.');
+            'A click, or the start of a drag, pins the preview until you press Escape or click ' +
+            'outside it. The page underneath stays readable and scrollable. Once pinned, a ' +
+            'single click on the picture pauses or resumes a clip and a double click fills the ' +
+            'screen.');
         para('Moving, sizing and zooming.',
-            'Drag the frame around the image, or its status bar, to move the window; drag an ' +
-            'edge or a corner to resize it, holding Shift to keep its shape. The wheel grows the ' +
-            'whole window until you resize it by hand, after which it zooms the image inside ' +
-            'the frame instead. Arrow keys pan, + and − zoom, 0 fits. The status bar carries a ' +
-            'zoom slider and the current level; click the level to type an exact one. Zooming ' +
-            'from either of those holds the window’s bottom-right corner still, so the controls ' +
-            'stay under the pointer.');
+            'Drag the grab border or the status bar to move the window; drag an edge or corner ' +
+            'to resize it, with Shift to keep its shape. The wheel grows the whole window until ' +
+            'you resize it by hand, after which it zooms the image inside the frame. Arrow keys ' +
+            'pan, + and − zoom, 0 fits. The status bar carries a zoom slider and the current ' +
+            'level — click the level to type an exact one.');
         para('Saving a copy.',
-            'Right-click a pinned preview and you get the browser’s own menu — Save image ' +
-            'as…, Copy image, Copy image address, Open image in new tab — all of them acting ' +
-            'on the full-size original. On a preview you are only hovering, right-click dismisses ' +
-            'it instead.');
+            'Right-click a pinned preview for the browser’s own menu — Save image as…, Copy ' +
+            'image, Copy image address, Open image in new tab — all acting on the full-size ' +
+            'original. On a preview you are only hovering, right-click dismisses it instead.');
         para('Something previewing that should not.',
-            'Pin it and press ⊘ in its status bar: that image goes on the never-preview list ' +
-            'below, which is the answer to a tiled background or a watermark that previews from ' +
-            'everywhere. For a whole site, the userscript manager’s menu has an ' +
-            'enable/disable entry for the page you are on.');
+            'Pin it and press ⊘ in its status bar to add it to the never-preview list below. ' +
+            'For a whole site, the userscript manager’s menu has an enable/disable entry for the ' +
+            'page you are on.');
         para('Clips, and what counts as a video.',
             'A short muted clip already looping with no controls is an animated image whatever ' +
             'it is encoded as, and previews as one — some posts have no still form at all. A ' +
-            'real player, or a thumbnail linking to a video page, is a video. Those are the two ' +
-            'video setting above. A page with a real player on it never previews on that ' +
-            'player, whatever that setting says — the player already shows the picture full ' +
-            'size. Press ▶ in a pinned ' +
-            'preview’s status bar to stop playing video for the rest of the tab; reloading ' +
-            'the page restores it.');
+            'real player, or a thumbnail linking to a video page, is a video. A page with a real ' +
+            'player never previews on that player, whatever the setting says. Press ▶ in a ' +
+            'pinned preview to stop playing video for the rest of the tab.');
 
         guideBtn.addEventListener('click', function () {
             const open = guide.classList.toggle('open');
@@ -4495,8 +4528,7 @@
         body.appendChild(guide);
 
         section('The preview');
-        const act = pick('activation', 'Show a preview',
-            'either order works with the key — hold it and then point, or point and then press it', [
+        const act = pick('activation', 'Show a preview', null, [
                 ['hover', 'When I hover over an image'],
                 ['modifier', 'Only when the modifier key is held']]);
         const modKey = pick('modifierKey', 'Modifier key', null, [
@@ -4509,42 +4541,39 @@
         const posHint = pos.row.querySelector('.hint');
         function syncPos() {
             posHint.textContent = pos.el.value === 'center'
-                ? 'the pointer is nowhere near it, so click the image you are pointing at to ' +
-                  'pin the preview — then hit Escape or click outside the preview to close it'
-                : 'opens under the pointer, so a click pins it without moving the mouse';
+                ? 'where the preview window will open. Click the image under the mouse to pin the preview window.'
+                : 'where the preview window will open. Beside the pointer makes it easy to pin.';
         }
         pos.el.addEventListener('change', syncPos);
         syncPos();
         num('zoomFactor', 'Opening zoom limit',
-            'how far a SMALL image is enlarged when the preview first opens, in multiples of ' +
-            'the original’s own size (1 = never enlarged). It is still fitted inside the ' +
-            'browser window, so anything larger than that opens smaller than this', 0.1, 8, 0.1);
+            'How far a small original may be enlarged, in multiples of its own size. 1 never ' +
+            'enlarges. Larger originals still shrink to fit the window. (default: 2)', 0.1, 8, 0.1);
         num('minRatio', 'Required upsize',
-            'the original must be at least this many times the size of the image on the page, ' +
-            'so 1 means anything bigger at all. Below 1 previews an image that is no bigger — ' +
-            'useful for working out why something gives no preview. Applies to what a linked ' +
-            'page declares as well as to what the script works out for itself', 0.1, 100, 0.1);
+            'Only show the preview window if the original is this much larger than the one on ' +
+            'the page. 1 means anything bigger at all; below 1 previews it even when the ' +
+            'original is smaller. (default: 1)', 0.1, 100, 0.1);
         num('minDisplayed', 'Ignore images smaller than',
-            'the size it is drawn at on the page, in px. This is the ONLY size filter — nothing ' +
-            'separately singles out icons, avatars or emoji, so lower it to reach those (a ' +
-            'YouTube avatar is about 24)', 0, 2000, 1);
+            'The size drawn on the page, in px. Lower it to reach icons and avatars — a ' +
+            'YouTube avatar is about 24. (default: 16)', 0, 2000, 1);
         pick('pinButton', 'Pin preview with',
-            'which button keeps a preview on screen. The other one closes it without ' +
-            'following the link underneath', [
+            'The other button closes the preview without following the link underneath.', [
                 ['left', 'Left click  (right click dismisses)'],
                 ['right', 'Right click  (left click dismisses)']]);
         pick('videoMode', 'Video to play in a preview',
-            'a short muted clip that loops with no controls is a clip, whatever it is encoded ' +
-            'as; a thumbnail linking to a video page is a video. No video at all also refuses ' +
-            'an animated GIF or WebP, at one extra request per image', [
+            'A clip is short, muted and looping. A video is a thumbnail linking to a video ' +
+            'page. No video at all also refuses animated GIFs.', [
                 ['clips', 'Looping clips only'],
                 ['all', 'Clips and videos'],
                 ['none', 'No video at all']]);
         check('skipFurniture', 'Ignore backgrounds and banners',
-            'page furniture rather than images on the page: the page’s own background, a ' +
-            'tiled or fixed one, a strip spanning the window, one the page’s text sits on, ' +
-            'the banner across the top, and anything the page marks as decoration. Turn off if ' +
-            'it is skipping images you want');
+            'Page furniture — backgrounds, banners, decoration — rather than images on the ' +
+            'page. Turn off if it skips images you want to preview.');
+        num('displayScale', 'Display scaling',
+            'your operating system’s display scaling, as a multiplier: Windows 125% is 1.25, a ' +
+            'Retina Mac is 2. Your browser reports ' + (window.devicePixelRatio || 1) + ' right ' +
+            'now — at 100% browser zoom that number IS your display scaling. Only the zoom ' +
+            'percentages change; the preview is not resized. (default: 1)', 1, 4, 0.25);
 
         section('Where it runs');
         pick('siteMode', 'Site list', null, [
@@ -4563,21 +4592,16 @@
         const blocks = list('blockList', {
             heading: 'Never preview these images',
             chronological: true,
-            description: 'Individual images that never open a preview. The quickest way to add ' +
-                'one is the ⊘ button on a pinned preview. Newest last, so an accidental one is ' +
-                'the bottom row. A * matches anything.',
+            description: 'Images that never open a preview. Add one with the ⊘ button on a ' +
+                'pinned preview; newest last. A * matches anything.',
             examples: 'Examples: https://example.com/tile.png, https://cdn.example.com/wm/*',
             placeholder: 'e.g. https://example.com/watermark.png',
         });
 
         const refSites = list('referrerSites', {
             heading: 'Load previews without a referrer on these sites',
-            description: 'The browser normally tells the image host which page asked for it. A ' +
-                'few hosts refuse a request that names another site, and their previews come up ' +
-                'blank or as a “no hotlinking” placeholder while the page’s own thumbnails look ' +
-                'fine — add that site here. It is per site because stripping the referrer has ' +
-                'the opposite effect on hosts that require their own site as the referrer, ' +
-                'where it turns working previews blank.',
+            description: 'Add a site whose previews come up blank or say “no hotlinking” ' +
+                'while the page’s own thumbnails look fine.',
             examples: 'Subdomains are included, same as the site list above',
             placeholder: 'e.g. example.com',
             addCurrentLabel: '+ This Site',
@@ -4589,73 +4613,65 @@
 
         section('The preview window');
         num('wheelZoomStep', 'Wheel zoom step',
-            'how much one wheel notch changes the zoom, in %. The + and − keys always step by 25%',
+            'One wheel notch, in %. The + and − keys always step by 25%. (default: 15)',
             2, 100, 1);
         num('panStep', 'Arrow-key pan step',
-            'how far one press moves the image, in px — hold Shift for 3×', 5, 500, 5);
+            'How far one press moves the image, in px — hold Shift for 3×. (default: 80)',
+            5, 500, 5);
         num('maxZoom', 'Maximum zoom',
-            'how far you can zoom in by hand, in multiples of the original’s own size', 1, 64, 1);
+            'How far you can zoom in by hand, in multiples of the original’s size. ' +
+            '(default: 32)', 1, 64, 1);
         num('maxSizeMultiple', 'Maximum window size',
-            'how large the preview window may be grown, in multiples of the browser window. A ' +
-            'preview always opens no larger than the browser window; this is the ceiling for ' +
-            'growing it yourself afterwards, with the wheel or by dragging a corner', 1, 4, 0.25);
+            'How far you can grow the window yourself, in multiples of the browser window. A ' +
+            'preview always opens no larger than the browser window. (default: 1.2)', 1, 4, 0.25);
 
         section('Appearance');
         num('hoverDelay', 'Delay before the preview appears',
-            'how long the pointer rests on an image first, in ms. A short wait stops previews ' +
-            'firing as you sweep the pointer across a page', 0, 3000, 10);
+            'How long the pointer must rest on an image before the preview begins to load, ' +
+            'in ms. (default: 120)', 0, 3000, 10);
         num('fadeMs', 'Preview fade in / out',
-            'time the preview window takes to fade in when it opens, and out when it closes, ' +
-            'in ms', 0, 1000, 10);
-        num('borderWidth', 'Border thickness', 'in px', 0, 20, 1);
+            'in ms. (default: 200)', 0, 1000, 10);
+        num('borderWidth', 'Border thickness', 'in px. (default: 1)', 0, 20, 1);
         color('borderColor', 'Border colour');
-        num('cornerRadius', 'Corner radius', 'in px', 0, 40, 1);
-        num('frameMargin', 'Grab border',
-            'width of the frame drawn over the edges of the image, in px, matching the status ' +
-            'bar along the bottom. This is the strip you grab to move the window at any zoom — ' +
-            'and it stops being a handle once it has faded', 0, 80, 2);
-        const barFade = check('barFade', 'Fade the grab border and status bar out',
-            'off keeps both of them on screen for as long as the preview window is up');
-        const barIdle = num('barIdleMs', 'Grab border fades after',
-            'how long the pointer stays still first, in ms. Set it to 0 and the grab border and ' +
-            'the status bar never appear at all — the window is then moved by dragging the ' +
-            'middle of an unzoomed image, and resized from its very edge', 0, 60000, 100);
-        const barTake = num('barFadeMs', 'Grab border fade takes',
-            'how long that fade takes, in ms. Both come back instantly on any movement over ' +
-            'the preview', 0, 10000, 100);
-        function syncBarFade() {
-            barIdle.row.hidden = !barFade.el.checked;
-            barTake.row.hidden = !barFade.el.checked;
+        num('cornerRadius', 'Corner radius', 'in px. (default: 6)', 0, 40, 1);
+        const bar = pick('barMode', 'Status bar', 'has useful tools and info.', [
+            ['always', 'Always visible'],
+            ['hover', 'Visible when hovering'],
+            ['off', 'Hidden']]);
+        const barIdle = num('barIdleMs', 'Status bar fades after',
+            'the wait before the fade starts, in ms, counted from the pointer leaving the ' +
+            'preview — or from the pointer going still, in fullscreen. (default: 250)',
+            0, 60000, 50);
+        const barTake = num('barFadeMs', 'Status bar fades out over',
+            'how long the fade itself takes, in ms. 0 disappears with no fade. It comes back ' +
+            'instantly on any movement over the preview. (default: 250)',
+            0, 10000, 50);
+        function syncFurniture() {
+            const fades = bar.el.value === 'hover';
+            barIdle.row.hidden = !fades;
+            barTake.row.hidden = !fades;
         }
-        barFade.el.addEventListener('change', syncBarFade);
-        syncBarFade();
+        bar.el.addEventListener('change', syncFurniture);
+        syncFurniture();
         const shadow = check('shadow', 'Drop shadow',
-            'a soft shadow under the preview window, which separates it from the page behind it');
+            'a soft shadow around the preview window, which separates it from the page behind it');
         const shadowSize = num('shadowSize', 'Shadow size',
-            'the blur under the window, in px — 0 is none, 60 is a wide soft pool', 0, 120, 4);
+            'The blur, in px. (default: 24)', 0, 120, 4);
         const shadowStrength = num('shadowStrength', 'Shadow strength',
-            'how dark that shadow is at its centre, in %', 0, 100, 5);
+            'how dark that shadow is, in %. (default: 50)', 0, 100, 5);
         function syncShadow() {
             shadowSize.row.hidden = !shadow.el.checked;
             shadowStrength.row.hidden = !shadow.el.checked;
         }
         shadow.el.addEventListener('change', syncShadow);
         syncShadow();
-        check('showStatusBar', 'Show the status bar',
-            'filename, format, dimensions and size along the bottom, and the ⊘, ▶ and AA ' +
-            'buttons — AA switches between smooth and hard pixels when the preview is enlarged, ' +
-            'on the image you are looking at. It doubles as the window’s title bar, and fades ' +
-            'out with the grab border');
         pick('spinnerTheme', 'Loading ring',
-            'the ring shown while it is still searching. Matching follows the light-or-dark ' +
-            'preference your browser reports to web pages, which is the operating system’s ' +
-            'setting — changing the browser’s own theme does not move it. Firefox is the ' +
-            'exception: it has a separate Website appearance setting that does', [
+            'Matching follows your system’s light-or-dark setting, not the browser’s theme.', [
                 ['auto', 'Match the system'], ['dark', 'Always dark'], ['light', 'Always light']]);
         section('Diagnostics');
         check('debug', 'Log every hover to the console',
-            'one line per hover in the browser console (F12): what was under the pointer, which ' +
-            'gates fired and why, and the URLs tried. Noisy — on only while chasing a problem');
+            'One line per hover in the browser console (F12). Noisy — leave off unless chasing ' +
+            'a problem.');
 
         const foot = document.createElement('div');
         foot.className = 'foot';
