@@ -911,18 +911,46 @@ Child rules still win for the child's own box, so the buttons and sliders keep t
 **`.cap .block` keeps `line-height:16px`.** The shared 18 px centres the letters of AA but drops the
 taller circled glyph a pixel too low.
 
-### The volume column is sticky, not hover-driven · `E38`
+### The volume column: hover, with a close delay · `E38`
 
-Opened by the sound button and closed by it. **Hover cannot close it**, because a pointer
-travelling from the button to the slider is briefly over neither — the first attempt used
-`:hover` on a shared wrapper and lost the column to the few dead pixels between the two, which is
-why it worked only sometimes and only when the mouse moved fast. A close *delay* was rejected as a
-second guess at the same racy question.
+Hovering the sound button opens the column; leaving it closes after `VOL_CLOSE_MS`. Both halves
+matter, and the project has now tried all three designs — the order is worth knowing, because two
+of them look correct and are not:
 
-`volUsed` is the whole of the state: set on the slider's `change`, so **only a column that has
-been used and released dismisses itself on leaving**. Until then it stays put however far the
-pointer wanders, so reaching for it can never lose it. `volDrag` additionally holds it through a
-drag that ends outside the box.
+1. **CSS `:hover` on a shared wrapper.** Failed: the pointer travelling from the button to the
+   slider is briefly over *neither*, so the column vanished on the way to it. Whether it did
+   depended on how fast the mouse moved, which is why it worked "a few of the times".
+2. **Sticky — opened and closed by the button, dismissed on leave only after the slider had been
+   used.** Correct, in that nothing could lose it, but tried and disliked: the button then meant
+   two things at once, and the column outstayed its welcome.
+3. **Hover plus a close delay** (current). The delay is what makes hover viable — a grace period
+   cannot be outrun, where a hover test can.
+
+Two details the delay alone does not cover:
+
+- **The gap between button and popup is `padding`, not `margin`.** Margin is dead space outside
+  the hover target; padding is inside it. The delay would have papered over this, but the dead
+  pixels would still be there for the pointer to fall into.
+- **`volDrag` re-arms the timer instead of letting it fire.** A drag is released wherever the hand
+  happens to be, which is routinely off the column; without this the slider is taken away
+  mid-adjustment.
+
+`.vvol` is shown by the `open` class only — there is no `:hover` rule left, so JS is the single
+source of truth for its visibility.
+
+### Our fullscreen hides the page's scrollbar
+
+Fullscreening the *document* leaves the page scrollable underneath, so its scrollbar is still drawn
+down the side of our black backdrop. `lockScroll()` sets `overflow:hidden` on **both**
+`documentElement` and `body` — which of them carries the scrollbar is the page's choice, not ours —
+and `unlockScroll()` puts back the exact inline values it found.
+
+**Restore what was there, do not clear.** A page may carry its own inline `overflow`, and blanking
+it is a change to the site that outlives the preview. The saved value is re-assigned verbatim;
+assigning `''` is what "there was none" has to mean, and it is only used when that is true.
+
+The lock reclaims the scrollbar's width, which fires `resize` → `fitFull()`. That is idempotent and
+happens under the backdrop, so it is invisible.
 
 **The rate clamp is the browser's, not ours.** Chromium throws `NotSupportedError` outside
 [0.0625, 16] and Firefox ignores the assignment, so `setRate()` clamps and the readout shows what

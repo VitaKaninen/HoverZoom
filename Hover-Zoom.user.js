@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.65.0
+// @version     0.66.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -2021,17 +2021,20 @@
         });
         vvolInEl.addEventListener('change', function () {
             volDrag = false;
-            volUsed = true;         // used and let go: leaving the column now dismisses it
             rememberAudio();
             showBar();
         });
         vvolEl.appendChild(vvolInEl);
         vsoundEl.appendChild(vmuteEl);
         vsoundEl.appendChild(vvolEl);
-        // The column is STICKY, like the speed menu: opened by the button and closed by the
-        // button. Hover cannot close it, because a pointer travelling from the button to the
-        // slider is briefly over neither and that read as 'leaving'.
-        vsoundEl.addEventListener('mouseleave', volMaybeClose);
+        // Hover-driven, with a close DELAY. Plain CSS :hover lost the column to the dead
+        // pixels between button and popup, and whether it did depended on how fast the pointer
+        // crossed them; a grace period cannot be outrun. The popup is a DOM child of the
+        // wrapper, so moving into it never counts as leaving.
+        vsoundEl.addEventListener('mouseenter', openVol);
+        vsoundEl.addEventListener('mouseleave', laterCloseVol);
+        vvolEl.addEventListener('mouseenter', openVol);
+        vvolEl.addEventListener('mouseleave', laterCloseVol);
 
         vctlEl.appendChild(vplayEl);
         vctlEl.appendChild(vtimeEl);
@@ -2047,26 +2050,29 @@
         vidEl.addEventListener('volumechange', syncVideoCtl);
     }
 
-    // Set once the slider has been used and released: only THEN does leaving the column
-    // dismiss it. Until then it stays put however far the pointer wanders, so that reaching for
-    // it can never lose it.
-    let volUsed = false;
-
-    function volOpen() { return !!vvolEl && vvolEl.classList.contains('open'); }
+    let volTimer = 0;
 
     function openVol() {
-        if (!vvolEl || mediaEl !== vidEl) return;
-        volUsed = false;
-        vvolEl.classList.add('open');
+        clearTimeout(volTimer);
+        volTimer = 0;
+        if (vvolEl && mediaEl === vidEl) vvolEl.classList.add('open');
+    }
+
+    // A drag that wanders off the box still holds it: the button is released somewhere, and
+    // that somewhere is often not over the column.
+    function laterCloseVol() {
+        clearTimeout(volTimer);
+        volTimer = setTimeout(function () {
+            volTimer = 0;
+            if (volDrag) { laterCloseVol(); return; }
+            closeVol();
+        }, VOL_CLOSE_MS);
     }
 
     function closeVol() {
-        volUsed = false;
+        clearTimeout(volTimer);
+        volTimer = 0;
         if (vvolEl) vvolEl.classList.remove('open');
-    }
-
-    function volMaybeClose() {
-        if (volUsed && !volDrag) closeVol();
     }
 
     function fmtTime(s) {
@@ -2113,8 +2119,6 @@
     // muted is stopped the moment it is not, unless the browser counts this click as the gesture.
     function toggleMute() {
         if (mediaEl !== vidEl) return;
-        // The button is the column's switch too — a second press puts it away.
-        if (volOpen()) closeVol(); else openVol();
         vidEl.muted = !vidEl.muted;
         // Unmuting into a zero volume is a button that does nothing; give it something to play.
         if (!vidEl.muted && vidEl.volume <= 0) vidEl.volume = AUDIO_DEFAULT.volume;
@@ -2248,6 +2252,7 @@
     const VCTL_H = 30;
     const VOL_BTN = 24;         // bigger than the rest of the strip: it is also a hover target
     const VOL_TRACK = 72;       // the popup column's height
+    const VOL_CLOSE_MS = 320;   // grace period for the pointer to reach the column
     const VCTL_GAP = 6;         // clearance above the status bar
     // Below this the strip would cover the clip instead of sitting on it.
     const VCTL_MIN_H = 110;
@@ -2842,6 +2847,30 @@
         return !!fullPrev;
     }
 
+    // Fullscreening the DOCUMENT leaves the page scrollable underneath, so its scrollbar is still
+    // drawn down the side of our black backdrop. Take it away for as long as we are up, and put
+    // back exactly what was there — an inline value we did not write is not ours to discard.
+    //
+    // Both elements, because which one carries the scrollbar is the page's choice, not ours.
+    let scrollLock = null;
+
+    function lockScroll() {
+        if (scrollLock) return;
+        const de = document.documentElement, bd = document.body;
+        scrollLock = { de: de ? de.style.overflow : null, bd: bd ? bd.style.overflow : null };
+        if (de) de.style.overflow = 'hidden';
+        if (bd) bd.style.overflow = 'hidden';
+    }
+
+    function unlockScroll() {
+        if (!scrollLock) return;
+        const de = document.documentElement, bd = document.body;
+        // Assigning '' removes the declaration, which is what "there was none" has to mean.
+        if (de && scrollLock.de !== null) de.style.overflow = scrollLock.de;
+        if (bd && scrollLock.bd !== null) bd.style.overflow = scrollLock.bd;
+        scrollLock = null;
+    }
+
     function toggleFull() {
         if (!view) return;
         if (fullActive()) { leaveFull(); return; }
@@ -2852,6 +2881,7 @@
         // Captured before anything moves: this is the only moment the pre-fullscreen state exists.
         fullPrev = { left: view.left, top: view.top, scale: view.scale };
         fullApi = false;
+        lockScroll();
         dimEl.classList.add('full');
         setIcon(fsEl, ICON_EXIT);
         setTip(fsEl, 'Leave fullscreen');
@@ -2907,6 +2937,7 @@
         const p = fullPrev;
         fullPrev = null;
         fullApi = false;
+        unlockScroll();
         dimEl.classList.remove('full');
         setIcon(fsEl, ICON_FULL);
         setTip(fsEl, 'Fill the screen');
