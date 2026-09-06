@@ -704,9 +704,11 @@ picture used to read 100 %. Set correctly it is a no-op at 100 % browser zoom an
 other zoom. A setting that silently degrades a large group of users until they find it does not
 belong behind a fold, and scaled displays are most laptops sold in the last decade.
 
-**The hint carries the live `devicePixelRatio`**, because that is the number needed to answer the
-question: at 100 % browser zoom it *is* the display scaling. Static prose about Windows and Retina
-cannot do that job.
+**The hint does not explain how to find the number** (v0.73.0). It said "Windows 125 % is 1.25, a
+Retina Mac is 2" plus the live `devicePixelRatio`, which named two platforms out of many and still
+did not cover the reader. It is now one sentence: *if the zoom percentages look wrong, set this to
+your display scaling.* Where to find that number is a search-engine question, and a panel hint is a
+bad search engine.
 
 ## `barIdleMs` and `barFadeMs` are completely independent (v0.72.0)
 
@@ -726,3 +728,26 @@ Measured both ways: delay 0 / fade 250 hides the moment the pointer leaves and s
 transition of 0 s.
 
 Defaults are **250 / 250**.
+
+## One duration for both directions of the bar fade (v0.73.0)
+
+The intended model, stated by the user and now what the code does:
+
+1. Pointer moves onto the preview → the bar fades **in** over `barFadeMs`.
+2. Pointer leaves → the bar holds at full opacity for `barIdleMs`.
+3. Then it fades **out** over `barFadeMs`.
+
+`BAR_SHOW_MS` (a fixed 120 ms) is gone. The fade-in used it while the fade-out used `--barfade`, so
+the setting labelled as the fade duration only ever controlled half the fade. Both directions now
+read `var(--barfade)`, which also makes `.box.baridle` a plain `opacity:0` — it no longer needs to
+restate a duration.
+
+The old asymmetry had a reason worth recording before it is re-proposed: a slow return reads as lag
+on a control you have just reached for, which is why the return was pinned fast and short. That is
+an argument for a *small default*, not for a second hidden constant — and the default is 250 ms.
+
+**Labels are `Status bar fade delay` and `Status bar fade duration`.** The old pair, *fades after*
+and *fades out over*, read as one setting split across two rows.
+
+Measured at delay 250 / duration 2000: on the preview, shown with a computed transition of 2 s;
+120 ms after leaving, still at full opacity; 420 ms after leaving, fading, still 2 s.

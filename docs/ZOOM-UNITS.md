@@ -60,12 +60,13 @@ Rejected for that reason.
 `displayScale`, a number, **default 1**, in the panel's *The preview window* section beside
 `maxZoom`:
 
-> **Display scaling** — Your operating system's display scaling, as a multiplier. Windows 100 % = 1,
-> 125 % = 1.25, 150 % = 1.5; a Retina Mac is 2. Leave at 1 if you do not scale your display. This
-> only affects the zoom percentages shown; it changes nothing about how large the preview is.
+> **Display scaling** — if the zoom percentages look wrong, set this to your display scaling.
 
-Sensible bounds for `num()`: `1, 4, 0.25` — but a live hint showing the current `devicePixelRatio`
-is worth more than the range, because it is the number the user needs in order to answer.
+*(Shipped shorter than the draft above, in v0.73.0. The draft named two platforms out of many and
+still left most readers guessing; where to find the number is a search-engine question. The live
+`devicePixelRatio` was in the hint briefly and came out with it.)*
+
+Sensible bounds for `num()`: `1, 4, 0.25`.
 
 **Two monitors at different scalings will disagree**, since `devicePixelRatio` follows whichever
 screen the window is on but the setting is one number. Accepted by the user when the setting was

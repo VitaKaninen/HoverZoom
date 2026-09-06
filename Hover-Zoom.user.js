@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.72.0
+// @version     0.73.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -1236,9 +1236,9 @@
             '.pop .acts button{font:11px system-ui,sans-serif;padding:4px 10px;border-radius:5px;',
             'border:1px solid #45475a;background:#313244;color:#cdd6f4;cursor:pointer}',
             '.pop .acts button.go{background:#f38ba8;border-color:#f38ba8;color:#1e1e2e;font-weight:700}',
-            '.cap,.vctl{transition:opacity ' + BAR_SHOW_MS + 'ms ease}',
-            '.box.baridle .cap,.box.baridle .vctl{opacity:0;pointer-events:none;',
-            'transition:opacity var(--barfade) ease}',
+            // barFadeMs drives BOTH directions: in from 0, and out again after barIdleMs.
+            '.cap,.vctl{transition:opacity var(--barfade) ease}',
+            '.box.baridle .cap,.box.baridle .vctl{opacity:0;pointer-events:none}',
             // The idle classes still decide whether they show; this only takes the animation off.
             // Equal specificity to the two rules above, so source order is what beats them.
             // Docked: the bar sits BELOW the picture rather than on it, so it must be opaque —
@@ -2285,7 +2285,6 @@
         });
     }
 
-    const BAR_SHOW_MS = 120;
 
     // The bar's height, fixed so the ring around it can be a matching thickness.
     const BAR_MIN_H = 24;
@@ -4570,10 +4569,8 @@
             'Page furniture — backgrounds, banners, decoration — rather than images on the ' +
             'page. Turn off if it skips images you want to preview.');
         num('displayScale', 'Display scaling',
-            'your operating system’s display scaling, as a multiplier: Windows 125% is 1.25, a ' +
-            'Retina Mac is 2. Your browser reports ' + (window.devicePixelRatio || 1) + ' right ' +
-            'now — at 100% browser zoom that number IS your display scaling. Only the zoom ' +
-            'percentages change; the preview is not resized. (default: 1)', 1, 4, 0.25);
+            'if the zoom percentages look wrong, set this to your display scaling. (default: 1)',
+            1, 4, 0.25);
 
         section('Where it runs');
         pick('siteMode', 'Site list', null, [
@@ -4638,13 +4635,10 @@
             ['always', 'Always visible'],
             ['hover', 'Visible when hovering'],
             ['off', 'Hidden']]);
-        const barIdle = num('barIdleMs', 'Status bar fades after',
-            'the wait before the fade starts, in ms, counted from the pointer leaving the ' +
-            'preview — or from the pointer going still, in fullscreen. (default: 250)',
-            0, 60000, 50);
-        const barTake = num('barFadeMs', 'Status bar fades out over',
-            'how long the fade itself takes, in ms. 0 disappears with no fade. It comes back ' +
-            'instantly on any movement over the preview. (default: 250)',
+        const barIdle = num('barIdleMs', 'Status bar fade delay',
+            'time in ms before the status bar begins to fade out. (default: 250)', 0, 60000, 50);
+        const barTake = num('barFadeMs', 'Status bar fade duration',
+            'time in ms the status bar takes to fade out, and back in. (default: 250)',
             0, 10000, 50);
         function syncFurniture() {
             const fades = bar.el.value === 'hover';
