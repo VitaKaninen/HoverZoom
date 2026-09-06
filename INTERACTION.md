@@ -359,6 +359,8 @@ Hover the sound button and a vertical column appears above it; clicking the butt
   (`VOL_CLOSE_MS`). The delay is load-bearing — without it the crossing between the two loses
   the column (`E38`). Crossing *back* from the column to the button keeps it (`E38`). A drag that
   ends outside the box still counts as held.
+- **Hovering the button with no mouse button held resets the hold**, so the column can never be
+  stranded open (`E38`).
 - **Dragging it to zero mutes**; the button toggles between silence and the stored unmuted level,
   which may itself be zero — then the button only changes the icon. Muted, the icon is red.
 - **Changing the volume never starts a paused clip** (`E38`).
@@ -415,6 +417,7 @@ inert.
 | `T24` | `S10` | Wheel anywhere **but** the frame | `S10` unchanged — the page scrolls under it |
 | `T26` | `S10` | Single click on the picture — not a grab band, not the bar, not a control | `S10`; a clip pauses or resumes, a still image does nothing (`E39`) |
 | `T27` | `S10` | Double click in the same place | `S10` fullscreen, or back out of it if already there. Click 1's pause is undone (`E39`) |
+| `T28` | `S10` fullscreen | Drag the picture, an edge, or the status bar | Nothing moves — fullscreen is locked to the screen, and the cursor stays an arrow. A spilling picture still pans (`E35`) |
 | `T25` | — | *Retired in v0.34.0.* Moving the window used to freeze its size as a ceiling; it no longer touches the size at all (`E22`) |
 
 ---
@@ -496,8 +499,8 @@ this table is a table.
 | `E31` | Smoothing — the AA toggle, and why there are only two answers | [`docs/SETTINGS.md`](docs/SETTINGS.md) |
 | `E32` | A pan that runs out of picture continues as a window move | [`docs/VIEWER.md`](docs/VIEWER.md) |
 | `E33` | The settings panel is never modal, and who owns the keyboard and wheel | [`docs/SETTINGS.md`](docs/SETTINGS.md) |
-| `E34` | The status bar's zoom slider and level, and the bottom-right corner anchor that keeps them still | [`docs/VIEWER.md`](docs/VIEWER.md) |
-| `E35` | Fullscreen — why the DOCUMENT goes fullscreen, and why maximise IS the implementation | [`docs/VIEWER.md`](docs/VIEWER.md) |
+| `E34` | The status bar's zoom slider and level, the bottom-right corner anchor, and why the percentage is CSS pixels rather than screen pixels | [`docs/VIEWER.md`](docs/VIEWER.md) |
+| `E35` | Fullscreen — why the DOCUMENT goes fullscreen, why maximise IS the implementation, and the three points that nail it to the screen | [`docs/VIEWER.md`](docs/VIEWER.md) |
 | `E36` | The floating video strip: why it overlays rather than reserves, and why not native `controls` | [`docs/VIEWER.md`](docs/VIEWER.md) |
 | `E37` | Every control clears the frame's grab bands, and the padding trap that broke it | [`docs/VIEWER.md`](docs/VIEWER.md) |
 | `E38` | Sound is remembered per site as two values, and starts muted everywhere | [`docs/VIEWER.md`](docs/VIEWER.md) |

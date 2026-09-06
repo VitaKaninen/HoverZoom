@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.67.0
+// @version     0.68.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -1101,6 +1101,9 @@
             '.box.placed:not(.pan){cursor:move}',
             '.box.pan{cursor:grab}',
             '.box.pan.drag{cursor:grabbing}',
+            // Fullscreen is nailed to the screen, so nothing here is a handle. After .placed, or
+            // the move cursor would still win.
+            '.box.full:not(.pan){cursor:default}',
             'img,video{display:block;position:absolute;background:#1e1e2e;-webkit-user-drag:none;user-select:none}',
             '.edge{position:absolute;pointer-events:none;background:rgba(30,30,46,.30)}',
             'img[hidden],video[hidden]{display:none}',
@@ -1582,6 +1585,7 @@
 
     function hitRegion(x, y) {
         if (!view) return null;
+        if (fullActive()) return null;      // locked to the screen: no move band, no resize edge
         const ow = outerW();
         const oh = outerH();
         const rx = x - view.left, ry = y - view.top;
@@ -2051,7 +2055,10 @@
 
     let volTimer = 0;
 
-    function openVol() {
+    // Hovering the button with no button held is a fresh start: nothing can legitimately be
+    // holding the column open at that moment, so a stuck `volDrag` cannot outlive the next hover.
+    function openVol(e) {
+        if (!e || e.buttons === 0) volDrag = false;
         clearTimeout(volTimer);
         volTimer = 0;
         if (vvolEl && mediaEl === vidEl) vvolEl.classList.add('open');
@@ -2757,7 +2764,7 @@
         seekDrag = false;
         volDrag = false;
         closeVol();
-        box.classList.remove('on', 'hot', 'pan', 'drag');
+        box.classList.remove('on', 'hot', 'pan', 'drag', 'full');
         box.style.cursor = '';      // onMove writes this inline over the bands; see hitRegion
         if (gripEl) { gripEl.classList.remove('hot'); gripEl.style.cursor = ''; }
         setTimeout(function () {
@@ -2886,6 +2893,8 @@
         fullApi = false;
         lockScroll();
         dimEl.classList.add('full');
+        box.classList.add('full');
+        box.style.cursor = '';      // onMove's inline cursor outranks the .full rule
         setIcon(fsEl, ICON_EXIT);
         setTip(fsEl, 'Leave fullscreen');
         if (!placed) place();           // fullscreen is a placed state, whatever it started as
@@ -2942,6 +2951,8 @@
         fullApi = false;
         unlockScroll();
         dimEl.classList.remove('full');
+        box.classList.remove('full');
+        box.style.cursor = '';
         setIcon(fsEl, ICON_FULL);
         setTip(fsEl, 'Fill the screen');
         if (!view) return;
@@ -3128,12 +3139,16 @@
                 spilling: pannable(),
                 refit: !pannable() && Math.abs(view.scale - view.fitScale) < 1e-6,
             };
+        } else if (fullActive()) {
+            // Nailed to the screen. Panning a picture that spills is the only drag left — a move
+            // would slide the window off its own black backdrop.
+            if (pannable()) drag = { x: e.clientX, y: e.clientY, mode: 'pan' };
         } else {
             const onFrame = onBar || (reg && reg.kind === 'move');   // reg is never 'resize' here
             const mode = onFrame || !pannable() ? 'move' : 'pan';
             drag = { x: e.clientX, y: e.clientY, mode: mode };
         }
-        box.classList.add('drag');
+        if (drag) box.classList.add('drag');
     }
 
     // A corner or an edge drag.
@@ -3689,6 +3704,7 @@
             // A control is never a move handle: onBoxDown returns early on isBoxControl(), so a
             // `move` cursor over one promises a drag that cannot happen.
             const c = pointerOverControl(e.clientX, e.clientY) ? 'default'
+                : fullActive() ? ''         // nothing is a handle; the .box.full rule answers
                 : reg && reg.kind === 'resize' ? regionCursor(reg)
                 : (chromeVisible() && pointerOverBar() ? 'move' : regionCursor(reg));
             box.style.cursor = c;
@@ -3822,9 +3838,20 @@
         e.preventDefault();
         e.stopPropagation();
     }, true);
+    // The three slider flags are armed on `mousedown` and disarmed on `change` — but a press that
+    // does not move the value fires no `change`, so the release is the only event that always
+    // comes. Without this they stick on: the volume column can never close (`E38`), the scrubber
+    // stops following the clip, and the bar never fades.
+    function releaseSliders() {
+        seekDrag = false;
+        volDrag = false;
+        zoomDrag = false;
+    }
+
     document.addEventListener('mouseup', function () {
         mouseDown = false;
         endDrag();
+        releaseSliders();
     }, true);
     window.addEventListener('scroll', function (e) {
         if (!placed && !panelOwns(e)) cancel();

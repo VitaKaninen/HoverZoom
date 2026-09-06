@@ -144,6 +144,29 @@ window.
 The bar carries a slider and the zoom level, in that order, immediately left of the ⊘/AA/▶
 buttons. Clicking the level swaps it for a text field in the same 52 px slot.
 
+**The percentage is CSS pixels per media pixel, not screen pixels.** `view.scale` is a plain ratio
+of layout units, so at 100% one image pixel occupies one CSS pixel — which equals one screen pixel
+only at 100% browser zoom on a 1× display. Audited 2026-09-06 against four hand-measured readings
+and the arithmetic is exact every time; a worked example, 480×854 clip on a 1080-tall screen:
+
+| browser zoom | viewport CSS px | reading | media on screen |
+|---|---|---|---|
+| 100 % | 1080 | fullscreen 126 % | 1078 device px |
+| 130 % | 830 | fullscreen 97 % | 1078 device px |
+
+Both readings are right and they disagree, because browser zoom shrinks the CSS pixel while the
+screen stays the same size: `(830 − 2·insetY)/854 = 0.97`, `(1080 − 2·insetY)/854 = 1.26`. The
+picture is the same physical size in both rows — only the label moves. **A ruler held to the screen
+therefore matches the reading only at 100 % browser zoom.**
+
+The correction, if the reading is ever wanted in screen pixels, is `view.scale * devicePixelRatio`
+at the display sites only (`fmtZoom`, `parseZoom`) — it reproduced all four measured readings
+exactly. It is **not** applied, and the reason is that `devicePixelRatio` folds display scaling in
+with browser zoom, and the two want opposite treatment: browser zoom changes apparent size at a
+fixed `scale`, HiDPI does not. On a 2× laptop every preview would open reading ~200 % and typing
+100 would render it half-size. Ask before changing this — it redefines every zoom number in the UI,
+`zoomFactor` included.
+
 **The problem the anchor solves:** the frame follows the picture, so a control living on the frame
 runs away from the pointer driving it. `zoomAnchored()` nails the frame's **bottom-right** corner —
 `view.left`/`view.top` are recomputed from `right`/`bottom` after `reflow()` — while the picture
@@ -802,6 +825,25 @@ sitting on the growth ceiling. Reported 2026-09-06.
 `fullApi` distinguishes the real API from the maximise fallback, so `leaveFull()` knows whether to
 ask the browser (and wait for `fullscreenchange`) or restore directly.
 
+### Fullscreen is nailed to the screen · `E35`
+
+Every other app's fullscreen is fixed, and ours was not: dragging the picture moved the window off
+its own black backdrop and left a grey hole where it had been. Locked in v0.68.0 at three points,
+all of which are needed — removing any one of them leaves a way to move it:
+
+- **`hitRegion()` returns null while `fullActive()`.** No move band, no resize edge, so the
+  cursor stops promising a drag as well.
+- **`onBoxDown()` allows only `pan` in fullscreen**, and only while `pannable()` — looking around a
+  picture the wheel has grown is the one drag that does not move the frame. The status bar is a
+  move handle everywhere else and is not one here.
+- **`.box.full`** gives `cursor:default` (after `.box.placed:not(.pan)`, or the move cursor still
+  wins), and `enterFull`/`restoreFull` clear `box.style.cursor` because `onMove()`'s inline write
+  outranks any rule. `onMove` writes `''` in fullscreen rather than a cursor name, so `.pan` can
+  still say `grab`.
+
+Wheel zoom needs no guard: `fitFull()` sets `view.fixedW/fixedH`, which is the hand-resized state,
+so the wheel already zooms the picture inside a fixed frame instead of growing the window.
+
 ## Clicking the picture of a placed window · `E39`
 
 Once the window is pinned its first click has been spent, so the picture itself is free: **one
@@ -980,6 +1022,22 @@ Two details the delay alone does not cover:
 - **`volDrag` re-arms the timer instead of letting it fire.** A drag is released wherever the hand
   happens to be, which is routinely off the column; without this the slider is taken away
   mid-adjustment.
+
+**Why the column got STUCK open, and the two things that now stop it.** `volDrag` was armed on the
+slider's `mousedown` and disarmed only on its `change` — and **a press on a range input that does
+not move the value fires no `change` at all.** Click the thumb where it already is, or press and
+release without dragging, and the flag is set for the rest of the preview's life: `laterCloseVol()`
+sees it, re-arms, and the column can never close. Nothing recovers it short of tearing the window
+down, which is exactly the reported symptom. Fixed in v0.68.0, two ways, because one of them is a
+guarantee and the other is a repair:
+
+- **`releaseSliders()` on the document's `mouseup`.** The release is the one event that always
+  comes. `seekDrag` and `zoomDrag` are the identical shape and were cleared at the same time — the
+  scrubber sticking stops it following the clip, and `zoomDrag` sticking holds the bar open for
+  ever (`zoomBusy()`).
+- **`openVol(e)` clears `volDrag` when `e.buttons === 0`.** Hovering the button with nothing held
+  cannot legitimately be mid-drag, so no stuck flag survives the next hover. The `buttons` test is
+  load-bearing: a real drag that wanders off the column and back must NOT be reset.
 
 `.vvol` is shown by the `open` class only — there is no `:hover` rule left, so JS is the single
 source of truth for its visibility.

@@ -85,6 +85,11 @@ has already been misdiagnosed once. (The shared ones — `innerHTML` on Trusted-
 - **Never write `el.title = '…'` — call `setTip(el, text)`.** The script draws its own tooltips so
   every one waits the same `TIP_DELAY_MS`; a `title` left on an element shows the browser's own a
   second later, under ours. See [`docs/VIEWER.md`](docs/VIEWER.md).
+- **A range input fires NO `change` when the press does not move the value.** Every "held" flag
+  here — `volDrag`, `seekDrag`, `zoomDrag` — is armed on `mousedown`, so clearing it only on
+  `change` strands it on for the life of the preview. Clear it on the document's `mouseup`
+  (`releaseSliders()`), which is the one event that always arrives. Symptom: the volume column
+  will not close, or the bar will not fade, and nothing the user does recovers it. See `E38`.
 - **A class that grants `pointer-events` must be removed on the path that HIDES the element**, not
   the path that lays it out. `layout()` stops running once the frame is down, so a `hot` left set
   leaves an invisible rectangle that eats clicks and blocks hover where the window used to be.
