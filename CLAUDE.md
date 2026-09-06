@@ -46,6 +46,7 @@ needs. **Opening all five defeats the point**; if a task genuinely spans two, re
 | the settings panel, stored settings, the manager's menu | [`docs/SETTINGS.md`](docs/SETTINGS.md) |
 | the test page, the `debug` log, the Browser pane's many lies | [`docs/TESTING.md`](docs/TESTING.md) |
 | any banner-gate threshold | [`banner-test-sites.md`](banner-test-sites.md) — ~40 live pages measured in two browsers; every number in the gate sits next to a row |
+| the zoom **percentage** — why it moves with browser zoom, and the agreed but unbuilt fix | [`docs/ZOOM-UNITS.md`](docs/ZOOM-UNITS.md) |
 | the user cited an ID — `S05`, `E22`, `T17`, `P4` | [`INTERACTION.md`](INTERACTION.md) says what it is in one line; then `grep -rn "E22" docs/` for the argument |
 
 **Find code by name, not by reading the file.** `Hover-Zoom.user.js` is ~4,200 lines and half of
