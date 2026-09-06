@@ -853,34 +853,42 @@ v0.74.0:
 
 ### The scrollbar's reserved strip · `E42`
 
-`vpW()`/`vpH()` return `window.innerWidth`/`innerHeight` **while our real fullscreen is engaged**,
-and `documentElement.clientWidth`/`clientHeight` every other time. `.dim.full` is `100vw`/`100vh`
-for the same reason: `vw`/`vh` include the scrollbar's strip, `inset:0` stops short of it.
+Two separate things go wrong in real fullscreen, and each needed its own fix.
 
-The symptom was a dead gap exactly one scrollbar wide down the right of a fullscreen preview, in
-Chrome and Firefox, with **no scrollbar drawn in it**. Those two halves are the whole diagnosis:
-`lockScroll()` succeeds (nothing is drawn), but the layout viewport keeps the reservation, so
-`clientWidth` is short by the scrollbar and every `position:fixed` box we place is inset by it.
-Before `lockScroll()` existed the same inset was there and the real scrollbar sat in it, which read
-as normal rather than as a bug.
+**The measurement.** `vpW()`/`vpH()` return `window.innerWidth`/`innerHeight` while our real
+fullscreen is engaged (`fullActive() && document.fullscreenElement`), and
+`documentElement.clientWidth`/`clientHeight` every other time. `.dim.full` is `100vw`/`100vh` for
+the same reason: those units include the scrollbar's strip, `inset:0` stops short of it.
 
-Measured, both engines, outside fullscreen: `innerWidth − clientWidth` is 15, and inline
-`overflow:hidden` on the root takes it to 0. So the reclaim works *windowed* — fullscreen is the
-only state where it does not, which is why the gate is `fullActive() && document.fullscreenElement`
-and not simply "always use innerWidth".
+**The scrollbar itself.** `lockScroll()` also sets `scrollbar-width: none`, not just
+`overflow: hidden`. Measured in fullscreen at 1920 wide, all three variants:
 
-**The maximise fallback deliberately keeps `clientWidth`.** There is no real fullscreen, the page's
-own scrollbar may genuinely still be there, and `lockScroll()` was measured reclaiming the width in
-that state — verified in the Browser pane, which is where the fallback runs.
+| root style | `innerWidth` | `clientWidth` |
+|---|---|---|
+| as-is (`overflow:hidden`) | 1920 | 1903 |
+| `width:100vw` added | 1920 | 1903 |
+| `overflow` cleared | 1920 | 1903 |
 
-**Not verified in real fullscreen.** Neither automated surface can enter it: the Browser pane
-swallows `requestFullscreen()` (the promise never settles) and an extension-driven Chrome tab is
-`visibilityState:"hidden"`, which Chrome refuses with `TypeError: not granted` — a synthetic click
-*does* carry user activation, so activation is not what is missing. If the gap survives this
-change, the remaining candidate is that `:fullscreen` makes the root `position:fixed`, which would
-make it the containing block for our fixed overlays and clip them to its own short box; the tell is
-`getComputedStyle(document.documentElement).position === 'fixed'` while fullscreen, and the fix
-would be sizing the root rather than our boxes.
+**`overflow` does nothing to the reservation in fullscreen** — it stops the page scrolling and
+nothing more. Windowed, the same `overflow:hidden` takes the gap from 15 to 0, so the propagation
+that normally reclaims the strip simply does not happen while the root is the fullscreen element.
+`scrollbar-width:none` does reclaim it (15 → 0, verified, and restores cleanly).
+
+**The two fixes are independent, and both are load-bearing.** With only the measurement fix the
+window and backdrop *do* span the screen — `dimRight` and `boxRight` both read 1920 — and the strip
+is still visible, because the browser paints the empty scrollbar track above page content and
+nothing we draw can go over it. With only `scrollbar-width` the strip is freed but `clientWidth`
+still sizes the frame short. The symptom that names this: a gap exactly one scrollbar wide with
+**no draggable thumb in it**. Before `lockScroll()` existed the same inset was there with a real,
+working scrollbar sitting in it, which read as normal rather than as a bug.
+
+**Neither automated surface can enter real fullscreen**, so all of the above came from the user
+running a probe in their own Chrome. The Browser pane swallows `requestFullscreen()` (the promise
+never settles) and an extension-driven tab is `visibilityState:"hidden"`, which Chrome refuses with
+`TypeError: not granted` — a synthetic click *does* carry user activation, so that is not what is
+missing. The maximise fallback is testable and was verified: enter, `scrollbarWidth:'none'` with
+gap 0 and the frame at full width; leave, both inline styles back to `''` and the page's scrollbar
+returned.
 
 Wheel zoom needs no guard: `fitFull()` sets `view.fixedW/fixedH`, which is the hand-resized state,
 so the wheel already zooms the picture inside a fixed frame instead of growing the window.

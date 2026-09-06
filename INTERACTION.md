@@ -507,7 +507,7 @@ this table is a table.
 | `E39` | Clicking the picture of a placed window: one click pauses, two fill the screen, and the 4 px slop that separates a click from a drag | [`docs/VIEWER.md`](docs/VIEWER.md) |
 | `E40` | One cursor rule: `grab`/`grabbing` wherever a press would pan, `move` wherever it would move the window | [`docs/VIEWER.md`](docs/VIEWER.md) |
 | `E41` | The grab border is gone and the bar is the only handle; `barMode` docks the bar when 'always'; outside fullscreen the whole preview holds it open | [`docs/VIEWER.md`](docs/VIEWER.md) |
-| `E42` | Real fullscreen measures the screen with `innerWidth`, not `clientWidth`, or a hidden scrollbar's reserved strip stays as a dead gap down the right | [`docs/VIEWER.md`](docs/VIEWER.md) |
+| `E42` | Real fullscreen measures the screen with `innerWidth`, and frees the scrollbar's strip with `scrollbar-width:none` — `overflow` alone does not reclaim it there | [`docs/VIEWER.md`](docs/VIEWER.md) |
 
 `E3` is retired with the detached state (v0.28.0); `E4` and `E5` are retired as dangling.
 

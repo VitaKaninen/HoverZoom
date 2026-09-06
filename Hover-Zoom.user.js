@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.75.0
+// @version     0.76.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -2927,14 +2927,19 @@
     // back exactly what was there — an inline value we did not write is not ours to discard.
     //
     // Both elements, because which one carries the scrollbar is the page's choice, not ours.
+    // `scrollbar-width` as well as `overflow`: in fullscreen only the former frees the strip. E42.
     let scrollLock = null;
 
     function lockScroll() {
         if (scrollLock) return;
         const de = document.documentElement, bd = document.body;
-        scrollLock = { de: de ? de.style.overflow : null, bd: bd ? bd.style.overflow : null };
-        if (de) de.style.overflow = 'hidden';
-        if (bd) bd.style.overflow = 'hidden';
+        scrollLock = {
+            de: de ? de.style.overflow : null, bd: bd ? bd.style.overflow : null,
+            deBar: de ? de.style.scrollbarWidth : null,
+            bdBar: bd ? bd.style.scrollbarWidth : null,
+        };
+        if (de) { de.style.overflow = 'hidden'; de.style.scrollbarWidth = 'none'; }
+        if (bd) { bd.style.overflow = 'hidden'; bd.style.scrollbarWidth = 'none'; }
     }
 
     function unlockScroll() {
@@ -2943,6 +2948,8 @@
         // Assigning '' removes the declaration, which is what "there was none" has to mean.
         if (de && scrollLock.de !== null) de.style.overflow = scrollLock.de;
         if (bd && scrollLock.bd !== null) bd.style.overflow = scrollLock.bd;
+        if (de && scrollLock.deBar !== null) de.style.scrollbarWidth = scrollLock.deBar;
+        if (bd && scrollLock.bdBar !== null) bd.style.scrollbarWidth = scrollLock.bdBar;
         scrollLock = null;
     }
 
