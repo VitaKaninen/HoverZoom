@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.74.0
+// @version     0.75.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -1095,7 +1095,8 @@
             '.dim{position:fixed;inset:0;background:transparent;pointer-events:none}',
             '.dim.catch{pointer-events:auto}',
             // Fullscreen puts the whole document on the screen, so the page is still behind us.
-            '.dim.full{background:#11111b}',
+            // vw/vh INCLUDE the scrollbar's reserved strip; inset:0 stops short of it. See E42.
+            '.dim.full{background:#11111b;width:100vw;height:100vh}',
             '.grip{position:fixed;background:transparent;pointer-events:none}',
             '.grip.hot{pointer-events:auto}',
             '.box{position:fixed;opacity:0;pointer-events:none;transition:opacity var(--fade) ease;',
@@ -1423,8 +1424,10 @@
     function vpEl() {
         return (document.compatMode === 'BackCompat' && document.body) || document.documentElement;
     }
-    function vpW() { return vpEl().clientWidth; }
-    function vpH() { return vpEl().clientHeight; }
+    // Real fullscreen measures the SCREEN, not the layout viewport. See E42.
+    function fullScreenAPI() { return fullActive() && !!document.fullscreenElement; }
+    function vpW() { return fullScreenAPI() ? window.innerWidth : vpEl().clientWidth; }
+    function vpH() { return fullScreenAPI() ? window.innerHeight : vpEl().clientHeight; }
 
     function usableHeight() {
         // The floor is because the Browser pane reports clientHeight 0 while it is hidden.

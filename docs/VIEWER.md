@@ -851,6 +851,37 @@ v0.74.0:
   stayed there — nothing puts it back until fullscreen ends, since `fitFull()` only re-centres on a
   viewport change. Arrow-key panning took the same route. Found v0.74.0.
 
+### The scrollbar's reserved strip · `E42`
+
+`vpW()`/`vpH()` return `window.innerWidth`/`innerHeight` **while our real fullscreen is engaged**,
+and `documentElement.clientWidth`/`clientHeight` every other time. `.dim.full` is `100vw`/`100vh`
+for the same reason: `vw`/`vh` include the scrollbar's strip, `inset:0` stops short of it.
+
+The symptom was a dead gap exactly one scrollbar wide down the right of a fullscreen preview, in
+Chrome and Firefox, with **no scrollbar drawn in it**. Those two halves are the whole diagnosis:
+`lockScroll()` succeeds (nothing is drawn), but the layout viewport keeps the reservation, so
+`clientWidth` is short by the scrollbar and every `position:fixed` box we place is inset by it.
+Before `lockScroll()` existed the same inset was there and the real scrollbar sat in it, which read
+as normal rather than as a bug.
+
+Measured, both engines, outside fullscreen: `innerWidth − clientWidth` is 15, and inline
+`overflow:hidden` on the root takes it to 0. So the reclaim works *windowed* — fullscreen is the
+only state where it does not, which is why the gate is `fullActive() && document.fullscreenElement`
+and not simply "always use innerWidth".
+
+**The maximise fallback deliberately keeps `clientWidth`.** There is no real fullscreen, the page's
+own scrollbar may genuinely still be there, and `lockScroll()` was measured reclaiming the width in
+that state — verified in the Browser pane, which is where the fallback runs.
+
+**Not verified in real fullscreen.** Neither automated surface can enter it: the Browser pane
+swallows `requestFullscreen()` (the promise never settles) and an extension-driven Chrome tab is
+`visibilityState:"hidden"`, which Chrome refuses with `TypeError: not granted` — a synthetic click
+*does* carry user activation, so activation is not what is missing. If the gap survives this
+change, the remaining candidate is that `:fullscreen` makes the root `position:fixed`, which would
+make it the containing block for our fixed overlays and clip them to its own short box; the tell is
+`getComputedStyle(document.documentElement).position === 'fixed'` while fullscreen, and the fix
+would be sizing the root rather than our boxes.
+
 Wheel zoom needs no guard: `fitFull()` sets `view.fixedW/fixedH`, which is the hand-resized state,
 so the wheel already zooms the picture inside a fixed frame instead of growing the window.
 
