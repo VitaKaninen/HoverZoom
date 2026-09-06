@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.68.0
+// @version     0.69.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -974,7 +974,7 @@
     let fullApi = false;        // the real API engaged, rather than the maximise fallback
 
     const SVG_NS = 'http://www.w3.org/2000/svg';
-    const SPIN_SIZE = 34;                           // px, matches the .spin rule
+    const SPIN_SIZE = 24;                           // px, matches the .spin rule
     const RING_R = 13;                              // in the 36×36 viewBox, stroke-width 4.5
     const RING_C = 2 * Math.PI * RING_R;
     const ARC_FRAC = 0.3;                           // how much of the ring the moving arc covers
@@ -1240,7 +1240,8 @@
             // `idle` still decides whether they show; this only takes the animation off it.
             // Equal specificity to the two rules above, so source order is what beats them.
             '.box.nobar .cap,.box.nobar .edge,.box.nobar .vctl{transition:none}',
-            '.spin{position:fixed;width:34px;height:34px;display:none;pointer-events:none;',
+            '.spin{position:fixed;width:' + SPIN_SIZE + 'px;height:' + SPIN_SIZE + 'px;',
+            'display:none;pointer-events:none;',
             'filter:drop-shadow(0 2px 6px rgba(0,0,0,.5))}',
             '.spin.on{display:block}',
             '.spin svg{display:block;width:100%;height:100%}',
@@ -1614,6 +1615,37 @@
         if (!reg.ey) return 'ew-resize';
         if (!reg.ex) return 'ns-resize';
         return (reg.ex === 'l') === (reg.ey === 't') ? 'nwse-resize' : 'nesw-resize';
+    }
+
+    // What a press at this spot would actually start — the same rule onBoxDown applies, so the
+    // cursor can never promise a drag the press does not perform.
+    function pressMode(reg) {
+        if (!placed || !view) return '';
+        if (reg && reg.kind === 'resize') return 'resize';
+        if (fullActive()) return pannable() ? 'pan' : '';
+        const onFrame = (reg && reg.kind === 'move') || (chromeVisible() && pointerOverBar());
+        return onFrame || !pannable() ? 'move' : 'pan';
+    }
+
+    // The one writer of the box cursor. Panning gets the hand in every state that pans.
+    function applyCursor() {
+        if (!box || !placed) return;
+        let c;
+        if (drag) {
+            c = drag.mode === 'pan' ? 'grabbing'
+                : drag.mode === 'move' ? 'move'
+                : regionCursor({ kind: 'resize', ex: drag.ex, ey: drag.ey });
+        } else {
+            const reg = hitRegion(pointer.x, pointer.y);
+            const m = pressMode(reg);
+            // A control is never a handle: onBoxDown returns early on isBoxControl().
+            c = pointerOverControl(pointer.x, pointer.y) ? 'default'
+                : m === 'resize' ? regionCursor(reg)
+                : m === 'pan' ? 'grab'
+                : m === 'move' ? 'move' : 'default';
+        }
+        box.style.cursor = c;
+        if (gripEl) gripEl.style.cursor = c;
     }
 
     // ------------------------------------------------------------- status bar
@@ -3149,6 +3181,7 @@
             drag = { x: e.clientX, y: e.clientY, mode: mode };
         }
         if (drag) box.classList.add('drag');
+        applyCursor();
     }
 
     // A corner or an edge drag.
@@ -3690,6 +3723,7 @@
         if (!drag) return;
         drag = null;
         if (box) box.classList.remove('drag');
+        applyCursor();      // the release may land with no further movement to redraw it
     }
 
     function onMove(e) {
@@ -3699,20 +3733,12 @@
         const over = !!view && !!box && box.classList.contains('on') &&
             pointInPreview(e.clientX, e.clientY);
         if (over) showBar(); else commitZoomField(null);
-        if (box && placed && !drag) {
-            const reg = hitRegion(e.clientX, e.clientY);
-            // A control is never a move handle: onBoxDown returns early on isBoxControl(), so a
-            // `move` cursor over one promises a drag that cannot happen.
-            const c = pointerOverControl(e.clientX, e.clientY) ? 'default'
-                : fullActive() ? ''         // nothing is a handle; the .box.full rule answers
-                : reg && reg.kind === 'resize' ? regionCursor(reg)
-                : (chromeVisible() && pointerOverBar() ? 'move' : regionCursor(reg));
-            box.style.cursor = c;
-            if (gripEl) gripEl.style.cursor = c;
-        }
-        if (!drag || !view) return;
+        applyCursor();
+        // Before the drag guard: fullscreen with a picture that fits starts no drag at all, and
+        // a tap only cleared inside that guard survives any distance. See E39.
         if (tap && (Math.abs(e.clientX - tap.x) > TAP_SLOP ||
                     Math.abs(e.clientY - tap.y) > TAP_SLOP)) tap = null;
+        if (!drag || !view) return;
         if (e.buttons === 0) { endDrag(); return; }
         if (drag.mode === 'resize') { resizeBy(e); return; }
         const dx = e.clientX - drag.x;
@@ -4489,6 +4515,19 @@
         }
         pos.el.addEventListener('change', syncPos);
         syncPos();
+        num('zoomFactor', 'Opening zoom limit',
+            'how far a SMALL image is enlarged when the preview first opens, in multiples of ' +
+            'the original’s own size (1 = never enlarged). It is still fitted inside the ' +
+            'browser window, so anything larger than that opens smaller than this', 0.1, 8, 0.1);
+        num('minRatio', 'Required upsize',
+            'the original must be at least this many times the size of the image on the page, ' +
+            'so 1 means anything bigger at all. Below 1 previews an image that is no bigger — ' +
+            'useful for working out why something gives no preview. Applies to what a linked ' +
+            'page declares as well as to what the script works out for itself', 0.1, 100, 0.1);
+        num('minDisplayed', 'Ignore images smaller than',
+            'the size it is drawn at on the page, in px. This is the ONLY size filter — nothing ' +
+            'separately singles out icons, avatars or emoji, so lower it to reach those (a ' +
+            'YouTube avatar is about 24)', 0, 2000, 1);
         pick('pinButton', 'Pin preview with',
             'which button keeps a preview on screen. The other one closes it without ' +
             'following the link underneath', [
@@ -4548,20 +4587,6 @@
 
         advanced('Advanced options');
 
-        section('Matching');
-        num('hoverDelay', 'Delay before the preview appears',
-            'how long the pointer rests on an image first, in ms. A short wait stops previews ' +
-            'firing as you sweep the pointer across a page', 0, 3000, 10);
-        num('minDisplayed', 'Ignore images smaller than',
-            'the size it is drawn at on the page, in px. This is the ONLY size filter — nothing ' +
-            'separately singles out icons, avatars or emoji, so lower it to reach those (a ' +
-            'YouTube avatar is about 24)', 0, 2000, 1);
-        num('minRatio', 'Required upsize',
-            'the original must be at least this many times the size of the image on the page, ' +
-            'so 1 means anything bigger at all. Below 1 previews an image that is no bigger — ' +
-            'useful for working out why something gives no preview. Applies to what a linked ' +
-            'page declares as well as to what the script works out for itself', 0.1, 100, 0.1);
-
         section('The preview window');
         num('wheelZoomStep', 'Wheel zoom step',
             'how much one wheel notch changes the zoom, in %. The + and − keys always step by 25%',
@@ -4574,13 +4599,12 @@
             'how large the preview window may be grown, in multiples of the browser window. A ' +
             'preview always opens no larger than the browser window; this is the ceiling for ' +
             'growing it yourself afterwards, with the wheel or by dragging a corner', 1, 4, 0.25);
-        num('zoomFactor', 'Opening zoom limit',
-            'how far a SMALL image is enlarged when the preview first opens, in multiples of ' +
-            'the original’s own size (1 = never enlarged). It is still fitted inside the ' +
-            'browser window, so anything larger than that opens smaller than this', 0.1, 8, 0.1);
 
         section('Appearance');
-        num('fadeMs', 'Preview fade',
+        num('hoverDelay', 'Delay before the preview appears',
+            'how long the pointer rests on an image first, in ms. A short wait stops previews ' +
+            'firing as you sweep the pointer across a page', 0, 3000, 10);
+        num('fadeMs', 'Preview fade in / out',
             'time the preview window takes to fade in when it opens, and out when it closes, ' +
             'in ms', 0, 1000, 10);
         num('borderWidth', 'Border thickness', 'in px', 0, 20, 1);

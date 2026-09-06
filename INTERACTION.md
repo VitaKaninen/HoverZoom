@@ -415,9 +415,9 @@ inert.
 | `T22` | `S05` | Wheel over the window | `S01` — the wheel is the page's here; it scrolls, and the scroll closes the preview (`K2`, `E22`) |
 | `T23` | `S10` | Drag a corner or an edge | `S19` → `S10` at the new size, frozen there (`E23`) |
 | `T24` | `S10` | Wheel anywhere **but** the frame | `S10` unchanged — the page scrolls under it |
-| `T26` | `S10` | Single click on the picture — not a grab band, not the bar, not a control | `S10`; a clip pauses or resumes, a still image does nothing (`E39`) |
+| `T26` | `S10` | Single click on the picture — not a grab band, not the bar, not a control — with under 4 px of travel | `S10`; a clip pauses or resumes, a still image does nothing (`E39`) |
 | `T27` | `S10` | Double click in the same place | `S10` fullscreen, or back out of it if already there. Click 1's pause is undone (`E39`) |
-| `T28` | `S10` fullscreen | Drag the picture, an edge, or the status bar | Nothing moves — fullscreen is locked to the screen, and the cursor stays an arrow. A spilling picture still pans (`E35`) |
+| `T28` | `S10` fullscreen | Drag the picture, an edge, or the status bar | Nothing moves — fullscreen is locked to the screen, and the cursor stays an arrow. A spilling picture still pans, with the `grab` cursor (`E35`, `E40`) |
 | `T25` | — | *Retired in v0.34.0.* Moving the window used to freeze its size as a ceiling; it no longer touches the size at all (`E22`) |
 
 ---
@@ -504,7 +504,8 @@ this table is a table.
 | `E36` | The floating video strip: why it overlays rather than reserves, and why not native `controls` | [`docs/VIEWER.md`](docs/VIEWER.md) |
 | `E37` | Every control clears the frame's grab bands, and the padding trap that broke it | [`docs/VIEWER.md`](docs/VIEWER.md) |
 | `E38` | Sound is remembered per site as two values, and starts muted everywhere | [`docs/VIEWER.md`](docs/VIEWER.md) |
-| `E39` | Clicking the picture of a placed window: one click pauses, two fill the screen | [`docs/VIEWER.md`](docs/VIEWER.md) |
+| `E39` | Clicking the picture of a placed window: one click pauses, two fill the screen, and the 4 px slop that separates a click from a drag | [`docs/VIEWER.md`](docs/VIEWER.md) |
+| `E40` | One cursor rule: `grab`/`grabbing` wherever a press would pan, `move` wherever it would move the window | [`docs/VIEWER.md`](docs/VIEWER.md) |
 
 `E3` is retired with the detached state (v0.28.0); `E4` and `E5` are retired as dangling.
 
@@ -518,6 +519,7 @@ this table is a table.
 | Hover state machine (`R1`, `R2`, `S01`–`S06`, `S16`) | `onOver`, `onOut`, `cancel`, `dismiss` |
 | Press / click ownership (`E1`) | `pointInPreview`, `onBoxDown`, `onBoxClick`, the document `mousedown` and `click` listeners |
 | Press regions and dragging (`S13`, `S14`, `S19`, `E21`, `E23`, `E25`) | `hitRegion`, `regionCursor`, `onBoxDown`, `onMove`, `resizeBy` |
+| The cursor (`E40`) | `pressMode`, `applyCursor`, `regionCursor`, the `.box.pan` / `.box.placed:not(.pan)` CSS fallback |
 | Placed mode (`S10`–`S15`, `S19`) | `place`, `unplace`, `onPinKey`, `onPinWheel` |
 | Wheel zoom, both states (`T17`, `T22`, `T24`) | `enableWheelZoom`, `disableWheelZoom`, `onPinWheel` |
 | Geometry (`S12`, `E7`, `E21`, `E25`, `E26`) | `view`, `reflow`, `layout`, `zoomAt`, `pannable`, `viewportBox`, `growBox`, `clampPosition`, `fitScaleFor`, `minScaleFor`, `chrome`, `insetX`/`insetY`, `outerW`/`outerH` |

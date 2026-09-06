@@ -866,8 +866,29 @@ is dead code.
 window to have been placed *before* this press (so the pinning click is not also a pause), the left
 button, `hitRegion()` returning null (not a grab band, not a resize edge) and not the status bar.
 `isBoxControl()` has already returned early, so the strip and its popups never reach here.
-`onMove()` clears `tap` once the pointer has travelled more than `TAP_SLOP` (4 px) with a button
-held, so a pan or a move is not also a pause.
+`onMove()` clears `tap` once the pointer has travelled more than `TAP_SLOP` (4 px), so a pan or a
+move is not also a pause.
+
+**The slop check must sit ABOVE `onMove`'s `if (!drag || !view) return;`, not below it.** Not every
+press starts a drag: fullscreen with a picture that fits sets no `drag` at all, so a check inside
+that guard never ran and the pause fired on release however far the pointer had travelled. Clearing
+`tap` is about the pointer, not about a drag being in progress. Fixed v0.69.0.
+
+## One cursor rule: it names what a press would do · `E40`
+
+**`pressMode(reg)` answers "what would a press here start" — `resize`, `move`, `pan` or nothing —
+and it is the same rule `onBoxDown` applies.** `applyCursor()` turns that into the cursor:
+`grab` for pan, `grabbing` while a pan drag is live, `move` for a window move, the eight resize
+arrows, `default` over a control or where a press does nothing. It is the only writer of
+`box.style.cursor`, called from `onMove`, from `onBoxDown` after the drag is decided, and from
+`endDrag()` — the last because a release with no further pointer movement has nothing else to
+redraw it.
+
+Before v0.69.0 the cursor was assembled inline in `onMove` from a different set of tests than
+`onBoxDown` used, and the two drifted: fullscreen short-circuited to `''` and left the answer to
+CSS, and a live drag kept whatever inline value the last hover had written. The `.box.pan` /
+`.box.placed:not(.pan)` / `.box.full:not(.pan)` rules survive as the fallback for the moment
+between `place()` and the first mousemove; they are no longer what decides anything.
 
 ## The floating video strip · `E36`
 

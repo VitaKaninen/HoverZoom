@@ -372,10 +372,19 @@ in `migrate()`, which runs before `RETIRED` deletes the old keys:
 
 `playVideos` left storage altogether — see the ▶ section below.
 
-**Everything else moved rather than went.** `hoverDelay`, `minDisplayed`, `minRatio`,
-`wheelZoomStep`, `frameMargin`, the colours — every number and colour is now inside a collapsed
-`<details>` labelled *Advanced options*. Nobody opens this panel to change them, and together
-they buried the four that people do change.
+**Everything else moved rather than went.** `hoverDelay`, `wheelZoomStep`, `frameMargin`, the
+colours — every number and colour is now inside a collapsed `<details>` labelled *Advanced
+options*. Nobody opens this panel to change them, and together they buried the four that people do
+change. (`minDisplayed`, `minRatio` and `zoomFactor` came back out in v0.69.0 — see below.)
+
+## The three gates that decide IF and HOW BIG live in *The preview* (v0.69.0)
+
+`zoomFactor`, `minRatio` and `minDisplayed`, in that order, directly under *Location*. They are the
+three numbers that decide whether a preview appears at all and how large it opens, which is the
+same question the visible section already answers; leaving them behind *Advanced options* filed
+"why does nothing happen on this image" under a fold. The section they left — *Matching* — held
+only those and `hoverDelay`, so it is gone; `hoverDelay` is now the first row of *Appearance*,
+where it reads as one of the timings rather than as a gate.
 
 ### Plain language is a behaviour change, not a rewording
 

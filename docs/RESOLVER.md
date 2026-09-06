@@ -117,7 +117,9 @@ went with it.
   background picks the light palette on a white page and draws a near-white disc on white, which is
   "matching" and invisible. The page reading survives only as the fallback where the media query is
   unsupported; `spinnerTheme` (auto/dark/light) overrides both.
-- **Contrast is deliberate on both sides:** 34 px, 4.5 px strokes, a 1.5 px rim at .45 alpha, track
+- **`SPIN_SIZE` (24 px, was 34 until v0.69.0) is the only size to change** — the `.spin` CSS reads
+  it, and the SVG's `viewBox` stays 36×36, so the disc, strokes and rim scale with it.
+- **Contrast is deliberate on both sides:** 4.5 px strokes, a 1.5 px rim at .45 alpha, track
   at .22–.30. **The rim is what separates the disc from arbitrary page content behind it** — at .20
   there is effectively no edge, which is most of why an earlier cut read as a smudge.
 - `SPINNER_DELAY` (150 ms) keeps it from flashing on cached hits, but `buildViewer()` runs
