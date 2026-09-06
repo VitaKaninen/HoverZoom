@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.63.0
+// @version     0.64.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -73,6 +73,8 @@
         showStatusBar: true,        // filename / type / size / dimensions strip, also the move handle; auto-fades
         spinnerTheme: 'auto',       // 'auto' (follows the browser) | 'dark' | 'light'
         referrerSites: [],          // sites to load previews from WITHOUT a referrer
+        siteAudio: {},              // host -> {muted, volume}; absent means muted, which is the
+                                    // only default a first visit may have — see AUDIO_DEFAULT
 
         debug: false,               // log every hover decision to the console
     };
@@ -124,6 +126,31 @@
 
     function saveSettings() {
         GM_setValue(KEY, JSON.stringify(cfg));
+    }
+
+    // Sound is remembered per site, and every site starts muted: a preview that made noise on a
+    // page the user had not asked it to would be the worst possible first impression.
+    const AUDIO_DEFAULT = { muted: true, volume: 0.6 };
+
+    function audioFor() {
+        const m = cfg.siteAudio && cfg.siteAudio[pageHost()];
+        if (!m) return Object.assign({}, AUDIO_DEFAULT);
+        return {
+            muted: m.muted === undefined ? AUDIO_DEFAULT.muted : !!m.muted,
+            volume: typeof m.volume === 'number' ? Math.max(0, Math.min(1, m.volume))
+                                                 : AUDIO_DEFAULT.volume,
+        };
+    }
+
+    // Read-modify-write against STORAGE, not against our copy: another tab may have written since.
+    function saveAudio(patch) {
+        const host = pageHost();
+        if (!host) return;
+        reloadSettings();
+        const all = Object.assign({}, cfg.siteAudio);
+        all[host] = Object.assign({}, AUDIO_DEFAULT, all[host], patch);
+        cfg.siteAudio = all;
+        saveSettings();
     }
 
     // Every tab holds its own `cfg`, read once at load.
@@ -939,9 +966,10 @@
     let spinEl = null, spinSvg = null;
     let fsEl = null;            // the bar's fullscreen button
     let vctlEl = null, vplayEl = null, vtimeEl = null, vseekEl = null,
-        vrateEl = null, vmuteEl = null;
+        vrateEl = null, vmuteEl = null, vsoundEl = null, vvolEl = null, vvolInEl = null,
+        ratePopEl = null, rateInEl = null;
     let seekDrag = false;       // the scrubber is being held; timeupdate must not fight it
-    let soundWanted = false;    // survives one preview to the next, unlike vidEl.muted
+    let volDrag = false;        // ditto for the volume column against syncVideoCtl()
     let fullPrev = null;        // geometry to put back when fullscreen ends
 
     const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -969,17 +997,23 @@
         'M14 4.2v2.06a5.75 5.75 0 0 1 0 11.48v2.06a7.75 7.75 0 0 0 0-15.6z';
     const ICON_MUTE = 'M3 9v6h4l5 4V5L7 9H3zm12.6-.9l1.4 1.4 1.4-1.4 1.4 1.4-1.4 1.4 1.4 1.4-1.4 1.4' +
         '-1.4-1.4-1.4 1.4-1.4-1.4 1.4-1.4-1.4-1.4 1.4-1.4z';
+    // Stroked, not filled: a slash through a solid triangle reads as a triangle. Outlining both
+    // is the only version that says "no" at 12 px.
+    const ICON_NOPLAY = ['M8 5.5v13l10-6.5z', 'M4.5 19.5l15-15'];
 
+    // A filled glyph from one path, or a stroked one from several.
     function mkIcon(d) {
         const svg = document.createElementNS(SVG_NS, 'svg');
         svg.setAttribute('viewBox', '0 0 24 24');
-        const p = document.createElementNS(SVG_NS, 'path');
-        p.setAttribute('d', d);
-        svg.appendChild(p);
+        [].concat(d).forEach(function (one) {
+            const p = document.createElementNS(SVG_NS, 'path');
+            p.setAttribute('d', one);
+            svg.appendChild(p);
+        });
         return svg;
     }
 
-    // Swap an icon button's glyph without rebuilding the button.
+    // Swap an icon button's glyph without rebuilding the button. Single-path icons only.
     function setIcon(btn, d) {
         const p = btn.querySelector('path');
         if (p) p.setAttribute('d', d);
@@ -1083,13 +1117,14 @@
             'white-space:nowrap;color:#7f849c;font-style:italic}',
             '.box.placed .cap .hint{display:none}',
             '.cap .btn{position:absolute;top:50%;transform:translateY(-50%);display:none;',
-            'width:18px;height:18px;line-height:16px;text-align:center;border-radius:4px;',
+            'width:18px;height:18px;line-height:18px;text-align:center;border-radius:4px;',
             'border:1px solid #45475a;background:rgba(49,50,68,.9);color:#a6adc8;',
             'cursor:pointer;font-size:12px}',
             '.box.hot .cap .block,.box.hot .cap .aa,.box.hot .cap .fs{display:block}',
             '.box.hot .cap.hasvid .vidoff{display:block}',
-            '.cap .vidoff{font-size:10px}',
-            '.cap .fs svg{display:block;width:12px;height:12px;margin:2px auto;fill:currentColor}',
+            '.cap .vidoff svg{display:block;width:13px;height:13px;margin:2px auto;fill:none;',
+            'stroke:currentColor;stroke-width:2;stroke-linejoin:round;stroke-linecap:round}',
+            '.cap .fs svg{display:block;width:12px;height:12px;margin:3px auto;fill:currentColor}',
             '.cap .fs:hover{background:#a6e3a1;border-color:#a6e3a1;color:#1e1e2e}',
             '.cap .aa{font-size:9px;font-weight:700;letter-spacing:-.06em}',
             '.cap .aa.sharp{background:#89b4fa;border-color:#89b4fa;color:#1e1e2e}',
@@ -1108,8 +1143,11 @@
             '.cap .zslider{flex:none;width:' + BAR_SLIDER_W + 'px;height:14px;',
             'margin:0;padding:0;accent-color:#89b4fa;cursor:pointer}',
             '.cap .zslider[hidden]{display:none}',
+            // Left-aligned in a fixed-width slot: the slot is wide enough for "3,200%", so
+            // right-aligning it left a hole between the slider and a short reading like "26%".
+            // The slack now falls after the readout, where nothing has to reach across it.
             '.cap .zoom{flex:none;position:relative;display:flex;align-items:center;',
-            'justify-content:flex-end;width:' + BAR_ZOOM_W + 'px;height:16px}',
+            'justify-content:flex-start;width:' + BAR_ZOOM_W + 'px;height:16px}',
             '.cap .zoom[hidden]{display:none}',
             '.cap .zval{cursor:pointer;padding:0 3px;border-radius:3px;white-space:nowrap}',
             '.cap .zval[hidden]{display:none}',
@@ -1120,7 +1158,7 @@
             '.cap .zin[hidden]{display:none}',
             // ---- the video strip: floats OVER the picture, so it costs no layout at all —
             // no gutter, no minFrameW(), no reserved height. Shown only over a clip.
-            '.vctl{position:absolute;left:' + VCTL_SIDE + 'px;right:' + VCTL_SIDE + 'px;',
+            '.vctl{position:absolute;',
             'bottom:' + (BAR_MIN_H + VCTL_GAP) + 'px;height:' + VCTL_H + 'px;display:none;',
             'align-items:center;gap:8px;box-sizing:border-box;padding:0 8px;border-radius:7px;',
             'background:rgba(17,17,27,.55);backdrop-filter:blur(7px) saturate(1.4);',
@@ -1138,8 +1176,44 @@
             'accent-color:#89b4fa;cursor:pointer}',
             '.vctl .vrate{flex:none;padding:0 5px;height:18px;line-height:18px;border-radius:4px;',
             'cursor:pointer;font-variant-numeric:tabular-nums;font-weight:600;color:#bac2de}',
-            '.vctl .vrate:hover{background:rgba(205,214,244,.18);color:#cdd6f4}',
+            '.vctl .vrate:hover,.vctl .vrate.open{background:rgba(205,214,244,.18);color:#cdd6f4}',
             '.vctl .vrate.off{color:#f9e2af}',
+
+            // ---- sound: the button is a hover target for the column above it, so the two share
+            // a wrapper and the popup keeps the pointer inside it on the way up.
+            '.vctl .vsound{flex:none;position:relative;display:flex;align-items:center;',
+            'justify-content:center;width:' + VOL_BTN + 'px;height:' + VOL_BTN + 'px}',
+            '.vctl .vsound .vbtn{width:100%;height:100%}',
+            '.vctl .vsound .vbtn svg{width:17px;height:17px}',
+            '.vvol{position:absolute;left:50%;bottom:100%;transform:translateX(-50%);display:none;',
+            'padding:9px 6px 7px;margin-bottom:5px;border-radius:7px;',
+            'background:rgba(17,17,27,.92);border:1px solid rgba(205,214,244,.14);',
+            'box-shadow:0 6px 18px rgba(0,0,0,.5)}',
+            '.vctl .vsound:hover .vvol,.vvol.open{display:block}',
+            // A vertical range: the rotated-div trick misreports its own hit area, so use the
+            // real thing. Both spellings are needed — Firefox reads one, Chromium the other.
+            '.vvol input{-webkit-appearance:slider-vertical;appearance:slider-vertical;',
+            'writing-mode:vertical-lr;direction:rtl;-moz-orient:vertical;',
+            'width:16px;height:' + VOL_TRACK + 'px;margin:0;padding:0;',
+            'accent-color:#89b4fa;cursor:pointer}',
+
+            // ---- the speed menu, opening upward out of the strip
+            '.spop{position:absolute;bottom:100%;margin-bottom:6px;display:none;z-index:5;',
+            'min-width:96px;padding:4px;border-radius:7px;background:rgba(17,17,27,.97);',
+            'border:1px solid rgba(205,214,244,.16);box-shadow:0 8px 22px rgba(0,0,0,.55);',
+            'font:11px/1.4 system-ui,sans-serif;color:#cdd6f4;text-align:left}',
+            '.spop.open{display:block}',
+            '.spop .opt{padding:4px 8px;border-radius:4px;cursor:pointer;',
+            'font-variant-numeric:tabular-nums;white-space:nowrap}',
+            '.spop .opt:hover{background:#313244}',
+            '.spop .opt.on{background:#89b4fa;color:#1e1e2e;font-weight:700}',
+            '.spop .sep{height:1px;margin:4px 2px;background:rgba(205,214,244,.16)}',
+            '.spop .custom{display:flex;align-items:center;gap:4px;padding:2px 4px 2px 8px}',
+            '.spop .custom input{width:46px;box-sizing:border-box;padding:2px 4px;',
+            'font:11px system-ui,sans-serif;color:#cdd6f4;background:#313244;',
+            'border:1px solid #45475a;border-radius:4px;outline:none}',
+            '.spop .custom input:focus{border-color:#89b4fa}',
+            '.spop .custom span{color:#7f849c}',
             '.pop{position:absolute;right:8px;bottom:' + (BAR_MIN_H + 4) + 'px;display:none;',
             'z-index:4;max-width:250px;background:rgba(30,30,46,.98);border:1px solid #45475a;',
             'border-radius:6px;overflow:hidden;box-shadow:0 6px 20px rgba(0,0,0,.55);',
@@ -1217,7 +1291,7 @@
         vidOffEl = document.createElement('span');
         vidOffEl.className = 'btn vidoff';
         setTip(vidOffEl, 'Stop showing clips in this tab — still images only, until you reload');
-        vidOffEl.textContent = '▶';
+        vidOffEl.appendChild(mkIcon(ICON_NOPLAY));
         vidOffEl.addEventListener('mousedown', function (e) { e.preventDefault(); e.stopPropagation(); }, true);
         vidOffEl.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); stopVideoPreviews(); }, true);
 
@@ -1853,7 +1927,9 @@
 
     // ------------------------------------------------- the floating video strip
 
-    const RATES = [1, 1.5, 2, 0.5];
+    const RATES = [0.1, 0.25, 0.5, 1, 1.25, 1.5, 2, 3];
+    const RATE_MIN = 0.0625, RATE_MAX = 16;     // what the media element itself will accept
+    const RATE_POP_W = 96;                      // matches .spop's min-width
 
     function mkVBtn(icon, tip, onClick) {
         const b = document.createElement('span');
@@ -1900,20 +1976,52 @@
 
         vrateEl = document.createElement('span');
         vrateEl.className = 'vrate';
-        vrateEl.textContent = '1×';
+        vrateEl.textContent = '100%';
         setTip(vrateEl, 'Playback speed');
         vrateEl.addEventListener('mousedown', function (e) { e.preventDefault(); e.stopPropagation(); }, true);
         vrateEl.addEventListener('click', function (e) {
-            e.preventDefault(); e.stopPropagation(); cycleRate(); showBar();
+            e.preventDefault(); e.stopPropagation(); toggleRateMenu(); showBar();
         }, true);
+        buildRateMenu();
 
+        // The button and its column share a wrapper, so the pointer never leaves the hover
+        // target on its way from one to the other.
+        vsoundEl = document.createElement('span');
+        vsoundEl.className = 'vsound';
         vmuteEl = mkVBtn(ICON_MUTE, 'Sound on / off', toggleMute);
+        vvolEl = document.createElement('div');
+        vvolEl.className = 'vvol';
+        vvolInEl = document.createElement('input');
+        vvolInEl.type = 'range';
+        vvolInEl.min = '0';
+        vvolInEl.max = '100';
+        vvolInEl.step = '1';
+        setTip(vvolInEl, 'Volume');
+        vvolInEl.addEventListener('mousedown', function (e) {
+            e.stopPropagation(); volDrag = true; showBar();
+        }, true);
+        vvolInEl.addEventListener('input', function () {
+            const v = Number(vvolInEl.value) / 100;
+            if (mediaEl !== vidEl) return;
+            volDrag = true;
+            vidEl.volume = v;
+            // Touching the column is a request for sound; zero is the way to ask for silence.
+            vidEl.muted = v <= 0;
+            applyAudioWish();
+        });
+        vvolInEl.addEventListener('change', function () {
+            volDrag = false; rememberAudio(); showBar();
+        });
+        vvolEl.appendChild(vvolInEl);
+        vsoundEl.appendChild(vmuteEl);
+        vsoundEl.appendChild(vvolEl);
 
         vctlEl.appendChild(vplayEl);
         vctlEl.appendChild(vtimeEl);
         vctlEl.appendChild(vseekEl);
         vctlEl.appendChild(vrateEl);
-        vctlEl.appendChild(vmuteEl);
+        vctlEl.appendChild(vsoundEl);
+        vctlEl.appendChild(ratePopEl);
 
         vidEl.addEventListener('timeupdate', syncVideoTime);
         vidEl.addEventListener('durationchange', syncVideoTime);
@@ -1947,8 +2055,13 @@
         if (!vctlEl || mediaEl !== vidEl) return;
         setIcon(vplayEl, vidEl.paused ? ICON_PLAY : ICON_PAUSE);
         setIcon(vmuteEl, vidEl.muted ? ICON_MUTE : ICON_LOUD);
-        vrateEl.textContent = String(vidEl.playbackRate).replace(/\.0$/, '') + '×';
-        vrateEl.classList.toggle('off', vidEl.playbackRate !== 1);
+        setTip(vmuteEl, vidEl.muted ? 'Sound on' : 'Mute');
+        // A muted element still reports its volume; the column must show silence, not the level
+        // it will come back to.
+        if (!volDrag) vvolInEl.value = String(Math.round((vidEl.muted ? 0 : vidEl.volume) * 100));
+        vrateEl.textContent = Math.round(vidEl.playbackRate * 100) + '%';
+        vrateEl.classList.toggle('off', Math.abs(vidEl.playbackRate - 1) > 1e-6);
+        syncRateMenu();
         syncVideoTime();
     }
 
@@ -1962,16 +2075,99 @@
     function toggleMute() {
         if (mediaEl !== vidEl) return;
         vidEl.muted = !vidEl.muted;
-        soundWanted = !vidEl.muted;
-        if (!vidEl.paused) return;
-        playVideo();
+        // Unmuting into a zero volume is a button that does nothing; give it something to play.
+        if (!vidEl.muted && vidEl.volume <= 0) vidEl.volume = AUDIO_DEFAULT.volume;
+        applyAudioWish();
+        rememberAudio();
     }
 
-    function cycleRate() {
-        if (mediaEl !== vidEl) return;
-        const i = RATES.indexOf(vidEl.playbackRate);
-        vidEl.playbackRate = RATES[(i + 1) % RATES.length];
+    // One place decides what the tab wants, so the icon, the column and the element agree.
+    function applyAudioWish() {
+        if (vidEl.paused) playVideo();
         syncVideoCtl();
+    }
+
+    function rememberAudio() {
+        saveAudio({ muted: !!vidEl.muted, volume: vidEl.volume });
+    }
+
+    // ---- the speed menu
+
+    function buildRateMenu() {
+        ratePopEl = document.createElement('div');
+        ratePopEl.className = 'spop';
+        ratePopEl.addEventListener('mousedown', function (e) { e.stopPropagation(); }, true);
+        RATES.forEach(function (r) {
+            const o = document.createElement('div');
+            o.className = 'opt';
+            o.dataset.rate = String(r);
+            o.textContent = Math.round(r * 100) + '%';
+            o.addEventListener('click', function (e) {
+                e.preventDefault(); e.stopPropagation(); setRate(r); closeRateMenu(); showBar();
+            }, true);
+            ratePopEl.appendChild(o);
+        });
+        const sep = document.createElement('div');
+        sep.className = 'sep';
+        ratePopEl.appendChild(sep);
+        const row = document.createElement('div');
+        row.className = 'custom';
+        rateInEl = document.createElement('input');
+        rateInEl.type = 'text';
+        rateInEl.spellcheck = false;
+        rateInEl.placeholder = 'custom';
+        rateInEl.addEventListener('mousedown', function (e) { e.stopPropagation(); }, true);
+        rateInEl.addEventListener('keydown', function (e) {
+            e.stopPropagation();                    // onPinKey is capture on window
+            if (e.key === 'Enter') { commitRateField(); e.preventDefault(); }
+            else if (e.key === 'Escape') { closeRateMenu(); e.preventDefault(); }
+        }, true);
+        const pct = document.createElement('span');
+        pct.textContent = '%';
+        row.appendChild(rateInEl);
+        row.appendChild(pct);
+        ratePopEl.appendChild(row);
+    }
+
+    function commitRateField() {
+        const n = parseFloat(String(rateInEl.value).replace(/[^0-9.]/g, ''));
+        if (isNaN(n) || n <= 0) { closeRateMenu(); return; }
+        setRate(Math.max(RATE_MIN, Math.min(RATE_MAX, n / 100)));
+        closeRateMenu();
+    }
+
+    function setRate(r) {
+        if (mediaEl !== vidEl) return;
+        vidEl.playbackRate = Math.max(RATE_MIN, Math.min(RATE_MAX, r));
+        syncVideoCtl();
+    }
+
+    function rateMenuOpen() { return !!ratePopEl && ratePopEl.classList.contains('open'); }
+
+    function closeRateMenu() {
+        if (!ratePopEl) return;
+        ratePopEl.classList.remove('open');
+        vrateEl.classList.remove('open');
+    }
+
+    function toggleRateMenu() {
+        if (rateMenuOpen()) { closeRateMenu(); return; }
+        closePops();
+        // Anchored to the button, clamped so a narrow frame cannot push it off the left edge.
+        const left = Math.max(0, vrateEl.offsetLeft + vrateEl.offsetWidth - RATE_POP_W);
+        ratePopEl.style.left = left + 'px';
+        ratePopEl.classList.add('open');
+        vrateEl.classList.add('open');
+        rateInEl.value = '';
+        syncRateMenu();
+    }
+
+    function syncRateMenu() {
+        if (!ratePopEl) return;
+        const cur = vidEl ? vidEl.playbackRate : 1;
+        [].forEach.call(ratePopEl.querySelectorAll('.opt'), function (o) {
+            o.classList.toggle('on', Math.abs(Number(o.dataset.rate) - cur) < 1e-6);
+        });
     }
 
     // The autoplay policy refuses an unmuted clip that has no gesture behind it. Rather than
@@ -1991,29 +2187,50 @@
 
     // The bar's height, fixed so the ring around it can be a matching thickness.
     const BAR_MIN_H = 24;
-    const BTN_RIGHT = 20;       // the rightmost button's inset
     const BTN_STEP = 24;        // and the pitch of the ones beside it
 
     // The bar's own metrics, shared by the stylesheet and by barMinW() so the two cannot disagree.
     const BAR_PAD = 8;          // .cap's left/right padding
     const BAR_GAP = 10;         // between name, metadata and the zoom cluster
     const BAR_SLIDER_W = 100;
-    const BAR_ZOOM_GAP = 6;     // inside the cluster
+    const BAR_ZOOM_GAP = 0;     // inside the cluster: the readout's own padding is the gap
     const BAR_ZOOM_W = 52;      // the readout slot, wide enough for "3,200%"
 
     // The floating video strip. It overlays the picture and reserves nothing, so none of these
     // reach btnGutter(), barMinW() or bottomGap() — that is the whole point of floating it.
     const VCTL_H = 30;
-    const VCTL_SIDE = 8;        // inset from the frame's left and right edges
+    const VOL_BTN = 24;         // bigger than the rest of the strip: it is also a hover target
+    const VOL_TRACK = 72;       // the popup column's height
     const VCTL_GAP = 6;         // clearance above the status bar
     // Below this the strip would cover the clip instead of sitting on it.
     const VCTL_MIN_H = 110;
+
+    // ---- clearing the grab bands
+    //
+    // The frame's edges are draggable, and the bar sits inside them: the bottom corners resize,
+    // the sides move the window. A control placed under any of that is unreachable — the press
+    // is the frame's, not the control's — so every control keeps `grabInset()` clear of both
+    // sides. It is derived from the same constants `hitRegion()` tests, so raising the frame
+    // margin widens the clearance instead of burying the slider.
+    //
+    // It reads `chrome()` (the SETTING) and not `chromeThickness()` (the setting clamped to the
+    // frame): `barMinW()` feeds `minFrameW()` feeds `reflow()`, which is what sets `frameW` —
+    // asking about the frame here is a loop. The setting is the larger of the two, so the
+    // clearance errs wide, which is the direction the user asked for.
+    function grabBand() {
+        return Math.max(CORNER_REACH, RESIZE_IN + MOVE_BAND, chrome() + cfg.borderWidth);
+    }
+
+    // The same distance measured from the FRAME's edge, which is what the bar is laid out in.
+    function grabInset() {
+        return Math.max(BAR_PAD, grabBand() - cfg.borderWidth);
+    }
 
     // Where the zoom cluster's right edge sits, measured in from the bar's right edge: clear of
     // the buttons once placed, and of nothing but the padding while hovering.
     function btnGutter() {
         if (!placed) return BAR_PAD;
-        return BTN_RIGHT + BTN_STEP * (mediaEl === vidEl ? 4 : 3) + 2;
+        return grabInset() + BTN_STEP * (mediaEl === vidEl ? 4 : 3) + 2;
     }
 
     // How much of the bar the cluster covers right now.
@@ -2031,7 +2248,7 @@
     // The narrowest frame that still shows the whole cluster clear of the buttons. Filename and
     // metadata are allowed to be clipped away entirely, so they claim nothing here.
     function barMinW() {
-        return BAR_PAD + BAR_SLIDER_W + BAR_ZOOM_GAP + BAR_ZOOM_W + btnGutter();
+        return grabInset() + BAR_SLIDER_W + BAR_ZOOM_GAP + BAR_ZOOM_W + btnGutter();
     }
 
     let barTimer = 0;
@@ -2049,7 +2266,9 @@
     function pointerOverBar() {
         if (!capEl || !view || !box || !box.classList.contains('on')) return false;
         if (capEl.style.display !== 'none' && overRect(capEl)) return true;
-        return mediaEl === vidEl && overRect(vctlEl);
+        if (mediaEl !== vidEl) return false;
+        return overRect(vctlEl) || overRect(vvolEl) ||
+               (rateMenuOpen() && overRect(ratePopEl));
     }
 
     // The margin ring counts too, for the same reason the bar does.
@@ -2124,9 +2343,15 @@
         if (!wantsVideo && noReferrerHere()) imgEl.referrerPolicy = 'no-referrer';
         mediaEl.src = res.url;
         if (wantsVideo) {
-            vidEl.muted = !soundWanted;
+            // The site's remembered answer, not the last clip's: a fresh tab on a site that has
+            // never been unmuted starts silent, which is what AUDIO_DEFAULT is for.
+            const a = audioFor();
+            vidEl.volume = a.volume;
+            vidEl.muted = a.muted;
             vidEl.playbackRate = 1;
             seekDrag = false;
+            volDrag = false;
+            closeRateMenu();
             playVideo();
             syncVideoCtl();
         }
@@ -2177,7 +2402,7 @@
         box.classList.toggle('tall', view.frameH >= VCTL_MIN_H);
         // Right to left, skipping the ▶ when the frame is not holding a clip; the gutter has to
         // clear whatever is actually there or the filename runs under the buttons.
-        let right = BTN_RIGHT;
+        let right = grabInset();
         fsEl.style.right = px(right); right += BTN_STEP;
         blockEl.style.right = px(right); right += BTN_STEP;
         if (hasVid) { vidOffEl.style.right = px(right); right += BTN_STEP; }
@@ -2185,8 +2410,16 @@
         markSmoothing();
         zctlEl.style.width = px(zctlW());
         zctlEl.style.right = px(btnGutter());
-        capEl.style.paddingRight =
-            px(Math.min(textGutter(), Math.max(BAR_PAD, view.frameW - BAR_PAD)));
+        // The strip clears the side bands too; it sits above the corners, so those do not apply.
+        vctlEl.style.left = px(grabInset());
+        vctlEl.style.right = px(grabInset());
+        // The two paddings TOGETHER may not exceed the frame. `box-sizing:border-box` treats
+        // padding as a minimum, not a share: overflow it and the bar's border box grows past the
+        // frame, taking every `right:`-anchored control with it — the buttons stop clearing the
+        // grab band and the slider jumps sideways at the narrowest zoom.
+        const padL = Math.min(grabInset(), Math.max(0, view.frameW - BAR_PAD));
+        capEl.style.paddingLeft = px(padL);
+        capEl.style.paddingRight = px(Math.min(textGutter(), Math.max(0, view.frameW - padL)));
     }
 
     function layout() {
@@ -2467,6 +2700,7 @@
         closePops();
         resetZoomControl();
         seekDrag = false;
+        volDrag = false;
         box.classList.remove('on', 'hot', 'pan', 'drag');
         box.style.cursor = '';      // onMove writes this inline over the bands; see hitRegion
         if (gripEl) { gripEl.classList.remove('hot'); gripEl.style.cursor = ''; }
@@ -2574,16 +2808,18 @@
     // Remember what to put back, then fill whatever the viewport is now.
     function maximise() {
         if (!view || fullPrev) return;
-        fullPrev = {
-            fixedW: view.fixedW, fixedH: view.fixedH,
-            left: view.left, top: view.top, scale: view.scale,
-        };
+        fullPrev = { left: view.left, top: view.top, scale: view.scale };
         dimEl.classList.add('full');
         setIcon(fsEl, ICON_EXIT);
         setTip(fsEl, 'Leave fullscreen');
+        if (!placed) place();           // fullscreen is a placed state, whatever it started as
         fitFull();
     }
 
+    // Position and zoom come back; the hand-resized flag does NOT. Leaving fullscreen always
+    // lands in pinned-but-not-resized, so the frame follows the picture again and the wheel grows
+    // the window rather than only the image — asked for directly, because restoring `fixedW`
+    // meant coming back to a letterboxed frame that no longer matched the zoom.
     function restoreFull() {
         if (!fullPrev) return;
         const p = fullPrev;
@@ -2592,12 +2828,12 @@
         setIcon(fsEl, ICON_FULL);
         setTip(fsEl, 'Fill the screen');
         if (!view) return;
-        view.fixedW = p.fixedW;
-        view.fixedH = p.fixedH;
+        view.fixedW = null;
+        view.fixedH = null;
         view.left = p.left;
         view.top = p.top;
-        view.scale = p.scale;
         view.fitScale = fitScaleFor(view.natW, view.natH);
+        view.scale = Math.max(p.scale, minScaleFor(view.natW, view.natH));
         reflow();
         layout();
     }
@@ -2630,6 +2866,14 @@
     document.addEventListener('webkitfullscreenchange', onFullChange);
 
     // Controls that live INSIDE the box.
+    // What is actually under the pointer, asked of the shadow root — a document-level hit test
+    // only ever names the host.
+    function pointerOverControl(x, y) {
+        if (!root || !root.elementFromPoint) return false;
+        const el = root.elementFromPoint(x, y);
+        return !!el && isBoxControl(el);
+    }
+
     function isBoxControl(t) {
         return blockEl.contains(t) || vidOffEl.contains(t) || aaEl.contains(t) ||
             fsEl.contains(t) || blockPopEl.contains(t) || zctlEl.contains(t) ||
@@ -2657,11 +2901,12 @@
     }
 
     function popOpen() {
-        return !!(blockPopEl && blockPopEl.classList.contains('open'));
+        return !!(blockPopEl && blockPopEl.classList.contains('open')) || rateMenuOpen();
     }
 
     function closePops() {
         if (blockPopEl) blockPopEl.classList.remove('open');
+        closeRateMenu();
     }
 
     function togglePop(pop) {
@@ -2816,10 +3061,12 @@
         if (!e || !e.composedPath) return false;
         const path = e.composedPath();
         if (zinEl && !zinEl.hidden && path.indexOf(zinEl) !== -1) return true;
+        if (rateInEl && rateMenuOpen() && path.indexOf(rateInEl) !== -1) return true;
         if (!SLIDER_KEYS[e.key]) return false;
         // The scrubber answers the arrows exactly as the zoom slider does.
         return (!!zsliderEl && path.indexOf(zsliderEl) !== -1) ||
-               (!!vseekEl && path.indexOf(vseekEl) !== -1);
+               (!!vseekEl && path.indexOf(vseekEl) !== -1) ||
+               (!!vvolInEl && path.indexOf(vvolInEl) !== -1);
     }
 
     function onPinKey(e) {
@@ -3316,7 +3563,10 @@
         if (over) showBar(); else commitZoomField(null);
         if (box && placed && !drag) {
             const reg = hitRegion(e.clientX, e.clientY);
-            const c = reg && reg.kind === 'resize' ? regionCursor(reg)
+            // A control is never a move handle: onBoxDown returns early on isBoxControl(), so a
+            // `move` cursor over one promises a drag that cannot happen.
+            const c = pointerOverControl(e.clientX, e.clientY) ? ''
+                : reg && reg.kind === 'resize' ? regionCursor(reg)
                 : (chromeVisible() && pointerOverBar() ? 'move' : regionCursor(reg));
             box.style.cursor = c;
             if (gripEl) gripEl.style.cursor = c;

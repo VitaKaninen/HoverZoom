@@ -774,6 +774,14 @@ The browser eats Escape itself when the API is what put us there, and `fullscree
 this branch is what covers the maximise fallback. `unplace()` leaves fullscreen too — it cannot
 outlive the window that asked for it.
 
+**Leaving fullscreen restores position and zoom but NOT `fixedW`/`fixedH`** — it always lands in
+pinned-but-not-resized, whatever it started as. Restoring the hand-resized flag was the v0.63.0
+behaviour and it was wrong in practice: the frame came back at fullscreen's fitted zoom while
+still carrying a frame size chosen for a different one, so it read as a black letterbox with the
+picture adrift in the middle, and the wheel only zoomed the picture inside it. Dropping the flag
+lets the frame follow the picture again, which is the state the window is in before anyone
+resizes it by hand. Asked for directly, 2026-09-06.
+
 ## The floating video strip · `E36`
 
 Play/pause, elapsed time, a scrubber, playback speed and sound, over the picture rather than in the
@@ -802,3 +810,64 @@ escapes the frame, taking the bare video and losing zoom, pan and the bar.
 
 **`clipSecs()`, not `secsOf()`.** `secsOf()` formats a string for the gate's debug line
 (`"2s"` / `"length unknown"`); using it as a number silently makes every scrubber position `NaN`.
+
+## The bar's controls clear the grab bands · `E37`
+
+The frame's own edges are draggable and the bar sits inside them, so a control under the bottom
+corners (resize) or the side strips (move) is unreachable: `onBoxDown` gives the frame the press
+before the control ever sees it. Every control therefore keeps `grabInset()` clear of both sides
+of the frame, and the strip does the same.
+
+**It is derived, not chosen.** `grabBand()` is the same `max(CORNER_REACH, RESIZE_IN + MOVE_BAND,
+chrome() + borderWidth)` that `hitRegion()` tests, so raising the frame margin widens the clearance
+instead of burying the slider. At the defaults that is 24 px, which puts `barMinW()` at 274 px for
+a picture and 298 px for a clip.
+
+**It reads `chrome()`, the SETTING, not `chromeThickness()`, the setting clamped to the frame.**
+`barMinW()` feeds `minFrameW()` feeds `reflow()`, which is what sets `frameW` — asking about the
+frame here is a loop. The setting is the larger of the two, so the clearance errs wide, which is
+the direction that was asked for.
+
+**The two paddings on `.cap` may not together exceed the frame.** `box-sizing: border-box` treats
+padding as a *minimum*, not a share of the width: overflow it and the bar's border box grows past
+the frame, and every `right:`-anchored control goes with it. Shipped wrong once — the buttons
+stopped clearing the band and the slider jumped 10 px sideways at the narrowest zoom, which is the
+exact failure the corner anchor exists to prevent (`E34`). `layoutChrome()` now clamps
+`paddingRight` against what `paddingLeft` already took.
+
+**The readout is left-aligned in its slot** (`.cap .zoom{justify-content:flex-start}`). The slot is
+`BAR_ZOOM_W`, wide enough for "3,200%"; right-aligning it left a 24 px hole between the slider and
+a short reading like "26%" — and that hole was inside `zctlEl`, so `isBoxControl()` swallowed the
+press while `onMove`'s geometry still drew a move cursor over it. Reported as "the four-way arrow
+shows but nothing happens".
+
+**A control is never a move handle**, and the cursor now says so: `onMove` asks
+`pointerOverControl()` — `root.elementFromPoint()`, because a document-level hit test only ever
+names the shadow host — and leaves the cursor alone over anything `isBoxControl()` claims.
+
+## Sound is remembered per site · `E38`
+
+`cfg.siteAudio` maps host to `{muted, volume}`, and **every site starts muted** (`AUDIO_DEFAULT`):
+a preview that made noise on a page nobody asked it to would be the worst possible first
+impression. After that the site's own answer is what a new preview opens with.
+
+- **`saveAudio()` reloads before it writes.** The map is shared with every other tab on every other
+  site; a read-modify-write against our own stale `cfg` would drop their entries.
+- **The volume column and the mute button are one state.** Unmuting into a zero volume is a button
+  that does nothing, so `toggleMute()` gives it `AUDIO_DEFAULT.volume`; dragging the column to zero
+  mutes. `syncVideoCtl()` shows a muted element as 0 rather than the level it will come back to.
+- **`volDrag` guards the column exactly as `zoomDrag` guards the zoom slider** — `syncVideoCtl()`
+  writing `.value` mid-drag is a slider fighting the hand on it.
+- **The column and the speed menu pop ABOVE the strip**, outside `vctlEl`'s rect, so
+  `pointerOverBar()` counts them too or the bar fades out from under the pointer reaching for them.
+  Both are clipped by `.box{overflow:hidden}` on a frame too short to hold them; accepted.
+
+**The speed menu is a `.spop`, not a `.pop`.** It anchors to the rate button rather than the bar's
+right edge, clamped so a narrow frame cannot push it off the left edge, and it joins `closePops()`
+and `popOpen()` so one press closes it and the bar waits on it. Its custom field is a text box, so
+`capOwns()` must claim the keyboard while it is open — `onPinKey` is capture on `window` and would
+otherwise eat the digits.
+
+**The ▶ that stops clips is a STROKED no-play glyph** (`ICON_NOPLAY`, two paths, `fill:none`). A
+slash across a solid triangle reads as a triangle; outlining both is the only version that says
+"no" at 13 px.

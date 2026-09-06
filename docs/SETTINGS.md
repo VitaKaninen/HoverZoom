@@ -606,3 +606,23 @@ Two defences, both needed:
 Verified against the `storage`-event stub in `test-page.html`: a silent write is picked up on
 open, a signalled write is picked up immediately, and saving afterwards preserves the other
 tab's values instead of clobbering them.
+
+## `siteAudio` is stored but has no panel row · `E38`
+
+`cfg.siteAudio` is a host-to-`{muted, volume}` map written by the strip's sound control, not by the
+panel. It is the only setting with no row, and deliberately: the thing that sets it is the control
+you are already looking at when you want it changed, and a panel list of every site you have ever
+unmuted is a privacy footprint nobody asked for.
+
+**It is still an ordinary key in the same blob**, so it rides the same `GM_setValue` write, the same
+cross-tab `GM_addValueChangeListener`, and the same migration path as everything else. Two
+consequences worth knowing:
+
+- **`saveAudio()` calls `reloadSettings()` first.** Every tab on every site shares this map; a
+  read-modify-write against a stale `cfg` would drop entries written by another tab. `blockCurrent()`
+  does the same thing for the same reason.
+- **It is not in `RETIRED` and must not be added there** — retiring a key deletes it on read, which
+  would silently wipe every site's answer.
+
+The full argument for per-site rather than global, and why the default is muted everywhere, is in
+[`VIEWER.md`](VIEWER.md) `E38`.

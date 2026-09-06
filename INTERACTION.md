@@ -53,6 +53,8 @@ bottom.
 | `S20` | dragging (zoom slider), placed | transient | the held button |
 | `S21` | typing a zoom level, placed | placed | nothing |
 | `S22` | holding the scrubber, placed (clip only) | placed | the held button |
+| `S23` | speed menu open, placed (clip only) | placed | a press anywhere else |
+| `S24` | volume column showing, placed (clip only) | placed | the pointer leaving it |
 | `S16` | suppressed | gone | — |
 | `S17` | fading out | gone | — |
 
@@ -237,19 +239,24 @@ growth ceiling, and only a hand resize pins its edges** (`E22`, `E23`).
   **the frame margin or the status bar → move, always** (`S14`, `E25`, `E21`); **the middle
   → move the frame, or pan the picture once it is spilling** (`S14` / `S13`).
 - **Its status bar carries four buttons, and only here**, right to left: ⛶ fill the screen
-  (`E35`), ⊘ never preview this image, which asks first (`E11`), ▶ stop showing clips in this
-  tab (`E27`, clip only), AA smooth-or-hard-pixels, a plain toggle (`E31`). Only the ⊘ opens a
+  (`E35`), ⊘ never preview this image, which asks first (`E11`), a no-play glyph that stops
+  showing clips in this tab (`E27`, clip only), AA smooth-or-hard-pixels, a plain toggle
+  (`E31`). **Every one of them clears the frame's grab bands** (`E37`). Only the ⊘ opens a
   popover, **upward** out of the bar; a press anywhere else in the frame closes it.
 - **Over a clip, a translucent strip floats above the bar** (`S22`, `E36`): play/pause, elapsed
   time, a scrubber, playback speed and sound. It overlays the picture and reserves no layout, so
   it costs the zoom floor nothing. Hidden on a frame shorter than 110 px.
+  - **Speed** opens a menu upward (`S23`) — 10/25/50/100/125/150/200/300 % plus a custom field.
+  - **Sound** reveals a vertical volume column on hover (`S24`); the button itself mutes and
+    unmutes. Both are remembered **per site**, and every site starts muted (`E38`).
 - **And a zoom cluster left of those buttons:** a 100 px slider stepping through round zoom
   percentages, and the current level,
   which is clickable and becomes a text field (`S20`, `S21`). Zooming from either **holds the
   frame's bottom-right corner still**, so the control does not run away from the pointer driving
   it (`E34`). The level shows on a hover preview too, but only when it is off its fit; the slider
   is placed-only. **A placed frame is never narrower than its bar's controls** —
-  260 px, or 284 px while the ▶ is there (`barMinW()`).
+  274 px, or 298 px while the no-play button is there (`barMinW()`), and wider still if the
+  frame margin is raised — the controls always clear the grab bands (`E37`).
 - **May hang off the edges of the screen** (`E21`), which is the point of the growth ceiling
   being above 1×: shoved aside or upwards, the picture still reaches the screen edges instead of
   leaving a strip of empty page behind it.
@@ -297,8 +304,8 @@ picture follows or does not depending on what it was doing (`E23`).
 - **Cursor:** `nwse-resize` / `nesw-resize` on a corner, `ew-resize` / `ns-resize` on an edge.
 - **Aspect:** free — drag the window to any shape you like. **Shift** locks it to the frame's
   shape as it was when the edge was grabbed (`E23`).
-- **Bounds:** no shorter than 48 px and **no narrower than `barMinW()`** — 260 px, or 284 px while
-  the ▶ is there (`E34`); at the default border that is a 262 × 50 window, which is what keeps the
+- **Bounds:** no shorter than 48 px and **no narrower than `barMinW()`** — 274 px, or 298 px while
+  the no-play button is there (`E34`, `E37`); at the default border that is a 276 × 50 window, which is what keeps the
   ⊘ reachable at any size (`E25`). No larger than the growth ceiling.
 
 #### S20 · dragging (zoom slider), placed
@@ -335,6 +342,22 @@ Drag the scrubber in the floating strip to move through the clip.
 - `timeupdate` keeps writing the readout but **must not write the thumb** while `seekDrag` is set,
   or the value fights the hand holding it — the same rule the zoom slider's `zoomDrag` follows.
 - Arrow keys nudge it while it has focus, and the window's own pan keys stand aside (`capOwns`).
+
+#### S23 · speed menu open, placed (clip only)
+Click the speed readout and a menu opens **upward** out of the strip.
+- 10/25/50/100/125/150/200/300 %, the current one marked, plus a **custom** field taking any
+  percentage (clamped to what the media element accepts, 6.25–1600 %).
+- **Enter** applies and closes; **Escape** closes without applying. The field owns the keyboard
+  while it is open, or the window's own keys would eat the digits (`E38`).
+- It is a popover, so a press anywhere else in the frame closes it and the bar cannot fade while
+  it is up.
+
+#### S24 · volume column showing, placed (clip only)
+Hover the sound button and a vertical column appears above it.
+- **Dragging it to zero mutes**; the button itself toggles, and unmuting into a zero volume
+  restores a default level rather than doing nothing.
+- Released, the level and the mute state are written to the **site's** entry (`E38`).
+- The column reaches above the strip, so the bar counts it as its own and will not fade under it.
 
 #### S15 · placed, upgrading
 Placing is a reason to keep looking, not to stop, so the search runs on.
@@ -467,6 +490,8 @@ this table is a table.
 | `E34` | The status bar's zoom slider and level, and the bottom-right corner anchor that keeps them still | [`docs/VIEWER.md`](docs/VIEWER.md) |
 | `E35` | Fullscreen — why the DOCUMENT goes fullscreen, and why maximise IS the implementation | [`docs/VIEWER.md`](docs/VIEWER.md) |
 | `E36` | The floating video strip: why it overlays rather than reserves, and why not native `controls` | [`docs/VIEWER.md`](docs/VIEWER.md) |
+| `E37` | Every control clears the frame's grab bands, and the padding trap that broke it | [`docs/VIEWER.md`](docs/VIEWER.md) |
+| `E38` | Sound is remembered per site, and starts muted everywhere | [`docs/VIEWER.md`](docs/VIEWER.md) |
 
 `E3` is retired with the detached state (v0.28.0); `E4` and `E5` are retired as dangling.
 
@@ -484,7 +509,10 @@ this table is a table.
 | Wheel zoom, both states (`T17`, `T22`, `T24`) | `enableWheelZoom`, `disableWheelZoom`, `onPinWheel` |
 | Geometry (`S12`, `E7`, `E21`, `E25`, `E26`) | `view`, `reflow`, `layout`, `zoomAt`, `pannable`, `viewportBox`, `growBox`, `clampPosition`, `fitScaleFor`, `minScaleFor`, `chrome`, `insetX`/`insetY`, `outerW`/`outerH` |
 | Fullscreen (`E35`) | `toggleFull`, `maximise`, `restoreFull`, `fitFull`, `onFullChange`, `fullActive` |
-| Video strip (`S22`, `E36`) | `buildVideoControls`, `syncVideoCtl`, `syncVideoTime`, `togglePlay`, `toggleMute`, `cycleRate`, `playVideo`, `clipSecs`, `isBoxControl`, `pointerOverBar` |
+| Video strip (`S22`, `E36`) | `buildVideoControls`, `syncVideoCtl`, `syncVideoTime`, `togglePlay`, `playVideo`, `clipSecs`, `isBoxControl`, `pointerOverBar` |
+| Speed menu (`S23`) | `buildRateMenu`, `toggleRateMenu`, `syncRateMenu`, `commitRateField`, `setRate`, `RATES`, `capOwns` |
+| Sound (`S24`, `E38`) | `audioFor`, `saveAudio`, `AUDIO_DEFAULT`, `toggleMute`, `applyAudioWish`, `rememberAudio` |
+| Grab-band clearance (`E37`) | `grabBand`, `grabInset`, `btnGutter`, `barMinW`, `layoutChrome`, `pointerOverControl` |
 | Zoom cluster (`S20`, `S21`, `E34`) | `buildZoomControl`, `syncZoom`, `openZoomField`, `closeZoomField`, `zoomAnchored`, `ZOOM_BANDS`/`walkStops`/`fitStops`/`zoomStops`/`zoomIndex`, `zoomLo`/`noBarsScale`/`zoomHi`, `parseZoom`, `commitZoomField`, `capOwns`, `minFrameW` |
 | Upgrades (`S06`, `S15`) | `resolve`, `upgradeViewer` |
 
