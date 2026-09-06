@@ -403,3 +403,51 @@ project exists not to be. **Not decided — ask before building any of it.**
 
 What was added for this and is still worth having, just not for Google: `linkParamCandidates()` (the
 generic `?imgurl=`-style rule) and the `/s0/` path-segment form of the googleusercontent size token.
+
+
+## Nothing may downgrade the frame · `E33`
+
+`resolve()` runs two paths at once — the linked-page lookup and the candidate loop — and each
+called `onHit()` on its own. The caller does `upgradeViewer(hit)` unconditionally and throws the
+return value away, so **whichever path emitted last owned the display.**
+
+That is fine cold and wrong warm. On the first hover the page fetch is slow, so the loop's still
+lands first and the video replaces it; on the second hover `pageCache` and `probeCache` are warm,
+the interleaving flips, and a *bigger still from the same page* lands after the video and replaces
+it. Reported as "the first hover plays the video, the second shows an enlarged jpg" — the same
+element, the same settings, a different answer.
+
+Both paths now go through one `emit()`, guarded by **`betterHit(cur, next)`**, which ranks
+`trusted` (the linked page's own answer) over `video` over area. The candidate loop's local
+`best && best.video && !dim.video` guard only ever covered loop-versus-loop; this covers the pair.
+`betterHit()` is pure and lives in the sliceable section, so `test-resolver.js` asserts the
+ordering directly — the race itself is environmental and cannot be asserted, the rule can.
+
+## Animated images, when the setting says none · `E32`
+
+`videoMode: 'none'` used to gate video *files*, which is not what it says. On gifwow the grid is
+30 animated `.webp` and no `<video>` at all, and each item page declares `og:video` → `.mp4`
+**and** `og:image` → an animated `.gif`; at `none` the resolver skipped the mp4 and fell straight
+through to the GIF. Half the tiles still moved.
+
+`sniffAnimated()` reads a candidate's first 4 KB and answers from the container:
+
+- **WebP** — a `VP8X` chunk with bit `0x02` of its flags byte set, or an `ANMF` chunk present.
+- **GIF** — the `NETSCAPE2.0` application extension. Not a frame count: counting image
+  descriptors means walking LZW block chains, and the loop extension is on essentially every
+  animated GIF in the wild.
+- **APNG** — an `acTL` chunk before `IDAT`.
+
+Verified against gifwow's real tiles: 6 of 6 animated, the static logo not.
+
+- **It needs `GM_xmlhttpRequest`, and that is why the grant was added.** A plain `fetch` of the
+  file is blocked — measured: `gifpit.com` sends no CORS headers, and the media is nearly always
+  on a different origin from the page. `mode: 'no-cors'` returns an opaque body, and the canvas
+  route taints. There is no same-origin-only version of this that fixes the reported case.
+- **Only at `videoMode: 'none'`, and only for `.gif`/`.webp`/`.png`/`.apng`.** It is one extra
+  request per candidate, paid only by the mode that asked for stillness. The panel hint says so.
+- **A missing grant degrades to "not animated"**, so the test page — whose GM shim has no
+  `GM_xmlhttpRequest` — cannot exercise this. `sniffAnimated()` is pure and asserted over
+  synthetic headers instead.
+- **A false positive costs one refused preview in one mode.** That is why the GIF test is the
+  loop extension rather than something stricter.

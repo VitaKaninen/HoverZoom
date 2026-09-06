@@ -1,11 +1,12 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.61.0
+// @version     0.62.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
 // @grant       GM_getValue
+// @grant       GM_xmlhttpRequest
 // @grant       GM_setValue
 // @grant       GM_addValueChangeListener
 // @grant       GM_registerMenuCommand
@@ -42,7 +43,6 @@
         minDisplayed: 16,           // ignore images displayed smaller than this — the only size gate
         minRatio: 1,                // full size must be this much bigger; below 1 previews anything
         videoMode: 'clips',         // 'none' | 'clips' (animated clips) | 'all' (+ links to a video page)
-        previewOverPlayer: false,   // preview while a real player is on the page, on the player
         skipFurniture: true,        // never preview the page's own furniture: its background, a
         siteMode: 'blacklist',      // 'blacklist' | 'whitelist'
         siteList: [],               // hostnames, matched by suffix
@@ -83,7 +83,7 @@
         'sameShapeOnly', 'keepSearching', 'followLinks', 'hoverThroughOverlays',
         'skipWhileMouseDown', 'playVideos', 'skipVideos', 'skipPageBackgrounds',
         'skipBanners', 'skipDecorative', 'enabled', 'maxDisplayed', 'cursorGap', 'noReferrer',
-        'showEvenIfNotLarger', 'previewVideos'];
+        'showEvenIfNotLarger', 'previewVideos', 'previewOverPlayer'];
 
     // The retirements that DO convert.
     function migrate(o) {
@@ -491,6 +491,31 @@
         return out;
     }
 
+    const ANIM_EXT_RE = /\.(gif|webp|png|apng)(?=$|[?#])/i;
+
+    // Animated or not, from a file's first few KB. No URL or DOM property answers this.
+    function sniffAnimated(bytes) {
+        if (!bytes || bytes.length < 24) return false;
+        let head = '';
+        for (let i = 0; i < bytes.length; i++) head += String.fromCharCode(bytes[i]);
+        if (head.slice(0, 4) === 'RIFF' && head.slice(8, 12) === 'WEBP')
+            return (head.slice(12, 16) === 'VP8X' && (bytes[20] & 0x02) !== 0) ||
+                head.indexOf('ANMF') >= 0;
+        if (head.slice(0, 4) === 'GIF8') return head.indexOf('NETSCAPE2.0') >= 0;
+        if (bytes[0] === 0x89 && head.slice(1, 4) === 'PNG') return head.indexOf('acTL') >= 0;
+        return false;
+    }
+
+    // Is `next` worth replacing what the frame is already showing? The two resolver paths
+    // emit independently and warm caches reorder them, so last-writer-wins is not safe.
+    function betterHit(cur, next) {
+        if (!next) return false;
+        if (!cur) return true;
+        if (!!next.trusted !== !!cur.trusted) return !!next.trusted;
+        if (!!next.video !== !!cur.video) return !!next.video;
+        return next.w * next.h > cur.w * cur.h;
+    }
+
     const DATA_ATTRS = ['data-src', 'data-original', 'data-original-src', 'data-full',
         'data-full-src', 'data-fullsize', 'data-large', 'data-large-src', 'data-hi-res',
         'data-highres', 'data-zoom-image', 'data-zoom', 'data-image', 'data-img',
@@ -671,6 +696,45 @@
 
     const LINKED_TRIES = 4;         // the linked page's own answers: og media, then its markup
 
+    const ANIM_HEAD = 4096;
+    const animCache = new Map();    // url -> Promise<boolean>
+
+    // GM_xmlhttpRequest, not fetch: the file is usually on a CDN that sends no CORS headers.
+    function headBytes(url, n) {
+        return new Promise(function (res) {
+            if (typeof GM_xmlhttpRequest !== 'function') { res(null); return; }
+            let done = false;
+            const fin = function (v) { if (!done) { done = true; res(v); } };
+            try {
+                GM_xmlhttpRequest({
+                    method: 'GET', url: url, responseType: 'arraybuffer', timeout: 4000,
+                    headers: { Range: 'bytes=0-' + (n - 1) },
+                    onload: function (r) { fin(r.response ? new Uint8Array(r.response) : null); },
+                    onerror: function () { fin(null); },
+                    ontimeout: function () { fin(null); },
+                });
+            } catch (e) { fin(null); }
+        });
+    }
+
+    function isAnimated(url) {
+        if (animCache.has(url)) return animCache.get(url);
+        const p = headBytes(url, ANIM_HEAD).then(sniffAnimated, function () { return false; });
+        animCache.set(url, p);
+        return p;
+    }
+
+    // The only place the script looks INSIDE a file, and only in the mode that asked for stillness.
+    async function motionRefused(url) {
+        if (cfg.videoMode !== 'none') return false;
+        let path;
+        try { path = new URL(url, location.href).pathname; } catch (e) { return false; }
+        if (!ANIM_EXT_RE.test(path)) return false;
+        const anim = await isAnimated(url);
+        if (anim) dbg('refused — an animated image, and video is set to none', url);
+        return anim;
+    }
+
     const pageCache = new Map();    // page url -> Promise<{url, video}|null>
 
     function metaContent(doc, names) {
@@ -765,6 +829,19 @@
         dbg('candidates', candidates);
         let best = null;
         let trusted = null;
+        let emitted = null;
+
+        // Both paths below emit through here, so a later hit can never downgrade the frame.
+        function emit(hit) {
+            if (token.cancelled || !betterHit(emitted, hit)) {
+                if (hit && !token.cancelled)
+                    dbg('upgrade refused — not an improvement on what is showing',
+                        { showing: emitted, offered: hit });
+                return;
+            }
+            emitted = hit;
+            if (onHit) onHit(hit);
+        }
 
         const linked = linkedMedia(el).then(async function (page) {
             if (!page || token.cancelled) return null;
@@ -799,12 +876,13 @@
                     });
                     continue;
                 }
+                if (await motionRefused(t.url)) continue;
                 if (trusted && dim.w * dim.h <= trusted.w * trusted.h) continue;
                 if (trusted && trusted.video && !dim.video) continue;
                 trusted = { url: t.url, w: dim.w, h: dim.h, video: !!dim.video, duration: dim.duration,
-                    from: t.from };
+                    trusted: true, from: t.from };
                 dbg('hit (declared by the linked page)', trusted);
-                if (onHit && !token.cancelled) onHit(trusted);
+                emit(trusted);
             }
             return trusted;
         }, function () { return null; });
@@ -835,12 +913,13 @@
                 });
                 continue;
             }
+            if (await motionRefused(url)) continue;
             if (best && dim.w * dim.h <= best.w * best.h) continue;   // not an improvement
             if (best && best.video && !dim.video) continue;
             best = { url: url, w: dim.w, h: dim.h, video: !!dim.video, duration: dim.duration,
                 from: c.from };
             dbg('hit', best);
-            if (onHit && !token.cancelled) onHit(best);
+            emit(best);
         }
         await linked;
         if (trusted) return trusted;
@@ -2786,12 +2865,12 @@
         if (!el) return null;
         if (el.tagName === 'VIDEO') {
             if (!videoPreviewsOn() || !gifLike(el)) return null;
-            if (!cfg.previewOverPlayer && playerSurfaceReason(el)) return null;
+            if (playerSurfaceReason(el)) return null;
             if (cfg.videoMode !== 'all' && videoLinkReason(el)) return null;
             return blocked(shownUrl(el)) ? null : el;
         }
         if (NEVER[el.tagName]) return null;
-        if (!cfg.previewOverPlayer && playerSurfaceReason(el)) return null;
+        if (playerSurfaceReason(el)) return null;
         if (cfg.videoMode !== 'all' && videoLinkReason(el)) return null;
         if (cfg.skipFurniture && decorativeReason(el)) return null;
         // Before the <img> branch, because this is the one furniture rule that applies to one.
@@ -3639,10 +3718,9 @@
             'A short muted clip already looping with no controls is an animated image whatever ' +
             'it is encoded as, and previews as one — some posts have no still form at all. A ' +
             'real player, or a thumbnail linking to a video page, is a video. Those are the two ' +
-            'video settings above, and they are separate on purpose: one is about what you are ' +
-            'pointing at, the other about the player you are standing on. Neither of them ' +
-            'touches an animated GIF or WebP — those are images, and nothing here can tell an ' +
-            'animated one from a still one without downloading it. Press ▶ in a pinned ' +
+            'video setting above. A page with a real player on it never previews on that ' +
+            'player, whatever that setting says — the player already shows the picture full ' +
+            'size. Press ▶ in a pinned ' +
             'preview’s status bar to stop playing video for the rest of the tab; reloading ' +
             'the page restores it.');
 
@@ -3681,15 +3759,11 @@
                 ['right', 'Right click  (left click dismisses)']]);
         pick('videoMode', 'Video to play in a preview',
             'a short muted clip that loops with no controls is a clip, whatever it is encoded ' +
-            'as; a thumbnail linking to a video page is a video. An animated GIF or WebP is an ' +
-            'image here, and previews whichever of these you pick', [
+            'as; a thumbnail linking to a video page is a video. No video at all also refuses ' +
+            'an animated GIF or WebP, at one extra request per image', [
                 ['clips', 'Looping clips only'],
                 ['all', 'Clips and videos'],
                 ['none', 'No video at all']]);
-        check('previewOverPlayer', 'Preview on top of a video player',
-            'checked, pointing at a player that is already on the page opens a preview over ' +
-            'it. Unchecked, it opens nothing there — the player shows the picture full size ' +
-            'itself');
         check('skipFurniture', 'Ignore backgrounds and banners',
             'page furniture rather than images on the page: the page’s own background, a ' +
             'tiled or fixed one, a strip spanning the window, one the page’s text sits on, ' +
@@ -3900,7 +3974,6 @@
         topFrame: isTopFrame,
         siteEnabled: siteEnabled(),
         videoMode: cfg.videoMode,
-        previewOverPlayer: cfg.previewOverPlayer,
         playVideos: playVideos,
         skipFurniture: cfg.skipFurniture,
         blockList: cfg.blockList.length,

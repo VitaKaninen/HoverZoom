@@ -50,12 +50,11 @@ questions with different right answers, and there is a third one underneath both
 | Question | About | What answers it |
 |---|---|---|
 | Is the thing under the pointer an animated picture, or a player? | the media itself | `gifLike()` — no setting |
-| Am I standing on a player that is already on this page? | where I am | `previewOverPlayer`, default **off** |
+| Am I standing on a player that is already on this page? | where I am | nothing — always refused |
 | Does this thumbnail lead away to a video page? | where it goes | `videoMode`, default **`clips`** |
 
-`videoMode` is a ladder: `none` (no video file ever reaches the frame — **not** "nothing that
-moves"; an animated GIF or WebP is an image and is never gated, see [`SETTINGS.md`](SETTINGS.md)
-`E31`) ⊂ `clips`
+`videoMode` is a ladder: `none` (nothing animated reaches the frame — video files by URL, and
+animated GIF/WebP/APNG by sniffing the bytes, see [`RESOLVER.md`](RESOLVER.md) `E32`) ⊂ `clips`
 (animated clips, the default) ⊂ `all` (also a still that links to a video page). `none` is the
 stored form of the bar's play button — `videoPreviewsOn()` is `playVideos && videoMode !== 'none'`
 and is the single test every video *candidate* passes through, so the two cannot disagree.
@@ -67,10 +66,24 @@ video site differs in exactly one place — its item page holds a real player �
 third question, asked of the link. See "Where the line actually is" below for which half of that
 is robust and which will break.
 
+### `previewOverPlayer` existed for one version and was removed (v0.62.0)
+
+It was the setting for the second question, default off. Deleted because **the thing it appeared
+to offer was not a thing it could do.** A user who ticks "preview on top of a video player"
+expects to hover the player and get the video; what actually happens is that
+`eligibleDirect()`'s `VIDEO` branch refuses any `<video>` that is not `gifLike()` **before**
+the setting is ever consulted, so a real player can never preview whatever the box says. All
+ticking it did was un-gate *other* elements sitting on the player's rectangle — a poster, an
+endscreen still — which is why the report was "it shows a static jpg, enlarged".
+
+Making it work as it read would mean previewing a player's own stream, which is `E12` in
+reverse: the player is right there, full size, with controls. So gates 0 and 2 are
+**unconditional** now and the question has no setting.
+
 ### The four gates, any one sufficient
 
-Gates 0 and 2 belong to the second question (`previewOverPlayer`), gate 3 to the third
-(`videoMode`). Gate 1 is unconditional. `playerSurfaceReason()` is 0 and 2 together;
+Gates 0 and 2 are the second question and always apply; gate 3 is the third and answers to
+`videoMode`. Gate 1 is unconditional. `playerSurfaceReason()` is 0 and 2 together;
 `videoLinkReason()` is 3; `videoReason()` is both, and exists only for the debug line.
 
 ### 0 · Geometry

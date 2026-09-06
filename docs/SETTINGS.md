@@ -440,11 +440,11 @@ will break. What the panel shows:
 - **Video to play in a preview** — a `pick()`, not a checkbox, because the answers are a ladder
   rather than a yes/no: *Looping clips only* (default) ⊂ *Clips and videos* ⊂ *No video at all*.
   Stored as `videoMode`: `'clips'` | `'all'` | `'none'`.
-- **Preview on top of a video player** — `previewOverPlayer`, default **off**. Orthogonal to the
-  ladder, because it is about where you are standing, not what you are pointing at. Off, a page
-  with a real player on it gives no preview on that player; the player already shows the thing
-  full size, and on the sites where this bites you had the preview on the listing page a click
-  ago.
+- ~~**Preview on top of a video player**~~ — `previewOverPlayer`, added here and **removed in
+  v0.62.0**. It could not do what its label promised: a real player is refused by
+  `eligibleDirect()` before the setting is read, so ticking it only un-gated posters and
+  endscreen stills sitting on the player. See [`GATES.md`](GATES.md). A page with a player on it
+  now always refuses previews on that player, with no switch.
 
 ### Both rows are named for what they DO, after v0.61.0
 
@@ -463,11 +463,12 @@ The rules that came out of it, and that any new row should follow:
   looking at an empty box and asking what ticking it does; answering with what the empty box
   already does is answering a question they did not ask.
 
-### `none` cannot mean "nothing that moves", and the label must not say it does
+### `none` DOES mean "nothing that moves", but only since v0.62.0
 
-**An animated GIF or WebP is an image to every test in this script**, and nothing decides
-otherwise — `MEDIA_RE` accepts `.gif`/`.webp` and no code path asks whether the frames move.
-`videoMode` gates *video files*; it cannot gate animation.
+**An animated GIF or WebP is an image to every URL test in this script** — `MEDIA_RE` accepts
+`.gif`/`.webp` and no property says whether the frames move. For one version `videoMode` gated
+video files only, and the option was honestly relabelled to admit it. v0.62.0 makes it true
+instead, by reading the file's first 4 KB (`E32` in [`RESOLVER.md`](RESOLVER.md)).
 
 Measured on gifwow 2026-09-06, which is why this is written down: its grid is 30 animated
 `.webp` and **zero `<video>`**, and each item page declares both

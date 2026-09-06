@@ -37,8 +37,8 @@ const gifLike = new Function(src.slice(gStart, gEnd) + '\nreturn gifLike;')();
 const location = { href: 'https://example.com/page/index.html' };
 const body = src.slice(start, end);
 const exported = new Function('location', body +
-    '\nreturn {parseSrcset, looksLikeImage, isVideoUrl, upgradeCandidates, linkParamCandidates, blockMatch, sameStem, urlStem};')(location);
-const { parseSrcset, looksLikeImage, isVideoUrl, upgradeCandidates, linkParamCandidates, blockMatch, sameStem, urlStem } = exported;
+    '\nreturn {parseSrcset, looksLikeImage, isVideoUrl, upgradeCandidates, linkParamCandidates, blockMatch, sameStem, urlStem, betterHit, sniffAnimated};')(location);
+const { parseSrcset, looksLikeImage, isVideoUrl, upgradeCandidates, linkParamCandidates, blockMatch, sameStem, urlStem, betterHit, sniffAnimated } = exported;
 
 let pass = 0, fail = 0;
 const NL = String.fromCharCode(10);
@@ -362,6 +362,54 @@ eq('an endless stream reads as a player', gifLike(vid({ duration: Infinity })), 
 // muted: duration is the only test still standing, and it is the one that must hold.
 eq('a custom-chrome player is caught by duration alone',
     gifLike(vid({ autoplay: true, loop: false, duration: 212 })), false);
+
+// ---- betterHit(): the two resolver paths emit independently and warm caches reorder them,
+// so this is what stops a later hit downgrading the frame. Order is trusted > video > area.
+const still = function (w) { return { w: w, h: w, video: false }; };
+const movie = function (w) { return { w: w, h: w, video: true }; };
+eq('anything beats an empty frame', betterHit(null, still(100)), true);
+eq('nothing is not an upgrade', betterHit(still(100), null), false);
+eq('a bigger still replaces a smaller one', betterHit(still(100), still(200)), true);
+eq('a smaller still does not replace a bigger one', betterHit(still(200), still(100)), false);
+eq('the same size is not an improvement', betterHit(still(200), still(200)), false);
+eq('a video replaces a still, even a much bigger still',
+    betterHit(still(4000), movie(100)), true);
+eq('a still NEVER replaces a video, however big',
+    betterHit(movie(100), still(4000)), false);
+eq('a bigger video replaces a smaller video', betterHit(movie(100), movie(200)), true);
+// The linked page's own answer outranks a URL guess regardless of size -- that is `trusted`.
+eq('the linked page beats a bigger guess',
+    betterHit(still(4000), { w: 100, h: 100, trusted: true }), true);
+eq('a guess never displaces the linked page',
+    betterHit({ w: 100, h: 100, trusted: true }, still(4000)), false);
+
+// ---- sniffAnimated(): the animated-image filter, over real container headers.
+// Only consulted at videoMode 'none', and a wrong `true` there costs one refused preview.
+function bytes(str, pad) {
+    const a = new Uint8Array(str.length + (pad || 0));
+    for (let i = 0; i < str.length; i++) a[i] = str.charCodeAt(i);
+    return a;
+}
+function webp(fourcc, flags, tail) {
+    const a = bytes('RIFF____WEBP' + fourcc + '____', 200);
+    a[20] = flags;
+    if (tail) for (let i = 0; i < tail.length; i++) a[40 + i] = tail.charCodeAt(i);
+    return a;
+}
+eq('an animated webp is caught by the VP8X animation flag', sniffAnimated(webp('VP8X', 0x12)), true);
+eq('a still webp with a VP8X chunk is not', sniffAnimated(webp('VP8X', 0x10)), false);
+eq('a plain lossy webp is not', sniffAnimated(webp('VP8 ', 0)), false);
+eq('an ANMF chunk alone is enough', sniffAnimated(webp('VP8 ', 0, 'ANMF')), true);
+eq('an animated gif is caught by its loop extension',
+    sniffAnimated(bytes('GIF89a' + 'x'.repeat(20) + 'NETSCAPE2.0', 40)), true);
+eq('a still gif is not', sniffAnimated(bytes('GIF89a', 40)), false);
+const APNG = bytes('QPNG', 100); APNG[0] = 0x89;
+'acTL'.split('').forEach(function (c, i) { APNG[40 + i] = c.charCodeAt(0); });
+eq('an APNG is caught by its acTL chunk', sniffAnimated(APNG), true);
+const PNG = bytes('QPNG', 100); PNG[0] = 0x89;
+eq('a plain png is not', sniffAnimated(PNG), false);
+eq('a truncated read is never called animated', sniffAnimated(new Uint8Array(8)), false);
+eq('no bytes at all is not animated', sniffAnimated(null), false);
 
 // ---- the never-preview list
 // A wrong match here is SILENT — the image just stops previewing, with nothing on screen to

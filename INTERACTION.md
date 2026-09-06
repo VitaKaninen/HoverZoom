@@ -106,14 +106,14 @@ arrives — nothing is decided in advance.
 | `P1` | The element is an `<img>`, a **playing gif-style `<video>`** (`E16`), or has a CSS background image and contains no `<img>` of its own | — |
 | `P2` | Displayed at least `minDisplayed` on screen | 48 px |
 | `P3` | Displayed no larger than `maxDisplayed` — **retired in v0.40.0**, nobody could name a reason to skip big pictures | — |
-| `P4` | Not a media/plugin tag, and no **player** on this page covering it: not inside a `<video>`, not sitting in a **video surface** (a laid-out player's rectangle, or the player box derived from it), and no player in it or within three ancestors. A `<video>` that is muted, controls-less, looping or autoplaying, and under a minute long is an animated picture rather than a player — it is none of those things (`E12`) | `previewOverPlayer` off |
+| `P4` | Not a media/plugin tag, and no **player** on this page covering it: not inside a `<video>`, not sitting in a **video surface** (a laid-out player's rectangle, or the player box derived from it), and no player in it or within three ancestors. A `<video>` that is muted, controls-less, looping or autoplaying, and under a minute long is an animated picture rather than a player — it is none of those things (`E12`). No setting — a player on the page always wins | — |
 | `P5` | The site passes the blacklist / whitelist test. The host tested is the **page's**, not the frame's (`E29`) | blacklist, empty |
 | `P6` | In modifier mode, the modifier key is held. **Either order** — hold it and then point, or point and then press it (`E28`) | activation = hover |
 | `P7` | Not page furniture — a CSS background that is part of the page rather than a picture on it (`E17`) | `skipFurniture` on |
 | `P8` | Neither the displayed URL nor any candidate is on the never-preview list | `blockList` empty |
 | `P9` | Not marked decoration by the page itself: no `aria-hidden="true"`, no `role="presentation"`/`"none"` on the element | `skipFurniture` on |
 | `P11` | Not a thumbnail leading AWAY to a video page: no ancestor `a[href]` matching the video-URL shapes. A different question from `P4` and a different setting since v0.59.0 — that one is about where you are standing, this one about where the picture goes (`E31`) | `videoMode` = `clips` |
-| `P12` | Anything that moves is allowed to reach the frame at all — the stored form of the bar's play button (`E27`, `E31`) | `videoMode` ≠ `none` |
+| `P12` | Anything that moves is allowed to reach the frame at all — a video file by its URL, an animated GIF/WebP/APNG by sniffing its first 4 KB (`E27`, `E31`, `E32`) | `videoMode` ≠ `none` |
 | `P10` | Not a **band** across the top of the page (`E20`) — a masthead, channel banner or leaderboard ad. The one furniture rule that applies to an `<img>` as well | `skipFurniture` on |
 
 The element tested is not always the one under the pointer. When the hover target fails `P1`, a
@@ -447,6 +447,8 @@ this table is a table.
 | `E29` | The script runs in every iframe; the menu and the site test belong to the page | [`docs/SETTINGS.md`](docs/SETTINGS.md) |
 | `E30` | A centred preview is pinned from the picture, not from the window | [`docs/VIEWER.md`](docs/VIEWER.md) |
 | `E31` | “Is it a video” is three questions, and they get three answers | [`docs/GATES.md`](docs/GATES.md) |
+| `E32` | An animated GIF or WebP is only detectable inside the file | [`docs/RESOLVER.md`](docs/RESOLVER.md) |
+| `E33` | A later hit may never downgrade the frame | [`docs/RESOLVER.md`](docs/RESOLVER.md) |
 | `E31` | Smoothing — the AA toggle, and why there are only two answers | [`docs/SETTINGS.md`](docs/SETTINGS.md) |
 | `E32` | A pan that runs out of picture continues as a window move | [`docs/VIEWER.md`](docs/VIEWER.md) |
 | `E33` | The settings panel is never modal, and who owns the keyboard and wheel | [`docs/SETTINGS.md`](docs/SETTINGS.md) |
