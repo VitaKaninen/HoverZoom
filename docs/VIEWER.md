@@ -832,7 +832,8 @@ ask the browser (and wait for `fullscreenchange`) or restore directly.
 
 Every other app's fullscreen is fixed, and ours was not: dragging the picture moved the window off
 its own black backdrop and left a grey hole where it had been. Locked in v0.68.0 at three points,
-all of which are needed — removing any one of them leaves a way to move it:
+all of which are needed — removing any one of them leaves a way to move it, plus a fourth found in
+v0.74.0:
 
 - **`hitRegion()` returns null while `fullActive()`.** No move band, no resize edge, so the
   cursor stops promising a drag as well.
@@ -843,6 +844,12 @@ all of which are needed — removing any one of them leaves a way to move it:
   wins), and `enterFull`/`restoreFull` clear `box.style.cursor` because `onMove()`'s inline write
   outranks any rule. `onMove` writes `''` in fullscreen rather than a cursor name, so `.pan` can
   still say `grab`.
+- **`panBy()` does not spill into `view.left/top` while `fullActive()`.** The one drag fullscreen
+  *does* allow moved the window anyway: panning past the picture's edge hands the refused travel to
+  the window, which is right everywhere else (a frame grown past the screen has edges nobody could
+  otherwise reach) and wrong here, where the frame IS the screen. The window came off the edge and
+  stayed there — nothing puts it back until fullscreen ends, since `fitFull()` only re-centres on a
+  viewport change. Arrow-key panning took the same route. Found v0.74.0.
 
 Wheel zoom needs no guard: `fitFull()` sets `view.fixedW/fixedH`, which is the hand-resized state,
 so the wheel already zooms the picture inside a fixed frame instead of growing the window.

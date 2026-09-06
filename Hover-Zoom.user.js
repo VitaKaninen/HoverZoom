@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.73.0
+// @version     0.74.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -2629,7 +2629,7 @@
     }
 
     // Whatever the pan clamp refuses moves the WINDOW instead, or a frame bigger than the screen
-    // has edges of the picture nobody can ever reach.
+    // has edges of the picture nobody can ever reach — except in fullscreen, which is nailed down.
     function panBy(dx, dy) {
         if (!view || !pannable()) return;
         const wasX = view.ox, wasY = view.oy;
@@ -2638,7 +2638,8 @@
         reflow();
         const spareX = dx - (view.ox - wasX);
         const spareY = dy - (view.oy - wasY);
-        if (spareX || spareY) { view.left += spareX; view.top += spareY; }
+        // Nailed to the screen: the spill would drag the window off its own backdrop. See E35.
+        if (!fullActive() && (spareX || spareY)) { view.left += spareX; view.top += spareY; }
         layout();
     }
 
