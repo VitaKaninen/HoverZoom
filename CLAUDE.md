@@ -49,9 +49,8 @@ needs. **Opening all five defeats the point**; if a task genuinely spans two, re
 | the zoom **percentage** — why it moves with browser zoom, and the agreed but unbuilt fix | [`docs/ZOOM-UNITS.md`](docs/ZOOM-UNITS.md) |
 | the user cited an ID — `S05`, `E22`, `T17`, `P4` | [`INTERACTION.md`](INTERACTION.md) says what it is in one line; then `grep -rn "E22" docs/` for the argument |
 
-**Find code by name, not by reading the file.** `Hover-Zoom.user.js` is ~4,200 lines and half of
-it is comment prose, so a whole-file read costs ~58k tokens. `grep -n` for the function, then read
-the range around it.
+**Find code by name, not by reading the file.** `Hover-Zoom.user.js` is ~4,800 lines, and a
+whole-file read costs ~58k tokens. `grep -n` for the function, then read the range around it.
 
 ### Keeping this current
 
@@ -100,6 +99,12 @@ has already been misdiagnosed once. (The shared ones — `innerHTML` on Trusted-
 - **Measure the viewport with `vpW()`/`vpH()`, never `documentElement.clientHeight` directly.** On a
   quirks-mode page (no doctype) the root answers with the whole document's height. See
   [`docs/VIEWER.md`](docs/VIEWER.md).
+- **An `<img>` with `srcset` reports `naturalWidth` divided by the chosen candidate's density**, not
+  the file's pixels. Never compare it to a probe of the same URL for equality — `nativeSize()`
+  marks it `scaled` and `samePicture()` compares the ratio instead. See `E45`.
+- **The event target at a document listener is the shadow HOST**, never the element inside a shadow
+  root; `composedPath()[0]` is the real one. A diagnostic that reads `e.target.getRootNode()` can
+  never say "in a shadow root".
 - **The Browser pane is Chromium; a Firefox-only layout fault is invisible to every check made
   here.** Give any absolutely positioned box holding a form control an explicit width — shrink-to-fit
   diverges between engines. See [`docs/TESTING.md`](docs/TESTING.md).
@@ -189,7 +194,7 @@ static catches it — `node --check` passes and the markup is fine.
 
 ```bash
 node --check Hover-Zoom.user.js     # syntax
-node test-resolver.js               # 160 assertions: the pure URL and video-link logic, plus
+node test-resolver.js               # 213 assertions: the pure URL and video-link logic, plus
                                     # the banner gate's shape test against every measured page
                                     # in banner-test-sites.md
 python make-test-images.py          # regenerate fixtures into test-images/

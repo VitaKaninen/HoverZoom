@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.77.0
+// @version     0.78.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -554,11 +554,13 @@
         'data-lazy', 'data-lazy-src', 'data-defer-src', 'data-echo', 'data-url',
         'data-hoverzoom', 'data-actualsrc'];
 
-    // Ordered best-first list of candidates worth trying for this element, each as `{ url, from }`.
+    const SRCSET_KEEP = 2;      // per list: the widest, and one behind it in case that 404s. See E46.
+
+    // Ordered best-first list of candidates worth trying for this element, each as `{ url, from, keep }`.
     function collectCandidates(el) {
-        const seen = new Set();
+        const seen = new Map();
         const out = [];
-        const add = function (u, from) {
+        const add = function (u, from, keep) {
             if (!u) return;
             let abs;
             try { abs = new URL(u, location.href).href; } catch (e) { return; }
@@ -566,9 +568,10 @@
             if (blocked(abs)) return;       // never probe something the user has ruled out
             if (unstable.has(abs)) return;  // it has already been caught changing under us
             if (!videoPreviewsOn() && isVideoUrl(abs)) return;
-            if (seen.has(abs)) return;
-            seen.add(abs);
-            out.push({ url: abs, from: from });
+            if (seen.has(abs)) { if (keep) seen.get(abs).keep = true; return; }
+            const c = { url: abs, from: from, keep: !!keep };
+            seen.set(abs, c);
+            out.push(c);
         };
         const adder = function (from) { return function (u) { add(u, from); }; };
 
@@ -578,7 +581,7 @@
             if (v && !/\s/.test(v.trim())) add(v.trim(), a);
         });
         const dataSrcset = el.getAttribute && el.getAttribute('data-srcset');
-        if (dataSrcset) parseSrcset(dataSrcset).forEach(adder('data-srcset'));
+        if (dataSrcset) parseSrcset(dataSrcset).slice(0, SRCSET_KEEP).forEach(adder('data-srcset'));
 
         // 2. srcset on the image and on any <picture><source>
         let bestSrcset = null;
@@ -586,14 +589,14 @@
             if (el.srcset) {
                 const list = parseSrcset(el.srcset);
                 if (list.length) bestSrcset = list[0];
-                list.forEach(adder('srcset'));
+                list.slice(0, SRCSET_KEEP).forEach(adder('srcset'));
             }
             const pic = el.closest && el.closest('picture');
             if (pic) {
                 pic.querySelectorAll('source[srcset]').forEach(function (s) {
                     const list = parseSrcset(s.srcset);
                     if (!bestSrcset && list.length) bestSrcset = list[0];
-                    list.forEach(adder('<picture> <source srcset>'));
+                    list.slice(0, SRCSET_KEEP).forEach(adder('<picture> <source srcset>'));
                 });
             }
         }
@@ -603,7 +606,7 @@
 
         const a = el.closest && el.closest('a[href]');
         if (a && a.href) {
-            if (looksLikeImage(a.href) || (videoPreviewsOn() && isVideoUrl(a.href))) add(a.href, 'the ancestor link itself');
+            if (looksLikeImage(a.href) || (videoPreviewsOn() && isVideoUrl(a.href))) add(a.href, 'the ancestor link itself', true);
             else {
                 linkParamCandidates(a.href).forEach(adder('a url inside the ancestor link\'s query'));
                 upgradeCandidates(a.href).forEach(function (u) {
@@ -617,7 +620,7 @@
         if (shown) upgradeCandidates(shown).forEach(adder('url rule on the displayed src'));
 
         // 5. the displayed src itself, last — it is the fallback, never the upgrade
-        if (shown) add(shown, 'the displayed src itself');
+        if (shown) add(shown, 'the displayed src itself', true);
 
         return out;
     }
@@ -663,10 +666,17 @@
         return Math.max(r1, r2) / Math.min(r1, r2) <= ASPECT_TOL;
     }
 
-    // The size of the bytes the page ALREADY has for this element — free, and exact.
+    // Did the probe load the picture the page decoded? Exact, unless the page's size is density-corrected (E45).
+    function samePicture(native, dim) {
+        if (!native.scaled) return dim.w === native.w && dim.h === native.h;
+        return Math.abs(native.w * dim.h - native.h * dim.w) <= dim.w + dim.h;
+    }
+
+    // The size of the bytes the page ALREADY has for this element. `scaled`: under srcset, naturalWidth is divided by the candidate's density.
     function nativeSize(el) {
         if (el.tagName === 'IMG' && el.naturalWidth > 0)
-            return { w: el.naturalWidth, h: el.naturalHeight };
+            return { w: el.naturalWidth, h: el.naturalHeight,
+                scaled: !!(el.srcset || (el.closest && el.closest('picture'))) };
         if (el.tagName === 'VIDEO' && el.videoWidth > 0)
             return { w: el.videoWidth, h: el.videoHeight };
         return null;    // a background image, or nothing decoded yet — nothing to check
@@ -701,26 +711,35 @@
         });
     }
 
-    function probe(url) {
-        if (probeCache.has(url)) return probeCache.get(url);
-        if (isVideoUrl(url)) {
-            const pv = probeVideo(url);
-            probeCache.set(url, pv);
-            return pv;
-        }
-        const p = new Promise(function (resolve) {
+    const IMAGE_PROBE_MS = 20000;
+    const PROBE_RETRY_MS = 30000;   // a miss is forgotten after this; a stall or a 429 is not for life
+
+    function probeImage(url) {
+        return new Promise(function (resolve) {
             const img = new Image();
             if (noReferrerHere()) img.referrerPolicy = 'no-referrer';
+            let timer = 0;
             const done = function (ok) {
+                clearTimeout(timer);
                 img.onload = img.onerror = null;
                 resolve(ok ? { w: img.naturalWidth, h: img.naturalHeight } : null);
             };
             img.onload = function () { done(img.naturalWidth > 0); };
             img.onerror = function () { done(false); };   // HZ+ omits this; a failed probe there wedges the page
+            timer = setTimeout(function () { done(false); img.src = ''; }, IMAGE_PROBE_MS);
             img.src = url;
             if (img.complete && img.naturalWidth > 0) done(true);
         });
+    }
+
+    function probe(url) {
+        if (probeCache.has(url)) return probeCache.get(url);
+        const p = isVideoUrl(url) ? probeVideo(url) : probeImage(url);
         probeCache.set(url, p);
+        p.then(function (dim) {
+            if (dim) return;
+            setTimeout(function () { if (probeCache.get(url) === p) probeCache.delete(url); }, PROBE_RETRY_MS);
+        });
         return p;
     }
 
@@ -741,7 +760,11 @@
                 GM_xmlhttpRequest({
                     method: 'GET', url: url, responseType: 'arraybuffer', timeout: 4000,
                     headers: { Range: 'bytes=0-' + (n - 1) },
-                    onload: function (r) { fin(r.response ? new Uint8Array(r.response) : null); },
+                    // Only the head, whatever the server made of the Range header.
+                    onload: function (r) {
+                        const b = r.response;
+                        fin(b && b.byteLength != null ? new Uint8Array(b, 0, Math.min(n, b.byteLength)) : null);
+                    },
                     onerror: function () { fin(null); },
                     ontimeout: function () { fin(null); },
                 });
@@ -758,7 +781,7 @@
 
     // The only place the script looks INSIDE a file, and only in the mode that asked for stillness.
     async function motionRefused(url) {
-        if (cfg.videoMode !== 'none') return false;
+        if (videoPreviewsOn()) return false;
         let path;
         try { path = new URL(url, location.href).pathname; } catch (e) { return false; }
         if (!ANIM_EXT_RE.test(path)) return false;
@@ -855,7 +878,10 @@
     }
 
     async function resolve(el, displayed, token, onHit) {
-        const candidates = collectCandidates(el).slice(0, MAX_PROBES);
+        // The budget falls on the guesses; the link and the displayed src are always tried. See E46.
+        const all = collectCandidates(el);
+        let budget = MAX_PROBES - all.filter(function (c) { return c.keep; }).length;
+        const candidates = all.filter(function (c) { return c.keep || budget-- > 0; });
         const shown = shownUrl(el);
         const native = nativeSize(el);      // the bytes on screen, for the stability test
         dbg('candidates', candidates);
@@ -926,7 +952,7 @@
             const dim = await probe(url);
             if (!dim) continue;
             const isSameAsShown = (url === shown);
-            if (isSameAsShown && native && (dim.w !== native.w || dim.h !== native.h)) {
+            if (isSameAsShown && native && !samePicture(native, dim)) {
                 markUnstable(url, native, dim);
                 continue;
             }
@@ -976,6 +1002,7 @@
     let volDrag = false;        // ditto for the volume column against syncVideoCtl()
     let fullPrev = null;        // geometry to put back, and the "this fullscreen is ours" flag
     let fullApi = false;        // the real API engaged, rather than the maximise fallback
+    let fullReq = null;         // the requestFullscreen() still in flight, which an exit waits out. See E47.
 
     const SVG_NS = 'http://www.w3.org/2000/svg';
     const SPIN_SIZE = 24;                           // px, matches the .spin rule
@@ -1081,6 +1108,9 @@
 
     const MAX_SCALE_ABS = 64;   // ceiling on cfg.maxZoom; past this a pixel is a billboard
     const KEY_ZOOM = 1.25;      // per +/− press
+
+    // The zoom ceiling in scale units; every fit and clamp reads this one.
+    function maxScale() { return fromShown(Math.min(cfg.maxZoom, MAX_SCALE_ABS)); }
 
     function buildViewer() {
         if (host) return;
@@ -1197,8 +1227,9 @@
             '.vctl .vsound .vbtn{width:100%;height:100%}',
             '.vctl .vsound .vbtn svg{width:17px;height:17px}',
             '.vctl .vsound.muted .vbtn{color:#f38ba8}',
+            // Explicit width: an abspos box holding a form control shrink-to-fits differently in Firefox.
             '.vvol{position:absolute;left:50%;bottom:100%;transform:translateX(-50%);display:none;',
-            'padding:9px 6px 11px;border-radius:7px;',
+            'width:28px;box-sizing:border-box;padding:9px 6px 11px;border-radius:7px;',
             'background:rgba(17,17,27,.92);border:1px solid rgba(205,214,244,.14);',
             'box-shadow:0 6px 18px rgba(0,0,0,.5)}',
             '.vvol.open{display:block}',
@@ -1211,7 +1242,7 @@
 
             // ---- the speed menu, opening upward out of the strip
             '.spop{position:absolute;bottom:100%;margin-bottom:6px;display:none;z-index:5;',
-            'min-width:96px;padding:4px;border-radius:7px;background:rgba(17,17,27,.97);',
+            'width:' + RATE_POP_W + 'px;box-sizing:border-box;padding:4px;border-radius:7px;background:rgba(17,17,27,.97);',
             'border:1px solid rgba(205,214,244,.16);box-shadow:0 8px 22px rgba(0,0,0,.55);',
             'font:11px/1.4 system-ui,sans-serif;color:#cdd6f4;text-align:left}',
             '.spop.open{display:block}',
@@ -1227,7 +1258,7 @@
             '.spop .custom input:focus{border-color:#89b4fa}',
             '.spop .custom span{color:#7f849c}',
             '.pop{position:absolute;right:8px;bottom:' + (BAR_MIN_H + 4) + 'px;display:none;',
-            'z-index:4;max-width:250px;background:rgba(30,30,46,.98);border:1px solid #45475a;',
+            'z-index:4;width:250px;background:rgba(30,30,46,.98);border:1px solid #45475a;',
             'border-radius:6px;overflow:hidden;box-shadow:0 6px 20px rgba(0,0,0,.55);',
             'font:11px/1.4 system-ui,sans-serif;color:#cdd6f4;text-align:left}',
             '.box.hot .pop.open{display:block}',
@@ -1292,7 +1323,7 @@
         capNameEl.className = 'name';
         capHintEl = document.createElement('span');
         capHintEl.className = 'hint';
-        capHintEl.textContent = '(click this window to pin it)';
+        capHintEl.textContent = '(click to pin)';
         capMetaEl = document.createElement('span');
         capMetaEl.className = 'meta';
         blockEl = document.createElement('span');
@@ -1304,7 +1335,7 @@
 
         vidOffEl = document.createElement('span');
         vidOffEl.className = 'btn vidoff';
-        setTip(vidOffEl, 'Stop showing clips in this tab — still images only, until you reload');
+        setTip(vidOffEl, 'Stop clips in this tab until reload');
         vidOffEl.appendChild(mkIcon(ICON_NOPLAY));
         vidOffEl.addEventListener('mousedown', function (e) { e.preventDefault(); e.stopPropagation(); }, true);
         vidOffEl.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); stopVideoPreviews(); }, true);
@@ -1318,7 +1349,7 @@
         fsEl = document.createElement('span');
         fsEl.className = 'btn fs';
         fsEl.appendChild(mkIcon(ICON_FULL));
-        setTip(fsEl, 'Fill the screen');
+        setTip(fsEl, 'Fullscreen');
         fsEl.addEventListener('mousedown', function (e) { e.preventDefault(); e.stopPropagation(); }, true);
         fsEl.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); toggleFull(); }, true);
 
@@ -1336,8 +1367,8 @@
 
         blockPopEl = buildPop();
         popHead(blockPopEl, 'Never preview this image again.',
-            ' It goes on the Exceptions list in Hover Zoom settings, where you can take it off ' +
-            'again. The page itself is not changed.');
+            ' It goes on the Exceptions list in settings, where it can be removed. The page is ' +
+            'not changed.');
         const acts = document.createElement('div');
         acts.className = 'acts';
         const noBtn = document.createElement('button');
@@ -1406,7 +1437,6 @@
     // The status bar answers 'always' | 'hover' | 'off' for itself.
     function barShown() { return cfg.barMode !== 'off'; }
     function barFades() { return cfg.barMode === 'hover'; }
-    function anyFades() { return barFades(); }
 
     // Height the bar claims BELOW the picture instead of over it. Only 'always' docks: a bar that
     // fades cannot own layout, or the picture would resize itself every time the bar came and went.
@@ -1523,9 +1553,9 @@
     // The zoom floor, and what `0` returns to.
     function fitScaleFor(w, h) {
         if (!w || !h) return 1;
-        if (view && view.fixedW != null) return Math.min(view.fixedW / w, view.fixedH / h);
+        if (view && view.fixedW != null) return Math.min(maxScale(), view.fixedW / w, view.fixedH / h);
         const m = viewportBox();
-        return Math.min(fromShown(cfg.zoomFactor), m.w / w, m.h / h);
+        return Math.min(fromShown(cfg.zoomFactor), maxScale(), m.w / w, m.h / h);
     }
 
     const MIN_MEDIA = 32;
@@ -1763,7 +1793,7 @@
     }
 
     function zoomHi() {
-        return Math.max(zoomLo() * 1.01, fromShown(Math.min(cfg.maxZoom, MAX_SCALE_ABS)));
+        return Math.max(zoomLo() * 1.01, maxScale());
     }
 
     // lo, every round value above it, then hi — with each band's stop count and the log distance
@@ -1917,7 +1947,7 @@
         zoomWrapEl.className = 'zoom';
         zvalEl = document.createElement('span');
         zvalEl.className = 'zval';
-        setTip(zvalEl, 'Click to type a zoom level');
+        setTip(zvalEl, 'Click to type a level');
         zinEl = document.createElement('input');
         zinEl.className = 'zin';
         zinEl.type = 'text';
@@ -2047,7 +2077,7 @@
         vrateEl = document.createElement('span');
         vrateEl.className = 'vrate';
         vrateEl.textContent = '100%';
-        setTip(vrateEl, 'Playback speed');
+        setTip(vrateEl, 'Speed');
         vrateEl.addEventListener('mousedown', function (e) { e.preventDefault(); e.stopPropagation(); }, true);
         vrateEl.addEventListener('click', function (e) {
             e.preventDefault(); e.stopPropagation(); toggleRateMenu(); showBar();
@@ -2427,7 +2457,7 @@
     // what the flicker across the middle of the picture was. It says NOTHING about how long the
     // fade takes — that is barFadeMs, and coupling the two is the bug fixed in v0.72.0.
     function barNoDelay() {
-        return anyFades() && !barIdleMs();
+        return barFades() && !barIdleMs();
     }
 
     // Should it be up right now, asked only where there is no timer to ask it later.
@@ -2454,7 +2484,7 @@
             return;
         }
         applyIdle(false);
-        if (!anyFades()) return;                // stays up for as long as the window does
+        if (!barFades()) return;                // stays up for as long as the window does
         barTimer = setTimeout(function () {
             barTimer = 0;
             if (!box || !view) return;
@@ -2577,7 +2607,7 @@
 
     function clampScale(s) {
         const lo = minScaleFor(view.natW, view.natH);
-        const hi = Math.max(lo, fromShown(Math.min(cfg.maxZoom, MAX_SCALE_ABS)));
+        const hi = Math.max(lo, maxScale());
         return Math.max(lo, Math.min(hi, s));
     }
 
@@ -2825,8 +2855,11 @@
         }, 300);
     }
 
+    let hideTimer = 0;          // one teardown at a time, or an older hide clears a newer fade
+
     function hideViewer() {
         if (!box) return;
+        if (vidEl) vidEl.pause();   // sound must not outlive the window; setMedia() restarts it
         hideTip();
         closePops();
         resetZoomControl();
@@ -2836,7 +2869,9 @@
         box.classList.remove('on', 'hot', 'pan', 'drag', 'full');
         box.style.cursor = '';      // onMove writes this inline over the bands; see hitRegion
         if (gripEl) { gripEl.classList.remove('hot'); gripEl.style.cursor = ''; }
-        setTimeout(function () {
+        clearTimeout(hideTimer);
+        hideTimer = setTimeout(function () {
+            hideTimer = 0;
             if (box && !box.classList.contains('on')) {
                 clearMedia(imgEl);
                 clearMedia(vidEl);
@@ -2981,17 +3016,23 @@
             try {
                 const p = req.call(el);
                 fullApi = true;
+                fullReq = p && p.then ? p : null;
                 // An iframe without allow="fullscreen" rejects; the maximise below is already
                 // showing, so the fallback is to simply stop expecting the API.
                 if (p && p.catch) p.catch(function () { fullApi = false; });
-            } catch (e) { fullApi = false; }
+            } catch (e) { fullApi = false; fullReq = null; }
         }
         fitFull();
     }
 
     function leaveFull() {
-        // Ask the browser first when the API is what put us here; `fullscreenchange` finishes the
-        // job. Otherwise there is nothing to ask and we restore directly.
+        // A request still in flight lands first, or the change it fires would find nothing to undo.
+        if (fullReq) {
+            const pending = fullReq;
+            fullReq = null;
+            pending.then(leaveFull, leaveFull);
+            return;
+        }
         if (fullApi && document.fullscreenElement) {
             const fn = document.exitFullscreen || document.webkitExitFullscreen;
             if (fn) {
@@ -3026,13 +3067,14 @@
         const p = fullPrev;
         fullPrev = null;
         fullApi = false;
+        fullReq = null;
         unlockScroll();
         dimEl.classList.remove('full');
         box.classList.remove('full');
         box.style.cursor = '';
         applyLook();                // fullPrev is already null, so the border comes back first
         setIcon(fsEl, ICON_FULL);
-        setTip(fsEl, 'Fill the screen');
+        setTip(fsEl, 'Fullscreen');
         if (!view) return;
         view.fixedW = null;
         view.fixedH = null;
@@ -3121,9 +3163,7 @@
         if (!aaEl) return;
         const sharp = smoothingMode() === 'pixelated';
         aaEl.classList.toggle('sharp', sharp);
-        setTip(aaEl, sharp
-            ? 'Hard pixels when enlarged — click for smooth'
-            : 'Smooth when enlarged — click for hard pixels');
+        setTip(aaEl, sharp ? 'Sharp pixels; click for smooth' : 'Smooth; click for sharp pixels');
     }
 
     function toggleSmoothing() {
@@ -3351,7 +3391,8 @@
     let suppressed = null;  // element whose preview was dismissed; skipped until re-entered
     let activeCovered = false;
     let suppressedCovered = false;
-    let swallowMenu = false;
+    let swallowMenuAt = 0;      // when the right press that dismissed a preview happened; its menu is ours
+    const MENU_CLAIM_MS = 1500; // and only that long, or a press released off-window eats the next menu
     let pointer = { x: 0, y: 0 };
     let mouseDown = false;
     let modifierDown = false;
@@ -3503,11 +3544,6 @@
         return null;
     }
 
-    // Reporting only — the two halves are gated separately, by different settings.
-    function videoReason(el) {
-        return playerSurfaceReason(el) || videoLinkReason(el);
-    }
-
     // Returns WHY this element leads AWAY to a video page, or null.
     function videoLinkReason(el) {
         const a = closestAcross(el, 'a[href]');
@@ -3618,13 +3654,14 @@
 
     const COVER_UP = 4;
 
+    // Laid-out pictures under n, counted only as far as "more than one".
     function laidOutMedia(n) {
         if (!n.querySelectorAll) return 0;
         const all = n.querySelectorAll('img,video');
         let seen = 0;
         for (let i = 0; i < all.length; i++) {
             const r = all[i].getBoundingClientRect();
-            if (r.width >= 2 && r.height >= 2) seen++;
+            if (r.width >= 2 && r.height >= 2 && ++seen > 1) break;
         }
         return seen;
     }
@@ -3680,7 +3717,7 @@
     }
 
     // One console line per hover, when `debug` is on.
-    function hoverReport(t, el) {
+    function hoverReport(t, el, e) {
         const a = closestAcross(t, 'a[href]');
         const rect = t.getBoundingClientRect();
         const cx = rect.left + rect.width / 2;
@@ -3716,7 +3753,8 @@
             videosOnPage: sizes.length ? sizes.join(', ') : 'none',
             ancestorLink: a ? (a.getAttribute('href') || '(empty href)').slice(0, 160)
                 : 'NO <a href> ancestor, even across shadow roots',
-            inShadowRoot: !!(t.getRootNode && t.getRootNode() !== document),
+            // The listener only ever sees the host; the real target is in its shadow root.
+            retargetedFromShadowRoot: !!(e && e.composedPath && e.composedPath()[0] !== t),
         };
     }
 
@@ -3758,7 +3796,7 @@
         dismiss();
         e.preventDefault();
         e.stopPropagation();
-        if (e.button === 2) swallowMenu = true;
+        if (e.button === 2) swallowMenuAt = Date.now();
         return true;
     }
 
@@ -3818,7 +3856,7 @@
         if (cfg.activation === 'modifier' && !modifierHeld(e) && !modifierDown) return;
 
         const el = eligible(e.target, e.clientX, e.clientY);
-        if (cfg.debug) dbg('hover', hoverReport(e.target, el));
+        if (cfg.debug) dbg('hover', hoverReport(e.target, el, e));
         if (!el) {
             if (active && !active.contains(e.target) &&
                 !(activeCovered && stillUnderPointer(active, e.clientX, e.clientY))) cancel();
@@ -3864,7 +3902,7 @@
         if (suppressed) {
             const inside = (to && suppressed.contains && suppressed.contains(to)) ||
                 (suppressedCovered && stillUnderPointer(suppressed, e.clientX, e.clientY));
-            if (!inside && (suppressedCovered || e.target === suppressed)) {
+            if (!inside && (suppressedCovered || suppressed.contains(e.target))) {
                 suppressed = null;  // left the image; hovering it again may preview again
                 suppressedCovered = false;
             }
@@ -3913,8 +3951,9 @@
         onBoxClick(e);
     }, true);
     CAP_TARGET.addEventListener('contextmenu', function (e) {
-        if (!swallowMenu) return;
-        swallowMenu = false;
+        const ours = swallowMenuAt && Date.now() - swallowMenuAt <= MENU_CLAIM_MS;
+        swallowMenuAt = 0;
+        if (!ours) return;
         e.preventDefault();
         e.stopPropagation();
     }, true);
@@ -3936,7 +3975,8 @@
     window.addEventListener('scroll', function (e) {
         if (!placed && !panelOwns(e)) cancel();
     }, true);
-    window.addEventListener('blur', function () { if (!placed) cancel(); });
+    // No keyup ever comes for a modifier held through Alt+Tab or Ctrl+Tab, so blur forgets it.
+    window.addEventListener('blur', function () { modifierDown = false; if (!placed) cancel(); });
     window.addEventListener('resize', function () {
         if (!placed) { cancel(); return; }
         if (!view) return;
@@ -3985,9 +4025,8 @@
     let advOpen = false;        // the fold survives the re-render every outside write needs
     let panelOpened = null;     // Undo's snapshot — see openPanel(); MUST outlive a re-render
 
-    // Things the user typed, not knobs. `Reset to defaults` leaves these alone; there is no
-    // getting them back from a default, and the ✕ per row already deletes them one at a time.
-    const RESET_KEEPS = ['siteList', 'blockList', 'referrerSites'];
+    // What the user entered per site, not knobs: `Reset to defaults` leaves these alone.
+    const RESET_KEEPS = ['siteList', 'blockList', 'referrerSites', 'siteAudio'];
 
     function closePanel() {
         if (panelFlush) { panelFlush(); panelFlush = null; }
@@ -4277,15 +4316,6 @@
             return { el: el, row: row(labelText, hintText, el) };
         }
 
-        // A row whose wording depends on another control. It must have been built WITH a hint,
-        // or there is no .hint span to write into.
-        function relabel(r, labelText, hintText) {
-            const l = r.row.querySelector('label');
-            l.childNodes[0].textContent = labelText;
-            const hint = l.querySelector('.hint');
-            if (hint) hint.textContent = hintText || '';
-        }
-
         function pick(key, labelText, hintText, opts) {
             const el = document.createElement('select');
             opts.forEach(function (o) {
@@ -4418,7 +4448,7 @@
             editBtn.className = 'edittext';
             editBtn.type = 'button';
             editBtn.textContent = 'Edit as text';
-            setTip(editBtn, 'One entry per line — paste a list in, or copy this one out');
+            setTip(editBtn, 'One entry per line; paste in or copy out');
 
             function editing() { return !textarea.hidden; }
 
@@ -4427,7 +4457,7 @@
                 textarea.hidden = false;
                 entries.hidden = true;
                 addRow.hidden = true;
-                editBtn.textContent = 'Done editing';
+                editBtn.textContent = 'Done';
                 textarea.focus();
             }
 
@@ -4454,7 +4484,7 @@
 
             textarea.addEventListener('blur', commitText);
             // Or the press blurs the textarea, commitText() closes it, and the click that follows
-            // sees "not editing" and re-opens it — Done editing looks dead.
+            // sees "not editing" and re-opens it — Done looks dead.
             editBtn.addEventListener('mousedown', function (e) { e.preventDefault(); });
             editBtn.addEventListener('click', function () {
                 if (editing()) { commitText(); } else { openText(); }
@@ -4485,9 +4515,9 @@
         const intro = document.createElement('p');
         intro.className = 'intro';
         intro.textContent =
-            'Point at any image and Hover Zoom shows the full-size original. Click to keep it ' +
-            'on screen, then scroll to resize, drag to move, and double-click for fullscreen. ' +
-            'Right-click to save or copy. Escape closes it.';
+            'Point at an image to see the full-size original. Click to keep it, then wheel to ' +
+            'zoom, drag to move, double-click for fullscreen, right-click to save or copy. ' +
+            'Escape closes it.';
         body.appendChild(intro);
 
         const guideBtn = document.createElement('button');
@@ -4518,14 +4548,13 @@
         para('One press keeps it.',
             'A click, or the start of a drag, pins the preview until you press Escape or click ' +
             'outside it. The page underneath stays readable and scrollable. Once pinned, a ' +
-            'single click on the picture pauses or resumes a clip and a double click fills the ' +
+            'single click on the image pauses or resumes a clip and a double click fills the ' +
             'screen.');
         para('Moving, sizing and zooming.',
-            'Drag the grab border or the status bar to move the window; drag an edge or corner ' +
-            'to resize it, with Shift to keep its shape. The wheel grows the whole window until ' +
-            'you resize it by hand, after which it zooms the image inside the frame. Arrow keys ' +
-            'pan, + and − zoom, 0 fits. The status bar carries a zoom slider and the current ' +
-            'level — click the level to type an exact one.');
+            'Drag the status bar to move the window; drag an edge or corner to resize it, Shift ' +
+            'keeps its shape. The wheel grows the window until you have resized it by hand, ' +
+            'then zooms the image inside it. Arrow keys pan, + and − zoom, 0 fits. Click the ' +
+            'zoom level in the status bar to type one.');
         para('Saving a copy.',
             'Right-click a pinned preview for the browser’s own menu — Save image as…, Copy ' +
             'image, Copy image address, Open image in new tab — all acting on the full-size ' +
@@ -4543,55 +4572,55 @@
 
         guideBtn.addEventListener('click', function () {
             const open = guide.classList.toggle('open');
-            guideBtn.textContent = open ? 'Hide the details' : 'How it works';
+            guideBtn.textContent = open ? 'Hide' : 'How it works';
         });
         body.appendChild(guideBtn);
         body.appendChild(guide);
 
         section('The preview');
         const act = pick('activation', 'Show a preview', null, [
-                ['hover', 'When I hover over an image'],
-                ['modifier', 'Only when the modifier key is held']]);
+                ['hover', 'On hover'],
+                ['modifier', 'On hover while the modifier key is held']]);
         const modKey = pick('modifierKey', 'Modifier key', null, [
             ['ctrl', 'Ctrl'], ['alt', 'Alt'], ['shift', 'Shift']]);
         function syncModKey() { modKey.row.hidden = act.el.value !== 'modifier'; }
         act.el.addEventListener('change', syncModKey);
         syncModKey();
-        const pos = pick('position', 'Location', ' ', [
+        const pos = pick('position', 'Opens', ' ', [
             ['cursor', 'Beside the pointer'], ['center', 'Centred in the window']]);
         const posHint = pos.row.querySelector('.hint');
         function syncPos() {
             posHint.textContent = pos.el.value === 'center'
-                ? 'where the preview window will open. Click the image under the mouse to pin the preview window.'
-                : 'where the preview window will open. Beside the pointer makes it easy to pin.';
+                ? 'Pin it by clicking the image under the pointer.'
+                : 'Pin it by clicking the preview.';
         }
         pos.el.addEventListener('change', syncPos);
         syncPos();
+        num('hoverDelay', 'Hover delay',
+            'How long the pointer rests on an image before the preview loads, in ms. ' +
+            '(default: 120)', 0, 3000, 10);
         num('zoomFactor', 'Opening zoom limit',
-            'How far a small original may be enlarged, in multiples of its own size. 1 never ' +
-            'enlarges. Larger originals still shrink to fit the window. (default: 2)', 0.1, 8, 0.1);
-        num('minRatio', 'Required upsize',
-            'Only show the preview window if the original is this much larger than the one on ' +
-            'the page. 1 means anything bigger at all; below 1 previews it even when the ' +
-            'original is smaller. (default: 1)', 0.1, 100, 0.1);
+            'How far a small original is enlarged, in multiples of its size. 1 never enlarges; ' +
+            'large originals always shrink to fit. (default: 2)', 0.1, 8, 0.1);
+        num('minRatio', 'Minimum size ratio',
+            'Original ÷ the image on the page. 1 previews anything larger; below 1 previews ' +
+            'smaller originals too. (default: 1)', 0.1, 100, 0.1);
         num('minDisplayed', 'Ignore images smaller than',
-            'The size drawn on the page, in px. Lower it to reach icons and avatars — a ' +
-            'YouTube avatar is about 24. (default: 16)', 0, 2000, 1);
-        pick('pinButton', 'Pin preview with',
-            'The other button closes the preview without following the link underneath.', [
-                ['left', 'Left click  (right click dismisses)'],
-                ['right', 'Right click  (left click dismisses)']]);
-        pick('videoMode', 'Video to play in a preview',
-            'A clip is short, muted and looping. A video is a thumbnail linking to a video ' +
-            'page. No video at all also refuses animated GIFs.', [
+            'As drawn on the page, in px. Lower it for icons and avatars; a YouTube avatar is ' +
+            'about 24. (default: 16)', 0, 2000, 1);
+        pick('pinButton', 'Pin with',
+            'The other button dismisses it without following the link underneath.', [
+                ['left', 'Left click (right dismisses)'],
+                ['right', 'Right click (left dismisses)']]);
+        pick('videoMode', 'Play in a preview',
+            'A clip is short, muted and looping; a video is anything a thumbnail links to.', [
                 ['clips', 'Looping clips only'],
                 ['all', 'Clips and videos'],
-                ['none', 'No video at all']]);
+                ['none', 'Nothing that moves']]);
         check('skipFurniture', 'Ignore backgrounds and banners',
-            'Page furniture — backgrounds, banners, decoration — rather than images on the ' +
-            'page. Turn off if it skips images you want to preview.');
+            'Turn off if an image you want is being skipped.');
         num('displayScale', 'Display scaling',
-            'if the zoom percentages look wrong, set this to your display scaling. (default: 1)',
+            'If the zoom percentages look wrong, set this to your display’s scaling. (default: 1)',
             1, 4, 0.25);
 
         section('Where it runs');
@@ -4599,10 +4628,10 @@
             ['blacklist', 'Disable on listed sites'], ['whitelist', 'Enable only on listed sites']]);
 
         const sites = list('siteList', {
-            description: 'Subdomains are included, so example.com also covers www.example.com.',
+            description: 'example.com also covers www.example.com.',
             examples: 'Examples: example.com, news.ycombinator.com',
             placeholder: 'e.g. example.com',
-            addCurrentLabel: '+ This Site',
+            addCurrentLabel: '+ This site',
             addCurrentTitle: pageHost(),
             currentValue: function () { return pageHost(); },
         });
@@ -4611,19 +4640,17 @@
         const blocks = list('blockList', {
             heading: 'Never preview these images',
             chronological: true,
-            description: 'Images that never open a preview. Add one with the ⊘ button on a ' +
-                'pinned preview; newest last. A * matches anything.',
+            description: 'Add one with ⊘ on a pinned preview; newest last. * matches anything.',
             examples: 'Examples: https://example.com/tile.png, https://cdn.example.com/wm/*',
             placeholder: 'e.g. https://example.com/watermark.png',
         });
 
         const refSites = list('referrerSites', {
             heading: 'Load previews without a referrer on these sites',
-            description: 'Add a site whose previews come up blank or say “no hotlinking” ' +
-                'while the page’s own thumbnails look fine.',
-            examples: 'Subdomains are included, same as the site list above',
+            description: 'For a site whose previews come up blank or say “no hotlinking”.',
+            examples: 'example.com also covers www.example.com',
             placeholder: 'e.g. example.com',
-            addCurrentLabel: '+ This Site',
+            addCurrentLabel: '+ This site',
             addCurrentTitle: pageHost(),
             currentValue: function () { return pageHost(); },
         });
@@ -4632,36 +4659,28 @@
 
         section('The preview window');
         num('wheelZoomStep', 'Wheel zoom step',
-            'One wheel notch, in %. The + and − keys always step by 25%. (default: 15)',
-            2, 100, 1);
+            'Per wheel notch, in %. The + and − keys step 25%. (default: 15)', 2, 100, 1);
         num('panStep', 'Arrow-key pan step',
-            'How far one press moves the image, in px — hold Shift for 3×. (default: 80)',
-            5, 500, 5);
+            'Per press, in px; Shift triples it. (default: 80)', 5, 500, 5);
         num('maxZoom', 'Maximum zoom',
-            'How far you can zoom in by hand, in multiples of the original’s size. ' +
-            '(default: 32)', 1, 64, 1);
+            'In multiples of the original’s size. (default: 32)', 1, 64, 1);
         num('maxSizeMultiple', 'Maximum window size',
-            'How far you can grow the window yourself, in multiples of the browser window. A ' +
-            'preview always opens no larger than the browser window. (default: 1.2)', 1, 4, 0.25);
+            'In multiples of the browser window. A preview never opens larger than the browser ' +
+            'window. (default: 1.2)', 1, 4, 0.25);
 
         section('Appearance');
-        num('hoverDelay', 'Delay before the preview appears',
-            'How long the pointer must rest on an image before the preview begins to load, ' +
-            'in ms. (default: 120)', 0, 3000, 10);
-        num('fadeMs', 'Preview fade in / out',
-            'in ms. (default: 200)', 0, 1000, 10);
-        num('borderWidth', 'Border thickness', 'in px. (default: 1)', 0, 20, 1);
+        num('fadeMs', 'Preview fade', 'In and out, in ms. (default: 200)', 0, 1000, 10);
+        num('borderWidth', 'Border thickness', 'In px; 0 for none. (default: 1)', 0, 20, 1);
         color('borderColor', 'Border colour');
-        num('cornerRadius', 'Corner radius', 'in px. (default: 6)', 0, 40, 1);
-        const bar = pick('barMode', 'Status bar', 'has useful tools and info.', [
-            ['always', 'Always visible'],
-            ['hover', 'Visible when hovering'],
+        num('cornerRadius', 'Corner radius', 'In px. (default: 6)', 0, 40, 1);
+        const bar = pick('barMode', 'Status bar', 'Filename, size, zoom and the buttons.', [
+            ['always', 'Always shown'],
+            ['hover', 'Shown while the pointer is on the preview'],
             ['off', 'Hidden']]);
         const barIdle = num('barIdleMs', 'Status bar fade delay',
-            'time in ms before the status bar begins to fade out. (default: 250)', 0, 60000, 50);
+            'After the pointer leaves the preview, in ms. (default: 250)', 0, 60000, 50);
         const barTake = num('barFadeMs', 'Status bar fade duration',
-            'time in ms the status bar takes to fade out, and back in. (default: 250)',
-            0, 10000, 50);
+            'Out and back in, in ms. (default: 250)', 0, 10000, 50);
         function syncFurniture() {
             const fades = bar.el.value === 'hover';
             barIdle.row.hidden = !fades;
@@ -4670,11 +4689,11 @@
         bar.el.addEventListener('change', syncFurniture);
         syncFurniture();
         const shadow = check('shadow', 'Drop shadow',
-            'a soft shadow around the preview window, which separates it from the page behind it');
+            'Separates the preview from the page behind it.');
         const shadowSize = num('shadowSize', 'Shadow size',
-            'The blur, in px. (default: 24)', 0, 120, 4);
+            'Blur, in px. (default: 24)', 0, 120, 4);
         const shadowStrength = num('shadowStrength', 'Shadow strength',
-            'how dark that shadow is, in %. (default: 50)', 0, 100, 5);
+            'Darkness, in %. (default: 50)', 0, 100, 5);
         function syncShadow() {
             shadowSize.row.hidden = !shadow.el.checked;
             shadowStrength.row.hidden = !shadow.el.checked;
@@ -4682,12 +4701,11 @@
         shadow.el.addEventListener('change', syncShadow);
         syncShadow();
         pick('spinnerTheme', 'Loading ring',
-            'Matching follows your system’s light-or-dark setting, not the browser’s theme.', [
+            'Match uses the system’s light/dark setting, not the browser’s.', [
                 ['auto', 'Match the system'], ['dark', 'Always dark'], ['light', 'Always light']]);
         section('Diagnostics');
         check('debug', 'Log every hover to the console',
-            'One line per hover in the browser console (F12). Noisy — leave off unless chasing ' +
-            'a problem.');
+            'One line per hover in the console (F12). Leave off unless chasing a problem.');
 
         const foot = document.createElement('div');
         foot.className = 'foot';
@@ -4699,11 +4717,10 @@
         const reset = document.createElement('button');
         reset.className = 'danger';
         reset.textContent = 'Reset to defaults';
-        setTip(reset, 'Puts every option back to its default. Your site list, exceptions and ' +
-            'referrer sites are kept.');
+        setTip(reset, 'Every option back to its default; the three lists and per-site sound are kept.');
         reset.addEventListener('click', function () {
             const kept = {};
-            RESET_KEEPS.forEach(function (k) { kept[k] = (cfg[k] || []).slice(); });
+            RESET_KEEPS.forEach(function (k) { kept[k] = cfg[k]; });
             cfg = Object.assign({}, DEFAULTS, kept);
             saveSettings();
             probeCache.clear();
@@ -4714,8 +4731,7 @@
         // Back to the values this panel opened on, whatever has been saved since.
         const undo = document.createElement('button');
         undo.textContent = 'Undo changes';
-        setTip(undo, 'Puts everything back to how it was when you opened this window, ' +
-            'including the lists.');
+        setTip(undo, 'Everything back to how it was when this window opened, lists included.');
         undo.addEventListener('click', function () {
             cfg = JSON.parse(JSON.stringify(panelOpened));
             saveSettings();

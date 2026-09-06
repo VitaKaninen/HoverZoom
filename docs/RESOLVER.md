@@ -456,3 +456,34 @@ Verified against gifwow's real tiles: 6 of 6 animated, the static logo not.
   synthetic headers instead.
 - **A false positive costs one refused preview in one mode.** That is why the GIF test is the
   loop extension rather than something stricter.
+- **`headBytes()` keeps only the first `ANIM_HEAD` bytes of whatever came back.** A server that
+  ignores `Range` (Python's `SimpleHTTPRequestHandler`, so the test server) returns the whole
+  file, and `sniffAnimated()` would otherwise walk it byte by byte.
+- **It reads `videoPreviewsOn()`, not the stored setting.** The ▶ in the bar is the same switch
+  per tab (`E27`); until v0.78.0 the sniff ignored it and animated GIFs kept moving after ▶.
+
+## The probe budget keeps the sure things · `E46`
+
+`MAX_PROBES` (8) bounds the requests one hover may cost. It is spent on the **guesses** — data
+attributes, srcset entries, URL rewrites — and never on the two candidates that are not guesses:
+the ancestor link when it names a media file, and the displayed src, which is the fallback. Both
+carry `keep: true` out of `collectCandidates()` (a duplicate arriving with `keep` upgrades the
+earlier entry) and `resolve()` filters with `c.keep || budget-- > 0`, so order is preserved and only
+guesses are dropped.
+
+**A srcset list contributes its two widest entries** (`SRCSET_KEEP`), whatever its length. The rest
+are strictly smaller derivatives of the same picture, which can never beat the widest and cost a
+download each to be rejected. Two rather than one so a widest entry that 404s still has a
+fallback.
+
+Measured before the fix: an 8-entry srcset inside `<a href="photo.jpg">` — eight probes, all
+srcset, seven downloaded only to be rejected, the link never tried, no preview. Seven entries:
+the link was candidate eight and hit.
+
+### Image probes time out, and a miss is not for life
+
+`probeImage()` gives up after `IMAGE_PROBE_MS` (20 s) and aborts the fetch; `probeVideo()` has
+always had its 6 s. Without it a stalled candidate parked the resolver on that URL for every later
+hover of the element, since the never-settling promise was cached. A probe that answers `null` —
+timeout, 404, 429 — is forgotten after `PROBE_RETRY_MS` (30 s) so a rate-limited burst is not a
+dead URL for the page's life. A hit is cached for the page's life as before.

@@ -385,14 +385,17 @@ No window, and the image it came from is blocked from opening another one.
   is not suppressed at all and hovering it again previews straight away.
 - **Why it exists:** without it, the very next mouse movement over the same image would re-open what
   you had deliberately got rid of.
-- **Ends on:** the pointer leaving that image and coming back (`T15`). Other images are unaffected.
+- **Ends on:** the pointer leaving that image and coming back (`T15`) — leaving through a child of
+  it (a caption over a background image) counts, since v0.78.0. Other images are unaffected.
 
 #### S17 · fading out
 The window has been ended and is running out its `fadeMs` (90 ms) opacity transition. It is already
 inert.
-- **Accepts:** nothing. Not hit-testable, holds no state.
+- **Accepts:** nothing. Not hit-testable, holds no state. A clip is paused the instant the fade
+  starts, so sound never outlives the window (v0.78.0).
 - **Then:** ~60 ms later the decoded image is released, so a long session does not accumulate
-  bitmaps.
+  bitmaps. One teardown timer at a time: a second fade started inside the first's window restarts
+  it rather than being cut short by it.
 
 ---
 
@@ -434,7 +437,7 @@ states.
 |---|---|---|
 | `K1` | The pointer leaves the source image | Immediate, no grace. |
 | `K2` | Page scroll | A placed window survives it, and stays put while the page moves underneath. A wheel over a *hover* preview scrolls the page like any other, so this fires wherever the pointer is (`T22`, `E22`). |
-| `K3` | Browser window loses focus | — |
+| `K3` | Browser window loses focus | Modifier mode forgets a held key, since no keyup will ever arrive for it (`E28`). |
 | `K4` | Browser window resize | A placed window keeps the size it was given (`T19`). |
 | `K5` | Escape | Closes it, but does **not** suppress the image (`E2`). |
 | `K6` | `mousedown` on the page outside the window's rectangle | — |
@@ -512,6 +515,9 @@ this table is a table.
 | `E42` | Real fullscreen measures the screen with `innerWidth`, and frees the scrollbar's strip with `scrollbar-width:none` — `overflow` alone does not reclaim it there | [`docs/VIEWER.md`](docs/VIEWER.md) |
 | `E43` | Fullscreen wears no border, and it goes before the fit measures — removed afterwards the frame stays short by it | [`docs/VIEWER.md`](docs/VIEWER.md) |
 | `E44` | A dismiss suppresses only while the pointer is on the picture; armed from anywhere else nothing lifts it until the visit after next | [`docs/VIEWER.md`](docs/VIEWER.md) |
+| `E45` | `naturalWidth` is density-corrected under `srcset`, so the "same URL, same picture" test compares ratio there, not pixels | [`docs/GATES.md`](docs/GATES.md) |
+| `E46` | The probe budget falls on the guesses; the ancestor link and the displayed src are always tried, and a srcset list contributes two | [`docs/RESOLVER.md`](docs/RESOLVER.md) |
+| `E47` | A fullscreen exit waits for the request still in flight, or the change it fires finds nothing to undo | [`docs/VIEWER.md`](docs/VIEWER.md) |
 
 `E3` is retired with the detached state (v0.28.0); `E4` and `E5` are retired as dangling.
 
@@ -527,11 +533,12 @@ this table is a table.
 | Press regions and dragging (`S13`, `S14`, `S19`, `E21`, `E23`, `E25`) | `hitRegion`, `regionCursor`, `onBoxDown`, `onMove`, `resizeBy` |
 | Zoom units (`E34`) | `zoomUnit`, `toShown`/`fromShown`, `fmtZoom`, `parseZoom`, `zoomStops`/`stopsKey`, `zoomLo`/`zoomHi`, `clampScale`, `fitScaleFor`, `displayScale` — see [`docs/ZOOM-UNITS.md`](docs/ZOOM-UNITS.md) |
 | The cursor (`E40`) | `pressMode`, `applyCursor`, `regionCursor`, the `.box.pan` / `.box.placed:not(.pan)` CSS fallback |
-| Furniture modes (`E41`) | `barMode`, `barShown`/`barFades`/`anyFades`/`barVisible`, `barDock`, `applyIdle`, `barWanted`/`barOver`, `pointerOverCap`/`pointerOverBar`/`pointerNearBar`/`barHoverBand`, `syncFurniture` |
+| Furniture modes (`E41`) | `barMode`, `barShown`/`barFades`/`barVisible`, `barDock`, `applyIdle`, `barWanted`/`barOver`, `pointerOverCap`/`pointerOverBar`/`pointerNearBar`/`barHoverBand`, `syncFurniture` |
+| Probing (`E19`, `E45`, `E46`) | `collectCandidates`/`SRCSET_KEEP`, `resolve`/`MAX_PROBES`, `probe`/`probeImage`/`probeVideo`, `IMAGE_PROBE_MS`/`PROBE_RETRY_MS`, `nativeSize`/`samePicture`/`markUnstable` |
 | Placed mode (`S10`–`S15`, `S19`) | `place`, `unplace`, `onPinKey`, `onPinWheel` |
 | Wheel zoom, both states (`T17`, `T22`, `T24`) | `enableWheelZoom`, `disableWheelZoom`, `onPinWheel` |
-| Geometry (`S12`, `E7`, `E21`, `E25`, `E26`) | `view`, `reflow`, `layout`, `zoomAt`, `pannable`, `viewportBox`, `growBox`, `clampPosition`, `fitScaleFor`, `minScaleFor`, `chrome`, `insetX`/`insetY`, `outerW`/`outerH` |
-| Fullscreen (`E35`, `E43`) | `toggleFull`, `enterFull`, `leaveFull`, `restoreFull`, `fitFull`, `onFullChange`, `fullActive`, `fullPrev`/`fullApi`, `lockScroll`/`unlockScroll`, `borderPx` |
+| Geometry (`S12`, `E7`, `E21`, `E25`, `E26`) | `view`, `reflow`, `layout`, `zoomAt`, `pannable`, `viewportBox`, `growBox`, `clampPosition`, `fitScaleFor`, `minScaleFor`, `maxScale`, `insetX`/`insetY`, `outerW`/`outerH` |
+| Fullscreen (`E35`, `E43`, `E47`) | `toggleFull`, `enterFull`, `leaveFull`, `restoreFull`, `fitFull`, `onFullChange`, `fullActive`, `fullPrev`/`fullApi`/`fullReq`, `lockScroll`/`unlockScroll`, `borderPx` |
 | Video strip (`S22`, `E36`) | `buildVideoControls`, `syncVideoCtl`, `syncVideoTime`, `togglePlay`, `playVideo`, `clipSecs`, `isBoxControl`, `pointerOverBar` |
 | Speed menu (`S23`) | `buildRateMenu`, `toggleRateMenu`, `syncRateMenu`, `commitRateField`, `setRate`, `RATES`, `capOwns` |
 | Sound (`S24`, `E38`) | `audioFor`, `saveAudio`, `AUDIO_DEFAULT`, `toggleMute`, `applyAudioWish`, `rememberAudio`, `openVol`/`laterCloseVol`/`closeVol`, `volDrag` |

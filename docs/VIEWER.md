@@ -63,6 +63,12 @@ The two cases the rule has to keep apart, both real:
   source, a right-click on a window that has been dragged off its thumbnail: nothing to suppress,
   because you are not standing on the thing that would re-open.
 
+**The leave that lifts it may come from a child.** `mouseout` fires on the deepest element the
+pointer was over, so a background-image element with a caption inside it reports the leave on the
+caption. `onOut` tests `suppressed.contains(e.target)`, as the `active` branch below it always
+did; testing `e.target === suppressed` left the picture refused until a leave from its own bare
+area. Found v0.78.0.
+
 ### The bottom gap is bigger than the other three · `STATUS_TIP_H`
 
 Every side keeps `EDGE_GAP` (4 px) clear; the bottom keeps `bottomGap()` — `EDGE_GAP +
@@ -659,7 +665,7 @@ untrusted and browsers run no default action for untrusted events. "A button tha
 click" cannot be built, at any price.
 
 **But it can decline to suppress one.** On a **placed** window `altButton()` returns false,
-`swallowMenu` stays off, and the browser raises its real menu over our `<img>` — whose `src` is the
+`swallowMenuAt` stays unset, and the browser raises its real menu over our `<img>` — whose `src` is the
 resolved full-size URL, so *Save image as…*, *Copy image*, *Copy image address* and *Open image in
 new tab* all act on the original. Native chrome does target an `<img>` inside an **open** shadow
 root.
@@ -742,7 +748,10 @@ time the flip with a `MutationObserver`, not a polling loop. See [`TESTING.md`](
   the element in `suppressed`, which `onOver` skips until `onOut` sees the pointer leave. Without
   that, the next mousemove just re-shows it. The right press is claimed in the document `mousedown`
   handler, **not** on `contextmenu` — mousedown fires first and would otherwise `cancel()` and clear
-  `active` before the menu event could see what to dismiss; `swallowMenu` then suppresses the menu.
+  `active` before the menu event could see what to dismiss; `swallowMenuAt` then suppresses the
+  menu. It is a timestamp with a `MENU_CLAIM_MS` (1.5 s) life, not a flag: a right press released
+  outside the window fires no `contextmenu`, and a flag would have eaten the next menu anywhere on
+  the page.
 - **While placed, the left button always drives the window**, whatever `pinButton` says. Do not wire
   dismissal onto the button that resizes, moves and pans.
 - **There is no close button.** A placed window has two ways out that need no aim, and the X sat in
@@ -848,6 +857,16 @@ sitting on the growth ceiling. Reported 2026-09-06.
 
 `fullApi` distinguishes the real API from the maximise fallback, so `leaveFull()` knows whether to
 ask the browser (and wait for `fullscreenchange`) or restore directly.
+
+### An exit waits for the request to land · `E47`
+
+`fullReq` holds the `requestFullscreen()` promise while it is in flight. `leaveFull()` called
+before it settles — F pressed twice, a double-click followed by Escape — defers itself to the
+promise. Without that it saw no `document.fullscreenElement` yet, restored directly and cleared
+`fullPrev`, and the `fullscreenchange` that arrived a moment later found nothing of ours and was
+ignored: the document stayed fullscreen with a windowed preview on it, until the browser's own
+Escape. `restoreFull()` clears `fullReq`; a rejected request (an iframe without
+`allow="fullscreen"`) settles it too, and the deferred exit then restores directly.
 
 ### Fullscreen is nailed to the screen · `E35`
 

@@ -15,8 +15,9 @@ this script is a DOM read, so only the DOM in front of the user can say which on
 - `hoverReport()` prints one line per hover: what was under the pointer, `playerGate` and
   `videoLinkGate` (the two halves of the old `videoGate`, reported separately since v0.59.0
   because they answer to different settings), whether an `<a href>` ancestor was findable **at
-  all**, how many laid-out `<video>` elements the page has, and whether the element sits in a
-  shadow root.
+  all**, how many laid-out `<video>` elements the page has, and `retargetedFromShadowRoot` — the
+  listener only ever sees a shadow host, so this says whether the real target was inside one (and
+  therefore never eligible).
 - `playerSurfaceReason()` and `videoLinkReason()` return a *string* rather than a boolean for
   exactly this. Keep it that way; a boolean cannot be reported.
 - **`videosOnPage` names every `<video>`'s length and, for anything refused, which `gifLike()`
@@ -141,6 +142,13 @@ ancestor-link candidate ever comes back missing on a shadow-DOM site.
   as the blank-screenshot and zero-rAF problems. **Call `resize_window` to pin an emulated
   viewport before measuring any geometry**, and sanity-check `clientHeight` in the same call as
   the measurement rather than trusting it.
+- **The user's real Chrome (the `claude-in-chrome` tools) runs the manager's copy off the disk, and
+  the test page ALSO loads its own copy** — two hosts, two previews. Silence the page's copy first:
+  `localStorage.setItem('hoverZoomSettings', JSON.stringify({siteMode:'blacklist',
+  siteList:['localhost']}))` and reload; the manager's copy reads GM storage and is unaffected.
+  Real fullscreen, real playback and trusted key presses all work there, which is how `E47` and the
+  fade-out pause were verified (2026-09-06). The manager copy's `debug` cannot be switched from the
+  page; for a log, re-enable the page copy with `{debug:true}` and accept the double preview.
 - **The pane is Chromium, so it cannot see a Firefox-only layout fault at all.** v0.50.0 shipped a
   ~30 px gap in the status bar that existed in Firefox and LibreWolf and not in Chrome: an
   absolutely positioned flex box with no `width` is shrink-to-fit, and the two engines size it

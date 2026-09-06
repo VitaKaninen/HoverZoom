@@ -23,10 +23,11 @@ Then when I clicked undo changes, it did not restore them."*
   snapshot **from the values it had just wiped**. The button that undoes Reset was destroyed by
   Reset. `showPanel()` is the only thing that clears it, so a fresh visit re-arms and every
   re-render (Reset, Undo, `refreshPanel()`, another tab's write) keeps the original.
-- **`RESET_KEEPS`** — `siteList`, `blockList`, `referrerSites` — is copied out of `cfg` and back
-  over `DEFAULTS`. Those are things the user typed; there is no default that reconstructs them,
-  and the ✕ per row already deletes them one at a time. Everything else is a knob with a right
-  answer, which is what "reset to defaults" is asking about.
+- **`RESET_KEEPS`** — `siteList`, `blockList`, `referrerSites`, and since v0.78.0 `siteAudio` —
+  is carried out of `cfg` and back over `DEFAULTS`. Those are things the user set per site; there
+  is no default that reconstructs them, and the ✕ per row (or the sound button) already undoes
+  them one at a time. Everything else is a knob with a right answer, which is what "reset to
+  defaults" is asking about.
 
 **Undo still rolls the lists back**, because it restores the whole object — that is the
 difference between the two buttons, and both now say so in a `title`.
@@ -91,7 +92,7 @@ Three more settings went in v0.40.0, for the same reason as v0.39.0's seven:
 | `cursorGap` | **It never did anything.** The window opens at `pointer.x + gap` and `nudgeIntoReach()` then pulls it back until the pointer is 10 px inside the frame — which is unconditional, because a pointer-transparent preview is pinned by a press *inside its rectangle* (`E1`). The gap was overwritten on every path, at every value. |
 
 **The first section is ordered by what people change**, not by topic: *Show a preview* →
-*Location* → *Pin preview with*, then the two gates. `position` and `pinButton` came up out of
+*Opens* → *Hover delay* → the gates → *Pin with*. `position` and `pinButton` came up out of
 Advanced to sit there; `position` carries a hint that **changes with the value**, because the
 centred answer needs one sentence the cursor answer does not (how to pin it — `E30`). Its label
 was *Opens* until v0.44.0 — a verb where every other label is a noun.
@@ -379,12 +380,18 @@ change. (`minDisplayed`, `minRatio` and `zoomFactor` came back out in v0.69.0 �
 
 ## The three gates that decide IF and HOW BIG live in *The preview* (v0.69.0)
 
-`zoomFactor`, `minRatio` and `minDisplayed`, in that order, directly under *Location*. They are the
-three numbers that decide whether a preview appears at all and how large it opens, which is the
-same question the visible section already answers; leaving them behind *Advanced options* filed
-"why does nothing happen on this image" under a fold. The section they left — *Matching* — held
-only those and `hoverDelay`, so it is gone; `hoverDelay` is now the first row of *Appearance*,
-where it reads as one of the timings rather than as a gate.
+`zoomFactor`, `minRatio` and `minDisplayed`, in that order, directly under *Hover delay*. They are
+the three numbers that decide whether a preview appears at all and how large it opens, which is
+the same question the visible section already answers; leaving them behind *Advanced options*
+filed "why does nothing happen on this image" under a fold. The section they left — *Matching* —
+held only those and `hoverDelay`, so it is gone. `hoverDelay` sat at the top of *Appearance* until
+v0.78.0; it is behaviour, not looks, so it now follows *Opens* in *The preview*.
+
+**Labels since v0.78.0:** *Location* → *Opens*, *Required upsize* → *Minimum size ratio*, *Pin
+preview with* → *Pin with*, *Video to play in a preview* → *Play in a preview* with *No video at
+all* → *Nothing that moves* (which is what `none` means, `E32`, so the hint no longer has to say
+so), *Delay before the preview appears* → *Hover delay*, *Preview fade in / out* → *Preview fade*.
+Storage keys unchanged.
 
 ### Plain language is a behaviour change, not a rewording
 
@@ -544,6 +551,10 @@ to `onBoxDown`.
 every repeat. Releasing the key still cancels (`K7`) and pressing it again re-opens — verified in
 the browser: point without the key → nothing, press → preview, release → gone, press → back.
 
+**`blur` clears `modifierDown`** (`K3`). Only `keyup` cleared it, and Alt+Tab or Ctrl+Tab deliver
+the keydown and then take the keyup with them: back in the tab, every hover previewed with no key
+held until some unrelated key was released. Verified with a synthetic keydown + blur, v0.78.0.
+
 **Testing note that cost time:** driving this with synthetic events needs the case scrolled into
 view first. `elementFromPoint` returns `null` for a point outside the viewport, so a test that
 hovers a case 1600 px down the page reports "the key does nothing" and looks exactly like the bug
@@ -651,10 +662,9 @@ overwrite a new answer.
 **`barIdleMs` of 0 still means no delay and no fade, not "never shown"** — unchanged, and still the
 easiest thing to misread here. See `E10`.
 
-**Panel order in *Appearance*:** the two mode pickers, then *Grab border size* (hidden when the
-border is off), then the two fade rows (hidden unless at least one mode is `'hover'`, and titled
-after whichever ones are). *Show the status bar* moved up out of its old spot below the shadow
-settings — it was three rows away from the settings that control it.
+**Panel order in *Appearance*:** fade, border, corner, then *Status bar* with its two fade rows
+directly under it (hidden unless the mode is `'hover'`), then the shadow rows. The bar's rows sit
+together because they were once three rows apart from the setting that controls them.
 
 ## Descriptions: the reader is not the author (v0.70.0)
 

@@ -294,10 +294,22 @@ Three answers, at three different depths:
     [`RESOLVER.md`](RESOLVER.md).
 - **`markUnstable()` — a URL caught contradicting itself is refused for the tab.** Two free check
   points: the probe against the element's own `naturalWidth`, and the frame's load against the probe.
-  Given the measurement above these do **not** fire in Chrome; they are kept for browsers that
-  re-request (Firefox honours `no-store` more strictly, and this project's reports come from
-  LibreWolf). **Do not delete them believing they are dead, and do not expect the test page to
-  exercise them under Chromium.**
+  Given the measurement above these do **not** fire in Chrome on a re-request; they are kept for
+  browsers that do re-request (Firefox honours `no-store` more strictly, and this project's reports
+  come from LibreWolf). **Do not delete them believing they are dead, and do not expect the test
+  page to exercise them under Chromium.**
+
+### `naturalWidth` is density-corrected under `srcset` · `E45`
+
+The first check point fired in Chrome anyway, on a units mismatch rather than a re-request: an
+`<img>` whose current source came from a `w`-descriptor `srcset` reports `naturalWidth` as *file
+pixels ÷ (descriptor ÷ source size)*. Measured: a 24×18 PNG in an 8-entry srcset with no `sizes`
+at 1280 wide read 284×213. Any density other than exactly 1 — most HiDPI displays, most `sizes`
+values — made the displayed URL "unstable", refused it for the tab, and left the frame on a smaller
+entry. `nativeSize()` marks the answer `scaled` when the element has a `srcset` or sits in a
+`<picture>`, and `samePicture()` then compares the aspect ratio to within a pixel of slack instead
+of the pixels; the 9.6:1-against-1:1 case above is still caught. The frame's own load is not
+affected — our `<img>` has no srcset. Found v0.78.0.
 
 **`collectCandidates()` returns `{ url, from }`, and `from` is the whole point.** Six mechanisms can
 produce a preview; the log used to print only the winning URL, which says nothing about which one to
