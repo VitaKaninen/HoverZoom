@@ -54,7 +54,7 @@ bottom.
 | `S21` | typing a zoom level, placed | placed | nothing |
 | `S22` | holding the scrubber, placed (clip only) | placed | the held button |
 | `S23` | speed menu open, placed (clip only) | placed | a press anywhere else |
-| `S24` | volume column showing, placed (clip only) | placed | the pointer leaving it |
+| `S24` | volume column showing, placed (clip only) | placed | the button again, or leaving it once used |
 | `S16` | suppressed | gone | — |
 | `S17` | fading out | gone | — |
 
@@ -247,8 +247,8 @@ growth ceiling, and only a hand resize pins its edges** (`E22`, `E23`).
   time, a scrubber, playback speed and sound. It overlays the picture and reserves no layout, so
   it costs the zoom floor nothing. Hidden on a frame shorter than 110 px.
   - **Speed** opens a menu upward (`S23`) — 10/25/50/100/125/150/200/300 % plus a custom field.
-  - **Sound** reveals a vertical volume column on hover (`S24`); the button itself mutes and
-    unmutes. Both are remembered **per site**, and every site starts muted (`E38`).
+  - **Sound** — the button mutes, unmutes, and opens a vertical volume column (`S24`). Both
+    are remembered **per site**, and every site starts muted (`E38`).
 - **And a zoom cluster left of those buttons:** a 100 px slider stepping through round zoom
   percentages, and the current level,
   which is clickable and becomes a text field (`S20`, `S21`). Zooming from either **holds the
@@ -353,7 +353,11 @@ Click the speed readout and a menu opens **upward** out of the strip.
   it is up.
 
 #### S24 · volume column showing, placed (clip only)
-Hover the sound button and a vertical column appears above it.
+Press the sound button and a vertical column appears above it. **It is sticky, not hover-driven**
+(`E38`).
+- **Stays up however far the pointer wanders**, so reaching for it cannot lose it.
+- **Ends on:** a second press of the sound button, or — once the slider has been used and
+  released — the pointer leaving it. A drag that ends outside the box still counts as held.
 - **Dragging it to zero mutes**; the button itself toggles, and unmuting into a zero volume
   restores a default level rather than doing nothing.
 - Released, the level and the mute state are written to the **site's** entry (`E38`).
@@ -508,10 +512,10 @@ this table is a table.
 | Placed mode (`S10`–`S15`, `S19`) | `place`, `unplace`, `onPinKey`, `onPinWheel` |
 | Wheel zoom, both states (`T17`, `T22`, `T24`) | `enableWheelZoom`, `disableWheelZoom`, `onPinWheel` |
 | Geometry (`S12`, `E7`, `E21`, `E25`, `E26`) | `view`, `reflow`, `layout`, `zoomAt`, `pannable`, `viewportBox`, `growBox`, `clampPosition`, `fitScaleFor`, `minScaleFor`, `chrome`, `insetX`/`insetY`, `outerW`/`outerH` |
-| Fullscreen (`E35`) | `toggleFull`, `maximise`, `restoreFull`, `fitFull`, `onFullChange`, `fullActive` |
+| Fullscreen (`E35`) | `toggleFull`, `enterFull`, `leaveFull`, `restoreFull`, `fitFull`, `onFullChange`, `fullActive`, `fullPrev`/`fullApi` |
 | Video strip (`S22`, `E36`) | `buildVideoControls`, `syncVideoCtl`, `syncVideoTime`, `togglePlay`, `playVideo`, `clipSecs`, `isBoxControl`, `pointerOverBar` |
 | Speed menu (`S23`) | `buildRateMenu`, `toggleRateMenu`, `syncRateMenu`, `commitRateField`, `setRate`, `RATES`, `capOwns` |
-| Sound (`S24`, `E38`) | `audioFor`, `saveAudio`, `AUDIO_DEFAULT`, `toggleMute`, `applyAudioWish`, `rememberAudio` |
+| Sound (`S24`, `E38`) | `audioFor`, `saveAudio`, `AUDIO_DEFAULT`, `toggleMute`, `applyAudioWish`, `rememberAudio`, `openVol`/`closeVol`/`volMaybeClose`, `volUsed` |
 | Grab-band clearance (`E37`) | `grabBand`, `grabInset`, `btnGutter`, `barMinW`, `layoutChrome`, `pointerOverControl` |
 | Zoom cluster (`S20`, `S21`, `E34`) | `buildZoomControl`, `syncZoom`, `openZoomField`, `closeZoomField`, `zoomAnchored`, `ZOOM_BANDS`/`walkStops`/`fitStops`/`zoomStops`/`zoomIndex`, `zoomLo`/`noBarsScale`/`zoomHi`, `parseZoom`, `commitZoomField`, `capOwns`, `minFrameW` |
 | Upgrades (`S06`, `S15`) | `resolve`, `upgradeViewer` |

@@ -771,16 +771,36 @@ put the frame at `left: 62` instead of `0`.
 
 **Escape is layered:** `onPinKey` leaves fullscreen and returns, so one press does not also unpin.
 The browser eats Escape itself when the API is what put us there, and `fullscreenchange` restores;
-this branch is what covers the maximise fallback. `unplace()` leaves fullscreen too — it cannot
-outlive the window that asked for it.
+this branch is what covers the maximise fallback. `unplace()` leaves fullscreen too — but only
+`fullActive()` fullscreen, never the page's.
 
-**Leaving fullscreen restores position and zoom but NOT `fixedW`/`fixedH`** — it always lands in
-pinned-but-not-resized, whatever it started as. Restoring the hand-resized flag was the v0.63.0
-behaviour and it was wrong in practice: the frame came back at fullscreen's fitted zoom while
-still carrying a frame size chosen for a different one, so it read as a black letterbox with the
-picture adrift in the middle, and the wheel only zoomed the picture inside it. Dropping the flag
-lets the frame follow the picture again, which is the state the window is in before anyone
-resizes it by hand. Asked for directly, 2026-09-06.
+### `fullPrev` is written at the CLICK, and it is also the ownership flag · `E35`
+
+Both halves of that sentence were bugs in v0.63.0, and the first one was serious.
+
+**Never key off `document.fullscreenElement`.** It is set when the PAGE goes fullscreen too, and
+`onFullChange` is registered on `document` in every frame of every site. v0.63.0 read it, found no
+preview open, and called `exitFullscreen()` — so clicking fullscreen on YouTube entered and
+immediately left it. It happened on excluded sites as well, because the listener was registered at
+load, before any site check, and the site gates only ever guarded *previewing*. Two rules follow:
+
+- **`fullActive()` is `!!fullPrev` and nothing else.** `onFullChange` returns immediately when it
+  is null: that fullscreen belongs to someone else and is none of our business.
+- **Nothing in the change handler may call `exitFullscreen()`.** Leaving is only ever driven by
+  the button, a key, or `unplace()`.
+- The listener is registered in `buildViewer()`, so a page that never opens a preview never has
+  it at all. Registering globals at load in a `@match *://*/*` script is how this class of bug
+  gets in — see the `isTopFrame` trap in the project `CLAUDE.md`.
+
+**The snapshot is taken before anything moves, in `enterFull()`.** Taking it in the change handler
+looked equivalent and was not: `resize` can arrive *before* `fullscreenchange`, and the resize path
+calls `fitFull()` while `fullActive()` is already true — so the snapshot captured the
+already-maximised geometry and "restoring" put the window back to fullscreen size. The symptom was
+a window that came back pinned to the left edge at ~full height and refused to grow, because it was
+sitting on the growth ceiling. Reported 2026-09-06.
+
+`fullApi` distinguishes the real API from the maximise fallback, so `leaveFull()` knows whether to
+ask the browser (and wait for `fullscreenchange`) or restore directly.
 
 ## The floating video strip · `E36`
 
@@ -871,3 +891,39 @@ otherwise eat the digits.
 **The ▶ that stops clips is a STROKED no-play glyph** (`ICON_NOPLAY`, two paths, `fill:none`). A
 slash across a solid triangle reads as a triangle; outlining both is the only version that says
 "no" at 13 px.
+
+## Corrections to `E37` and the sound column
+
+**The gap after the zoom readout cannot be closed completely.** The slider's right edge and the
+buttons' left edge are both pinned to the frame's right edge, so the space between them is a
+constant; a reading shorter than the slot's reserve leaves slack *somewhere* in it. Right-aligning
+the readout put the slack before it (between slider and readout); left-aligning puts it after.
+The only way to remove it is a slot that tracks the text, which moves the slider — `E34`. What was
+done instead: `BAR_ZOOM_W` trimmed 52 → 44, measured against the widest reading the ceiling can
+produce (`MAX_SCALE_ABS` 64 → "6,400%", 35 px at 11 px system-ui, plus `.zval`'s 6 px of padding).
+Residual slack at a short reading is ~16 px.
+
+**`box.style.cursor = ''` is not "no cursor", it is "whatever CSS says"** — and CSS says
+`.box.placed:not(.pan){cursor:move}`. Suppressing the move cursor over a control therefore needs an
+explicit `'default'`; the empty string left the four-way arrow exactly where the complaint was.
+Child rules still win for the child's own box, so the buttons and sliders keep their `pointer`.
+
+**`.cap .block` keeps `line-height:16px`.** The shared 18 px centres the letters of AA but drops the
+taller circled glyph a pixel too low.
+
+### The volume column is sticky, not hover-driven · `E38`
+
+Opened by the sound button and closed by it. **Hover cannot close it**, because a pointer
+travelling from the button to the slider is briefly over neither — the first attempt used
+`:hover` on a shared wrapper and lost the column to the few dead pixels between the two, which is
+why it worked only sometimes and only when the mouse moved fast. A close *delay* was rejected as a
+second guess at the same racy question.
+
+`volUsed` is the whole of the state: set on the slider's `change`, so **only a column that has
+been used and released dismisses itself on leaving**. Until then it stays put however far the
+pointer wanders, so reaching for it can never lose it. `volDrag` additionally holds it through a
+drag that ends outside the box.
+
+**The rate clamp is the browser's, not ours.** Chromium throws `NotSupportedError` outside
+[0.0625, 16] and Firefox ignores the assignment, so `setRate()` clamps and the readout shows what
+stuck — the same contract as the zoom field.

@@ -73,6 +73,11 @@ has already been misdiagnosed once. (The shared ones — `innerHTML` on Trusted-
 - **A control placed inside `.box` must be added to `isBoxControl()`.** `onBoxDown`/`onBoxClick`
   are capture listeners on the box, so they eat a child's events first. The symptom is silence,
   and `node --check` passes. See the section below.
+- **A global listener must never act on state it does not own.** `@match *://*/*` means our
+  `fullscreenchange`/`resize`/key handlers fire for the PAGE's own doings on every site,
+  excluded ones included — the site gates only guard previewing. v0.63.0's handler read
+  `document.fullscreenElement`, found no preview, and cancelled YouTube's fullscreen. Key off
+  a flag *we* set, and never undo an action we did not start. See `E35`.
 - **Anything registered per-page — a menu command, a listener that writes settings — must be
   guarded on `isTopFrame`.** `@match *://*/*` with no `@noframes` means every ad iframe runs its
   own copy, and the manager lists every frame's menu commands together. Site decisions use

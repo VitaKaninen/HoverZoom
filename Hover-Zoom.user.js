@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.64.0
+// @version     0.65.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -970,7 +970,8 @@
         ratePopEl = null, rateInEl = null;
     let seekDrag = false;       // the scrubber is being held; timeupdate must not fight it
     let volDrag = false;        // ditto for the volume column against syncVideoCtl()
-    let fullPrev = null;        // geometry to put back when fullscreen ends
+    let fullPrev = null;        // geometry to put back, and the "this fullscreen is ours" flag
+    let fullApi = false;        // the real API engaged, rather than the maximise fallback
 
     const SVG_NS = 'http://www.w3.org/2000/svg';
     const SPIN_SIZE = 34;                           // px, matches the .spin rule
@@ -1127,6 +1128,9 @@
             '.cap .fs svg{display:block;width:12px;height:12px;margin:3px auto;fill:currentColor}',
             '.cap .fs:hover{background:#a6e3a1;border-color:#a6e3a1;color:#1e1e2e}',
             '.cap .aa{font-size:9px;font-weight:700;letter-spacing:-.06em}',
+            // Reverted from the shared 18px: the glyph is taller than the letters and the
+            // extra pixel reads as low rather than centred.
+            '.cap .block{line-height:16px}',
             '.cap .aa.sharp{background:#89b4fa;border-color:#89b4fa;color:#1e1e2e}',
             '.cap .block:hover{background:#f38ba8;border-color:#f38ba8;color:#1e1e2e}',
             '.cap .vidoff:hover{background:#f9e2af;border-color:#f9e2af;color:#1e1e2e}',
@@ -1186,10 +1190,10 @@
             '.vctl .vsound .vbtn{width:100%;height:100%}',
             '.vctl .vsound .vbtn svg{width:17px;height:17px}',
             '.vvol{position:absolute;left:50%;bottom:100%;transform:translateX(-50%);display:none;',
-            'padding:9px 6px 7px;margin-bottom:5px;border-radius:7px;',
+            'padding:9px 6px 11px;border-radius:7px;',
             'background:rgba(17,17,27,.92);border:1px solid rgba(205,214,244,.14);',
             'box-shadow:0 6px 18px rgba(0,0,0,.5)}',
-            '.vctl .vsound:hover .vvol,.vvol.open{display:block}',
+            '.vvol.open{display:block}',
             // A vertical range: the rotated-div trick misreports its own hit area, so use the
             // real thing. Both spellings are needed — Firefox reads one, Chromium the other.
             '.vvol input{-webkit-appearance:slider-vertical;appearance:slider-vertical;',
@@ -1356,6 +1360,9 @@
         box.addEventListener('mousedown', onBoxDown, true);
         box.addEventListener('click', onBoxClick, true);
         root.appendChild(box);
+
+        document.addEventListener('fullscreenchange', onFullChange);
+        document.addEventListener('webkitfullscreenchange', onFullChange);
 
         spinEl = document.createElement('div');
         spinEl.className = 'spin';
@@ -1928,7 +1935,10 @@
     // ------------------------------------------------- the floating video strip
 
     const RATES = [0.1, 0.25, 0.5, 1, 1.25, 1.5, 2, 3];
-    const RATE_MIN = 0.0625, RATE_MAX = 16;     // what the media element itself will accept
+    // The BROWSER's range, not a choice of ours: Chromium throws NotSupportedError outside
+    // [0.0625, 16] and Firefox silently ignores it, so a typed value is clamped and the readout
+    // shows what actually stuck rather than what was asked for.
+    const RATE_MIN = 0.0625, RATE_MAX = 16;
     const RATE_POP_W = 96;                      // matches .spop's min-width
 
     function mkVBtn(icon, tip, onClick) {
@@ -2010,11 +2020,18 @@
             applyAudioWish();
         });
         vvolInEl.addEventListener('change', function () {
-            volDrag = false; rememberAudio(); showBar();
+            volDrag = false;
+            volUsed = true;         // used and let go: leaving the column now dismisses it
+            rememberAudio();
+            showBar();
         });
         vvolEl.appendChild(vvolInEl);
         vsoundEl.appendChild(vmuteEl);
         vsoundEl.appendChild(vvolEl);
+        // The column is STICKY, like the speed menu: opened by the button and closed by the
+        // button. Hover cannot close it, because a pointer travelling from the button to the
+        // slider is briefly over neither and that read as 'leaving'.
+        vsoundEl.addEventListener('mouseleave', volMaybeClose);
 
         vctlEl.appendChild(vplayEl);
         vctlEl.appendChild(vtimeEl);
@@ -2028,6 +2045,28 @@
         vidEl.addEventListener('play', syncVideoCtl);
         vidEl.addEventListener('pause', syncVideoCtl);
         vidEl.addEventListener('volumechange', syncVideoCtl);
+    }
+
+    // Set once the slider has been used and released: only THEN does leaving the column
+    // dismiss it. Until then it stays put however far the pointer wanders, so that reaching for
+    // it can never lose it.
+    let volUsed = false;
+
+    function volOpen() { return !!vvolEl && vvolEl.classList.contains('open'); }
+
+    function openVol() {
+        if (!vvolEl || mediaEl !== vidEl) return;
+        volUsed = false;
+        vvolEl.classList.add('open');
+    }
+
+    function closeVol() {
+        volUsed = false;
+        if (vvolEl) vvolEl.classList.remove('open');
+    }
+
+    function volMaybeClose() {
+        if (volUsed && !volDrag) closeVol();
     }
 
     function fmtTime(s) {
@@ -2074,6 +2113,8 @@
     // muted is stopped the moment it is not, unless the browser counts this click as the gesture.
     function toggleMute() {
         if (mediaEl !== vidEl) return;
+        // The button is the column's switch too — a second press puts it away.
+        if (volOpen()) closeVol(); else openVol();
         vidEl.muted = !vidEl.muted;
         // Unmuting into a zero volume is a button that does nothing; give it something to play.
         if (!vidEl.muted && vidEl.volume <= 0) vidEl.volume = AUDIO_DEFAULT.volume;
@@ -2194,7 +2235,13 @@
     const BAR_GAP = 10;         // between name, metadata and the zoom cluster
     const BAR_SLIDER_W = 100;
     const BAR_ZOOM_GAP = 0;     // inside the cluster: the readout's own padding is the gap
-    const BAR_ZOOM_W = 52;      // the readout slot, wide enough for "3,200%"
+    // The readout slot. Measured: at 11px system-ui the widest reading the zoom ceiling can
+    // produce ("6,400%", MAX_SCALE_ABS) is 35px, plus .zval's 6px of padding. The slot is
+    // FIXED because the slider's right edge and the buttons' left edge are both pinned, so a
+    // slot that tracked the text would move one of them — which is the skip `E34` exists to
+    // prevent. A short reading therefore leaves slack after it; trimming 52 to 44 is as far as
+    // that can go without giving the slider back its wander.
+    const BAR_ZOOM_W = 44;
 
     // The floating video strip. It overlays the picture and reserves nothing, so none of these
     // reach btnGutter(), barMinW() or bottomGap() — that is the whole point of floating it.
@@ -2352,6 +2399,7 @@
             seekDrag = false;
             volDrag = false;
             closeRateMenu();
+            closeVol();
             playVideo();
             syncVideoCtl();
         }
@@ -2701,6 +2749,7 @@
         resetZoomControl();
         seekDrag = false;
         volDrag = false;
+        closeVol();
         box.classList.remove('on', 'hot', 'pan', 'drag');
         box.style.cursor = '';      // onMove writes this inline over the bands; see hitRegion
         if (gripEl) { gripEl.classList.remove('hot'); gripEl.style.cursor = ''; }
@@ -2764,9 +2813,8 @@
 
     function unplace() {
         if (!placed) return;
-        // Fullscreen outlives nothing: the window that asked for it is going away.
-        if (document.fullscreenElement) exitFull();
-        else if (fullPrev) restoreFull();
+        // Fullscreen outlives nothing: the window that asked for it is going away. Only ours.
+        if (fullActive()) leaveFull();
         placed = false;
         drag = null;
         box.classList.remove('placed', 'drag');
@@ -2781,61 +2829,61 @@
     // The DOCUMENT goes fullscreen, not our host: our whole coordinate system is `position:fixed`
     // against the viewport, and fullscreening the document is the one route that makes the
     // viewport BE the screen in every engine. The page behind is blacked out by `.dim.full`.
+    //
+    // `fullPrev` is BOTH the saved geometry and the "this fullscreen is ours" flag, and it is
+    // written at the CLICK — never from the change event. Two reasons, both of which shipped as
+    // bugs in v0.63.0:
+    //
+    //  - `document.fullscreenElement` is also set when the PAGE goes fullscreen. Keying off it
+    //    meant our handler fired on YouTube's own fullscreen and cancelled it.
+    //  - `resize` can arrive before `fullscreenchange`, so a snapshot taken in the handler had
+    //    already been overwritten by `fitFull()` and "restoring" put back the fullscreen size.
     function fullActive() {
-        return !!(document.fullscreenElement || fullPrev);
+        return !!fullPrev;
     }
 
     function toggleFull() {
         if (!view) return;
-        if (document.fullscreenElement) { exitFull(); return; }
-        if (fullPrev) { restoreFull(); return; }        // maximised without the API
-        const el = document.documentElement;
-        const req = el.requestFullscreen || el.webkitRequestFullscreen;
-        if (!req || !document.fullscreenEnabled) { maximise(); return; }
-        const p = req.call(el);
-        // An iframe without allow="fullscreen" rejects; maximising is the honest fallback.
-        if (p && p.catch) p.catch(function () { maximise(); });
+        if (fullActive()) { leaveFull(); return; }
+        enterFull();
     }
 
-    function exitFull() {
-        const fn = document.exitFullscreen || document.webkitExitFullscreen;
-        if (fn) {
-            const p = fn.call(document);
-            if (p && p.catch) p.catch(function () { /* already gone */ });
-        }
-    }
-
-    // Remember what to put back, then fill whatever the viewport is now.
-    function maximise() {
-        if (!view || fullPrev) return;
+    function enterFull() {
+        // Captured before anything moves: this is the only moment the pre-fullscreen state exists.
         fullPrev = { left: view.left, top: view.top, scale: view.scale };
+        fullApi = false;
         dimEl.classList.add('full');
         setIcon(fsEl, ICON_EXIT);
         setTip(fsEl, 'Leave fullscreen');
         if (!placed) place();           // fullscreen is a placed state, whatever it started as
+        const el = document.documentElement;
+        const req = el.requestFullscreen || el.webkitRequestFullscreen;
+        if (req && document.fullscreenEnabled) {
+            try {
+                const p = req.call(el);
+                fullApi = true;
+                // An iframe without allow="fullscreen" rejects; the maximise below is already
+                // showing, so the fallback is to simply stop expecting the API.
+                if (p && p.catch) p.catch(function () { fullApi = false; });
+            } catch (e) { fullApi = false; }
+        }
         fitFull();
     }
 
-    // Position and zoom come back; the hand-resized flag does NOT. Leaving fullscreen always
-    // lands in pinned-but-not-resized, so the frame follows the picture again and the wheel grows
-    // the window rather than only the image — asked for directly, because restoring `fixedW`
-    // meant coming back to a letterboxed frame that no longer matched the zoom.
-    function restoreFull() {
-        if (!fullPrev) return;
-        const p = fullPrev;
-        fullPrev = null;
-        dimEl.classList.remove('full');
-        setIcon(fsEl, ICON_FULL);
-        setTip(fsEl, 'Fill the screen');
-        if (!view) return;
-        view.fixedW = null;
-        view.fixedH = null;
-        view.left = p.left;
-        view.top = p.top;
-        view.fitScale = fitScaleFor(view.natW, view.natH);
-        view.scale = Math.max(p.scale, minScaleFor(view.natW, view.natH));
-        reflow();
-        layout();
+    function leaveFull() {
+        // Ask the browser first when the API is what put us here; `fullscreenchange` finishes the
+        // job. Otherwise there is nothing to ask and we restore directly.
+        if (fullApi && document.fullscreenElement) {
+            const fn = document.exitFullscreen || document.webkitExitFullscreen;
+            if (fn) {
+                try {
+                    const p = fn.call(document);
+                    if (p && p.catch) p.catch(function () { restoreFull(); });
+                    return;
+                } catch (e) { /* fall through and restore */ }
+            }
+        }
+        restoreFull();
     }
 
     // Edge to edge, and the picture refitted to it.
@@ -2851,19 +2899,36 @@
         layout();
     }
 
-    function onFullChange() {
-        if (document.fullscreenElement) {
-            if (!view) { exitFull(); return; }
-            maximise();
-            // Chrome reports the old viewport for a frame after the event.
-            setTimeout(function () { if (fullActive()) fitFull(); }, 0);
-        } else if (fullPrev) {
-            restoreFull();
-        }
+    // Position and zoom come back; the hand-resized flag does NOT. Leaving fullscreen always
+    // lands in pinned-but-not-resized, so the frame follows the picture again and the wheel grows
+    // the window rather than only the image.
+    function restoreFull() {
+        if (!fullPrev) return;
+        const p = fullPrev;
+        fullPrev = null;
+        fullApi = false;
+        dimEl.classList.remove('full');
+        setIcon(fsEl, ICON_FULL);
+        setTip(fsEl, 'Fill the screen');
+        if (!view) return;
+        view.fixedW = null;
+        view.fixedH = null;
+        view.left = p.left;
+        view.top = p.top;
+        view.fitScale = fitScaleFor(view.natW, view.natH);
+        view.scale = Math.max(p.scale, minScaleFor(view.natW, view.natH));
+        reflow();
+        layout();
     }
 
-    document.addEventListener('fullscreenchange', onFullChange);
-    document.addEventListener('webkitfullscreenchange', onFullChange);
+    // Only ever reacts to OUR fullscreen. A page putting its own player on the screen must pass
+    // straight through here untouched — and it reaches us on every site, since the script has no
+    // @noframes and the listener cannot know whose request this was.
+    function onFullChange() {
+        if (!fullPrev) return;
+        if (document.fullscreenElement) { fullApi = true; fitFull(); return; }
+        restoreFull();
+    }
 
     // Controls that live INSIDE the box.
     // What is actually under the pointer, asked of the shadow root — a document-level hit test
@@ -3565,7 +3630,7 @@
             const reg = hitRegion(e.clientX, e.clientY);
             // A control is never a move handle: onBoxDown returns early on isBoxControl(), so a
             // `move` cursor over one promises a drag that cannot happen.
-            const c = pointerOverControl(e.clientX, e.clientY) ? ''
+            const c = pointerOverControl(e.clientX, e.clientY) ? 'default'
                 : reg && reg.kind === 'resize' ? regionCursor(reg)
                 : (chromeVisible() && pointerOverBar() ? 'move' : regionCursor(reg));
             box.style.cursor = c;
