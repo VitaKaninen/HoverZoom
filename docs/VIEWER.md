@@ -42,6 +42,27 @@ on it.
 Browser pane reports `clientHeight` 0 while hidden. It survives as the single answer to "where is
 the bottom", so the size cap, the opening position and `clampPosition()` cannot disagree.
 
+### Suppression is armed by where the POINTER is, not by the dismiss · `E44`
+
+`dismiss()` arms `suppressed` only when the pointer is over the source picture at that moment
+(`stillUnderPointer`), not unconditionally from `active`.
+
+**`onOut` is the only thing that lifts it.** Armed with the pointer somewhere else, no `mouseout`
+for that picture is ever coming: the flag survives the next *entry*, `onOver` refuses on
+`el === suppressed`, and only the leave after that clears it — so the picture takes **two** visits
+to come back. Hover previews never hit this (the pointer leaving the picture cancels them, so
+`active` is null by then); a **placed** window does, because it outlives hover entirely and can be
+dismissed from anywhere on screen. Fixed v0.77.0.
+
+The two cases the rule has to keep apart, both real:
+
+- **Dismissed by clicking the thumbnail itself** (`E2`, the common case): the pointer *is* on it,
+  so it suppresses, and hovering it again is refused until you leave. Without that the click that
+  closed the window re-opens it on the next mouse movement.
+- **Dismissed with the pointer elsewhere** — the ⊘ and ▶ buttons, a backdrop click away from the
+  source, a right-click on a window that has been dragged off its thumbnail: nothing to suppress,
+  because you are not standing on the thing that would re-open.
+
 ### The bottom gap is bigger than the other three · `STATUS_TIP_H`
 
 Every side keeps `EDGE_GAP` (4 px) clear; the bottom keeps `bottomGap()` — `EDGE_GAP +
@@ -892,6 +913,20 @@ returned.
 
 Wheel zoom needs no guard: `fitFull()` sets `view.fixedW/fixedH`, which is the hand-resized state,
 so the wheel already zooms the picture inside a fixed frame instead of growing the window.
+
+### Fullscreen wears no border · `E43`
+
+The frame's border is the window's edge, and in fullscreen there is no edge — it would draw a
+`borderColor` hairline all the way round the screen and take `borderWidth` off every side of the
+picture. `borderPx()` answers `0` while `fullActive()` and `cfg.borderWidth` otherwise; `insetX`,
+`insetY`, `grabInset` and `applyLook` all read it, so the setting itself is untouched and comes
+back on the way out.
+
+**Order is the whole trick.** `fullPrev` is assigned first in `enterFull()`, so `borderPx()` is
+already 0 when `applyLook()` runs, and `applyLook()` runs **before** `fitFull()` — which sizes the
+frame from `vpW() - insetX() * 2`. Strip the border after the fit and the frame keeps the two
+pixels it was told to reserve, leaving the picture short of the screen with nothing there. The
+same holds in reverse: `restoreFull()` clears `fullPrev`, then `applyLook()`, then `reflow()`.
 
 ## Clicking the picture of a placed window · `E39`
 

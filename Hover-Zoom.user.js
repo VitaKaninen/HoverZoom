@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.76.0
+// @version     0.77.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -1414,9 +1414,13 @@
         return barShown() && cfg.barMode === 'always' ? BAR_MIN_H : 0;
     }
 
+    // The border the window is wearing right now — the setting, except in fullscreen where there
+    // is no window edge to draw. Everything geometric reads this, never cfg.borderWidth. See E43.
+    function borderPx() { return fullActive() ? 0 : cfg.borderWidth; }
+
     // What sits between view.left/top and the picture's own top-left, and the window's outer size.
-    function insetX() { return cfg.borderWidth; }
-    function insetY() { return cfg.borderWidth; }
+    function insetX() { return borderPx(); }
+    function insetY() { return borderPx(); }
     function outerW() { return view.frameW + insetX() * 2; }
     function outerH() { return view.frameH + insetY() * 2 + barDock(); }
 
@@ -2330,7 +2334,7 @@
 
     // The same distance measured from the FRAME's edge, which is what the bar is laid out in.
     function grabInset() {
-        return Math.max(BAR_PAD, grabBand() - cfg.borderWidth);
+        return Math.max(BAR_PAD, grabBand() - borderPx());
     }
 
     // Where the zoom cluster's right edge sits, measured in from the bar's right edge: clear of
@@ -2723,12 +2727,12 @@
         if (!host || !box) return;
         host.style.setProperty('--fade', cfg.fadeMs + 'ms');
         host.style.setProperty('--barfade', barFadeMs() + 'ms');
-        box.style.border = cfg.borderWidth > 0
-            ? cfg.borderWidth + 'px solid ' + cfg.borderColor : 'none';
+        const bw = borderPx();
+        box.style.border = bw > 0 ? bw + 'px solid ' + cfg.borderColor : 'none';
         box.style.borderRadius = cfg.cornerRadius + 'px';
         box.style.boxShadow = shadowCss();
         paintOver(box, 'background-color', '#1e1e2e');
-        if (cfg.borderWidth > 0) paintOver(box, 'border-color', cfg.borderColor);
+        if (bw > 0) paintOver(box, 'border-color', cfg.borderColor);
     }
 
     function barFadeMs() {
@@ -2967,6 +2971,7 @@
         dimEl.classList.add('full');
         box.classList.add('full');
         box.style.cursor = '';      // onMove's inline cursor outranks the .full rule
+        applyLook();                // border off BEFORE fitFull() measures with it. See E43.
         setIcon(fsEl, ICON_EXIT);
         setTip(fsEl, 'Leave fullscreen');
         if (!placed) place();           // fullscreen is a placed state, whatever it started as
@@ -3025,6 +3030,7 @@
         dimEl.classList.remove('full');
         box.classList.remove('full');
         box.style.cursor = '';
+        applyLook();                // fullPrev is already null, so the border comes back first
         setIcon(fsEl, ICON_FULL);
         setTip(fsEl, 'Fill the screen');
         if (!view) return;
@@ -3734,9 +3740,14 @@
         hideViewer();
     }
 
+    // Only arm the suppression when the pointer is actually ON the picture — `onOut` is the only
+    // thing that lifts it, so armed from anywhere else it strands until the next enter-and-leave.
+    // See E44.
     function dismiss() {
-        suppressed = active;            // read it before unplace()/cancel() clear it
-        suppressedCovered = activeCovered;
+        const el = active;              // read it before unplace()/cancel() clear it
+        const on = !!el && stillUnderPointer(el, pointer.x, pointer.y);
+        suppressed = on ? el : null;
+        suppressedCovered = on ? activeCovered : false;
         if (placed) unplace(); else cancel();
     }
 

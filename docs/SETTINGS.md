@@ -519,8 +519,9 @@ status bar and reset by a reload. Nothing writes it to storage.
   running under the ▶ for a moment on every media swap.
 - **It goes in `isBoxControl()`**, like the ⊘, or `onBoxDown`/`onBoxClick` eat its click at
   capture and the symptom is silence.
-- **It closes the window through `dismiss()`**, so the source element is suppressed and the clip
-  you just refused does not immediately re-open under the stationary pointer.
+- **It closes the window through `dismiss()`**, so the clip you just refused does not immediately
+  re-open under the stationary pointer — suppressing the source element when the pointer is
+  standing on it (`E44`), and needing nothing when it is not.
 
 ## The modifier key works in either order (v0.39.0)  · `E28`
 

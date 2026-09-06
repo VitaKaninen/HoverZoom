@@ -380,7 +380,9 @@ Placing is a reason to keep looking, not to stop, so the search runs on.
 #### S16 · suppressed
 No window, and the image it came from is blocked from opening another one.
 - **Entered from:** a right-click dismiss (`T10`), or dismissing a placed window with a click
-  outside it (`T16`) — which very often lands on the thumbnail it came from.
+  outside it (`T16`) — which very often lands on the thumbnail it came from. **Only if the pointer
+  is on that image at the moment of the dismiss** (`E44`); dismissed from anywhere else the image
+  is not suppressed at all and hovering it again previews straight away.
 - **Why it exists:** without it, the very next mouse movement over the same image would re-open what
   you had deliberately got rid of.
 - **Ends on:** the pointer leaving that image and coming back (`T15`). Other images are unaffected.
@@ -416,7 +418,7 @@ inert.
 | `T23` | `S10` | Drag a corner or an edge | `S19` → `S10` at the new size, frozen there (`E23`) |
 | `T24` | `S10` | Wheel anywhere **but** the frame | `S10` unchanged — the page scrolls under it |
 | `T26` | `S10` | Single click on the picture — not the bar, not a control — with under 4 px of travel | `S10`; a clip pauses or resumes, a still image does nothing (`E39`) |
-| `T27` | `S10` | Double click in the same place | `S10` fullscreen, or back out of it if already there. Click 1's pause is undone (`E39`) |
+| `T27` | `S10` | Double click in the same place | `S10` fullscreen, or back out of it if already there. Click 1's pause is undone (`E39`); the border comes off for as long as it lasts (`E43`) |
 | `T28` | `S10` fullscreen | Drag the picture, an edge, or the status bar | Nothing moves — fullscreen is locked to the screen, and the cursor stays an arrow. A spilling picture still pans, with the `grab` cursor, and panning past its edge does not carry the window with it (`E35`, `E40`) |
 | `T25` | — | *Retired in v0.34.0.* Moving the window used to freeze its size as a ceiling; it no longer touches the size at all (`E22`) |
 
@@ -508,6 +510,8 @@ this table is a table.
 | `E40` | One cursor rule: `grab`/`grabbing` wherever a press would pan, `move` wherever it would move the window | [`docs/VIEWER.md`](docs/VIEWER.md) |
 | `E41` | The grab border is gone and the bar is the only handle; `barMode` docks the bar when 'always'; outside fullscreen the whole preview holds it open | [`docs/VIEWER.md`](docs/VIEWER.md) |
 | `E42` | Real fullscreen measures the screen with `innerWidth`, and frees the scrollbar's strip with `scrollbar-width:none` — `overflow` alone does not reclaim it there | [`docs/VIEWER.md`](docs/VIEWER.md) |
+| `E43` | Fullscreen wears no border, and it goes before the fit measures — removed afterwards the frame stays short by it | [`docs/VIEWER.md`](docs/VIEWER.md) |
+| `E44` | A dismiss suppresses only while the pointer is on the picture; armed from anywhere else nothing lifts it until the visit after next | [`docs/VIEWER.md`](docs/VIEWER.md) |
 
 `E3` is retired with the detached state (v0.28.0); `E4` and `E5` are retired as dangling.
 
@@ -518,7 +522,7 @@ this table is a table.
 | Area | Functions |
 |---|---|
 | Eligibility (`P1`–`P6`, `P11`, `P12`) | `eligible`, `playerSurfaceReason`, `videoLinkReason`, `overVideoSurface`, `videoPreviewsOn`, `siteEnabled` |
-| Hover state machine (`R1`, `R2`, `S01`–`S06`, `S16`) | `onOver`, `onOut`, `cancel`, `dismiss` |
+| Hover state machine (`R1`, `R2`, `S01`–`S06`, `S16`, `E44`) | `onOver`, `onOut`, `cancel`, `dismiss`, `stillUnderPointer`, `suppressed`/`suppressedCovered` |
 | Press / click ownership (`E1`) | `pointInPreview`, `onBoxDown`, `onBoxClick`, the document `mousedown` and `click` listeners |
 | Press regions and dragging (`S13`, `S14`, `S19`, `E21`, `E23`, `E25`) | `hitRegion`, `regionCursor`, `onBoxDown`, `onMove`, `resizeBy` |
 | Zoom units (`E34`) | `zoomUnit`, `toShown`/`fromShown`, `fmtZoom`, `parseZoom`, `zoomStops`/`stopsKey`, `zoomLo`/`zoomHi`, `clampScale`, `fitScaleFor`, `displayScale` — see [`docs/ZOOM-UNITS.md`](docs/ZOOM-UNITS.md) |
@@ -527,7 +531,7 @@ this table is a table.
 | Placed mode (`S10`–`S15`, `S19`) | `place`, `unplace`, `onPinKey`, `onPinWheel` |
 | Wheel zoom, both states (`T17`, `T22`, `T24`) | `enableWheelZoom`, `disableWheelZoom`, `onPinWheel` |
 | Geometry (`S12`, `E7`, `E21`, `E25`, `E26`) | `view`, `reflow`, `layout`, `zoomAt`, `pannable`, `viewportBox`, `growBox`, `clampPosition`, `fitScaleFor`, `minScaleFor`, `chrome`, `insetX`/`insetY`, `outerW`/`outerH` |
-| Fullscreen (`E35`) | `toggleFull`, `enterFull`, `leaveFull`, `restoreFull`, `fitFull`, `onFullChange`, `fullActive`, `fullPrev`/`fullApi`, `lockScroll`/`unlockScroll` |
+| Fullscreen (`E35`, `E43`) | `toggleFull`, `enterFull`, `leaveFull`, `restoreFull`, `fitFull`, `onFullChange`, `fullActive`, `fullPrev`/`fullApi`, `lockScroll`/`unlockScroll`, `borderPx` |
 | Video strip (`S22`, `E36`) | `buildVideoControls`, `syncVideoCtl`, `syncVideoTime`, `togglePlay`, `playVideo`, `clipSecs`, `isBoxControl`, `pointerOverBar` |
 | Speed menu (`S23`) | `buildRateMenu`, `toggleRateMenu`, `syncRateMenu`, `commitRateField`, `setRate`, `RATES`, `capOwns` |
 | Sound (`S24`, `E38`) | `audioFor`, `saveAudio`, `AUDIO_DEFAULT`, `toggleMute`, `applyAudioWish`, `rememberAudio`, `openVol`/`laterCloseVol`/`closeVol`, `volDrag` |
