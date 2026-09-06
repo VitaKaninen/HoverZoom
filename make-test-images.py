@@ -67,16 +67,31 @@ def make_clip():
     committed, so a clone without ffmpeg still has the fixture and this step is
     skipped rather than failed.
     """
-    out = os.path.join(ROOT, "clip-2s.mp4")
+    clip("clip-2s.mp4", 640, 480, 2)
+
+
+def clip(name, w, h, secs):
+    """One silent test clip, skipped rather than failed when ffmpeg is absent."""
+    out = os.path.join(ROOT, name)
     if not shutil.which("ffmpeg"):
-        print("  skip clip-2s.mp4 (no ffmpeg on PATH; the committed copy still works)")
+        print("  skip %s (no ffmpeg on PATH; the committed copy still works)" % name)
         return
     subprocess.run([
         "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
-        "-f", "lavfi", "-i", "testsrc=size=640x480:rate=12:duration=2",
+        "-f", "lavfi", "-i", "testsrc=size=%dx%d:rate=12:duration=%d" % (w, h, secs),
         "-c:v", "libx264", "-pix_fmt", "yuv420p", "-movflags", "+faststart", out,
     ], check=True)
-    print("  clip-2s.mp4")
+    print("  %-42s %dx%d" % (name, w, h))
+
+
+def make_letterbox_clip():
+    """angryduck.cc's shape: a PORTRAIT clip behind a fixed-shape letterbox thumbnail.
+
+    160x70 against 270x480 is 4.06x apart, just past ASPECT_TOL (4) -- so case 42
+    previews only because a matching filename outranks the shape test. Those are the
+    site's real numbers, measured 2026-09-06.
+    """
+    clip("letterbox.mp4", 270, 480, 2)
 
 
 def main():
@@ -110,6 +125,9 @@ def main():
     save(make(600, 600, "SIDEBAR", 5), "sidebar-600x600.jpg")
 
     make_clip()
+    # The letterbox thumbnail that clip hides behind (case 42).
+    save(make(160, 70, "strip", 5), "letterbox.jpg")
+    make_letterbox_clip()
 
     print("done")
 

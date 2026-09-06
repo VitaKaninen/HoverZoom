@@ -219,8 +219,38 @@ the search** — the candidate loop breaks the moment `trusted` is set. It does 
     `getAttribute('src')` and resolves against `pageUrl` itself.
   - **The largest qualifying answer wins, not the first, and never the URL already on screen.** `og:`
     is not automatically better than the markup — it can be a mid-size share crop that passes the
-    upsize gate while the real original sits in the body. Both still pass `sameShape()` and
-    `bigEnough()`; nothing here skips a gate.
+    upsize gate while the real original sits in the body.
+
+### A matching filename outranks the shape test · v0.58.0
+
+`angryduck.cc` is a grid of clips where **some posts previewed and some did not, with byte-identical
+markup on both the listing and the item pages**. The difference was never in the markup — it was the
+thumbnail's shape. Measured live 2026-09-06:
+
+| post | thumbnail | clip | apart | |
+|---|---|---|---|---|
+| beach-day | 160×70 (2.29) | 270×480 (0.56) | **4.06×** | refused |
+| whooooopsies | 160×70 (2.29) | 270×480 (0.56) | **4.06×** | refused |
+| yeah-no537146 | 160×144 (1.11) | 480×480 (1.00) | 1.11× | previewed |
+| what-are-you986075 | 160×104 (1.54) | 338×480 (0.70) | 2.19× | previewed |
+
+`ASPECT_TOL` is 4. The site letterboxes portrait clips into a fixed-shape thumbnail, so the two
+portrait posts land at 4.06× — over by a hair — and `sameShape()` vetoed them. Raising the tolerance
+would be fitting the constant to one site and would weaken it everywhere else.
+
+**So a body candidate matched by `sameStem()` skips `sameShape()`.** The gate is a *heuristic for
+identity*: same shape, probably the same picture. A matching filename on the page the thumbnail links
+to is *evidence* of identity, and when the evidence is present the heuristic has nothing left to add
+— a thumbnail's shape describes the site's crop, not the media behind it.
+
+- **`bigEnough()` still applies**, to this and to every other candidate. Identity and worth are
+  different questions: the page is authoritative about *what* the thumbnail stands for, never about
+  whether it is worth a window. That is the same line v0.40.0 drew.
+- **The exemption does not extend to `og:` candidates**, which keep the shape test — an `og:image`
+  is not filename-matched, and the banner-links-to-its-section case in [`GATES.md`](GATES.md) is
+  exactly that shape of mistake.
+- This page declares **no `og:` of any kind**, so the media comes only from `pageBodyMedia()` reading
+  `video source[src]` — the `<video>` carries no `src` of its own. Case 42 is the fixture.
 - **Same origin only, and that is a design choice rather than a limitation.** A listing and its item
   pages are on one site essentially by definition; a cross-origin href is an outbound link, not "the
   page for this thumbnail". The payoff is large: plain `fetch` with the user's own cookies, so the

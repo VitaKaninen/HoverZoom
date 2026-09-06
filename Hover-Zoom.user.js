@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.57.0
+// @version     0.58.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -765,7 +765,8 @@
             if (page.declared && page.declared.url !== shown)
                 tries.push({ url: page.declared.url, from: 'the page the thumbnail links to (og: media)' });
             page.body.forEach(function (u) {
-                if (shown && u !== shown && sameStem(u, shown)) tries.push({ url: u, from: 'the page the thumbnail links to (its own markup)' });
+                if (shown && u !== shown && sameStem(u, shown))
+                    tries.push({ url: u, named: true, from: 'the page the thumbnail links to (its own markup)' });
             });
             // Largest of the page's own answers, not the first — og: may be a share crop.
             for (const t of tries.slice(0, LINKED_TRIES)) {
@@ -773,7 +774,8 @@
                 if (blocked(t.url)) continue;
                 const dim = await probe(t.url);
                 if (!dim || token.cancelled) continue;
-                if (!sameShape(native, dim)) {
+                // A matching filename already proves identity; the thumbnail may be a fixed-shape crop.
+                if (!t.named && !sameShape(native, dim)) {
                     dbg('linked page rejected — a different shape, so a different picture', {
                         url: t.url, from: t.from,
                         onScreen: native ? native.w + '×' + native.h : '(unknown)',

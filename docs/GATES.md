@@ -188,10 +188,16 @@ Three answers, at three different depths:
   and it is loose on purpose: a thumbnail is often a *crop* of its original (a square thumb of a 3:2
   photo is 1.5× off, a 16:9 crop of 4:3 is 1.34×) and all must pass, while the reported case is
   9.6:1 against 1:1. A wrong refusal here is silent, so the number errs toward letting things
-  through. Applied to guesses **and** to the linked-page answer, which otherwise skips every gate —
-  a banner links to the section it heads, and that section's `og:image` is its own artwork. Only
-  where a **natural** size exists (`nativeSize()`): a CSS background has none, and its box aspect is
-  not the image's.
+  through. Applied to guesses **and** to the linked page's `og:` answer, which otherwise skips every
+  gate — a banner links to the section it heads, and that section's `og:image` is its own artwork.
+  Only where a **natural** size exists (`nativeSize()`): a CSS background has none, and its box
+  aspect is not the image's.
+  - **Exempt since v0.58.0: a linked-page candidate whose FILENAME matches the thumbnail's**
+    (`sameStem()`, so `beach-day.jpg` → `beach-day.mp4`). Shape is a *guess* at identity; a matching
+    filename on the page the thumbnail links to is a much stronger claim, and it outranks the guess.
+    The exemption is deliberately narrow — the banner case above is an `og:image`, which is not
+    filename-matched and still faces this gate. Reasoning and the measured site in
+    [`RESOLVER.md`](RESOLVER.md).
 - **`markUnstable()` — a URL caught contradicting itself is refused for the tab.** Two free check
   points: the probe against the element's own `naturalWidth`, and the frame's load against the probe.
   Given the measurement above these do **not** fire in Chrome; they are kept for browsers that

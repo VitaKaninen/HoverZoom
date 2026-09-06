@@ -1,0 +1,13 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Post page with a clip and no metadata at all</title>
+<!--
+  angryduck.cc's shape, and the two things that matter are both absences: there is NO og: of any
+  kind, so the media can only come from pageBodyMedia() reading `video source[src]`, and the
+  thumbnail is a 160x70 letterbox for a 270x480 portrait clip. Those are 4.06x apart, past
+  ASPECT_TOL, so before v0.58.0 sameShape() vetoed it and the post previewed nothing.
+-->
+<h1>Post page with a clip and no metadata at all</h1>
+<video class="giffy" height="auto" playsinline autoplay muted loop>
+  <source src="/test-images/letterbox.mp4" type="video/mp4">
+</video>

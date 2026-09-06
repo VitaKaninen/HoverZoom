@@ -321,6 +321,20 @@
   </div>
 
   <!--
+    42 is angryduck.cc: a letterbox thumbnail in front of a portrait clip, 4.06x apart, on a page
+    that declares no og: at all. It previews only because the filename matches, which is a
+    stronger claim about identity than the shape test it now outranks.
+  -->
+  <div class="case" data-expect="270 (video)">
+    <h2>42. the linked clip is a completely different shape</h2>
+    <p class="hz bad">HZ+: no equivalent — and the thumbnail's shape describes the crop, not
+      the clip</p>
+    <a href="test-pages/post-clip.html">
+      <img id="c42" src="test-images/letterbox.jpg" style="width:320px">
+    </a>
+  </div>
+
+  <!--
     27 and 28 are the imgur gallery shape: THE THING UNDER THE POINTER IS THE CLIP. There is
     no <img> here at all, which is what made "hovering a gif does nothing" — <video> was
     refused outright by NEVER, so the frame's video support and the linked-page lookup were
