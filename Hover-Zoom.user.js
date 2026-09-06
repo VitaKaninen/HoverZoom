@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.59.0
+// @version     0.60.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -2537,6 +2537,21 @@
         return isFinite(d) && d > 0 && d <= GIF_MAX_SECS;
     }
 
+    // Which gifLike() clause refused this <video>. Debug line only.
+    function notGifBecause(v) {
+        if (v.controls || v.hasAttribute('controls')) return 'it has controls';
+        if (!v.muted) return 'it is not muted';
+        if (!(v.loop || v.autoplay)) return 'neither loop nor autoplay is set';
+        const d = v.duration;
+        if (!isFinite(d) || d <= 0) return 'its duration is unknown (' + d + ')';
+        return 'it runs ' + Math.round(d) + 's, over the ' + GIF_MAX_SECS + 's clip limit';
+    }
+
+    function secsOf(v) {
+        const d = v.duration;
+        return isFinite(d) && d > 0 ? Math.round(d) + 's' : 'length unknown';
+    }
+
     // The first non-gif <video> inside `n`, or null.
     function playerIn(n) {
         if (!n || !n.querySelectorAll) return null;
@@ -2551,8 +2566,11 @@
         for (let i = 0; i < vids.length; i++) {
             const v = vids[i].getBoundingClientRect();
             if (v.width < 2 || v.height < 2) continue;   // not laid out; contains nothing
-            if (gifLike(vids[i])) { out.push({ what: 'gif (not a player)', rect: v, gif: true }); continue; }
-            out.push({ what: 'video', rect: v });
+            if (gifLike(vids[i])) {
+                out.push({ what: 'clip, ' + secsOf(vids[i]), rect: v, gif: true });
+                continue;
+            }
+            out.push({ what: 'player — ' + notGifBecause(vids[i]), rect: v });
             const area = v.width * v.height;
             let n = vids[i].parentElement;
             for (let up = 0; n && up < PLAYER_UP; up++, n = n.parentElement) {
@@ -2795,7 +2813,7 @@
         const cy = rect.top + rect.height / 2;
         const sizes = videoSurfaces().map(function (s) {
             return s.what + ' ' + rectStr(s.rect) +
-                (s.gif ? ' [ignored: muted, no controls, short loop — suppresses nothing]'
+                (s.gif ? ' [an animated picture — suppresses nothing]'
                     : holds(s.rect, cx, cy) ? ' [CONTAINS the pointer target]'
                         : ' [does not contain it]');
         });

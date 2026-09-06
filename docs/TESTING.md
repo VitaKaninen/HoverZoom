@@ -19,6 +19,14 @@ this script is a DOM read, so only the DOM in front of the user can say which on
   shadow root.
 - `playerSurfaceReason()` and `videoLinkReason()` return a *string* rather than a boolean for
   exactly this. Keep it that way; a boolean cannot be reported.
+- **`videosOnPage` names every `<video>`'s length and, for anything refused, which `gifLike()`
+  clause refused it** — `clip, 2s`, or `player — it has controls` / `… it runs 214s, over the 60s
+  clip limit`. `GIF_MAX_SECS` is a guess about real sites and this is the only way to check it
+  against one: hover with `debug` on and read the lengths back.
+- **`videosOnPage` names every `<video>`'s length and, for anything refused, which `gifLike()`
+  clause refused it** — `clip, 2s` or `player — it has controls` / `… it runs 214s, over the 60s
+  clip limit`. `GIF_MAX_SECS` is a guess about real sites and this is the only way to check it
+  against one without adding logging first: hover with `debug` on and read the lengths back.
 
 Two lessons from reading the first real report back (2026-09-03, v0.14.0 fixed both):
 

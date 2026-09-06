@@ -162,6 +162,21 @@ carries the whole gate alone**. That is the fragile hinge, and it is one number:
 is refused. Both are the safe direction. Asserted against plain objects in `test-resolver.js`,
 one case per property.
 
+**The four clauses are checked in order and the first one to fail wins, so the duration is often
+never consulted at all.** A player that never sets `loop` or `autoplay` as *attributes* — most of
+them, since players call `play()` from script — is refused by the third clause, and `GIF_MAX_SECS`
+does nothing on that page. Which means the cost of raising it is much narrower than it looks: it
+is paid only where a video is muted, controls-less, *and* attribute-autoplaying or looping, and is
+still long. **Measure before moving it** — the debug line's `videosOnPage` prints every video's
+length and names the clause that refused it, precisely so this number can be argued from real
+pages instead of from whichever two sites were open.
+
+**Where it bites is asymmetric, and worth knowing before changing it.** On a grid of short clips
+the duration clause never fires, so raising it changes nothing there. It fires on *item* pages,
+where a long clip stops being hoverable and starts suppressing its neighbours. That produces one
+genuine wart: **the same post page behaves differently depending on how long its video is**, with
+the boundary invisible to the user — under the limit it previews, over it is refused.
+
 **`VIDEO_LINK_RE` is a URL guess and it does not generalise.** `/watch?`, `/shorts/`, `/embed/`,
 `/video(s)/`, `youtu.be/` are five shapes out of an open set; `/v/12345` is deliberately a
 negative because it over-matches. A video site whose item URL is `/p/12345` or `/media/abc` is
