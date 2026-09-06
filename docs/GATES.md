@@ -53,7 +53,9 @@ questions with different right answers, and there is a third one underneath both
 | Am I standing on a player that is already on this page? | where I am | `previewOverPlayer`, default **off** |
 | Does this thumbnail lead away to a video page? | where it goes | `videoMode`, default **`clips`** |
 
-`videoMode` is a ladder: `none` (nothing that moves ever reaches the frame) ⊂ `clips`
+`videoMode` is a ladder: `none` (no video file ever reaches the frame — **not** "nothing that
+moves"; an animated GIF or WebP is an image and is never gated, see [`SETTINGS.md`](SETTINGS.md)
+`E31`) ⊂ `clips`
 (animated clips, the default) ⊂ `all` (also a still that links to a video page). `none` is the
 stored form of the bar's play button — `videoPreviewsOn()` is `playVideos && videoMode !== 'none'`
 and is the single test every video *candidate* passes through, so the two cannot disagree.

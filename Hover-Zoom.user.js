@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.60.0
+// @version     0.61.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -3638,10 +3638,13 @@
         para('Clips, and what counts as a video.',
             'A short muted clip already looping with no controls is an animated image whatever ' +
             'it is encoded as, and previews as one — some posts have no still form at all. A ' +
-            'real player, or a thumbnail linking to a video page, is a video, and those are two ' +
-            'separate settings above. Either way, pointing at a player already on the page gives ' +
-            'no preview unless you ask for one. Press ▶ in a pinned preview’s status bar to go ' +
-            'back to still images for the rest of the tab; reloading the page restores it.');
+            'real player, or a thumbnail linking to a video page, is a video. Those are the two ' +
+            'video settings above, and they are separate on purpose: one is about what you are ' +
+            'pointing at, the other about the player you are standing on. Neither of them ' +
+            'touches an animated GIF or WebP — those are images, and nothing here can tell an ' +
+            'animated one from a still one without downloading it. Press ▶ in a pinned ' +
+            'preview’s status bar to stop playing video for the rest of the tab; reloading ' +
+            'the page restores it.');
 
         guideBtn.addEventListener('click', function () {
             const open = guide.classList.toggle('open');
@@ -3676,15 +3679,17 @@
             'following the link underneath', [
                 ['left', 'Left click  (right click dismisses)'],
                 ['right', 'Right click  (left click dismisses)']]);
-        pick('videoMode', 'Moving pictures',
-            'a short muted clip looping with no controls is an animated image, whatever it ' +
-            'is encoded as; a link to a video page is a video', [
-                ['clips', 'Animated clips only'],
-                ['all', 'Clips and video thumbnails'],
-                ['none', 'Nothing that moves']]);
-        check('previewOverPlayer', 'Preview on the player itself',
-            'pointing at a player already on the page gives no preview, because the player ' +
-            'shows it full size itself. Turn on to get one there anyway');
+        pick('videoMode', 'Video to play in a preview',
+            'a short muted clip that loops with no controls is a clip, whatever it is encoded ' +
+            'as; a thumbnail linking to a video page is a video. An animated GIF or WebP is an ' +
+            'image here, and previews whichever of these you pick', [
+                ['clips', 'Looping clips only'],
+                ['all', 'Clips and videos'],
+                ['none', 'No video at all']]);
+        check('previewOverPlayer', 'Preview on top of a video player',
+            'checked, pointing at a player that is already on the page opens a preview over ' +
+            'it. Unchecked, it opens nothing there — the player shows the picture full size ' +
+            'itself');
         check('skipFurniture', 'Ignore backgrounds and banners',
             'page furniture rather than images on the page: the page’s own background, a ' +
             'tiled or fixed one, a strip spanning the window, one the page’s text sits on, ' +

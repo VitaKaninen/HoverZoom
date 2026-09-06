@@ -437,14 +437,48 @@ be answered differently. They are different questions — the full argument is i
 [`GATES.md`](GATES.md) `E31`, including which half of the underlying test is robust and which
 will break. What the panel shows:
 
-- **Moving pictures** — a `pick()`, not a checkbox, because the answers are a ladder rather than
-  a yes/no: *Animated clips only* (default) ⊂ *Clips and video thumbnails* ⊂ *Nothing that
-  moves*. Stored as `videoMode`: `'clips'` | `'all'` | `'none'`.
-- **Preview on the player itself** — `previewOverPlayer`, default **off**. Orthogonal to the
+- **Video to play in a preview** — a `pick()`, not a checkbox, because the answers are a ladder
+  rather than a yes/no: *Looping clips only* (default) ⊂ *Clips and videos* ⊂ *No video at all*.
+  Stored as `videoMode`: `'clips'` | `'all'` | `'none'`.
+- **Preview on top of a video player** — `previewOverPlayer`, default **off**. Orthogonal to the
   ladder, because it is about where you are standing, not what you are pointing at. Off, a page
   with a real player on it gives no preview on that player; the player already shows the thing
   full size, and on the sites where this bites you had the preview on the listing page a click
   ago.
+
+### Both rows are named for what they DO, after v0.61.0
+
+The first attempt named them for what they are *about* — **Moving pictures**, with options
+*Animated clips only* / *Clips and video thumbnails* / *Nothing that moves*, and a checkbox
+**Preview on the player itself**. Reported unreadable, and correctly: the options are noun
+phrases that never say whether the thing is played or refused, and a checkbox whose hint leads
+with the unchecked behaviour never says what checking it does.
+
+The rules that came out of it, and that any new row should follow:
+
+- **A `pick()`'s label carries the verb so its options do not have to repeat it.** *Video to play
+  in a preview: Looping clips only* reads as a sentence; three options each starting "Play…"
+  reads as a stutter.
+- **A checkbox hint states the CHECKED behaviour first**, then the unchecked one. The reader is
+  looking at an empty box and asking what ticking it does; answering with what the empty box
+  already does is answering a question they did not ask.
+
+### `none` cannot mean "nothing that moves", and the label must not say it does
+
+**An animated GIF or WebP is an image to every test in this script**, and nothing decides
+otherwise — `MEDIA_RE` accepts `.gif`/`.webp` and no code path asks whether the frames move.
+`videoMode` gates *video files*; it cannot gate animation.
+
+Measured on gifwow 2026-09-06, which is why this is written down: its grid is 30 animated
+`.webp` and **zero `<video>`**, and each item page declares both
+`og:video` → `…/gp-5fjtt.mp4` and `og:image` → `…/gp-5fjtt.gif`. At `none` the resolver skips the
+mp4 and falls through to the `og:image`, which is an animated GIF — so roughly half the tiles
+still previewed something moving, under an option that had promised they would not.
+
+Detecting animation means fetching the bytes and parsing them (a GIF's second image descriptor,
+a WebP's `ANMF` chunk) on every candidate. **Not done, and not obviously wanted**: an animated GIF
+is a picture, and previewing pictures is the entire purpose of the script. The label tells the
+truth instead, and the hint says so outright.
 
 **`videoMode: 'none'` and the ▶ are the same switch**, one stored and one per-tab:
 `videoPreviewsOn()` is `playVideos && cfg.videoMode !== 'none'`. Keeping them as one function is
