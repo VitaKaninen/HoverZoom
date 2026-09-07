@@ -364,13 +364,55 @@ after 3–4 attempts. **Short timeout, several attempts** — not one long wait.
 
 `probeImage` resolves on `onload`, which is the **whole file**. A large JPEG on a slow link
 legitimately takes more than 5s, so a flat 5s timeout would abort real downloads and retry from
-scratch — an infinite failure loop on exactly the biggest pictures.
+scratch — an infinite failure loop on exactly the biggest pictures, which are the ones this script
+exists to show.
 
-Make it a **stall timeout, not a total timeout**: 5s with no bytes arriving. Resource Timing can
-tell the difference, and `transferBytes()` (`:1708`) already reads it for the status bar — if
-`performance.getEntriesByName(url)` shows bytes moving, extend rather than abort. **Verify this
-works before relying on it**; the fallback is `GM_xmlhttpRequest`, whose `onprogress` reports
-bytes directly.
+**One number cannot serve both cases.** 20s is too long for a dead host and too short for an 8 MB
+original on a slow link. The budget has to scale with the file.
+
+#### Two dead ends — do not spend time on these
+
+- **Resource Timing cannot report progress.** Entries are queued when a resource *finishes*, not
+  while it downloads; there is no entry during the transfer. `transferBytes()` (`:1708`) works only
+  because it runs after the image has loaded.
+- **`new Image()` is a black box** — no progress event, nothing between `src =` and
+  `onload`/`onerror`.
+- **GM_xhr + blob** gives real `onprogress`, but a blob URL is a different cache entry, so
+  `mediaEl.src = res.url` would re-download. That destroys "probing *is* preloading", which the
+  whole preload design (§6) rests on.
+- **`fetch()` + ReadableStream** would populate the real cache, but a cross-origin image with no
+  CORS headers yields an opaque response whose body cannot be read — which is exactly where images
+  live, on third-party CDNs.
+
+#### The design: measure the server, derive the budget from the file size
+
+1. **Liveness deadline, ~3s.** If the `Image` has not loaded by then, fire one small ranged
+   request. `headBytes()` (`:754`) is already this exact shape — 4KB, `Range` header, GM_xhr so
+   CORS does not apply, own 4s timeout.
+2. **Route on the answer:**
+   - no response / timeout → host is dead. Abort now (~7s, not 20s).
+   - 4xx → definitive. Abort, report "404 — not found", do not retry.
+   - 429 / Cloudflare / `Retry-After` → `hardBlock()`, mark the host no-rush (§6).
+   - 200/206 → alive; keep waiting.
+3. **If alive, read the size** — `Content-Length`, or the total from
+   `Content-Range: bytes 0-4095/8388608` — and set the budget to `max(5s, size / floorRate)`, with
+   an absolute ceiling.
+
+Why this shape:
+
+- The fast path costs nothing; the diagnostic only fires when already waiting.
+- **It is the same request as the failure diagnosis in §8.** One round trip decides whether to keep
+  waiting *and* supplies the status code for the status-bar reason.
+- `probeImage` keeps a plain `Image`, so the browser-cache/preload property survives.
+- A dead host fails in ~7s instead of 20s, which is most of the complaint.
+
+`headBytes` currently reads only `r.response` and discards `r.status` and `r.responseHeaders`. Both
+are needed here, and `hardBlock()` wants the headers regardless.
+
+Start `floorRate` pessimistic (~100 KB/s): an 8 MB file gets a long leash, small files fall through
+to the 5s floor. Measuring the real rate is possible — request 64KB instead of 4KB and time it —
+but 4KB is dominated by round-trip time and cannot give a throughput figure. Only add measurement
+if the fixed floor misfires.
 
 ---
 
@@ -561,7 +603,9 @@ Flagged so a future session measures rather than inherits:
 
 - Whether the 1.45s/image is latency or bandwidth (§6). Decides whether concurrency multiplies.
 - Whether programmatic scrolling works through `lockScroll()`'s `overflow:hidden` (§9).
-- Whether a Resource-Timing-based stall timeout can distinguish "still downloading" from "dead"
+- Whether `floorRate` at ~100 KB/s sizes the budget sensibly in practice, or needs real measurement
   (§7).
+- How often servers answer the ranged diagnostic with a bare 200 and no size at all, leaving the
+  budget underived — the fallback then is the old flat ceiling (§7).
 - Whether a 100ms relocation animation looks better than a jump (§3).
 - The right scrub rate. Starting at 5/s (§5).
