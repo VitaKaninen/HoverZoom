@@ -634,7 +634,48 @@ issue authenticated GraphQL calls carrying `fb_dtsg` and hardcoded `doc_id` cons
   embedded YouTube thumbnail sits inside a link to a video page, so `videoLinkReason()` refuses it
   before the resolver runs unless `videoMode` is `all`. Revisit only if that gate changes.
 
-### The one idea worth building · not built
+### The inline-JSON scan was measured before building it, and it does not pay · v0.87.0
+
+**Measured live 2026-09-07 in a logged-in Chrome.** The rule below was going to be built on the
+strength of `facebook.js`'s design. Four pages were checked first — count image URLs in the DOM,
+count them in every inline `<script>`, and see how many DOM thumbnails have a *bigger* sibling
+under the same id.
+
+| Page | Inline script | Image URLs in it | DOM thumbs with a bigger sibling |
+|---|---|---|---|
+| Instagram `/explore/` (logged in) | 788 KB | 109 | **0** — all 24 matched, every match the *same* URL |
+| Pinterest search | 524 KB | **0** | 0 |
+| Flickr search | 421 KB | 352 | 0 — and Flickr is already solved by the `_b`/`_k` suffix rules |
+| Facebook feed | 277 KB | 2 | inconclusive: only one fbcdn `<img>` had rendered, and FB also paints into SVG `<image>`, which `document.images` does not return |
+
+**Instagram is the case that killed it.** Every grid thumbnail *does* appear in the inline JSON,
+which looks like a hit until you compare the two URLs: they are byte-identical, same `stp=` size
+token. The larger `image_versions2` candidates arrive by XHR when a post is opened — which is
+exactly why `instagram.js` hooks `window.fetch` instead of reading the document.
+
+So the mechanism is real but the payload usually is not there. **Do not build it as a general
+rule.** If it is ever revisited, the only remaining candidate is Facebook, and the first thing to
+check is whether a *rendered* feed carries `viewer_image.uri` in a script tag — this run could not
+establish that.
+
+Two things that came out of the run and are worth keeping:
+
+- **`document.images` is not enough on these sites.** Facebook draws into SVG `<image>` elements,
+  which that collection excludes. Any future page-wide read needs `querySelectorAll('img, image')`.
+- **A URL rule beat the clever mechanism on every page where either could work.** Pinterest,
+  Flickr and DeviantArt all wanted one line of `UPGRADES`, not a JSON scan.
+
+### Pinterest · v0.87.0
+
+The first path segment on `i.pinimg.com` is the size, and the grid serves `60x60`. Measured on
+three pins: `60x60` 1.3 KB, `236x` 18 KB, `474x` 56 KB, `736x` 103 KB, `1200x` 170 KB.
+
+**`/originals/` is not reliably the answer** — it 403'd on one of the three pins and was
+byte-identical to `1200x` on the other two. Both are offered as candidates and the size gate picks
+the winner, which costs one extra probe and cannot be wrong. Do not "simplify" this to `originals`
+alone.
+
+### The idea this replaced · not built
 
 `facebook.js` does **not** rewrite the thumbnail URL — it extracts a stable id from it
 (`120042242_3034295103343234_…` out of `/v/t45.5328-4/<id>_n.jpg`) and then searches the page's own

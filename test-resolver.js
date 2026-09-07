@@ -127,6 +127,19 @@ has('generic _thumb filename suffix',
     upgradeCandidates('https://site.com/images/pic_thumb.png'),
     'https://site.com/images/pic.png');
 
+// ---- Pinterest. Sizes measured live 2026-09-07 on three pins: 60x60 1.3KB, 236x 18KB,
+// 474x 56KB, 736x 103KB, 1200x 170KB. /originals/ was 403 on one of the three and identical to
+// 1200x on the other two, so both are offered rather than either alone.
+has('pinterest size segment to originals',
+    upgradeCandidates('https://i.pinimg.com/60x60/fa/de/85/fade85201d3af07f0c74573447544e67.jpg'),
+    'https://i.pinimg.com/originals/fa/de/85/fade85201d3af07f0c74573447544e67.jpg');
+has('pinterest size segment to 1200x, the fallback when originals 403s',
+    upgradeCandidates('https://i.pinimg.com/236x/fa/de/85/fade85201d3af07f0c74573447544e67.jpg'),
+    'https://i.pinimg.com/1200x/fa/de/85/fade85201d3af07f0c74573447544e67.jpg');
+has('pinterest already at originals still offers 1200x',
+    upgradeCandidates('https://i.pinimg.com/originals/fa/de/85/fade85201d3af07f0c74573447544e67.jpg'),
+    'https://i.pinimg.com/1200x/fa/de/85/fade85201d3af07f0c74573447544e67.jpg');
+
 // The marker vocabulary was widened from HZ+'s 398 plugins, where these four are the tokens
 // that recur outside our list. See RESOLVER.md "What HZ+'s plugins actually contain".
 has('generic /tiny/ path segment',

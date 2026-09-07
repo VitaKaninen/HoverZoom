@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.86.0
+// @version     0.87.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -595,6 +595,22 @@
             const f = u.searchParams.get('format');
             if (!f || !/^\d+w$/.test(f)) return null;
             u.searchParams.set('format', '2500w');
+            return u.href;
+        },
+        // Pinterest: the first path segment is the size. /originals/ is the true top but 403s on
+        // some pins, and /1200x/ answers where it does, so both are offered and the biggest wins.
+        function (u) {
+            if (!/(^|\.)pinimg\.com$/.test(u.hostname)) return null;
+            const p = u.pathname.replace(/^\/(?:\d+x\d*|originals)\//, '/originals/');
+            if (p === u.pathname) return null;
+            u.pathname = p;
+            return u.href;
+        },
+        function (u) {
+            if (!/(^|\.)pinimg\.com$/.test(u.hostname)) return null;
+            const p = u.pathname.replace(/^\/(?:\d+x\d*|originals)\//, '/1200x/');
+            if (p === u.pathname) return null;
+            u.pathname = p;
             return u.href;
         },
         // generic path markers
