@@ -586,6 +586,29 @@ Two that were looked at and deliberately left alone:
 Danbooru, Unsplash, Pexels, ArtStation, Fandom and phpbb.com all answered **403** to a plain fetch;
 they need a real browser session, and are unsurveyed rather than uninteresting.
 
+### The logged-in walled gardens are entirely unsurveyed · asked about 2026-09-07
+
+Facebook, Instagram, TikTok, and the two photo-album services (Google Photos, iCloud Photos) have
+**never been tested here, in any version.** Nothing below is a measurement; it is what to go and
+check, so the next session does not repeat a guess as a finding.
+
+- **They cannot be surveyed by fetch.** Every one requires a session cookie, so the only route is a
+  logged-in browser — the user's own Chrome, hovering by hand or through the extension.
+- **The suspected shape is a signed URL, which would defeat every rule in `UPGRADES` by
+  construction.** `scontent.*.fbcdn.net` and `*.cdninstagram.com` carry `_nc_ohc`, `oh=` and `oe=`
+  parameters that look like a signature over the whole URL; if they are, then dropping or editing a
+  size token yields a 403 rather than a bigger picture, and the `E50` size-parameter rule is not
+  merely useless there but actively wrong. **This is the one thing to measure first** — one hover
+  with `debug` on settles it, and a 403 on the rewrite is a definitive answer.
+- **Google Photos is the one with a live reason to expect a hit:** `lh3.googleusercontent.com` size
+  tokens are already rewritten to `=s0` by the googleusercontent rule, and that rule was measured on
+  Blogger/ggpht URLs. Whether an album page's thumbnails carry that shape is unverified.
+- **TikTok is a video site**, so `GATES.md`'s player rule governs before the resolver ever runs. The
+  question there is not "which URL" but "does `gifLike()` classify a feed tile as a gif or a
+  player" — a gates question, answered on that page, not this one.
+
+Nothing should be written into `UPGRADES` for any of these until a real hover has been logged.
+
 ## Nothing may downgrade the frame · `E33`
 
 `resolve()` runs two paths at once — the linked-page lookup and the candidate loop — and each

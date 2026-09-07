@@ -7,6 +7,27 @@ A *tour* is next/previous navigation through every picture on the page, driven f
 preview window. The window stays put; the page does not move; each step swaps a different picture
 into the same frame.
 
+**No line numbers into `Hover-Zoom.user.js` appear below, deliberately.** They were here, taken at
+v0.79.0, and v0.80.0–v0.85.0 moved the probe region ~110 lines; a plan this long outlives any of
+them. `grep -n` the symbol name. (Refs into *other* scripts — Forum Stumbler, OLINT — keep their
+numbers; those files are not moving under us.)
+
+### What shipped since this was written, that the plan assumed was missing
+
+v0.80.0–v0.85.0 landed the resolver work §14 was measuring, so three items below are done:
+
+- **CSP refusal is detected and routed** (`cspRefused()` → `bytesFor()`, v0.83.0). A page whose
+  `img-src` refuses off-site images now gets the bytes via GM_xhr and displays them as `blob:`, or
+  `data:` where `blob:` is also refused. `@connect *` is in the header for this.
+- **Brave's base64url originals decode** (v0.84.0), generically — any imgproxy-shaped path, not a
+  Brave rule. Verified end-to-end in a real browser 2026-09-07: a Brave result whose only candidate
+  was a 500 px proxy thumbnail previews as the 564×752 original.
+- **Size parameters drop from extensionless CDN paths** (v0.83.0), plus Reddit/Flickr/gelbooru
+  rules and leading thumbnail markers (v0.85.0).
+
+What is still entirely unbuilt is §7 and §8 — the retry model, the size-derived timeout budget, and
+showing anything at all when a picture fails. Those are the parts that are *not* about the tour.
+
 ---
 
 ## 0. Do this first — the invariant rewrite
@@ -46,7 +67,7 @@ Why this shape rather than a maintained list:
 - Re-deriving is ~5ms on a keypress. That is a keypress budget, not a hover budget.
 - Lazy-loaded and newly appended images are picked up for free, because every press re-reads.
 
-`coveredMedia()` (`Hover-Zoom.user.js:3669`) is the existing precedent: a read performed at the
+`coveredMedia()` is the existing precedent: a read performed at the
 moment of need, caching nothing.
 
 ### The anchor is an element, not an index
@@ -72,7 +93,7 @@ list length changes under you.
 
 ### Membership
 
-An entry is eligible if `eligibleDirect(el)` (`:3696`) returns it. That guarantees the list can
+An entry is eligible if `eligibleDirect(el)` returns it. That guarantees the list can
 only hold things that would preview if hovered, and it inherits every existing gate — `videoMode`,
 the block list, banner/furniture rules — with no new code. Clips and images share one list.
 
@@ -80,7 +101,7 @@ the block list, banner/furniture rules — with no new code. Clips and images sh
 must give a tour of 50, and a picture they spotted half way down is their landmark for "half
 done". A failure shows the thumbnail and a reason (§8); it does not vanish.
 
-That extends to the size gate. `sizeOf(el)` (`:3761`) reads the layout rect, and a below-the-fold
+That extends to the size gate. `sizeOf(el)` reads the layout rect, and a below-the-fold
 `loading="lazy"` image with no width/height attributes is often 0×0 until it loads. Fall back, in
 order: layout rect → `width`/`height` attributes → probed dimensions. Only something that is
 genuinely not a picture leaves the list.
@@ -96,14 +117,14 @@ Three functions now put media in the window, and they are not interchangeable:
 
 | Function | Used when | Keeps |
 |---|---|---|
-| `showViewer()` (`:2772`) | opening a new window | nothing; positions from the pointer, fades in |
-| `upgradeViewer()` (`:2819`) | a better version of **the same** picture arrived | zoom and pan — you stay on the same spot |
+| `showViewer()` | opening a new window | nothing; positions from the pointer, fades in |
+| `upgradeViewer()` | a better version of **the same** picture arrived | zoom and pan — you stay on the same spot |
 | **`swapViewer()`** — new | a **different** picture, same window | position, and the hand-set size if there is one |
 
 `swapViewer()` resets `scale` to `fitScale` and recentres `ox`/`oy` — carrying a pan offset into a
 different picture is meaningless. Borrow the centre-preserving arithmetic from `upgradeViewer()`.
 
-It must also update `active` and `activeShown` (`:3382`), or ⊘ blocks the wrong image and unpinning
+It must also update `active` and `activeShown`, or ⊘ blocks the wrong image and unpinning
 misbehaves.
 
 ### The anchored corner
@@ -113,30 +134,29 @@ bottom-right of the strip, so pinning that corner keeps them under the pointer a
 
 Capture `right = view.left + outerW()` and `bottom = view.top + outerH()` before the swap; after
 `reflow()` recomputes the frame, set `view.left = right - outerW()` and
-`view.top = bottom - outerH()`. `clampPosition()` (`:1601`) still runs after.
+`view.top = bottom - outerH()`. `clampPosition()` still runs after.
 
 ### Growing and shrinking — already free
 
 Frame follows the picture unless the user hand-resized. This is existing behaviour and needs no
-new code: `view.fixedW`/`fixedH` are null until a hand resize, `resizeBy()` (`:3290`) is their only
-writer, and `reflow()` (`:1575`) already branches on them. `swapViewer()` calls `reflow()` and gets
+new code: `view.fixedW`/`fixedH` are null until a hand resize, `resizeBy()` is their only
+writer, and `reflow()` already branches on them. `swapViewer()` calls `reflow()` and gets
 the right answer either way.
 
 ### Size floors
 
 - **Width is already floored.** `reflow()` floors `frameW` at `minFrameW()` → `barMinW()` when
-  placed, and centres a narrower picture inside it (`:1580`). Small images letterbox rather than
+  placed, and centres a narrower picture inside it. Small images letterbox rather than
   shrinking the controls.
 - **Height is not.** `frameH` floors at `MIN_FRAME` (48), while the strip hides below `VCTL_MIN_H`
   (110). A short image mid-tour would make the nav buttons vanish. Add a height floor during a
   tour.
-- **One deliberate decision reverses.** The comment at `:2345` says the strip's metrics
+- **One deliberate decision reverses.** The comment above the bar metrics constants says the strip's metrics
   intentionally never reach `btnGutter()`, `barMinW()` or `bottomGap()` — floating it means it
   reserves nothing. That was right for optional video controls. It is wrong once the strip holds
   the only mouse route to next/prev: `barMinW()` must account for the strip's width when nav is
   present, or a narrow frame clips the buttons off.
-- **Cap the frame at the viewport during a tour.** `maxSizeMultiple` defaults to 1.2 (`growBox()`,
-  `:1543`), so a frame can exceed the viewport; anchored bottom-right, a large picture would then
+- **Cap the frame at the viewport during a tour.** `maxSizeMultiple` defaults to 1.2 (`growBox()`), so a frame can exceed the viewport; anchored bottom-right, a large picture would then
   run off the top-left and be clipped there for the whole tour. Treat a tour as a lightbox.
 
 ---
@@ -150,7 +170,7 @@ the right answer either way.
 | pinned, already relocated | → or Next | advance only |
 
 Relocation puts the anchored corner at `vpW() - EDGE_GAP`, `vpH() - EDGE_GAP`. Not flush:
-`bottomGap()`'s 20px allowance (`:1427`) is for the browser's link-target tooltip, which is painted
+`bottomGap()`'s 20px allowance is for the browser's link-target tooltip, which is painted
 bottom-**left**, so the bottom-right corner does not owe it.
 
 **Relocation happens exactly once per pinned window.** One boolean, set on the first arrow/next
@@ -181,7 +201,7 @@ One element holds both groups. Do not build a second floating box.
 - **Image:** the same strip shrinks to the nav group and sits right, same height, same background,
   same blur.
 
-The mechanism is one line: `.vctl` currently pins both edges in `layoutChrome()` (`:2573`). Make
+The mechanism is one line: `.vctl` currently pins both edges in `layoutChrome()`. Make
 `left` conditional — `grabInset()` with a clip, `auto` without. An absolutely positioned box with
 only `right` set shrinks to content. Transitions between the two are free because `layoutChrome()`
 runs from every `layout()`, which runs from `setMedia()`.
@@ -192,9 +212,9 @@ pane cannot see a Firefox-only fault.
 
 ### Style is shared by construction
 
-- Build ◀ ▶ with `mkVBtn()` (`:2034`). Identical box, hover wash, tooltip, and mousedown/click
+- Build ◀ ▶ with `mkVBtn()`. Identical box, hover wash, tooltip, and mousedown/click
   swallowing, for free.
-- Hoist the four `.vctl .vbtn` rules (`:1210`–`:1213`) to bare `.vbtn` so a restyle is one place.
+- Hoist the four `.vctl .vbtn` rules to bare `.vbtn` so a restyle is one place.
   Only `.vsound .vbtn` sizing stays scoped.
 - Hide the video group with a **class, not `hidden`**. `../CLAUDE.md`: `[hidden]` loses to an
   explicit `display`, and the group carries `display:flex`. This has cost a version twice.
@@ -209,13 +229,13 @@ which is also why entries are never silently dropped (§1).
 
 | Where | Now | Change to |
 |---|---|---|
-| `:1209` | `.box.hot.hasvid.tall .vctl{display:flex}` | drop `.hasvid`; gate the **video group** on it |
-| `:2410` `barHoverBand()` | widens the band only for a clip | widen whenever the strip is up |
-| `:2427` `pointerOverBar()` | `if (mediaEl !== vidEl) return false` | must include the strip for images, or it fades out from under the hand reaching for ◀ |
-| `:2573` `layoutChrome()` | sets both edges | `left` conditional as above |
+| `.box.hot.hasvid.tall .vctl` | `.box.hot.hasvid.tall .vctl{display:flex}` | drop `.hasvid`; gate the **video group** on it |
+| `barHoverBand()` | widens the band only for a clip | widen whenever the strip is up |
+| `pointerOverBar()` | `if (mediaEl !== vidEl) return false` | must include the strip for images, or it fades out from under the hand reaching for ◀ |
+| `layoutChrome()` | sets both edges | `left` conditional as above |
 | `VCTL_MIN_H` (110) | strip hides on short frames | a lower threshold for nav-only, or the §2 height floor |
 
-`isBoxControl()` (`:3107`) already exempts the whole `vctlEl` subtree, so buttons inside the strip
+`isBoxControl()` already exempts the whole `vctlEl` subtree, so buttons inside the strip
 are safe from the capture-listener trap with no extra code. A separate box would have to be
 registered there by hand — and the symptom of forgetting is silence.
 
@@ -223,16 +243,16 @@ registered there by hand — and the symptom of forgetting is silence.
 
 ## 5. Keys
 
-`onPinKey()` (`:3325`).
+`onPinKey()`.
 
 - **Left/Right navigate when the picture cannot pan horizontally**, and pan when it can. Test
-  `view.imgW > view.frameW + 0.5` — per-axis, not `pannable()` (`:1549`), which is either-axis.
+  `view.imgW > view.frameW + 0.5` — per-axis, not `pannable()`, which is either-axis.
   Correct edge case falls out: a tall picture at fit-width pans vertically, so Up/Down pan while
   Left/Right navigate.
 - **Up/Down always pan.** Unchanged.
 - **Add an always-navigates pair** (`[` / `]`, or PageUp/PageDown), or zooming in traps the user on
   the current picture.
-- `capOwns()` (`:3313`) already stands the arrows down while the zoom field, scrubber or volume
+- `capOwns()` already stands the arrows down while the zoom field, scrubber or volume
   slider has focus. Unchanged, works for free.
 
 ### Scrub
@@ -279,7 +299,7 @@ The two are separate settings and scale in opposite directions with connection q
 wants a **deeper window** (more buffer), while **concurrency** only multiplies if the 1.45s is
 latency rather than bandwidth. Google Images is expected to be latency-dominated — every result is
 on a different third-party host, so each pays fresh DNS + TLS, and `collectCandidates` must pull
-the real URL out of Google's `imgres?imgurl=` link via `linkParamCandidates` (`:349`) before
+the real URL out of Google's `imgres?imgurl=` link via `linkParamCandidates` before
 probing. **Not verified.** The test is to re-run the same 20-image walk against the concurrent
 preloader and compare wall-clock.
 
@@ -295,7 +315,7 @@ Read `../Forum-Stumbler/Forum-Stumbler.user.js`:
 | **`ctl.cancelled`** | throughout | Matches Hover Zoom's existing `token.cancelled`. |
 | **`ctl.mark(page, SEG_BUSY/DONE/TODO)`** | `:4085` | Per-item state, reported on **arrival** not delivery. What a buffer indicator would use. |
 | **Failure containment** | `:4098` | `endAt = Math.min(endAt, page)` — stop scheduling past a failure, still deliver what is in hand. |
-| **GM_xhr first, `fetch` fallback** | `fetchRes`, `:3902` | GM_xhr is not subject to the page's CSP/connect-src. Hover Zoom already does this in `headBytes` (`:754`). |
+| **GM_xhr first, `fetch` fallback** | `fetchRes`, `:3902` | GM_xhr is not subject to the page's CSP/connect-src. Hover Zoom already does this in `headBytes`. |
 
 **Do not take** the ordered-delivery machinery — the `got` map and `flush()` (`:4058`). Forum
 Stumbler needs pages in order because `prevKey` and the `n` sequence only mean anything
@@ -306,16 +326,16 @@ an order of magnitude too slow for 3/s — slot spacing replaces it.
 ### Rules
 
 - **A global cap on in-flight preload requests**, separate from resolve concurrency. `MAX_PROBES`
-  is 8 (`:747`), so six concurrent resolves is up to 48 simultaneous requests without one.
+  is 8, so six concurrent resolves is up to 48 simultaneous requests without one.
 - **Cut the probe budget for speculative items.** `resolve()` always tries the `keep` candidates —
-  the link and the displayed src (`:882`) — and spends the rest of the 8 on guesses. Keep plus one
+  the link and the displayed src — and spends the rest of the 8 on guesses. Keep plus one
   or two guesses is enough for a preload; the full search runs on arrival if it came up empty.
 - **Foreground jumps the queue.** A resolve the user is waiting on must never sit behind six
   speculative ones. Two priority tiers.
 - **Cancel on direction change.** Reversing with ◀ or blocking with ⊘ drops queued preloads that
   are no longer near the cursor.
 - **Preloads never write to `view`.** Own token; `onHit` records only.
-- `probeCache` (`:687`) is keyed by URL and holds a promise, so concurrent probes of one URL
+- `probeCache` is keyed by URL and holds a promise, so concurrent probes of one URL
   collapse automatically. Free.
 
 ### Arrival must be flash-free
@@ -329,7 +349,7 @@ progressive emit path. Fall back to the live path only if the preload has not se
 
 ### Videos are not preloaded by probing
 
-`probeVideo()` (`:691`) sets `preload='metadata'` and then calls `v.load()` to **abort** the fetch
+`probeVideo()` sets `preload='metadata'` and then calls `v.load()` to **abort** the fetch
 once it has dimensions. Images land in the HTTP cache as a side effect of probing; clips do not.
 Pre-warming a clip needs a separate hidden `<video preload="auto">` for the winning URL.
 
@@ -344,11 +364,12 @@ relies on the HTTP cache, which Chromium can evict.
 
 | | |
 |---|---|
-| Image probe timeout | **20s** (`IMAGE_PROBE_MS`, `:715`) |
-| Video metadata timeout | 6s (`VIDEO_PROBE_MS`, `:689`) |
-| Retry on re-hover | **No, not for 30s.** `probe()` caches the *promise*; a null result schedules its removal after `PROBE_RETRY_MS = 30000` (`:741`). A re-hover inside that window gets the cached failure instantly. |
-| Shown on failure | **Nothing.** `resolve()` never emits, `onHit` never fires, `showViewer` is never called, the `finally` hides the spinner (`:3885`). The ring spins, then vanishes. |
-| Can it tell a 404 from a timeout? | **No.** `probeImage`'s `onerror` (`:729`) fires identically for 404, dead host, CORS rejection and corrupt file. `new Image()` exposes no status. |
+| Image probe timeout | **20s** (`IMAGE_PROBE_MS`) |
+| Video metadata timeout | 6s (`VIDEO_PROBE_MS`) |
+| Retry on re-hover | **No, not for 30s.** `probe()` caches the *promise*; a null result schedules its removal after `PROBE_RETRY_MS = 30000`. A re-hover inside that window gets the cached failure instantly. |
+| Shown on failure | **Nothing.** `resolve()` never emits, `onHit` never fires, `showViewer` is never called, the `finally` hides the spinner. The ring spins, then vanishes. |
+| Can it tell a 404 from a timeout? | **No.** `probeImage`'s `onerror` fires identically for 404, dead host, CORS rejection and corrupt file. `new Image()` exposes no status. |
+| Can it tell a CSP refusal from either? | **Yes, since v0.83.0** — the `securitypolicyviolation` listener names the URL, and `probeImage` routes a refusal to `bytesFor()` instead of returning null. This is the one failure kind already classified, and it is the free one. |
 
 ### The model to build
 
@@ -383,7 +404,7 @@ original on a slow link. The budget has to scale with the file.
 #### Two dead ends — do not spend time on these
 
 - **Resource Timing cannot report progress.** Entries are queued when a resource *finishes*, not
-  while it downloads; there is no entry during the transfer. `transferBytes()` (`:1708`) works only
+  while it downloads; there is no entry during the transfer. `transferBytes()` works only
   because it runs after the image has loaded.
 - **`new Image()` is a black box** — no progress event, nothing between `src =` and
   `onload`/`onerror`.
@@ -397,7 +418,7 @@ original on a slow link. The budget has to scale with the file.
 #### The design: measure the server, derive the budget from the file size
 
 1. **Liveness deadline, ~3s.** If the `Image` has not loaded by then, fire one small ranged
-   request. `headBytes()` (`:754`) is already this exact shape — 4KB, `Range` header, GM_xhr so
+   request. `headBytes()` is already this exact shape — 4KB, `Range` header, GM_xhr so
    CORS does not apply, own 4s timeout.
 2. **Route on the answer:**
    - no response / timeout → host is dead. Abort now (~7s, not 20s).
@@ -441,24 +462,24 @@ this blurry" reads as a bug.
 Reasons come in two tiers:
 
 - **Free** — already computed and currently thrown away. `resolve()` knows exactly why it rejected
-  each candidate: *"under the required upsize"* (`:966`), *"a different shape, so a different
-  picture"* (`:955`), blocked, caught changing size. Each is logged under the `debug` flag and
+  each candidate: *"under the required upsize"*, *"a different shape, so a different
+  picture"*, blocked, caught changing size. Each is logged under the `debug` flag and
   discarded. Capture the last rejection instead.
 - **Paid** — anything needing an HTTP status. On total failure only, fire one `GM_xmlhttpRequest`
   to learn why. Rare path, and it is what makes "404 — not found" vs "site did not respond"
   sayable. The same response feeds `hardBlock()`, so failure diagnosis and 429 detection share one
   request.
 
-The caption is built in `caption()` (`:1731`); `capMetaEl` carries the type/dimensions/bytes line
+The caption is built in `caption()`; `capMetaEl` carries the type/dimensions/bytes line
 and is where a reason belongs. Note the `capFor`/`capDims` guard — the caption only rebuilds when
-the URL or measured size changes, so a reason must invalidate it (`resetCaption()`, `:1727`).
+the URL or measured size changes, so a reason must invalidate it (`resetCaption()`).
 
 ### The Retry button
 
 In the bar, **only during a tour**, and only on a failed picture. Outside a tour the user already
 has re-hover. It clears the URL from `probeCache` and re-resolves at foreground priority.
 
-Any new control in the bar must be added to `isBoxControl()` (`:3107`) — not optional, and the
+Any new control in the bar must be added to `isBoxControl()` — not optional, and the
 symptom of forgetting is silence.
 
 ---
@@ -469,7 +490,7 @@ Confirmed with the user: during ordinary navigation **the page never scrolls**. 
 off-screen pictures in the preview and leaves the document where it is.
 
 The list already handles this — `querySelectorAll` sees the whole document regardless of viewport,
-and `collectCandidates` reads `data-src`/`data-srcset` (`:578`), so below-the-fold lazy images
+and `collectCandidates` reads `data-src`/`data-srcset`, so below-the-fold lazy images
 usually resolve to a real URL without ever being displayed. On the user's Google Images case ~50
 results are in the DOM at load while only 20 are visible; all 50 are in the tour immediately.
 
@@ -506,14 +527,14 @@ pictures the user is still looking at rather than stalling them at the wall.
 
 ### Fullscreen
 
-Fullscreen is the **easy** case. `borderPx()` returns 0 and `fitFull()` (`:3050`) sizes to the
+Fullscreen is the **easy** case. `borderPx()` returns 0 and `fitFull()` sizes to the
 screen, so the frame is always the whole viewport: the corner anchor is a no-op, every picture
 re-fits, and the controls are stationary because the frame never changes size. Nothing extra.
 
 Excursions are better there too — `.dim.full` blacks the page out completely, so the scroll is
 literally invisible rather than merely subtle.
 
-**One thing to verify:** `lockScroll()` (`:2972`) sets `overflow:hidden` on both `documentElement`
+**One thing to verify:** `lockScroll()` sets `overflow:hidden` on both `documentElement`
 and `body`. Programmatic scrolling normally still works through `overflow:hidden`, but confirm it
 in a real browser rather than assuming. If it blocks, `scrollLock` already stores the previous
 values — restore them for the excursion and re-apply after.
@@ -526,7 +547,7 @@ values — restore them for the excursion and re-apply after.
 script instance.
 
 Not needed anyway. Hover Zoom already fetches and parses other pages — `linkedMedia()` /
-`pageMediaFrom()` (`:821`, `:857`) GM_xhr a linked page and `DOMParser` it to find media. The
+`pageMediaFrom()` GM_xhr a linked page and `DOMParser` it to find media. The
 capability is in the file; it is just pointed at one page at a time.
 
 At 10-from-the-end with no more scroll content: find page 2's URL, fetch and parse it in the
@@ -556,9 +577,9 @@ They are not interchangeable:
 **A tour entry becomes either a live DOM element (this page) or a bare URL harvested from a fetched
 page.** Most of the pipeline is URL-based and does not care. Two things do:
 
-- `collectCandidates(el)` (`:560`) works fine against an element from the parsed detached document
+- `collectCandidates(el)` works fine against an element from the parsed detached document
   — it only reads attributes and `closest('a')`.
-- `sizeOf(el)` (`:3761`) **cannot** — a detached document has no layout. Fetched entries fall back
+- `sizeOf(el)` **cannot** — a detached document has no layout. Fetched entries fall back
   to probed dimensions for the `minDisplayed` gate.
 
 This is the largest piece of the feature. Build it last, after the tour works on one page.
@@ -567,7 +588,7 @@ This is the largest piece of the feature. Build it last, after the tour works on
 
 ## 11. Settings
 
-Proposed keys, added to `DEFAULTS` (`:38`). Remember the hoisting trap in `../CLAUDE.md`: every
+Proposed keys, added to `DEFAULTS`. Remember the hoisting trap in `../CLAUDE.md`: every
 `const` the loader touches must be declared **above** the `cfg =` line, or `readSettings()`'s own
 `catch` swallows the `ReferenceError` and the script silently runs on defaults.
 
@@ -648,7 +669,7 @@ video**, giving ~19s.
 ### `transferBytes()` is already broken for most images — pre-existing, unrelated to the tour
 
 Only **4 of 24** successful loads reported a nonzero `encodedBodySize`; 83% return 0 because the
-host sends no `Timing-Allow-Origin`. So the status bar's byte figure (`:1708`) is silently absent
+host sends no `Timing-Allow-Origin`. So the status bar's byte figure is silently absent
 for most cross-origin images today. The ranged diagnostic in §7 could supply it instead.
 
 ### Failures are a normal path, not an edge case
@@ -679,11 +700,15 @@ is correct; **do not "improve" it into raising one.**
 
 ### Brave's base64 rule decodes correctly and then cannot load · see `RESOLVER.md` `E49`
 
-Brave sends `img-src 'self' blob: data: https://*.search.brave.com …`, so the `t4.ftcdn.net` original
-this section verified is refused by the page before it is ever probed. The decode below is right and
-still wanted; it is **blocked on the GM_xhr → `blob:` path**, not shippable on its own.
+**Both halves shipped — v0.83.0 (the bytes path) and v0.84.0 (the decode) — and were verified
+together in Chrome on 2026-09-07.** Kept because the ordering is the lesson: the decode was correct
+and useless on its own.
 
-### Brave image search needs a URL rule, and one is available
+Brave sends `img-src 'self' blob: data: https://*.search.brave.com …`, so the `t4.ftcdn.net` original
+this section verified is refused by the page before it is ever probed. The decode below was right and
+was **blocked on the GM_xhr → `blob:` path**, not shippable alone.
+
+### Brave image search needs a URL rule, and one is available · shipped v0.84.0
 
 - Results are `imgs.search.brave.com/<sig>/rs:fit:500:0:1:0/<base64>` with **no ancestor anchor**
   (`closest('a')` is null), so the linked-page path finds nothing and the only candidate is a
@@ -705,7 +730,7 @@ This belongs in `UPGRADES` with a host check, per the Known Limits rule in `../C
 imgur mp4, four clips: **1.0–9.6 MB** (images on the same run were 40 KB–1.3 MB). Metadata
 **169–864ms**; full load **561–3076ms**.
 
-- `VIDEO_PROBE_MS = 6000` (`:689`) is well calibrated — ~7× headroom over the measured worst case.
+- `VIDEO_PROBE_MS = 6000` is well calibrated — ~7× headroom over the measured worst case.
   No change.
 - **Clips need a two-stage preload.** A 12-deep window of 9.6 MB clips is ~115 MB of speculative
   traffic. Stage 1: metadata for the whole window — cheap, and it settles dimensions so the frame
