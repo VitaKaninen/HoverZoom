@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.94.0
+// @version     0.95.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -4077,6 +4077,13 @@
     const COVER_PEER = 0.25;    // share of the biggest picture's area that makes another one a peer
 
     // Laid-out pictures under n, counted only as far as "more than one".
+    // Laid out but invisible is not a picture on screen. Lazy-load placeholders sit exactly on top
+    // of the real image at opacity 0, so they are neither a peer nor a candidate. See E18.
+    function shownMedia(el) {
+        const s = getComputedStyle(el);
+        return s.visibility !== 'hidden' && parseFloat(s.opacity || '1') > 0.01;
+    }
+
     // How many laid-out pictures in here are PEERS of the biggest one. A card's avatar or badge is
     // not a second picture; two tiles of a grid are. See E18.
     function peerMedia(n) {
@@ -4085,7 +4092,7 @@
         const areas = [];
         for (let i = 0; i < all.length; i++) {
             const r = all[i].getBoundingClientRect();
-            if (r.width >= 2 && r.height >= 2) areas.push(r.width * r.height);
+            if (r.width >= 2 && r.height >= 2 && shownMedia(all[i])) areas.push(r.width * r.height);
         }
         if (!areas.length) return 0;
         let max = 0;
@@ -4102,7 +4109,8 @@
         let below = false;
         for (let i = 0; i < stack.length; i++) {
             if (!below) { if (stack[i] === el) below = true; continue; }
-            if (stack[i].tagName === 'IMG' || stack[i].tagName === 'VIDEO') under.push(stack[i]);
+            if ((stack[i].tagName === 'IMG' || stack[i].tagName === 'VIDEO') && shownMedia(stack[i]))
+                under.push(stack[i]);
         }
         if (!under.length) return null;
         let n = el;
