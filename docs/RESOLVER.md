@@ -419,8 +419,8 @@ Four things this needed that are easy to get wrong:
   every one of the six allows `data:`. **So the fallback must try `blob:` first and fall back to
   `data:`**, paying ~33% base64 bloat and the memory only where it must. An earlier note here said
   every blocked engine allowed `blob:`; that was true of the four measured in a browser and false in
-  general. This is **not built**; it is the prerequisite for the Brave rule in [`TOUR.md`](TOUR.md)
-  §14, which decodes correctly and then cannot load what it decoded.
+  general. Built in v0.83.0 — `probeBytes()` tries `blob:` and falls back to `data:` — which is what
+  unblocked the Brave rule in [`TOUR.md`](TOUR.md) §14, verified end to end 2026-09-07.
 - **A Cloudflare or Anubis interstitial is not a CSP answer.** Ecosia and `searx.be` both refuse the
   in-app browser (a throwaway profile that cannot hold `cf_clearance`) and both are fine in a real
   one; `curl` reads the header either way and needs no browser at all. Ecosia turned out to need no
@@ -690,6 +690,44 @@ hover time, caching nothing — and it needs no API keys, no XHR hook and no coo
 Cost to weigh before building it: inline JSON on a feed page is megabytes, so it needs a size cap
 and a cheap `indexOf` pre-filter before any `JSON.parse`, and the "URLs found near the token" step
 needs a rule for which one is the picture rather than an avatar or a preview.
+
+## The five that needed a browser but no account · v0.90.0
+
+Surveyed 2026-09-07 in a real Chrome, because all five answer a plain `curl` with 401/403. For each
+one the thumbnail URL was read off the live page and every candidate transform was confirmed with
+`curl` before a rule was written — two of the five turned out to need no rule at all.
+
+| Site | Thumbnail | Verdict |
+|---|---|---|
+| **Unsplash** | `images.unsplash.com/photo-<id>?w=400&q=60&fit=crop&…` | **Already worked.** `E50` drops `w`/`q`/`fit` from the extensionless path; the survivor `?auto=format&ixlib=…` serves the **10.9 MB** original against the thumbnail's 29 KB. |
+| **Pexels** | `images.pexels.com/photos/<id>/pexels-photo-<id>.jpeg?auto=compress&w=400` | **Already worked.** The media-path query strip leaves `?auto=compress`, which is compression not size: 1.15 MB against 16.6 KB. |
+| **Etsy** | `i.etsystatic.com/…/il_510x638.<id>_<code>.jpg` | **Rule added.** The size is a *prefix* on the filename, which no existing rule reads. `il_fullxfull` measured 323 KB against 70 KB, and beats `il_1140xN` (223 KB). |
+| **ArtStation** | `cdn*.artstation.com/p/assets/…/<date>/smaller_square/<name>.jpg` | **Fixed generically, not with a rule** — see below. |
+| **Vimeo** | `i.vimeocdn.com/video/<id>-<hash>?r=…&region=…` | **Out of scope, correctly.** A video site: the thumbnail links to a player page, so `videoLinkReason()` refuses it before the resolver runs, exactly as on TikTok. The URL carries no size token to raise anyway — 640×360 is what is served. |
+
+### ArtStation is why the filename rule now covers `og:image` · v0.90.0
+
+Its thumbnail is a **400×400 square crop** of a **762×1047** original, and the URL ladder is a dead
+end: `/large/`, `/original/`, `/4k/` and `/medium/` all answered **403** in place of
+`/smaller_square/`, because the large sizes also drop the `<date>` path segment the thumbnail
+carries. Guessing that is not a rule anyone should write.
+
+The linked artwork page declares the right file in `og:image` and always has — but `resolve()`
+refused it, because a 1:1 thumbnail against a 0.73 original fails `sameShape()`, and that test was
+being applied to the declared candidate. The **filename is identical on both sides**
+(`tiago-kogi-red-panda-2.jpg`), and "a matching filename already proves identity" is a rule this
+file has held since v0.58.0 — it was simply never wired to the `og:image` candidate, only to the
+page-body ones. It is now: `named` is set from `sameStem(declared, shown)`.
+
+**This is the better fix and it is not about ArtStation.** A square-cropped thumbnail over a
+portrait original is one of the most common shapes on the web, and every site that names its files
+consistently now gets the linked page's answer instead of a shape rejection.
+
+**Unverified:** the end-to-end hover on ArtStation. The URL logic, the stem match and the og:image
+target are all measured; what has not been watched is `linkedMedia()` actually fetching
+`artstation.com/artwork/<id>`, which answers **403** to a cookieless request. GM_xhr sends the
+browser's cookies, so it should pass for a signed-in visitor and may not for anyone else. Check
+this before treating ArtStation as done.
 
 ### The logged-in walled gardens are entirely unsurveyed · asked about 2026-09-07
 

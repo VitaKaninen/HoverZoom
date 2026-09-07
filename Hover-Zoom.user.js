@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.90.0
+// @version     0.91.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -2116,7 +2116,10 @@
                 if (n > 0) return n;
             }
         } catch (e) { /* no Resource Timing */ }
-        return 0;
+        // 83% of cross-origin images report 0 — no Timing-Allow-Origin. Where the picture was slow
+        // enough to earn a diagnosis, Content-Range already said the true size, for free.
+        const d = diagValue.get(url);
+        return (d && d.total) || 0;
     }
 
     function humanBytes(n) {
