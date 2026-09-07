@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.91.0
+// @version     0.92.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -4061,17 +4061,25 @@
     }
 
     const COVER_UP = 4;
+    const COVER_PEER = 0.25;    // share of the biggest picture's area that makes another one a peer
 
     // Laid-out pictures under n, counted only as far as "more than one".
-    function laidOutMedia(n) {
+    // How many laid-out pictures in here are PEERS of the biggest one. A card's avatar or badge is
+    // not a second picture; two tiles of a grid are. See E18.
+    function peerMedia(n) {
         if (!n.querySelectorAll) return 0;
         const all = n.querySelectorAll('img,video');
-        let seen = 0;
+        const areas = [];
         for (let i = 0; i < all.length; i++) {
             const r = all[i].getBoundingClientRect();
-            if (r.width >= 2 && r.height >= 2 && ++seen > 1) break;
+            if (r.width >= 2 && r.height >= 2) areas.push(r.width * r.height);
         }
-        return seen;
+        if (!areas.length) return 0;
+        let max = 0;
+        for (let i = 0; i < areas.length; i++) if (areas[i] > max) max = areas[i];
+        let peers = 0;
+        for (let i = 0; i < areas.length; i++) if (areas[i] >= max * COVER_PEER) peers++;
+        return peers;
     }
 
     function coveredMedia(el, x, y) {
@@ -4086,7 +4094,7 @@
         if (!under.length) return null;
         let n = el;
         for (let up = 0; n && up <= COVER_UP; up++, n = n.parentElement) {
-            if (laidOutMedia(n) > 1) return null;    // a grid or a page, not a card
+            if (peerMedia(n) > 1) return null;       // a grid or a page, not a card
             for (let i = 0; i < under.length; i++) if (n.contains(under[i])) return under[i];
         }
         return null;
