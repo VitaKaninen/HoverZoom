@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.79.0
+// @version     0.80.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -346,12 +346,25 @@
 
     const THUMB_PARAM = /(?:^|[_-])(?:thumb|thumbnail|tn|small|preview|icon|avatar)(?:$|[_-])/i;
 
-    // Has the ancestor link already named the original in its query? Then its page is not worth
-    // fetching: an internal result page answers og:image with the site's own share card. See E48.
-    function linkDeclaresMedia(el) {
+    // A card links once but can hold a strip of extra thumbnails; the link is about the biggest
+    // image inside it and says nothing about the others. See E48.
+    function anchorOwns(el, a) {
+        if (!a || !a.querySelectorAll) return false;
+        const imgs = a.querySelectorAll('img');
+        if (imgs.length <= 1) return true;
+        const mine = el.clientWidth * el.clientHeight;
+        for (let i = 0; i < imgs.length; i++)
+            if (imgs[i] !== el && imgs[i].clientWidth * imgs[i].clientHeight > mine) return false;
+        return true;
+    }
+
+    // Fetching the page behind a link is wasted when the link already named the media, and wrong
+    // when this image is not what the link is about — both give the site's share card. See E48.
+    function skipLinkedPage(el) {
         const a = el.closest && el.closest('a[href]');
-        if (!a || !a.href || looksLikeImage(a.href)) return false;
-        return linkParamCandidates(a.href).length > 0;
+        if (!a || !a.href) return false;
+        if (!anchorOwns(el, a)) return true;
+        return !looksLikeImage(a.href) && linkParamCandidates(a.href).length > 0;
     }
 
     function linkParamCandidates(href) {
@@ -613,7 +626,7 @@
         if (bestSrcset) upgradeCandidates(bestSrcset).forEach(adder('url rule on the widest srcset entry'));
 
         const a = el.closest && el.closest('a[href]');
-        if (a && a.href) {
+        if (a && a.href && anchorOwns(el, a)) {
             if (looksLikeImage(a.href) || (videoPreviewsOn() && isVideoUrl(a.href))) add(a.href, 'the ancestor link itself', true);
             else {
                 // A declaration, not a guess, so it is kept out of the probe budget. See E48.
@@ -914,7 +927,7 @@
             if (onHit) onHit(hit);
         }
 
-        const linked = linkDeclaresMedia(el) ? Promise.resolve(null) : linkedMedia(el).then(async function (page) {
+        const linked = skipLinkedPage(el) ? Promise.resolve(null) : linkedMedia(el).then(async function (page) {
             if (!page || token.cancelled) return null;
             const tries = [];
             // og:image is the share card on some sites, and that is the thumbnail itself.

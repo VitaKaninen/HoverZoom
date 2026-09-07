@@ -303,6 +303,25 @@ and that URL is added with `keep: true`. Two independent reasons, and the first 
 Measured after the change on four live Bing results: 4/4 declared, resolving to 4000×2666, 2560×1440
 and 3072×1728 — the fourth's original is genuinely dead, and falling back to the thumbnail is right.
 
+#### The anchor must own the image · v0.80.0
+
+Fixing the above made a second bug visible, because the wrong URL was now *kept*: a card links once
+but holds a **strip of extra thumbnails inside the same anchor**, so `closest('a')` hands all of them
+the card's `mediaurl` and every strip thumb previewed its neighbour's picture. Measured on one Bing
+page: **18 of 73** linked images, every one an 89×89 strip thumb in an anchor holding three images,
+and in 18/18 the wrong ones were *not the largest image in that anchor* while the right ones always
+were. So `anchorOwns()` gates the whole anchor branch — its query, the link itself, and
+`linkedMedia()` — on being the biggest `<img>` the anchor contains.
+
+- **A tie leaves everyone an owner.** `>` not `>=`, so `<a>` with a front image and an equal-sized
+  hover-swap keeps working. A grid of equal images under one anchor would therefore all claim its
+  declared URL; no measured layout does this, and refusing on a tie would cost the swap case.
+- **A declined strip thumb now previews nothing at all**, which is correct but incomplete: its own
+  `th.bing.com/th/id/OIP.<id>?w=89&h=89&…` would give an honest 474×315 if the size parameters were
+  dropped, and the param-drop rule refuses because `MEDIA_RE` does not match an extensionless CDN
+  path. Widening that gate is wanted and **not done** — `/rotate.php` in `test-server.py` is the
+  standing reason a bare path may not have its query stripped.
+
 `linkParamCandidates()` now also runs on the **displayed src**, because an image proxy carries its
 source in its own query rather than on a link (`?url=`, `?piurl=`, `?imgurl=`, `?u=`). The value must
 still be an absolute `http(s)` URL that `looksLikeImage()` accepts, so a proxy pointing at another
