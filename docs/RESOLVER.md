@@ -356,22 +356,36 @@ script, not assumed: `test-pages/csp-img-src.html` serves one fixture twice, and
 `img-src 'self'` a cross-origin original behind a link is refused while the same-origin one on the
 same page still resolves. The failure is silent and ~1 ms, identical to a 404.
 
-This is the whole story on the privacy search engines, and no URL rule can be written around it:
+This is the whole story on the privacy search engines, and no URL rule can be written around it.
+Measured 2026-09-07, headers read directly with `curl` where a browser was challenged:
 
-| | off-site probe | `blob:` allowed |
-|---|---|---|
-| Google, Bing, Yandex | allowed | n/a |
-| Brave, DuckDuckGo, Startpage, Qwant, Mojeek | **blocked** | **yes**, all of them |
+| Engine | off-site probe | `blob:` | `data:` | Today |
+|---|---|---|---|---|
+| Bing | allowed (no CSP) | — | — | originals, since v0.79.0–v0.82.0 |
+| Yandex (`img-src 'self' * blob: data:`) | allowed | — | — | originals via `img_url=`; 2560×1405 verified |
+| Ecosia | allowed | — | — | **already worked** — 4000×2666 verified |
+| Google | allowed | — | — | thumbnail only, and not fixable generically (above) |
+| Brave, DuckDuckGo, Startpage, Qwant | **blocked** | yes | yes | thumbnail only |
+| Mojeek, `searx.be` (SearXNG) | **blocked** | **no** | yes | thumbnail only |
 
 Two consequences:
 
 - **A blocked probe is identifiable for free.** `securitypolicyviolation` on `document` carries
   `blockedURI` and `violatedDirective`, needs no network request, and fires before any timeout. It is
   the one failure kind that can be named exactly, and it must not be spent as a retry.
-- **`blob:` is the way out where one is wanted.** `GM_xmlhttpRequest` is not subject to page CSP, and
-  every blocked engine measured permits `blob:` — so bytes fetched by GM_xhr can be displayed. This is
-  **not built**; it is the prerequisite for the Brave rule in [`TOUR.md`](TOUR.md) §14, which decodes
-  correctly and then cannot load what it decoded.
+- **`data:` is the universal escape hatch, not `blob:`.** `GM_xmlhttpRequest` is not subject to page
+  CSP, so the bytes can always be fetched; the question is only what may then be *displayed*. Four of
+  the six blocked engines allow `blob:`, but SearXNG (`img-src 'self' data:
+  https://*.tile.openstreetmap.org`) and Mojeek (`img-src 'self' data: *.mojeek.com`) do not — and
+  every one of the six allows `data:`. **So the fallback must try `blob:` first and fall back to
+  `data:`**, paying ~33% base64 bloat and the memory only where it must. An earlier note here said
+  every blocked engine allowed `blob:`; that was true of the four measured in a browser and false in
+  general. This is **not built**; it is the prerequisite for the Brave rule in [`TOUR.md`](TOUR.md)
+  §14, which decodes correctly and then cannot load what it decoded.
+- **A Cloudflare or Anubis interstitial is not a CSP answer.** Ecosia and `searx.be` both refuse the
+  in-app browser (a throwaway profile that cannot hold `cf_clearance`) and both are fine in a real
+  one; `curl` reads the header either way and needs no browser at all. Ecosia turned out to need no
+  work, which the interstitial had hidden.
 
 ## The preview can BE a video · `E14`
 
