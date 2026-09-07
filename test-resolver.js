@@ -136,6 +136,23 @@ has('generic _thumb filename suffix',
     upgradeCandidates('https://site.com/images/pic_thumb.png'),
     'https://site.com/images/pic.png');
 
+// ---- Etsy. Measured live 2026-09-07: il_510x638 is 70 KB, il_1140xN 223 KB, il_fullxfull 323 KB.
+has('etsy size prefix to fullxfull',
+    upgradeCandidates('https://i.etsystatic.com/19619146/r/il/ee675c/6642205685/il_510x638.6642205685_jhs0.jpg'),
+    'https://i.etsystatic.com/19619146/r/il/ee675c/6642205685/il_fullxfull.6642205685_jhs0.jpg');
+has('etsy handles the xN form the ladder also uses',
+    upgradeCandidates('https://i.etsystatic.com/1/r/il/aa/22/il_794xN.123_abc.jpg'),
+    'https://i.etsystatic.com/1/r/il/aa/22/il_fullxfull.123_abc.jpg');
+none('the etsy rule is host-scoped', 'https://cdn.other.com/il_510x638.123_abc.jpg');
+
+// ArtStation's thumbnail is a 400x400 square crop of a 762x1047 original, so the shape test
+// refuses the og:image the linked page declares — and the filename is identical either side.
+// That match is what overrides it; see the `named` flag in resolve(). Measured 2026-09-07.
+eq('artstation thumbnail and original share a stem across different size segments',
+    sameStem('https://cdna.artstation.com/p/assets/images/images/001/936/185/large/tiago-kogi-red-panda-2.jpg',
+             'https://cdna.artstation.com/p/assets/images/images/001/936/185/20160207045143/smaller_square/tiago-kogi-red-panda-2.jpg'),
+    true);
+
 // ---- Pinterest. Sizes measured live 2026-09-07 on three pins: 60x60 1.3KB, 236x 18KB,
 // 474x 56KB, 736x 103KB, 1200x 170KB. /originals/ was 403 on one of the three and identical to
 // 1200x on the other two, so both are offered rather than either alone.

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.89.0
+// @version     0.90.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -595,6 +595,15 @@
             const f = u.searchParams.get('format');
             if (!f || !/^\d+w$/.test(f)) return null;
             u.searchParams.set('format', '2500w');
+            return u.href;
+        },
+        // Etsy: the size is a prefix on the filename, il_510x638.<id>_<code>.jpg, and the top of
+        // the ladder is named rather than numbered.
+        function (u) {
+            if (!/(^|\.)etsystatic\.com$/.test(u.hostname)) return null;
+            const p = u.pathname.replace(/\/il_\d+x[\dN]+\./, '/il_fullxfull.');
+            if (p === u.pathname) return null;
+            u.pathname = p;
             return u.href;
         },
         // Pinterest: the first path segment is the size. /originals/ is the true top but 403s on
@@ -1291,8 +1300,12 @@
             if (!page || token.cancelled) return null;
             const tries = [];
             // og:image is the share card on some sites, and that is the thumbnail itself.
+            // A matching filename proves identity, so it outranks the shape test here too — the
+            // thumbnail is often a square crop of a portrait original. See v0.58.0 and v0.90.0.
             if (page.declared && page.declared.url !== shown)
-                tries.push({ url: page.declared.url, from: 'the page the thumbnail links to (og: media)' });
+                tries.push({ url: page.declared.url,
+                    named: !!(shown && sameStem(page.declared.url, shown)),
+                    from: 'the page the thumbnail links to (og: media)' });
             page.body.forEach(function (u) {
                 if (shown && u !== shown && sameStem(u, shown))
                     tries.push({ url: u, named: true, from: 'the page the thumbnail links to (its own markup)' });
