@@ -110,6 +110,11 @@ def main():
     # An opaque size code, displayed UPSCALED the way my.evilmilk.com does (case 41).
     save(full.resize((340, 255)), "photo_t3.jpg")
 
+    # A small picture whose NAME offers the resolver nothing: no size suffix, no marker,
+    # no thumbs directory. It is the only way to make a hover reach the linked candidate
+    # and fail there, which is what test-pages/failure-and-timeout.html needs.
+    save(full.resize((200, 150)), "mural.jpg")
+
     scene = make(1600, 1200, "SCENE", 3)
     save(scene, "scene.jpg")
     save(scene.resize((200, 150)), "thumbs", "scene.jpg")

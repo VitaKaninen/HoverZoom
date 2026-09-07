@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.88.0
+// @version     0.89.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -960,6 +960,9 @@
     const IMAGE_TRIES = 3;
     const IMG_RATE = 100 * 1024;    // bytes/sec assumed, the measured floor for images
     const DIAG_BYTES = 4096;
+    // Longer than it looks it needs to be, on purpose: a server that is merely slow answers
+    // this request slowly too, and a diagnostic that times out first calls it dead. See E52.
+    const DIAG_MS = 10000;
 
     // The total file size. On a 206 that is the tail of Content-Range — Content-Length is the
     // slice, and reads 4096 for a 9 MB file.
@@ -985,9 +988,12 @@
     // the file size that sets the waiting budget.
     function diagnose(url) {
         if (diagCache.has(url)) return diagCache.get(url);
-        const p = rangeGet(url, DIAG_BYTES, 4000).then(function (r) {
+        const p = rangeGet(url, DIAG_BYTES, DIAG_MS).then(function (r) {
             let v;
-            if (!r) v = { kind: gmXhrWorks ? 'dead' : 'unknown', status: 0, total: 0 };
+            // A timeout says slow, never dead — keep waiting. Only a refused connection,
+            // and only once GM_xhr has been seen to work here, is fatal.
+            if (!r || r.timedOut) v = { kind: 'unknown', status: 0, total: 0 };
+            else if (r.netError) v = { kind: gmXhrWorks ? 'dead' : 'unknown', status: 0, total: 0 };
             else if (r.status === 429 || ((r.status === 403 || r.status === 503) && /retry-after:/i.test(r.headers)))
                 v = { kind: 'busy', status: r.status, total: 0 };
             else if (r.status >= 400 && r.status < 500) v = { kind: 'gone', status: r.status, total: 0 };
@@ -1004,9 +1010,9 @@
     function failureText(url) {
         const d = diagValue.get(url);
         if (!d) return 'the picture did not load';
-        if (d.kind === 'gone') return 'not found — the site answered ' + d.status;
-        if (d.kind === 'busy') return 'the site asked us to slow down';
-        if (d.kind === 'dead') return d.status ? 'the site answered ' + d.status : 'the site did not respond';
+        if (d.kind === 'gone') return 'not found (' + d.status + ')';
+        if (d.kind === 'busy') return 'rate-limited (' + d.status + ')';
+        if (d.kind === 'dead') return d.status ? 'the site answered ' + d.status : 'no answer from the site';
         return 'the picture did not load';
     }
 
@@ -1041,7 +1047,7 @@
             live = setTimeout(function () {
                 diagnose(url).then(function (d) {
                     if (settled) return;
-                    if (d.kind === 'unknown') { arm(ATTEMPT_CEIL_MS); return; }
+                    if (d.kind === 'unknown') { arm(ATTEMPT_CEIL_MS - LIVENESS_MS); return; }
                     if (d.kind !== 'alive') { fin({ stop: true, diag: d }); return; }
                     // Alive, so the wait is the file's own cost, not a hang.
                     const want = d.total ? d.total / IMG_RATE * 1000 : ATTEMPT_FLOOR_MS;
@@ -1108,7 +1114,7 @@
             let done = false;
             const fin = function (v) { if (!done) { done = true; res(v); } };
             // GM's own timeout does not cover a pending permission dialog. See E51.
-            setTimeout(function () { fin(null); }, ms + 500);
+            setTimeout(function () { fin({ status: 0, timedOut: true, headers: '' }); }, ms + 500);
             try {
                 GM_xmlhttpRequest({
                     method: 'GET', url: url, responseType: 'arraybuffer', timeout: ms,
@@ -1124,15 +1130,15 @@
                                 ? new Uint8Array(b, 0, Math.min(n, b.byteLength)) : null,
                         });
                     },
-                    onerror: function () { fin(null); },
-                    ontimeout: function () { fin(null); },
+                    onerror: function () { fin({ status: 0, netError: true, headers: '' }); },
+                    ontimeout: function () { fin({ status: 0, timedOut: true, headers: '' }); },
                 });
             } catch (e) { fin(null); }
         });
     }
 
     function headBytes(url, n) {
-        return rangeGet(url, n, 4000).then(function (r) { return r ? r.bytes : null; });
+        return rangeGet(url, n, 4000).then(function (r) { return r && r.bytes ? r.bytes : null; });
     }
 
     function isAnimated(url) {
