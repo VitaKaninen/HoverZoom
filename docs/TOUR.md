@@ -267,8 +267,13 @@ With P resolves in flight, throughput is P/1.45 per second:
 | **5** | **3.4** |
 | 6 | 4.1 |
 
-**Target: 5–6 concurrent, window 10–15.** The window absorbs bursts; the concurrency sustains the
-rate. Forum Stumbler independently landed on `PAGE_WORKERS = 6`.
+**Target: 6 concurrent, window 10–15.** The window absorbs bursts; the concurrency sustains the
+rate. Forum Stumbler independently landed on `PAGE_WORKERS = 6`, and **§14 measured 5.9× at 6
+workers on live Google Images results — 5.3 images/sec, latency-bound as predicted.** Do not raise
+the worker count without re-measuring.
+
+**Clips are the exception**: they are 5–10× larger, so the window preloads video *metadata* only
+and fully buffers just 1–2 ahead. See §14.
 
 The two are separate settings and scale in opposite directions with connection quality: a slow link
 wants a **deeper window** (more buffer), while **concurrency** only multiplies if the 1.45s is
@@ -394,9 +399,12 @@ original on a slow link. The budget has to scale with the file.
    - 4xx → definitive. Abort, report "404 — not found", do not retry.
    - 429 / Cloudflare / `Retry-After` → `hardBlock()`, mark the host no-rush (§6).
    - 200/206 → alive; keep waiting.
-3. **If alive, read the size** — `Content-Length`, or the total from
-   `Content-Range: bytes 0-4095/8388608` — and set the budget to `max(5s, size / floorRate)`, with
-   an absolute ceiling.
+3. **If alive, read the size — from `Content-Range`, never from `Content-Length`.** A 206 sends
+   `Content-Range: bytes 0-4095/8388608` (total) alongside `Content-Length: 4096` (the slice).
+   Reading the wrong one gives 4096 for an 8 MB file. `Content-Length` is the right source only on
+   a **200**. Measured and confirmed — see §14.
+   Then set the budget to `max(5s, size / floorRate)` with an absolute ceiling. `floorRate` is
+   ~100 KB/s for images and ~500 KB/s for video (§14).
 
 Why this shape:
 
@@ -597,15 +605,88 @@ Version bump and commit at each step, per `../../CLAUDE.md`.
 - New traps that belong in `../CLAUDE.md`'s "Traps that fire BEFORE you act": the Retry button and
   any new bar control needing `isBoxControl()`; the stall-vs-total timeout distinction.
 
-## 14. Unverified
+## 14. Measured, 2026-09-07
 
-Flagged so a future session measures rather than inherits:
+Live browser tests against Google image search, Brave image search and imgur. Run on a fast link
+(1.6–4.1 MB/s observed); on a slower connection bandwidth binds sooner and the concurrency figure
+below shrinks.
 
-- Whether the 1.45s/image is latency or bandwidth (§6). Decides whether concurrency multiplies.
+### Concurrency is confirmed latency-bound — ~5.9× at 6 workers
+
+30 Google Images originals, real hosts. Sum of individual load times **33.7s**; wall clock at
+6-wide **5.7s**. Serial cost 1.12s/image, corroborating the user's independently measured 1.45s.
+
+At 6-wide that is **0.19s/image = 5.3 images/sec**, clearing both the 3/s target and the 5/s scrub
+cap (§5). **Six workers is enough. Do not raise it without re-measuring.**
+
+### Never read `Content-Length` on a 206 — it is the slice, not the file
+
+Proven same-origin: `Content-Range: bytes 0-4095/34494` alongside `Content-Length: 4096`.
+
+- Cross-origin from page JS, `Content-Range` is **hidden** — it is not a CORS-safelisted response
+  header — and `Content-Length` reads **4096**. GM_xhr bypasses CORS and sees the real header, so
+  the script is fine, but a naive `Content-Length` read yields 4096 for a 9.6 MB video and derives
+  a 5s budget for it.
+- **Parse the total out of `Content-Range`. Fall back to `Content-Length` only on a 200.**
+- All 30+ ranged requests across ~12 hosts answered **206**. The "bare 200 with no size" case this
+  section previously asked about did not occur once; the real hazard turned out to be the 206.
+
+### `floorRate` at 100 KB/s is right for images, wrong for video
+
+Where size and time were both measurable: **240–452 KB/s** effective for files of 313 KB–1.3 MB. A
+39 KB file measured 36 KB/s effective — latency-dominated — which the `max(5s, …)` term already
+covers. The formula behaves correctly at both ends.
+
+Video needs its own floor. At 100 KB/s a 9.6 MB clip gets a 96s budget. Use **~500 KB/s for
+video**, giving ~19s.
+
+### `transferBytes()` is already broken for most images — pre-existing, unrelated to the tour
+
+Only **4 of 24** successful loads reported a nonzero `encodedBodySize`; 83% return 0 because the
+host sends no `Timing-Allow-Origin`. So the status bar's byte figure (`:1708`) is silently absent
+for most cross-origin images today. The ranged diagnostic in §7 could supply it instead.
+
+### Failures are a normal path, not an edge case
+
+**6 of 30 (20%)** originals failed to load on a live Google Images page — `preview.redd.it` ×3,
+`trvst.world` ×2, `media.istockphoto.com` ×1. Almost certainly hotlink/referer protection, which is
+what `noReferrerHere()` (`:217`) exists for. This validates §8: a tour hits broken pictures
+constantly and must handle them gracefully rather than treat them as exceptional.
+
+### Brave image search needs a URL rule, and one is available
+
+- Results are `imgs.search.brave.com/<sig>/rs:fit:500:0:1:0/<base64>` with **no ancestor anchor**
+  (`closest('a')` is null), so the linked-page path finds nothing and the only candidate is a
+  500px proxy thumbnail.
+- **Rewriting the resize spec fails.** The leading hash signs the whole path (imgproxy signed
+  URLs); `rs:fit:2000:…`, `rs:fit:0:…` and dropping the segment all errored.
+- **But the source URL is base64url-encoded in the trailing path segments.** Drop segment 1 (the
+  signature) and any segment containing `:` (processing options), join the rest, base64url-decode.
+  Verified on 5 URLs, e.g. → `https://t4.ftcdn.net/jpg/12/98/25/17/360_F_1298251759_….jpg`.
+- Some decode to `favicons.search.brave.com` icons; those fall out under `minDisplayed` on their
+  own.
+- Some decode to a *thumbnail* on the source host (vecteezy `/thumbnails/…/small/`), so the
+  existing `UPGRADES` chaining gets a second step for free.
+
+This belongs in `UPGRADES` with a host check, per the Known Limits rule in `../CLAUDE.md`.
+
+### Video: 5–10× larger, and metadata is 3–13× cheaper than a full load
+
+imgur mp4, four clips: **1.0–9.6 MB** (images on the same run were 40 KB–1.3 MB). Metadata
+**169–864ms**; full load **561–3076ms**.
+
+- `VIDEO_PROBE_MS = 6000` (`:689`) is well calibrated — ~7× headroom over the measured worst case.
+  No change.
+- **Clips need a two-stage preload.** A 12-deep window of 9.6 MB clips is ~115 MB of speculative
+  traffic. Stage 1: metadata for the whole window — cheap, and it settles dimensions so the frame
+  is right and nothing flashes. Stage 2: full buffer only **1–2 ahead**, which is what makes
+  playback instant.
+- This is the "videos are different" exception. Everything else in §6 applies unchanged.
+
+## 15. Still unverified
+
 - Whether programmatic scrolling works through `lockScroll()`'s `overflow:hidden` (§9).
-- Whether `floorRate` at ~100 KB/s sizes the budget sensibly in practice, or needs real measurement
-  (§7).
-- How often servers answer the ranged diagnostic with a bare 200 and no size at all, leaving the
-  budget underived — the fallback then is the old flat ceiling (§7).
 - Whether a 100ms relocation animation looks better than a jump (§3).
 - The right scrub rate. Starting at 5/s (§5).
+- Whether 6 workers still clears 3/s on a slow connection, where bandwidth binds instead of
+  latency (§14).
