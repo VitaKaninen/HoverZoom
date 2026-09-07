@@ -1,0 +1,41 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Failure and timeout cases</title>
+<!--
+  The three shapes the v0.88.0 retry model has to tell apart, all from one thumbnail size.
+  Each anchor is a `keep` candidate, so the resolver always tries it.
+
+  A · the linked original does not exist. The ranged diagnostic answers 404, one attempt is
+      spent, and the frame shows the page's own picture with "not found — the site answered 404".
+  B · the linked original is alive but slow. The 3s liveness deadline fires, the diagnostic says
+      200 with a real size, the budget stretches, and the 800x600 original arrives normally.
+      Nothing must be shown from the failure path here.
+  C · the control. Fast, alive, upgrades as it always did.
+-->
+<style>
+  body { font: 14px system-ui, sans-serif; margin: 24px; max-width: 60em; }
+  .case { border: 1px solid #ccc; border-radius: 6px; padding: 12px; margin: 16px 0; }
+  .case h2 { font-size: 15px; margin: 0 0 4px; }
+  .case p { margin: 0 0 10px; color: #555; }
+  img { width: 200px; height: 150px; }
+</style>
+
+<h1>Failure and timeout cases</h1>
+
+<div class="case">
+  <h2>A · the original is a 404</h2>
+  <p>Expect: the thumbnail in the frame, and <code>not found — the site answered 404</code> in the bar.</p>
+  <a href="/test-images/no-such-original.jpg"><img src="/test-images/photo-200x150.jpg" alt=""></a>
+</div>
+
+<div class="case">
+  <h2>B · the original is alive but takes 8 seconds</h2>
+  <p>Expect: the ring keeps turning, then the real 800×600 original. No failure text.</p>
+  <a href="/test-images/photo-800x600.jpg?slow=8"><img src="/test-images/photo-200x150.jpg" alt=""></a>
+</div>
+
+<div class="case">
+  <h2>C · control, fast and alive</h2>
+  <p>Expect: the 800×600 original, immediately.</p>
+  <a href="/test-images/photo-800x600.jpg"><img src="/test-images/photo-200x150.jpg" alt=""></a>
+</div>

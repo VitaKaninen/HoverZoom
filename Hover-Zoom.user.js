@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.87.0
+// @version     0.88.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -951,35 +951,143 @@
         return p;
     }
 
-    function probeImage(url) {
-        return new Promise(function (resolve) {
+    // ---- how long to wait, and telling a dead host from a slow one. See TOUR.md §7.
+
+    const LIVENESS_MS = 3000;       // still silent here, and the paid diagnostic fires
+    const ATTEMPT_FLOOR_MS = 5000;  // no single attempt is cut shorter than this
+    const ATTEMPT_CEIL_MS = 20000;  // and none runs longer, whatever the file size says
+    const PROBE_TOTAL_MS = 30000;   // across every attempt at one URL
+    const IMAGE_TRIES = 3;
+    const IMG_RATE = 100 * 1024;    // bytes/sec assumed, the measured floor for images
+    const DIAG_BYTES = 4096;
+
+    // The total file size. On a 206 that is the tail of Content-Range — Content-Length is the
+    // slice, and reads 4096 for a 9 MB file.
+    function sizeFromHeaders(h, status) {
+        const cr = /content-range:\s*bytes\s+\d+-\d+\/(\d+)/i.exec(h);
+        if (cr) return parseInt(cr[1], 10) || 0;
+        if (status === 200) {
+            const cl = /content-length:\s*(\d+)/i.exec(h);
+            if (cl) return parseInt(cl[1], 10) || 0;
+        }
+        return 0;
+    }
+
+    // A silent GM_xhr means a dead host ONLY once one has answered here. Before that it is
+    // indistinguishable from a blocked grant or a pending permission dialog, and treating
+    // that as death would fail every picture on the page in three seconds.
+    let gmXhrWorks = false;
+
+    const diagCache = new Map();    // url -> Promise<verdict>
+    const diagValue = new Map();    // url -> the settled verdict, readable synchronously
+
+    // Why is this URL not answering? One ranged request settles it, and the same answer carries
+    // the file size that sets the waiting budget.
+    function diagnose(url) {
+        if (diagCache.has(url)) return diagCache.get(url);
+        const p = rangeGet(url, DIAG_BYTES, 4000).then(function (r) {
+            let v;
+            if (!r) v = { kind: gmXhrWorks ? 'dead' : 'unknown', status: 0, total: 0 };
+            else if (r.status === 429 || ((r.status === 403 || r.status === 503) && /retry-after:/i.test(r.headers)))
+                v = { kind: 'busy', status: r.status, total: 0 };
+            else if (r.status >= 400 && r.status < 500) v = { kind: 'gone', status: r.status, total: 0 };
+            else if (r.status >= 500) v = { kind: 'dead', status: r.status, total: 0 };
+            else v = { kind: 'alive', status: r.status, total: sizeFromHeaders(r.headers, r.status) };
+            diagValue.set(url, v);
+            return v;
+        });
+        diagCache.set(url, p);
+        return p;
+    }
+
+    // A sentence for the status bar, from the diagnosis the probe already paid for.
+    function failureText(url) {
+        const d = diagValue.get(url);
+        if (!d) return 'the picture did not load';
+        if (d.kind === 'gone') return 'not found — the site answered ' + d.status;
+        if (d.kind === 'busy') return 'the site asked us to slow down';
+        if (d.kind === 'dead') return d.status ? 'the site answered ' + d.status : 'the site did not respond';
+        return 'the picture did not load';
+    }
+
+    // One attempt. Resolves with the size, or a verdict saying whether another is worth making.
+    function imageAttempt(url, deadlineAt) {
+        return new Promise(function (res) {
             const img = new Image();
             if (noReferrerHere()) img.referrerPolicy = 'no-referrer';
-            let timer = 0;
-            const done = function (ok) {
-                clearTimeout(timer);
+            let live = 0, cap = 0, settled = false;
+            const fin = function (v) {
+                if (settled) return;
+                settled = true;
+                clearTimeout(live); clearTimeout(cap);
                 img.onload = img.onerror = null;
-                if (ok) { resolve({ w: img.naturalWidth, h: img.naturalHeight }); return; }
-                // A refusal is not a failure: the bytes are still reachable. See E49.
-                if (cspRefused(url)) { dbg('refused by the page CSP — fetching the bytes instead', url); resolve(bytesFor(url)); return; }
-                resolve(null);
+                if (!v.dim) img.src = '';           // abort a transfer we have stopped waiting for
+                res(v);
             };
-            img.onload = function () { done(img.naturalWidth > 0); };
-            // Deferred a tick: the violation event must land before done() decides why this failed.
-            img.onerror = function () { setTimeout(function () { done(false); }, 0); };
-            timer = setTimeout(function () { done(false); img.src = ''; }, IMAGE_PROBE_MS);
+            const arm = function (ms) {
+                clearTimeout(cap);
+                cap = setTimeout(function () { fin({ retry: true, timedOut: true }); },
+                    Math.max(0, Math.min(ms, deadlineAt - Date.now())));
+            };
+            img.onload = function () {
+                fin(img.naturalWidth > 0 ? { dim: { w: img.naturalWidth, h: img.naturalHeight } }
+                    : { stop: true, why: 'the file is not a picture' });
+            };
+            // Deferred a tick: the violation event must land before we decide why this failed.
+            img.onerror = function () {
+                setTimeout(function () { fin(cspRefused(url) ? { csp: true } : { retry: true }); }, 0);
+            };
+            arm(ATTEMPT_CEIL_MS);
+            live = setTimeout(function () {
+                diagnose(url).then(function (d) {
+                    if (settled) return;
+                    if (d.kind === 'unknown') { arm(ATTEMPT_CEIL_MS); return; }
+                    if (d.kind !== 'alive') { fin({ stop: true, diag: d }); return; }
+                    // Alive, so the wait is the file's own cost, not a hang.
+                    const want = d.total ? d.total / IMG_RATE * 1000 : ATTEMPT_FLOOR_MS;
+                    arm(Math.max(ATTEMPT_FLOOR_MS, Math.min(want, ATTEMPT_CEIL_MS)));
+                });
+            }, LIVENESS_MS);
             img.src = url;
-            if (img.complete && img.naturalWidth > 0) done(true);
+            if (img.complete && img.naturalWidth > 0) fin({ dim: { w: img.naturalWidth, h: img.naturalHeight } });
         });
     }
 
-    function probe(url) {
+    async function probeImage(url) {
+        const deadlineAt = Date.now() + PROBE_TOTAL_MS;
+        for (let i = 0; i < IMAGE_TRIES; i++) {
+            const r = await imageAttempt(url, deadlineAt);
+            if (r.dim) return r.dim;
+            // A refusal is not a failure: the bytes are still reachable. See E49.
+            if (r.csp) { dbg('refused by the page CSP — fetching the bytes instead', url); return bytesFor(url); }
+            if (r.stop) { dbg('gave up', { url: url, why: r.why || failureText(url) }); return null; }
+            // An error lands in milliseconds, before the liveness deadline could fire, so a 404
+            // would otherwise spend every attempt. Diagnose before deciding to try again.
+            const d = await diagnose(url);
+            if (d.kind !== 'alive' && d.kind !== 'unknown') { dbg('gave up', { url: url, why: failureText(url) }); return null; }
+            if (Date.now() >= deadlineAt) break;
+            dbg('retrying', { url: url, attempt: i + 2, size: d.total });
+        }
+        return null;
+    }
+
+    const probeMiss = new Set();    // URLs whose cached promise settled as a failure
+
+    function probe(url, fresh) {
+        // A user gesture always retries: only a settled miss is evicted, never a probe in flight.
+        if (fresh && probeMiss.has(url)) {
+            probeCache.delete(url); probeMiss.delete(url);
+            diagCache.delete(url); diagValue.delete(url);
+        }
         if (probeCache.has(url)) return probeCache.get(url);
         const p = isVideoUrl(url) ? probeVideo(url) : probeImage(url);
         probeCache.set(url, p);
         p.then(function (dim) {
             if (dim) return;
-            setTimeout(function () { if (probeCache.get(url) === p) probeCache.delete(url); }, PROBE_RETRY_MS);
+            probeMiss.add(url);
+            setTimeout(function () {
+                if (probeCache.get(url) === p) { probeCache.delete(url); probeMiss.delete(url); }
+            }, PROBE_RETRY_MS);
         });
         return p;
     }
@@ -991,26 +1099,40 @@
     const ANIM_HEAD = 4096;
     const animCache = new Map();    // url -> Promise<boolean>
 
-    // GM_xmlhttpRequest, not fetch: the file is usually on a CDN that sends no CORS headers.
-    function headBytes(url, n) {
+    // One small ranged GET, with the status and headers kept. GM_xmlhttpRequest, not fetch: the
+    // file is usually on a CDN that sends no CORS headers, and GM_xhr is not subject to the
+    // page's CSP either.
+    function rangeGet(url, n, ms) {
         return new Promise(function (res) {
             if (typeof GM_xmlhttpRequest !== 'function') { res(null); return; }
             let done = false;
             const fin = function (v) { if (!done) { done = true; res(v); } };
+            // GM's own timeout does not cover a pending permission dialog. See E51.
+            setTimeout(function () { fin(null); }, ms + 500);
             try {
                 GM_xmlhttpRequest({
-                    method: 'GET', url: url, responseType: 'arraybuffer', timeout: 4000,
+                    method: 'GET', url: url, responseType: 'arraybuffer', timeout: ms,
                     headers: { Range: 'bytes=0-' + (n - 1) },
                     // Only the head, whatever the server made of the Range header.
                     onload: function (r) {
                         const b = r.response;
-                        fin(b && b.byteLength != null ? new Uint8Array(b, 0, Math.min(n, b.byteLength)) : null);
+                        gmXhrWorks = true;
+                        fin({
+                            status: r.status || 0,
+                            headers: String(r.responseHeaders || ''),
+                            bytes: b && b.byteLength != null
+                                ? new Uint8Array(b, 0, Math.min(n, b.byteLength)) : null,
+                        });
                     },
                     onerror: function () { fin(null); },
                     ontimeout: function () { fin(null); },
                 });
             } catch (e) { fin(null); }
         });
+    }
+
+    function headBytes(url, n) {
+        return rangeGet(url, n, 4000).then(function (r) { return r ? r.bytes : null; });
     }
 
     function isAnimated(url) {
@@ -1145,6 +1267,7 @@
         let best = null;
         let trusted = null;
         let emitted = null;
+        let failure = null;      // a candidate that FAILED, as opposed to one merely rejected
 
         // Both paths below emit through here, so a later hit can never downgrade the frame.
         function emit(hit) {
@@ -1172,8 +1295,9 @@
             for (const t of tries.slice(0, LINKED_TRIES)) {
                 if (token.cancelled) break;
                 if (blocked(t.url)) continue;
-                const dim = await probe(t.url);
-                if (!dim || token.cancelled) continue;
+                const dim = await probe(t.url, token.fresh);
+                if (!dim) { failure = failure || failureText(t.url); continue; }
+                if (token.cancelled) continue;
                 // A matching filename already proves identity; the thumbnail may be a fixed-shape crop.
                 if (!t.named && !sameShape(native, dim)) {
                     dbg('linked page rejected — a different shape, so a different picture', {
@@ -1206,8 +1330,8 @@
             const url = c.url;
             if (token.cancelled) return trusted || best;
             if (trusted) break;             // the authoritative answer landed; stop guessing
-            const dim = await probe(url);
-            if (!dim) continue;
+            const dim = await probe(url, token.fresh);
+            if (!dim) { failure = failure || failureText(url); continue; }
             const isSameAsShown = (url === shown);
             if (isSameAsShown && native && !samePicture(native, dim)) {
                 markUnstable(url, native, dim);
@@ -1238,6 +1362,9 @@
         }
         await linked;
         if (trusted) return trusted;
+        // Nothing loaded AND something actually failed — the caller shows the reason. A run
+        // that only rejected candidates for being too small leaves this null on purpose.
+        if (!best && failure) token.failure = failure;
         return best;
     }
 
@@ -2004,6 +2131,7 @@
             parts.push(dims);
             const bytes = transferBytes(view.url);
             if (bytes) parts.push(humanBytes(bytes));
+            if (view.reason) parts.push(view.reason);
             capMetaEl.textContent = parts.join('  ·  ');
         }
         syncZoom();
@@ -3033,7 +3161,7 @@
         const fit = Math.min(fromShown(cfg.zoomFactor), m.w / res.w, m.h / res.h);
 
         view = {
-            url: res.url, natW: res.w, natH: res.h,
+            url: res.url, natW: res.w, natH: res.h, reason: res.reason || null,
             scale: fit, fitScale: fit,
             imgW: 0, imgH: 0, frameW: 0, frameH: 0, ox: 0, oy: 0, left: 0, top: 0,
             // null until a hand resize pins the edges; resizeBy() is the only writer.
@@ -3086,6 +3214,7 @@
         view.url = res.url;
         view.natW = res.w;
         view.natH = res.h;
+        view.reason = res.reason || null;   // an upgrade landing clears a failure note
         view.fitScale = fitScaleFor(res.w, res.h);
         view.scale = userSized && prevImgW
             ? Math.max(minScaleFor(res.w, res.h), prevImgW / res.w)   // same size, better pixels
@@ -4129,20 +4258,41 @@
         active = el;
         activeCovered = (el !== e.target);
         activeShown = shownUrl(el);
-        const myToken = token = { cancelled: false };
+        // A hover is a user gesture, and a gesture always retries a cached miss. See TOUR.md §7.
+        const myToken = token = { cancelled: false, fresh: true };
         timer = setTimeout(async function () {
             showSpinner();
+            let got = false;
             try {
                 await resolve(el, displayed, myToken,
                     function (hit) {
                         if (myToken.cancelled || active !== el) return;
+                        got = true;
                         if (view && box.classList.contains('on')) upgradeViewer(hit);
                         else { showViewer(hit, pointer); dockSpinner(); }
                     });
+                if (!got && !myToken.cancelled && active === el && myToken.failure)
+                    showFallback(el, displayed, myToken.failure);
             } finally {
                 if (!myToken.cancelled) hideSpinner();
             }
         }, cfg.hoverDelay);
+    }
+
+    // Nothing loaded and something genuinely failed: show the page's own picture with the reason,
+    // so a hover is never a ring that spins and vanishes. Deliberately NOT shown when every
+    // candidate was merely rejected for being too small — that is the size gate working, and
+    // previewing every un-upgradable thumbnail on a page would be noise. See TOUR.md §8.
+    function showFallback(el, displayed, why) {
+        const url = shownUrl(el);
+        if (!url || blocked(url)) return;
+        const n = nativeSize(el);
+        const w = (n && n.w) || displayed.w;
+        const h = (n && n.h) || displayed.h;
+        if (!w || !h) return;
+        dbg('showing the page\'s own picture instead — ' + why, url);
+        showViewer({ url: url, w: w, h: h, reason: why }, pointer);
+        dockSpinner();
     }
 
     // Is the picture still under the pointer?

@@ -34,6 +34,15 @@ const gEnd = src.indexOf('    // The first non-gif');
 if (gStart < 0 || gEnd < 0) { console.error('gifLike markers not found'); process.exit(1); }
 const gifLike = new Function(src.slice(gStart, gEnd) + '\nreturn gifLike;')();
 
+// sizeFromHeaders() reads raw header text and nothing else. It is asserted here because the
+// 206 trap is invisible at runtime: reading Content-Length on a partial response gives 4096
+// for a 9 MB file, and the only symptom is a waiting budget that is far too short.
+const szStart = src.indexOf('    function sizeFromHeaders');
+const szEnd = src.indexOf('    // A silent GM_xhr means');
+if (szStart < 0 || szEnd < 0) { console.error('sizeFromHeaders markers not found'); process.exit(1); }
+const sizeFromHeaders = new Function(
+    src.slice(szStart, szEnd) + String.fromCharCode(10) + 'return sizeFromHeaders;')();
+
 const location = { href: 'https://example.com/page/index.html' };
 const body = src.slice(start, end);
 const exported = new Function('location', body +
@@ -659,5 +668,22 @@ eq('a bare directory url has no stem to match', sameStem('/a/', '/a/cat.jpg'), f
 
 eq('urlStem strips the directory and the extension',
     urlStem('https://www.evilmilk.com/pictures/I_Am_An_Expert.jpg'), 'I_Am_An_Expert');
+
+// ---- the waiting budget's input. The 206 trap is invisible at runtime: the wrong header gives
+// 4096 for a 9 MB file and the only symptom is a budget far too short. See TOUR.md §7 and §14.
+const CRLF = String.fromCharCode(13) + String.fromCharCode(10);
+eq('a 206 reports the whole file from Content-Range, never the slice',
+    sizeFromHeaders('content-range: bytes 0-4095/8388608' + CRLF + 'content-length: 4096' + CRLF, 206),
+    8388608);
+eq('a 200 falls back to Content-Length',
+    sizeFromHeaders('content-type: image/jpeg' + CRLF + 'content-length: 34494' + CRLF, 200),
+    34494);
+eq('Content-Length is ignored on a 206 that sent no Content-Range',
+    sizeFromHeaders('content-length: 4096' + CRLF, 206), 0);
+eq('header names match case-insensitively',
+    sizeFromHeaders('Content-Range: bytes 0-4095/12345' + CRLF, 206), 12345);
+eq('no size header at all is zero, so the floor applies',
+    sizeFromHeaders('content-type: image/png' + CRLF, 200), 0);
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);
