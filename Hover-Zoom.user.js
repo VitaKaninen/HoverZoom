@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.92.0
+// @version     0.93.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -3963,6 +3963,18 @@
     const BAND_WIDTH = 0.98;    // of the viewport — a full-bleed band reaches both edges
     const CONTENT_CHARS = 40;   // text this long is a paragraph, not a tile's caption
 
+    // The same fact as `background-attachment: fixed`, expressed with an element instead of a CSS
+    // background: pinned to the viewport and filling it in both axes. Applies to <img>/<video>,
+    // which every other wallpaper test deliberately does not. See E17.
+    function pinnedWallpaperReason(el) {
+        const vw = vpW(), vh = vpH();
+        if (vw <= 0 || vh <= 0) return null;        // the Browser pane answers 0 while hidden
+        if (getComputedStyle(el).position !== 'fixed') return null;
+        const r = el.getBoundingClientRect();
+        if (r.width < vw * BAND_WIDTH || r.height < vh * BAND_WIDTH) return null;
+        return 'pinned to the viewport and filling it — a wallpaper, not a picture on the page';
+    }
+
     function wallpaperReason(el) {
         if (el === document.body || el === document.documentElement) return 'the page background';
         const s = getComputedStyle(el);
@@ -4121,8 +4133,9 @@
         if (playerSurfaceReason(el)) return null;
         if (cfg.videoMode !== 'all' && videoLinkReason(el)) return null;
         if (cfg.skipFurniture && decorativeReason(el)) return null;
-        // Before the <img> branch, because this is the one furniture rule that applies to one.
+        // Before the <img> branch, because these are the furniture rules that apply to one.
         if (cfg.skipFurniture && bannerReason(el)) return null;
+        if (cfg.skipFurniture && pinnedWallpaperReason(el)) return null;
         if (el.tagName === 'IMG') return blocked(shownUrl(el)) ? null : el;
         // element with a background image and no img of its own
         if (el.querySelector && el.querySelector('img')) return null;
@@ -4158,7 +4171,8 @@
             videoMode: cfg.videoMode + (playVideos ? '' : ' (turned off in this tab)'),
             playerGate: playerSurfaceReason(t) || 'none — no player on this page covers it',
             videoLinkGate: videoLinkReason(t) || 'none — does not lead to a video page',
-            backgroundGate: t.tagName === 'IMG' || t.tagName === 'VIDEO' ? 'n/a — not a background'
+            backgroundGate: t.tagName === 'IMG' || t.tagName === 'VIDEO'
+                ? (pinnedWallpaperReason(t) || 'n/a — not a background')
                 : !backgroundUrl(t) ? 'n/a — no background image'
                     : (wallpaperReason(t) || 'none — NOT treated as page furniture'),
             decorativeGate: decorativeReason(t) || 'none — not marked decorative',

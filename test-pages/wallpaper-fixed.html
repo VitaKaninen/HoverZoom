@@ -1,0 +1,35 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>A wallpaper that is an img, not a CSS background</title>
+<!--
+  Discord's login page, reduced. The backdrop is an <img class="artwork">, position:fixed, sized
+  to the viewport in both axes at every window size — so every wallpaper test missed it, because
+  they all read CSS background properties and this element has none. Reported 2026-09-07.
+
+  It gets its own page rather than a case in test-page.html because a fixed full-viewport element
+  would sit on top of every other case there.
+
+  Expect: hovering the backdrop previews NOTHING. Hovering the card's picture previews normally —
+  that one is the control, and it is what stops the fix being "refuse everything on this page".
+-->
+<style>
+  html, body { margin: 0; height: 100%; }
+  body { font: 14px system-ui, sans-serif; background: #1e1e2e; color: #cdd6f4; }
+  .artwork { position: fixed; inset: 0; width: 100%; height: 100%; object-fit: fill; }
+  .card {
+    position: relative; z-index: 1; width: 420px; margin: 12vh auto;
+    background: #313244; border-radius: 8px; padding: 20px; text-align: center;
+  }
+  .card img { width: 200px; height: 150px; }
+  p { color: #a6adc8; }
+</style>
+
+<img class="artwork" src="/test-images/scene.jpg" alt="">
+
+<div class="card">
+  <h1>Sign in</h1>
+  <p>The picture behind this card fills the window and is pinned to it.<br>
+     Hovering it must do nothing.</p>
+  <a href="/test-images/photo.jpg"><img src="/test-images/mural.jpg" alt=""></a>
+  <p>This one is the control, and must still preview.</p>
+</div>
