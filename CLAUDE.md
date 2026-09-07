@@ -45,7 +45,7 @@ needs. **Opening all five defeats the point**; if a task genuinely spans two, re
 | finding the original — URL rules, linked pages, imgur, video previews, the loading ring | [`docs/RESOLVER.md`](docs/RESOLVER.md) |
 | the settings panel, stored settings, the manager's menu | [`docs/SETTINGS.md`](docs/SETTINGS.md) |
 | the test page, the `debug` log, the Browser pane's many lies | [`docs/TESTING.md`](docs/TESTING.md) |
-| next/previous navigation through a page's pictures — **designed, not built** | [`docs/TOUR.md`](docs/TOUR.md) — the whole specification. Its §7/§8 (probe timeouts, retry, the failure display) were built in v0.88.0–v0.89.0 and now live in [`docs/RESOLVER.md`](docs/RESOLVER.md) |
+| the tour — next/previous navigation through a page's pictures | [`docs/TOUR.md`](docs/TOUR.md). §0–§5, §8, §11 built in v0.96.0; §7 in v0.88.0–v0.89.0 (that half now lives in [`docs/RESOLVER.md`](docs/RESOLVER.md)). §6, §9 and §10 are still specification |
 | any banner-gate threshold | [`banner-test-sites.md`](banner-test-sites.md) — ~40 live pages measured in two browsers; every number in the gate sits next to a row |
 | the zoom **percentage** — what it counts, and why it once moved with browser zoom (fixed in v0.72.0) | [`docs/ZOOM-UNITS.md`](docs/ZOOM-UNITS.md) |
 | the user cited an ID — `S05`, `E22`, `T17`, `P4` | [`INTERACTION.md`](INTERACTION.md) says what it is in one line; then `grep -rn "E22" docs/` for the argument |
@@ -73,7 +73,11 @@ has already been misdiagnosed once. (The shared ones — `innerHTML` on Trusted-
 
 - **A control placed inside `.box` must be added to `isBoxControl()`.** `onBoxDown`/`onBoxClick`
   are capture listeners on the box, so they eat a child's events first. The symptom is silence,
-  and `node --check` passes. See the section below.
+  and `node --check` passes. See the section below. (Anything inside `vctlEl` is already covered
+  by the whole-subtree exemption; a new button in the **bar** is not — ↻ had to be added by hand.)
+- **A new reason in the status bar must invalidate the caption.** `caption()` rebuilds only when
+  the URL or the measured size changes, and a tour swaps between entries that share both. Call
+  `resetCaption()`. The symptom is a stale sentence over a picture it does not describe.
 - **A global listener must never act on state it does not own.** `@match *://*/*` means our
   `fullscreenchange`/`resize`/key handlers fire for the PAGE's own doings on every site,
   excluded ones included — the site gates only guard previewing. v0.63.0's handler read
@@ -154,17 +158,19 @@ path has been touched twice ever, both times in 2021.
 
 ## Design invariants — do not regress these
 
-- **Nothing is decided before hover time.** Two delegated listeners on `document`; everything
-  resolves when the pointer arrives. This is the whole architectural difference from HZ+ and it
-  removes an entire bug class (lazy-loaded src, SPA navigation, images added after load, scan
-  races). Do not add a MutationObserver or a pre-pass "for performance", and never bind state to
-  an element that might change under it.
-  *(Previously worded "no DOM scanning, ever", which reads as a ban on ever querying the document
-  and is broader than the thing being protected — a read performed AT hover time, binding
-  nothing, has none of those failure modes. See the Google Images section of
-  [`docs/RESOLVER.md`](docs/RESOLVER.md) for where the distinction actually bites, and
-  `coveredMedia()` for one that is squarely inside the rule: a
-  hit-test of the pointer's own position, done at hover time, caching nothing.)*
+- **Nothing is cached that the DOM can invalidate.** Everything resolves from a read taken at the
+  moment it is needed — hover time for a preview, press time for next/prev. Do not add a
+  MutationObserver or a pre-pass "for performance", and do not hold a reference to a page element
+  across an interaction; re-derive instead. Reading the document ahead of a hover is fine, and
+  `tourEntries()` does exactly that on every press — keeping the answer is what causes the bugs.
+  *(Two earlier wordings, both too broad. "No DOM scanning, ever" reads as a ban on ever querying
+  the document; "nothing is decided before hover time" banned reading ahead of one. What both
+  were protecting against was *keeping* the answer: stale `src`, SPA navigation, images added
+  after a scan, dead references. See the Google Images section of
+  [`docs/RESOLVER.md`](docs/RESOLVER.md) for where the distinction bites, `coveredMedia()` for a
+  hit-test done at hover time caching nothing, and `tourAt()` for what re-deriving buys — the
+  anchor is an element and a position, never an index, so a virtualised feed deleting the node
+  under you is survivable. Rewritten with the user's approval 2026-09-07 for the tour.)*
 - **No format allowlist.** Extension never decides eligibility. The only gate is
   "is the candidate actually bigger than what's displayed", measured by loading it. A candidate
   the linked page *declares* skips the guessing checks but **not** the `minRatio` gate (v0.40.0

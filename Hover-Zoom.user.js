@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.95.0
+// @version     0.96.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -18,7 +18,7 @@
 // ==/UserScript==
 
 /*
- * Design note — why this does no DOM scanning.
+ * Design note — why nothing here is decided in advance.
  *
  * Hover Zoom+ pre-scans the page for candidate images, binds .one('mouseover') to each,
  * and never revisits them. That single decision causes most of its misses: images added
@@ -27,8 +27,9 @@
  * of the page.
  *
  * This script binds two delegated listeners at document level and resolves everything at
- * hover time, when the DOM is settled and the real src is present. Nothing is scanned,
- * nothing is cached against an element that might change, and there is no shared lock.
+ * hover time, when the DOM is settled and the real src is present. The tour reads the
+ * whole document, but on every press and keeping nothing: an answer held across an
+ * interaction is the thing that goes stale, not the reading of it.
  */
 
 (function () {
@@ -48,6 +49,15 @@
         siteMode: 'blacklist',      // 'blacklist' | 'whitelist'
         siteList: [],               // hostnames, matched by suffix
         blockList: [],              // image URLs never to preview; '*' matches anything
+
+        // the tour — next/previous through every picture on the page, from a pinned window
+        tourButtons: true,          // ◀ ▶ and the counter in the floating strip
+        tourKeys: true,             // arrows navigate when the picture cannot pan sideways
+        tourWindow: 12,             // entries kept buffered ahead
+        tourWorkers: 6,             // concurrent speculative resolves
+        tourScrubRate: 5,           // steps/sec ceiling while an arrow is held
+        tourLoadMore: true,         // the scroll excursion that makes a lazy page load more
+        tourCrossPage: true,        // harvest the next page in the background
 
         // placed mode
         pinButton: 'left',          // 'left' | 'right' — whichever pins, the other dismisses
@@ -1399,9 +1409,11 @@
     let gripEl = null;          // invisible collar that carries the outer half of the resize strip
     let spinEl = null, spinSvg = null;
     let fsEl = null;            // the bar's fullscreen button
-    let vctlEl = null, vplayEl = null, vtimeEl = null, vseekEl = null,
+    let vctlEl = null, vgrpEl = null, vplayEl = null, vtimeEl = null, vseekEl = null,
         vrateEl = null, vmuteEl = null, vsoundEl = null, vvolEl = null, vvolInEl = null,
         ratePopEl = null, rateInEl = null;
+    let navEl = null, navPrevEl = null, navNextEl = null, navCountEl = null;
+    let retryEl = null;         // in the bar, and only on a failed picture during a tour
     let seekDrag = false;       // the scrubber is being held; timeupdate must not fight it
     let volDrag = false;        // ditto for the volume column against syncVideoCtl()
     let fullPrev = null;        // geometry to put back, and the "this fullscreen is ours" flag
@@ -1436,6 +1448,9 @@
     // Stroked, not filled: a slash through a solid triangle reads as a triangle. Outlining both
     // is the only version that says "no" at 12 px.
     const ICON_NOPLAY = ['M8 5.5v13l10-6.5z', 'M4.5 19.5l15-15'];
+    const ICON_PREV = 'M15 5l-8 7 8 7V5z';
+    const ICON_NEXT = 'M9 5l8 7-8 7V5z';
+    const ICON_RETRY = 'M12 5V2L8 6l4 4V7a5 5 0 1 1-5 5H5a7 7 0 1 0 7-7z';
 
     // A filled glyph from one path, or a stroked one from several.
     function mkIcon(d) {
@@ -1537,6 +1552,9 @@
             'background:#1e1e2e;box-sizing:content-box;overflow:hidden}',
             '.box.on{opacity:1}',
             '.box.hot{pointer-events:auto}',
+            // The one-time slide to the corner when a tour starts. Nothing else animates position.
+            '.box.moving{transition:opacity var(--fade) ease,left ' + TOUR_MOVE_MS + 'ms ease,',
+            'top ' + TOUR_MOVE_MS + 'ms ease}',
             '.box.placed:not(.pan){cursor:move}',
             '.box.pan{cursor:grab}',
             '.box.pan.drag{cursor:grabbing}',
@@ -1564,6 +1582,9 @@
             'cursor:pointer;font-size:12px}',
             '.box.hot .cap .block,.box.hot .cap .aa,.box.hot .cap .fs{display:block}',
             '.box.hot .cap.hasvid .vidoff{display:block}',
+            '.box.hot .cap .retry.on{display:block}',
+            '.cap .retry svg{display:block;width:12px;height:12px;margin:3px auto;fill:currentColor}',
+            '.cap .retry:hover{background:#f9e2af;border-color:#f9e2af;color:#1e1e2e}',
             '.cap .vidoff svg{display:block;width:13px;height:13px;margin:2px auto;fill:none;',
             'stroke:currentColor;stroke-width:2;stroke-linejoin:round;stroke-linecap:round}',
             '.cap .fs svg{display:block;width:12px;height:12px;margin:3px auto;fill:currentColor}',
@@ -1610,11 +1631,21 @@
             '-webkit-backdrop-filter:blur(7px) saturate(1.4);border:1px solid rgba(205,214,244,.12);',
             'font:11px/16px system-ui,sans-serif;color:#cdd6f4;',
             'text-shadow:0 1px 2px rgba(0,0,0,.6)}',
-            '.box.hot.hasvid.tall .vctl{display:flex}',
-            '.vctl .vbtn{flex:none;display:flex;align-items:center;justify-content:center;',
-            'width:20px;height:20px;border-radius:4px;cursor:pointer;color:#cdd6f4}',
-            '.vctl .vbtn svg{display:block;width:14px;height:14px;fill:currentColor}',
-            '.vctl .vbtn:hover{background:rgba(205,214,244,.18)}',
+            '.box.hot.tall.hasvid .vctl,.box.hot.tall.hasnav .vctl{display:flex}',
+            // Two groups: the video controls, and next/previous. Either may be absent, and the
+            // strip shrinks to whichever is there. See TOUR.md §4.
+            '.vctl .vgrp{flex:1;min-width:0;display:flex;align-items:center;gap:8px}',
+            '.vctl .ngrp{flex:none;display:flex;align-items:center;gap:' + NAV_GAP + 'px}',
+            '.vctl .vgrp.off,.vctl .ngrp.off{display:none}',
+            '.vctl .ncount{flex:none;padding:0 4px;font-variant-numeric:tabular-nums;',
+            'letter-spacing:.02em;color:#bac2de;white-space:nowrap}',
+            // Bare .vbtn, not .vctl .vbtn: a restyle of these buttons is one place.
+            '.vbtn{flex:none;display:flex;align-items:center;justify-content:center;',
+            'width:' + VBTN_W + 'px;height:' + VBTN_W + 'px;border-radius:4px;cursor:pointer;color:#cdd6f4}',
+            '.vbtn svg{display:block;width:14px;height:14px;fill:currentColor}',
+            '.vbtn:hover{background:rgba(205,214,244,.18)}',
+            '.vbtn.dim{opacity:.3;cursor:default}',
+            '.vbtn.dim:hover{background:none}',
             '.vctl .vtime{flex:none;min-width:62px;font-variant-numeric:tabular-nums;',
             'letter-spacing:.02em;color:#bac2de;white-space:nowrap}',
             '.vctl .vseek{flex:1;min-width:0;height:14px;margin:0;padding:0;',
@@ -1750,6 +1781,13 @@
         aaEl.addEventListener('mousedown', function (e) { e.preventDefault(); e.stopPropagation(); }, true);
         aaEl.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); toggleSmoothing(); }, true);
 
+        retryEl = document.createElement('span');
+        retryEl.className = 'btn retry';
+        retryEl.appendChild(mkIcon(ICON_RETRY));
+        setTip(retryEl, 'Try this picture again');
+        retryEl.addEventListener('mousedown', function (e) { e.preventDefault(); e.stopPropagation(); }, true);
+        retryEl.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); tourShow(); }, true);
+
         fsEl = document.createElement('span');
         fsEl.className = 'btn fs';
         fsEl.appendChild(mkIcon(ICON_FULL));
@@ -1766,6 +1804,7 @@
         capEl.appendChild(zctlEl);
         capEl.appendChild(blockEl);
         capEl.appendChild(vidOffEl);
+        capEl.appendChild(retryEl);
         capEl.appendChild(aaEl);
         capEl.appendChild(fsEl);
 
@@ -1944,8 +1983,10 @@
     const MAX_MULTIPLE_ABS = 4;
 
     // How far the frame may grow. Deliberately bigger than the window — see the setting.
+    // A tour is the exception: anchored bottom-right, an oversized frame runs off the top-left
+    // and stays clipped there for the whole tour, so a tour is a lightbox. See TOUR.md §2.
     function growBox() {
-        const m = Math.max(1, Math.min(cfg.maxSizeMultiple || 1, MAX_MULTIPLE_ABS));
+        const m = tourActive() ? 1 : Math.max(1, Math.min(cfg.maxSizeMultiple || 1, MAX_MULTIPLE_ABS));
         const b = viewportBox();
         return { vw: b.vw, vh: b.vh, w: b.w * m, h: b.h * m };
     }
@@ -1969,6 +2010,12 @@
         return Math.min(MIN_MEDIA / Math.max(w, h), fitScaleFor(w, h));
     }
 
+    // The strip is the only mouse route to next/prev, so a window carrying nav buttons may not
+    // shrink below the height that shows them — a short picture letterboxes instead. See TOUR.md §2.
+    function minFrameH() {
+        return navShown() ? VCTL_MIN_H : MIN_FRAME;
+    }
+
     // The frame follows the picture, up to the growth ceiling.
     function reflow() {
         if (!view) return;
@@ -1976,10 +2023,11 @@
         view.imgW = view.natW * view.scale;
         view.imgH = view.natH * view.scale;
         const mw = Math.min(minFrameW(), g.w);
+        const mh = Math.min(minFrameH(), g.h);
         view.frameW = Math.round(view.fixedW != null ? view.fixedW
             : Math.max(mw, Math.min(view.imgW, g.w)));
-        view.frameH = Math.round(view.fixedH != null ? view.fixedH
-            : Math.max(MIN_FRAME, Math.min(view.imgH, g.h)));
+        view.frameH = Math.round(Math.max(mh, view.fixedH != null ? view.fixedH
+            : Math.min(view.imgH, g.h)));
         view.ox = view.imgW <= view.frameW
             ? (view.frameW - view.imgW) / 2
             : Math.min(0, Math.max(view.frameW - view.imgW, view.ox));
@@ -2532,11 +2580,20 @@
         vsoundEl.addEventListener('mouseover', openVol);
         vsoundEl.addEventListener('mouseout', laterCloseVol);
 
-        vctlEl.appendChild(vplayEl);
-        vctlEl.appendChild(vtimeEl);
-        vctlEl.appendChild(vseekEl);
-        vctlEl.appendChild(vrateEl);
-        vctlEl.appendChild(vsoundEl);
+        vgrpEl = document.createElement('div');
+        vgrpEl.className = 'vgrp';
+        vgrpEl.appendChild(vplayEl);
+        vgrpEl.appendChild(vtimeEl);
+        vgrpEl.appendChild(vseekEl);
+        vgrpEl.appendChild(vrateEl);
+        vgrpEl.appendChild(vsoundEl);
+
+        buildNavControls();
+
+        vctlEl.appendChild(vgrpEl);
+        vctlEl.appendChild(navEl);
+        // A child of the strip, not of either group: `.spop` positions against the strip, and
+        // toggleRateMenu() measures vrateEl.offsetLeft in the same box.
         vctlEl.appendChild(ratePopEl);
 
         vidEl.addEventListener('timeupdate', syncVideoTime);
@@ -2544,6 +2601,22 @@
         vidEl.addEventListener('play', syncVideoCtl);
         vidEl.addEventListener('pause', syncVideoCtl);
         vidEl.addEventListener('volumechange', syncVideoCtl);
+    }
+
+    // ◀ 124 / 294 ▶ — the same strip as the video controls, so it inherits their box, hover
+    // wash, tooltips and mousedown swallowing, and isBoxControl()'s exemption with them.
+    function buildNavControls() {
+        navEl = document.createElement('div');
+        navEl.className = 'ngrp';
+        navPrevEl = mkVBtn(ICON_PREV, 'Previous picture', function () { tourNav(-1, false); });
+        navCountEl = document.createElement('span');
+        navCountEl.className = 'ncount';
+        navCountEl.textContent = '0 / 0';
+        setTip(navCountEl, 'Where you are among this page\'s pictures');
+        navNextEl = mkVBtn(ICON_NEXT, 'Next picture', function () { tourNav(1, false); });
+        navEl.appendChild(navPrevEl);
+        navEl.appendChild(navCountEl);
+        navEl.appendChild(navNextEl);
     }
 
     let volTimer = 0;
@@ -2757,6 +2830,34 @@
     const VCTL_GAP = 6;         // clearance above the status bar
     // Below this the strip would cover the clip instead of sitting on it.
     const VCTL_MIN_H = 110;
+    const VCTL_PAD = 8;         // .vctl's own left/right padding, matching the rule
+    const VBTN_W = 20;          // one strip button's box
+    const NAV_GAP = 2;          // between ◀, the counter and ▶
+
+    // Is the nav group up? It is the only mouse route to next/prev, so several floors read this.
+    function navShown() { return !!tour && !!cfg.tourButtons; }
+
+    // Is the floating strip actually on screen? Exactly what the CSS rule above asks.
+    function stripUp() {
+        return !!box && box.classList.contains('hot') && box.classList.contains('tall') &&
+            (box.classList.contains('hasvid') || box.classList.contains('hasnav'));
+    }
+
+    let navFor = '', navTextW = 0;
+
+    // The strip's width when it holds nothing but the nav group. Explicit, never shrink-to-fit:
+    // an abspos box sizes differently in Firefox, which the Browser pane cannot see. The counter
+    // is measured once per text, not per layout — a rect read forces a synchronous reflow and
+    // layout() runs on every frame of a drag.
+    function navW() {
+        if (!navCountEl) return 0;
+        const t = navCountEl.textContent;
+        if (t !== navFor) {
+            const w = Math.ceil(navCountEl.getBoundingClientRect().width);
+            if (w) { navFor = t; navTextW = w; }
+        }
+        return VCTL_PAD * 2 + 2 + VBTN_W * 2 + NAV_GAP * 2 + (navTextW || t.length * 7);
+    }
 
     // ---- clearing the grab bands
     //
@@ -2779,7 +2880,15 @@
     // the buttons once placed, and of nothing but the padding while hovering.
     function btnGutter() {
         if (!placed) return BAR_PAD;
-        return grabInset() + BTN_STEP * (mediaEl === vidEl ? 4 : 3) + 2;
+        const n = 3 + (mediaEl === vidEl ? 1 : 0) + (retryShown() ? 1 : 0);
+        return grabInset() + BTN_STEP * n + 2;
+    }
+
+    // ↻ appears only where re-hovering is not available: on a failed picture, inside a tour.
+    function retryShown() { return !!retryEl && !!view && !!view.reason && tourActive(); }
+
+    function markRetry() {
+        if (retryEl) retryEl.classList.toggle('on', retryShown());
     }
 
     // How much of the bar the cluster covers right now.
@@ -2797,7 +2906,11 @@
     // The narrowest frame that still shows the whole cluster clear of the buttons. Filename and
     // metadata are allowed to be clipped away entirely, so they claim nothing here.
     function barMinW() {
-        return grabInset() + BAR_SLIDER_W + BAR_ZOOM_GAP + BAR_ZOOM_W + btnGutter();
+        const bar = grabInset() + BAR_SLIDER_W + BAR_ZOOM_GAP + BAR_ZOOM_W + btnGutter();
+        // The strip floats and normally reserves nothing — that is the point of floating it.
+        // Once it carries the only mouse route to next/prev, a narrower frame clips the buttons
+        // off, so that one decision reverses. See TOUR.md §2.
+        return Math.max(bar, navShown() ? grabInset() * 2 + navW() : 0);
     }
 
     let barTimer = 0;
@@ -2817,9 +2930,7 @@
     // crossing that gap on the way to the scrubber.
     function barHoverBand() {
         let h = barShown() ? BAR_MIN_H : 0;
-        if (mediaEl === vidEl && box && box.classList.contains('tall')) {
-            h = Math.max(h, BAR_MIN_H + VCTL_GAP + VCTL_H);
-        }
+        if (stripUp()) h = Math.max(h, BAR_MIN_H + VCTL_GAP + VCTL_H);
         return h;
     }
 
@@ -2831,13 +2942,15 @@
         return capEl.style.display !== 'none' && overRect(capEl);
     }
 
-    // The video strip counts too, or it fades out from under the hand reaching for the scrubber.
+    // The strip counts too, or it fades out from under the hand reaching for the scrubber — or,
+    // over a still picture, for ◀.
     function pointerOverBar() {
         if (pointerOverCap()) return true;
         if (!view || !box || !box.classList.contains('on')) return false;
-        if (mediaEl !== vidEl) return false;
-        return overRect(vctlEl) || overRect(vvolEl) ||
-               (rateMenuOpen() && overRect(ratePopEl));
+        if (!stripUp()) return false;
+        if (overRect(vctlEl)) return true;
+        return mediaEl === vidEl &&
+            (overRect(vvolEl) || (rateMenuOpen() && overRect(ratePopEl)));
     }
 
     // Reaching for the bar, which is what keeps it up. Wider than the bar, and never a handle.
@@ -2963,9 +3076,13 @@
     function layoutChrome() {
         const px = function (n) { return n + 'px'; };
         const hasVid = mediaEl === vidEl;
+        const hasNav = navShown();
         capEl.classList.toggle('hasvid', hasVid);
         box.classList.toggle('hasvid', hasVid);
-        // The strip would cover the clip rather than sit on it once the frame is this short.
+        box.classList.toggle('hasnav', hasNav);
+        vgrpEl.classList.toggle('off', !hasVid);
+        navEl.classList.toggle('off', !hasNav);
+        // The strip would cover the picture rather than sit on it once the frame is this short.
         box.classList.toggle('tall', view.frameH >= VCTL_MIN_H);
         // Right to left, skipping the ▶ when the frame is not holding a clip; the gutter has to
         // clear whatever is actually there or the filename runs under the buttons.
@@ -2973,13 +3090,23 @@
         fsEl.style.right = px(right); right += BTN_STEP;
         blockEl.style.right = px(right); right += BTN_STEP;
         if (hasVid) { vidOffEl.style.right = px(right); right += BTN_STEP; }
+        if (retryShown()) { retryEl.style.right = px(right); right += BTN_STEP; }
         aaEl.style.right = px(right); right += BTN_STEP;
         markSmoothing();
+        markRetry();
         zctlEl.style.width = px(zctlW());
         zctlEl.style.right = px(btnGutter());
         // The strip clears the side bands too; it sits above the corners, so those do not apply.
-        vctlEl.style.left = px(grabInset());
+        // With no video group it shrinks to the nav group and sits right: `left:auto` plus an
+        // explicit width, never shrink-to-fit. See TOUR.md §4.
         vctlEl.style.right = px(grabInset());
+        if (hasVid) {
+            vctlEl.style.left = px(grabInset());
+            vctlEl.style.width = '';
+        } else {
+            vctlEl.style.left = 'auto';
+            vctlEl.style.width = px(Math.max(0, Math.min(navW(), view.frameW - grabInset() * 2)));
+        }
         // The two paddings TOGETHER may not exceed the frame. `box-sizing:border-box` treats
         // padding as a minimum, not a share: overflow it and the bar's border box grows past the
         // frame, taking every `right:`-anchored control with it — the buttons stop clearing the
@@ -3255,6 +3382,35 @@
         deferredCaption(res.url);
     }
 
+    // A DIFFERENT picture into the same window. Position and a hand-set size stay; zoom and pan
+    // reset, because a pan offset means nothing carried into another picture. See TOUR.md §2.
+    function swapViewer(res) {
+        if (!view) return;
+        // The bottom-right corner does not move: the nav buttons live there.
+        const right = view.left + outerW();
+        const bottom = view.top + outerH();
+
+        view.url = res.url;
+        view.natW = res.w;
+        view.natH = res.h;
+        view.reason = res.reason || null;
+        view.fitScale = fitScaleFor(res.w, res.h);
+        view.scale = view.fitScale;
+        view.ox = 0;
+        view.oy = 0;
+        // caption() only rebuilds when the URL or the measured size changes, and two entries can
+        // share both — the same file, once with a reason and once without.
+        resetCaption();
+
+        reflow();
+        view.left = right - outerW();
+        view.top = bottom - outerH();
+
+        setMedia(res);
+        layout();
+        deferredCaption(res.url);
+    }
+
     function deferredCaption(url) {
         if (!barShown() || transferBytes(url)) return;
         setTimeout(function () {
@@ -3334,8 +3490,10 @@
         CAP_TARGET.addEventListener('keydown', onPinKey, true);
         // The wheel becomes the window's only now — see enableWheelZoom.
         enableWheelZoom();
+        tourStart();    // before reflow(): the nav group is a control, and the floors read it
         reflow();       // the controls appear with `placed`, and minFrameW() grows with them
         layout();
+        tourChrome();
     }
 
     function unplace() {
@@ -3343,6 +3501,7 @@
         // Fullscreen outlives nothing: the window that asked for it is going away. Only ours.
         if (fullActive()) leaveFull();
         placed = false;
+        tourEnd();
         drag = null;
         tap = null;
         box.classList.remove('placed', 'drag');
@@ -3409,7 +3568,10 @@
 
     function enterFull() {
         // Captured before anything moves: this is the only moment the pre-fullscreen state exists.
-        fullPrev = { left: view.left, top: view.top, scale: view.scale };
+        // The URL and the bottom-right corner are for the tour: a step taken while fullscreen
+        // means the picture coming back is not the one that went in. See E57.
+        fullPrev = { left: view.left, top: view.top, scale: view.scale, url: view.url,
+            right: view.left + outerW(), bottom: view.top + outerH() };
         fullApi = false;
         lockScroll();
         dimEl.classList.add('full');
@@ -3487,11 +3649,16 @@
         if (!view) return;
         view.fixedW = null;
         view.fixedH = null;
-        view.left = p.left;
-        view.top = p.top;
+        // A tour may have stepped while we were fullscreen. A zoom and a top-left corner belong
+        // to the picture they were taken on: on a different one, fit it and hold the bottom-right
+        // corner instead — the same rule a swap follows. See E57.
+        const swapped = view.url !== p.url;
         view.fitScale = fitScaleFor(view.natW, view.natH);
-        view.scale = Math.max(p.scale, minScaleFor(view.natW, view.natH));
+        view.scale = swapped ? view.fitScale
+            : Math.max(p.scale, minScaleFor(view.natW, view.natH));
         reflow();
+        view.left = swapped ? p.right - outerW() : p.left;
+        view.top = swapped ? p.bottom - outerH() : p.top;
         layout();
     }
 
@@ -3515,8 +3682,8 @@
 
     function isBoxControl(t) {
         return blockEl.contains(t) || vidOffEl.contains(t) || aaEl.contains(t) ||
-            fsEl.contains(t) || blockPopEl.contains(t) || zctlEl.contains(t) ||
-            vctlEl.contains(t);
+            fsEl.contains(t) || retryEl.contains(t) || blockPopEl.contains(t) ||
+            zctlEl.contains(t) || vctlEl.contains(t);
     }
 
     // ---- the popover the ⊘ opens
@@ -3592,6 +3759,14 @@
         dismiss();
     }
 
+    // Never take a key from a field the user is typing in.
+    function typingIn(e) {
+        const t = e && e.composedPath ? e.composedPath()[0] : (e && e.target);
+        if (!t || !t.tagName) return false;
+        return !!t.isContentEditable ||
+            t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT';
+    }
+
     // "Never preview this image again", from the ⊘ in the status bar.
     function blockCurrent() {
         if (!view) return;
@@ -3604,6 +3779,8 @@
         dbg('blocked', cfg.blockList);
         probeCache.clear();
         refreshPanel();             // the Exceptions list is on screen behind this window
+        // Mid-tour, blocking is "not this one" — it moves on rather than tearing the window down.
+        if (tourActive()) { tourNav(scrubDir, false); return; }
         dismiss();
     }
 
@@ -3691,7 +3868,7 @@
             else w = h * drag.aspect;
         }
         w = Math.max(Math.min(minFrameW(), g.w), Math.min(w, g.w));
-        h = Math.max(MIN_FRAME, Math.min(h, g.h));
+        h = Math.max(Math.min(minFrameH(), g.h), Math.min(h, g.h));
         if (drag.ex === 'l') view.left = drag.l0 + (drag.w0 - w);
         else if (!drag.ex) view.left = drag.l0 - (w - drag.w0) / 2;
         if (drag.ey === 't') view.top = drag.t0 + (drag.h0 - h);
@@ -3763,10 +3940,17 @@
             case ' ': if (mediaEl === vidEl) togglePlay(); else handled = false; break;
             case 'f': case 'F': toggleFull(); break;
             case 'm': case 'M': if (mediaEl === vidEl) toggleMute(); else handled = false; break;
-            case 'ArrowLeft': panBy(step, 0); break;
-            case 'ArrowRight': panBy(-step, 0); break;
+            // Left/Right step through the page's pictures unless the picture itself can pan
+            // sideways. Up/Down always pan. See TOUR.md §5.
+            case 'ArrowLeft':
+                if (tourOwnsArrows()) tourNav(-1, e.repeat); else panBy(step, 0); break;
+            case 'ArrowRight':
+                if (tourOwnsArrows()) tourNav(1, e.repeat); else panBy(-step, 0); break;
             case 'ArrowUp': panBy(0, step); break;
             case 'ArrowDown': panBy(0, -step); break;
+            // The always-navigates pair, or zooming in traps you on the current picture.
+            case '[': tourNav(-1, e.repeat); break;
+            case ']': tourNav(1, e.repeat); break;
             case '+': case '=': zoomCentre(view.scale * KEY_ZOOM); break;
             case '-': case '_': zoomCentre(view.scale / KEY_ZOOM); break;
             case '0': zoomCentre(view.fitScale); break;
@@ -4447,7 +4631,20 @@
         reflow();
         layout();
     });
+    const TOUR_KEYS = { ArrowRight: 1, ']': 1, ArrowLeft: -1, '[': -1 };
+
     document.addEventListener('keydown', function (e) {
+        // A nav key on a preview we are only HOVERING pins it and starts the tour. onPinKey has
+        // already taken the placed case; this one acts only on a window of ours that is up.
+        const dir = TOUR_KEYS[e.key];
+        if (dir && !placed && cfg.tourKeys && view && box && box.classList.contains('on') &&
+            !e.ctrlKey && !e.metaKey && !e.altKey && !panelHost && !typingIn(e)) {
+            place();
+            tourNav(dir, e.repeat);
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+        }
         if (e.key === 'Escape' && panelHost) {
             closePanel();                       // the panel is on top; it closes first
             e.stopPropagation();
@@ -4472,6 +4669,237 @@
         const el = document.elementFromPoint(pointer.x, pointer.y);
         if (!el) return;
         onOver({ target: el, clientX: pointer.x, clientY: pointer.y });
+    }
+
+    // -------------------------------------------------------------------- tour
+
+    // Next/previous through every picture on the page, from the pinned window. The window stays
+    // put, the page does not move, each step swaps a different picture into the same frame.
+    // docs/TOUR.md is the specification; nothing here keeps a list between presses.
+
+    let tour = null;            // the pinned window's navigation state; null when nothing is pinned
+
+    const TOUR_ROW = 0.5;       // share of the shorter item's height that puts two in one row
+    const TOUR_SETTLE_MS = 150; // an arrow must be still this long before a scrub resolves
+    const TOUR_MOVE_MS = 100;   // the one-time slide to the corner
+
+    // Is a tour under way — as opposed to a window merely pinned? Geometry reads this.
+    function tourActive() { return !!tour && tour.on; }
+
+    // What the page draws it as, or failing that what its attributes say it will be. A lazy
+    // image below the fold is often 0×0 until it loads and must not fall out for it. Null means
+    // unknown, and unknown stays in the list: only a probe can settle it. See TOUR.md §1.
+    function tourSize(el) {
+        const r = el.getBoundingClientRect();
+        if (r.width >= 1 || r.height >= 1) return { w: r.width, h: r.height };
+        const w = parseInt(el.getAttribute('width') || '0', 10) || 0;
+        const h = parseInt(el.getAttribute('height') || '0', 10) || 0;
+        return (w || h) ? { w: w, h: h } : null;
+    }
+
+    // Reading order: items whose vertical extents overlap are one row, sorted left to right
+    // inside it. A plain (top, left) sort scrambles masonry and any ragged grid.
+    function tourOrder(items) {
+        items.sort(function (a, b) { return a.y - b.y || a.x - b.x || a.n - b.n; });
+        const rows = [];
+        items.forEach(function (it) {
+            const row = rows[rows.length - 1];
+            const over = row ? Math.min(row.bot, it.y + it.h) - Math.max(row.top, it.y) : -1;
+            if (row && over >= Math.min(row.bot - row.top, it.h) * TOUR_ROW) {
+                row.items.push(it);
+                row.bot = Math.max(row.bot, it.y + it.h);
+            } else rows.push({ top: it.y, bot: it.y + it.h, items: [it] });
+        });
+        const out = [];
+        rows.forEach(function (row) {
+            row.items.sort(function (a, b) { return a.x - b.x || a.n - b.n; });
+            for (let i = 0; i < row.items.length; i++) out.push(row.items[i]);
+        });
+        return out;
+    }
+
+    // Everything on the page a hover would preview, in reading order. Derived on every press;
+    // sorted in DOCUMENT coordinates, or the order changes as the page scrolls.
+    function tourEntries() {
+        const all = document.querySelectorAll('img,video');
+        const sx = window.scrollX || 0, sy = window.scrollY || 0;
+        const items = [];
+        for (let i = 0; i < all.length; i++) {
+            const el = all[i];
+            if (!el.getClientRects().length || !shownMedia(el)) continue;
+            if (!eligibleDirect(el)) continue;
+            const s = tourSize(el);
+            if (s && s.w < cfg.minDisplayed && s.h < cfg.minDisplayed) continue;
+            const r = el.getBoundingClientRect();
+            items.push({ el: el, url: shownUrl(el), x: r.left + sx, y: r.top + sy,
+                h: r.height, n: items.length });
+        }
+        return tourOrder(items);
+    }
+
+    // Where the anchor sits in a freshly derived list: element identity, then URL. Never an
+    // index — the list changes length under us.
+    function tourAt(list) {
+        if (!tour) return -1;
+        for (let i = 0; i < list.length; i++) if (list[i].el === tour.el) return i;
+        if (tour.url) for (let i = 0; i < list.length; i++) if (list[i].url === tour.url) return i;
+        return -1;
+    }
+
+    function tourBefore(it) {
+        return it.y < tour.y - 1 || (it.y <= tour.y + 1 && it.x < tour.x);
+    }
+
+    // The index a step of `dir` lands on, or -1 for "nothing that way".
+    function tourTarget(list, dir) {
+        if (!list.length || !tour) return -1;
+        const at = tourAt(list);
+        if (at >= 0) {
+            const to = at + dir;
+            return to >= 0 && to < list.length ? to : -1;
+        }
+        // The anchor was destroyed under us — a virtualised feed does this. Step from the last
+        // position it was seen at, in the direction of travel.
+        let k = 0;
+        while (k < list.length && tourBefore(list[k])) k++;
+        return Math.max(0, Math.min(list.length - 1, dir > 0 ? k : k - 1));
+    }
+
+    function tourRemember(entry) {
+        tour.el = entry.el;
+        tour.url = entry.url;
+        tour.x = entry.x;
+        tour.y = entry.y;
+    }
+
+    // Re-derive and report where the anchor is. The index and total are the only things kept
+    // between presses, and only because the counter shows them.
+    function tourSync() {
+        if (!tour) return null;
+        const list = tourEntries();
+        tour.index = tourAt(list);
+        tour.total = list.length;
+        return list;
+    }
+
+    // The counter and the two buttons, from whatever the last derivation found. `–` means the
+    // pinned picture is not itself in the list — a background image, or one just blocked.
+    function tourChrome() {
+        if (!navCountEl || !tour) return;
+        const at = tour.index, n = tour.total;
+        navCountEl.textContent = (at >= 0 ? at + 1 : '–') + ' / ' + n;
+        navPrevEl.classList.toggle('dim', at === 0 || !n);
+        navNextEl.classList.toggle('dim', !n || (at >= 0 && at >= n - 1));
+        if (view && placed) layout();       // the counter's width feeds barMinW()
+    }
+
+    function tourStart() {
+        tour = { el: active || null, url: activeShown || (view ? view.url : ''),
+            x: 0, y: 0, index: -1, total: 0, relocated: false, on: false };
+        if (tour.el) {
+            const r = tour.el.getBoundingClientRect();
+            tour.x = r.left + (window.scrollX || 0);
+            tour.y = r.top + (window.scrollY || 0);
+        }
+        if (cfg.tourButtons) tourSync();    // only the counter needs the number up front
+    }
+
+    function tourEnd() {
+        clearTimeout(scrubTimer);
+        scrubTimer = 0;
+        tour = null;
+    }
+
+    // Once per pinned window, on the first nav press: the anchored corner goes to the bottom
+    // right, where the nav buttons then sit under the pointer for every later step. After this
+    // the window is the user's — a drag or a resize is never undone. See TOUR.md §3.
+    function tourRelocate() {
+        tour.relocated = true;
+        if (fullActive()) return;       // the frame already IS the screen
+        reflow();                       // a tour is capped at the viewport; this may shrink it
+        view.left = vpW() - EDGE_GAP - outerW();
+        view.top = vpH() - EDGE_GAP - outerH();
+        box.classList.add('moving');
+        setTimeout(function () { if (box) box.classList.remove('moving'); }, TOUR_MOVE_MS + 60);
+        layout();
+    }
+
+    // Left/Right navigate when the picture cannot pan sideways, and pan when it can. Per axis,
+    // not pannable(): a tall picture at fit-width pans up and down while the arrows still step.
+    function tourOwnsArrows() {
+        return !!tour && !!view && cfg.tourKeys && !(view.imgW > view.frameW + 0.5);
+    }
+
+    let scrubTimer = 0, scrubAt = 0, scrubDir = 1;
+
+    // One press of ◀ / ▶ or a navigating arrow. A HELD key scrubs: the anchor moves at the scrub
+    // rate and nothing resolves until the key has been still, because OS key repeat is ~30/s and
+    // would outrun any buffer instantly. See TOUR.md §5.
+    function tourNav(dir, repeat) {
+        if (!placed || !view || !tour) return;
+        if (repeat) {
+            const gap = 1000 / Math.max(1, Math.min(30, cfg.tourScrubRate || 5));
+            if (Date.now() - scrubAt < gap) return;
+        }
+        scrubAt = Date.now();
+        tour.on = true;
+        scrubDir = dir;
+        if (!tour.relocated) tourRelocate();
+        const list = tourEntries();
+        const to = tourTarget(list, dir);
+        tour.total = list.length;
+        if (to < 0) { tour.index = tourAt(list); tourChrome(); return; }
+        tourRemember(list[to]);
+        tour.index = to;
+        dbg('tour step', { at: to + 1, of: list.length, dir: dir, scrubbing: !!repeat,
+            // The position is the operand the reading-order sort compared, so it is logged.
+            doc: Math.round(list[to].x) + ',' + Math.round(list[to].y),
+            to: list[to].el.tagName + ' ' + (list[to].url || '(nothing)').slice(-48) });
+        tourChrome();
+        clearTimeout(scrubTimer);
+        if (repeat) scrubTimer = setTimeout(tourShow, TOUR_SETTLE_MS);
+        else tourShow();
+    }
+
+    // Resolve the anchor and put it in the window. Nothing is emitted progressively: a tour that
+    // showed every improvement as it landed would flash a thumbnail into a mid-size into the
+    // original at every step. See TOUR.md §6.
+    async function tourShow() {
+        clearTimeout(scrubTimer);
+        scrubTimer = 0;
+        if (!placed || !view || !tour || !tour.el) return;
+        const el = tour.el;
+        const displayed = sizeOf(el);
+        active = el;
+        activeShown = shownUrl(el);
+        if (token) token.cancelled = true;
+        const myToken = token = { cancelled: false, fresh: true };
+        showSpinner();
+        dockSpinner();
+        let hit = null;
+        try {
+            hit = await resolve(el, displayed, myToken, null);
+        } finally {
+            if (!myToken.cancelled) hideSpinner();
+        }
+        if (myToken.cancelled || !tour || tour.el !== el || !view) return;
+        if (hit) swapViewer(hit);
+        else tourFallback(el, displayed, myToken.failure);
+    }
+
+    // Never blank, never skipped: a page of 50 pictures gives a tour of 50, and one that will not
+    // resolve shows the page's own picture with the reason. Unlike an ordinary hover this fires
+    // for a candidate merely rejected as too small as well — inside a tour the entry has to
+    // exist. See TOUR.md §8.
+    function tourFallback(el, displayed, why) {
+        const url = shownUrl(el);
+        const n = url ? nativeSize(el) : null;
+        const w = (n && n.w) || displayed.w;
+        const h = (n && n.h) || displayed.h;
+        if (!url || blocked(url) || !w || !h) return;
+        const reason = why || 'no larger version found';
+        dbg('tour: showing the page\'s own picture — ' + reason, url);
+        swapViewer({ url: url, w: w, h: h, reason: reason });
     }
 
     // -------------------------------------------------------------- settings UI
@@ -5015,6 +5443,10 @@
             'keeps its shape. The wheel grows the window until you have resized it by hand, ' +
             'then zooms the image inside it. Arrow keys pan, + and − zoom, 0 fits. Click the ' +
             'zoom level in the status bar to type one.');
+        para('Stepping through a page.',
+            'On a pinned preview, ◀ and ▶ — or the arrow keys — move to the next picture on the ' +
+            'page without moving the page itself. The window jumps to the bottom-right corner ' +
+            'the first time, then stays wherever you put it. Hold an arrow to run through them.');
         para('Saving a copy.',
             'Right-click a pinned preview for the browser’s own menu — Save image as…, Copy ' +
             'image, Copy image address, Open image in new tab — all acting on the full-size ' +
@@ -5083,6 +5515,13 @@
             'If the zoom percentages look wrong, set this to your display’s scaling. (default: 1)',
             1, 4, 0.25);
 
+        section('Next and previous');
+        check('tourButtons', 'Show ◀ ▶ on a pinned preview',
+            'With a counter saying where you are among the page’s pictures.');
+        check('tourKeys', 'Arrow keys step through the page',
+            'Left and right move to the next picture unless the one you are looking at is ' +
+            'zoomed in far enough to pan sideways. [ and ] always move.');
+
         section('Where it runs');
         pick('siteMode', 'Site list', null, [
             ['blacklist', 'Disable on listed sites'], ['whitelist', 'Enable only on listed sites']]);
@@ -5116,6 +5555,11 @@
         });
 
         advanced('Advanced options');
+
+        section('Next and previous');
+        num('tourScrubRate', 'Scrub rate',
+            'Pictures per second while an arrow is held down. Faster than about 5 and they go ' +
+            'by too quickly to see. (default: 5)', 1, 30, 1);
 
         section('The preview window');
         num('wheelZoomStep', 'Wheel zoom step',

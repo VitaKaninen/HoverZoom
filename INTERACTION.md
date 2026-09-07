@@ -55,6 +55,8 @@ bottom.
 | `S22` | holding the scrubber, placed (clip only) | placed | the held button |
 | `S23` | speed menu open, placed (clip only) | placed | a press anywhere else |
 | `S24` | volume column showing, placed (clip only) | placed | the pointer leaving it, after a delay |
+| `S25` | touring — placed, stepping through the page's pictures | placed | nothing |
+| `S26` | scrubbing — an arrow held, the counter running | transient | the held key |
 | `S16` | suppressed | gone | — |
 | `S17` | fading out | gone | — |
 
@@ -368,6 +370,31 @@ Hover the sound button and a vertical column appears above it; clicking the butt
   values (`E38`).
 - The column reaches above the strip, so the bar counts it as its own and will not fade under it.
 
+#### S25 · touring
+A placed window stepping through every picture on the page. The window stays put, the page does
+not move, and each step swaps a different picture into the same frame.
+- **Entered from:** the first ◀ / ▶ or navigating arrow press on any placed window (`T29`, `T30`).
+  There is no separate mode to turn on; a pinned window is already carrying the strip.
+- **The list is derived on every press and kept nowhere** (`E54`). Lazy-loaded and newly appended
+  images are picked up for free, and a virtualised feed deleting the picture under you is
+  survivable — the anchor is the element, then its URL, then the place it was last seen.
+- **Membership is `eligibleDirect()`**, so the tour can only hold things that would preview if
+  hovered, and it inherits every gate — `videoMode`, the block list, the banner and furniture
+  rules — with no separate list. Clips and images share one list. Elements with a CSS background
+  image are hoverable but not in the tour.
+- **Nothing is ever dropped for failing to resolve** (`E56`): a page of 50 gives a tour of 50, so
+  the counter means what it says and a picture spotted half way down stays where it was.
+- **The bottom-right corner is what does not move** (`E54`), because the buttons live there.
+- **The frame is capped at the viewport** for as long as a tour is running — anchored bottom
+  right, an oversized frame would run off the top-left and stay clipped there.
+- **A short picture letterboxes** rather than shrinking the frame past the strip.
+
+#### S26 · scrubbing
+An arrow held down. OS key repeat is ~30/s, ten times the useful rate.
+- The counter steps at up to `tourScrubRate` (5/s) and **nothing is resolved** until the key has
+  been still for 150 ms. The counter is the feedback.
+- Releasing resolves whatever the anchor landed on. Any other press cancels the pending resolve.
+
 #### S15 · placed, upgrading
 Placing is a reason to keep looking, not to stop, so the search runs on.
 - **On upgrade:** three things are held constant — the frame's centre, its on-screen size, and the
@@ -423,6 +450,12 @@ inert.
 | `T26` | `S10` | Single click on the picture — not the bar, not a control — with under 4 px of travel | `S10`; a clip pauses or resumes, a still image does nothing (`E39`) |
 | `T27` | `S10` | Double click in the same place | `S10` fullscreen, or back out of it if already there. Click 1's pause is undone (`E39`); the border comes off for as long as it lasts (`E43`) |
 | `T28` | `S10` fullscreen | Drag the picture, an edge, or the status bar | Nothing moves — fullscreen is locked to the screen, and the cursor stays an arrow. A spilling picture still pans, with the `grab` cursor, and panning past its edge does not carry the window with it (`E35`, `E40`) |
+| `T29` | `S05` | `→` or `←` (or `[` / `]`) on a preview you are only hovering | `S25` — it pins, slides to the bottom-right corner, and advances, all on the one press (`E54`) |
+| `T30` | `S10`/`S25` | ◀ ▶ in the strip, or `→` `←` where the picture cannot pan sideways, or `[` `]` always | `S25` on the next picture. Position and any hand-set size stay; zoom and pan reset; the **bottom-right corner does not move** (`E54`, `E55`) |
+| `T31` | `S25` | Hold the key | `S26` — the counter steps at up to `tourScrubRate`/sec and nothing resolves until the key has been still 150 ms |
+| `T32` | `S25` | ⊘ on the picture | `S25` on the next one — mid-tour, blocking means "not this one", not "close the window" |
+| `T33` | `S25` | Reach a picture that will not resolve | `S25` showing the page's own thumbnail with the reason in the bar, and ↻ to ask again (`E56`) |
+| `T34` | `S25` fullscreen | `f`, or the button, after stepping | `S25` windowed, fitted to the picture now in the frame and holding the bottom-right corner — not the zoom and top-left of the picture that went in (`E57`) |
 | `T25` | — | *Retired in v0.34.0.* Moving the window used to freeze its size as a ceiling; it no longer touches the size at all (`E22`) |
 
 ---
@@ -525,6 +558,11 @@ this table is a table.
 | `E52` | A picture still silent after 3 s earns one ranged request, which says whether to keep waiting and for how long; a diagnostic that times out means slow, never dead | [`docs/RESOLVER.md`](docs/RESOLVER.md) |
 | `E53` | A hover that resolved nothing AND hit a real failure shows the page's own picture with the reason; one that merely found nothing bigger still shows nothing | [`docs/RESOLVER.md`](docs/RESOLVER.md) |
 
+| `E54` | The tour's list is derived on every press and kept nowhere; the anchor is an element and a position, never an index; the bottom-right corner is what stays still, and the slide to it happens once per pinned window | [`docs/TOUR.md`](docs/TOUR.md) |
+| `E55` | `←`/`→` navigate only where the picture cannot pan sideways — per axis, so a tall picture pans up and down while they still step. `[` and `]` always navigate | [`docs/TOUR.md`](docs/TOUR.md) |
+| `E56` | A tour never drops an entry: one that will not resolve shows the page's own picture with the reason and a ↻, where an ordinary hover shows nothing | [`docs/TOUR.md`](docs/TOUR.md) |
+| `E57` | A zoom and a top-left corner belong to the picture they were taken on, so leaving fullscreen after a tour step fits the new picture and holds the bottom-right corner instead | [`docs/TOUR.md`](docs/TOUR.md) |
+
 `E3` is retired with the detached state (v0.28.0); `E4` and `E5` are retired as dangling.
 
 ---
@@ -552,6 +590,7 @@ this table is a table.
 | Grab-band clearance (`E37`) | `grabBand`, `grabInset`, `btnGutter`, `barMinW`, `layoutChrome`, `pointerOverControl` |
 | Zoom cluster (`S20`, `S21`, `E34`) | `buildZoomControl`, `syncZoom`, `openZoomField`, `closeZoomField`, `zoomAnchored`, `ZOOM_BANDS`/`walkStops`/`fitStops`/`zoomStops`/`zoomIndex`, `zoomLo`/`noBarsScale`/`zoomHi`, `parseZoom`, `commitZoomField`, `capOwns`, `minFrameW` |
 | Upgrades (`S06`, `S15`) | `resolve`, `upgradeViewer` |
+| The tour (`S25`, `S26`, `T29`–`T34`, `E54`–`E57`) | `tourEntries`/`tourOrder`/`tourSize`, `tourAt`/`tourTarget`/`tourBefore`, `tourNav`/`tourShow`/`tourFallback`, `tourStart`/`tourEnd`/`tourSync`/`tourChrome`, `tourRelocate`, `tourOwnsArrows`, `swapViewer`, `navShown`/`navW`/`stripUp`, `minFrameH`, `retryShown` — see [`docs/TOUR.md`](docs/TOUR.md) |
 
 Function names are used rather than line numbers, which rot.
 

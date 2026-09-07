@@ -1,9 +1,11 @@
 # The tour — next/previous navigation through a page's pictures
 
-**Status: the tour itself is designed, not built. §7 and §8 ARE built** — they were the parts that
-stood alone, and they shipped in v0.88.0-v0.89.0 as ordinary-hover improvements. Everything else
-here is still specification, and complete enough that a session picking it up should not need to
-re-derive any of it.
+**Status: §0-§5, §8 and §11 are BUILT (v0.96.0); §7 was built earlier (v0.88.0-v0.89.0).** What is
+left is §6 (the concurrent preloader), §9 (the scroll excursion) and §10 (cross-page harvesting).
+Sections that are built are kept because the reasoning still explains the shape; where the build
+departed from the plan the section says so.
+
+The live account of what the code does is `INTERACTION.md` `S25`, `S26`, `T29`-`T34`, `E54`-`E57`.
 
 A *tour* is next/previous navigation through every picture on the page, driven from a pinned
 preview window. The window stays put; the page does not move; each step swaps a different picture
@@ -632,13 +634,16 @@ probably constants rather than settings unless testing says otherwise.
 
 ## 12. Build order
 
-1. Rewrite the invariant (§0). Derive-on-demand list, anchor resolution, ordering (§1). Arrow-key
+1. ~~Rewrite the invariant (§0). Derive-on-demand list, anchor resolution, ordering (§1). Arrow-key
    handoff and scrub (§5). Tour mode entry, corner anchor, one-time relocation, size floors (§2,
-   §3).
-2. Strip restructure: nav group, counter, the five `hasvid` sites, CSS hoist (§4).
+   §3).~~ — **done, v0.96.0.**
+2. ~~Strip restructure: nav group, counter, the five `hasvid` sites, CSS hoist (§4).~~ — **done,
+   v0.96.0**, in the same version as step 1: the counter is what step 1's derivation is *for*, so
+   splitting them would have shipped a version whose only new state nothing displayed.
 3. ~~Retry and timeout changes (§7)~~ — **done, v0.88.0-v0.89.0.** They stood alone, as predicted.
 4. Concurrent preloader with slot spacing and the no-rush list (§6).
-5. Failure display ~~and the Retry button~~ (§8) — **display done, v0.88.0**; the button waits for the tour, and widening the trigger to every rejection is part of that step.
+5. ~~Failure display and the Retry button (§8)~~ — **done: display v0.88.0, the widened trigger and
+   ↻ v0.96.0.**
 6. Scroll excursion and load-more (§9).
 7. Cross-page harvesting (§10).
 
@@ -764,7 +769,30 @@ imgur mp4, four clips: **1.0–9.6 MB** (images on the same run were 40 KB–1.3
 ## 15. Still unverified
 
 - Whether programmatic scrolling works through `lockScroll()`'s `overflow:hidden` (§9).
-- Whether a 100ms relocation animation looks better than a jump (§3).
-- The right scrub rate. Starting at 5/s (§5).
+- Whether a 100ms relocation animation looks better than a jump (§3). Built as an animation; not
+  yet judged by eye.
+- The right scrub rate. Shipped at 5/s and measured at 4.7-5.5 steps/sec under a 30/s key repeat,
+  so the throttle does what it says; whether 5 is the right *number* is still a guess (§5).
 - Whether 6 workers still clears 3/s on a slow connection, where bandwidth binds instead of
   latency (§14).
+
+## 16. Measured while building, 2026-09-07
+
+- **The derivation costs 3 ms** on the 41-case test page (52 `img`/`video`, 40 eligible),
+  Chromium. The plan's "~5 ms on a keypress" holds. The cost that would bite is
+  `playerSurfaceReason()`'s ancestor walk, which does a `querySelectorAll('img')` per level — it
+  breaks at the first ancestor holding more than one image, so on a grid it stops after one or two
+  levels rather than scanning the grid per item.
+- **The row-band sort is doing real work**, and the log proves it: `doc: 341,1606` → `652,1606` →
+  `962,1606` → `31,1835`, i.e. left-to-right along a row and then a wrap, not a `(top, left)`
+  scramble. `dbg('tour step', …)` prints the document position for exactly this reason.
+- **The strip's two-group layout measures as designed**: 1094 px full-width over a clip with the
+  scrubber flexing to 805 px, collapsing to a 106 px nav-only box on the next still picture, and
+  back again.
+- **`swapViewer()` must call `resetCaption()`.** `caption()` only rebuilds when the URL or the
+  measured size changes, and two tour entries routinely share both — the same file, once with a
+  failure reason and once without. Without the reset the bar kept "no larger version found" over a
+  picture that had resolved fine. §8 said this; it still got missed once.
+- **Leaving fullscreen after a step needed `E57`.** `restoreFull()` put back the zoom and top-left
+  corner captured on entry, which belong to a picture that is no longer in the frame: the window
+  came back 111 px off the right edge at the wrong zoom. A tour step is the only way to reach it.
