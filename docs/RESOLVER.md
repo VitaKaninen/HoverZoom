@@ -586,6 +586,70 @@ Two that were looked at and deliberately left alone:
 Danbooru, Unsplash, Pexels, ArtStation, Fandom and phpbb.com all answered **403** to a plain fetch;
 they need a real browser session, and are unsurveyed rather than uninteresting.
 
+## What HZ+'s 398 plugins actually contain · surveyed 2026-09-07 · v0.86.0
+
+The whole `plugins/` directory was downloaded and classified mechanically, because "399 plugins"
+had been cited in `../CLAUDE.md` as per-site knowledge we lose without ever being opened.
+
+**Licence: MIT** (Oleg Anashkin 2014-2025, Romain Vallet 2012). Reuse is permitted with the notice
+retained — there is no legal reason not to take from it, only architectural ones.
+
+| | Plugins | What it means for us |
+|---|---|---|
+| Purely declarative — `hoverZoom.urlReplace()` only, no DOM or network | **173** | Harvestable. Each call is `(selector, search, replace)` where search/replace is a plain URL transform, the same shape as an `UPGRADES` rule. |
+| Mixed | **81** | Partly harvestable. |
+| No `urlReplace` at all — fully imperative | **144** | Not transferable at any price; see below. |
+
+523 `urlReplace` calls in total.
+
+### The imperative half cannot be ported, and the reason is architectural, not effort
+
+Those plugins are jQuery running against a pre-scanned page: `$('.Post').one('mouseover', …)`,
+`hoverZoom.prepareLink(el, src)`, and `chrome.runtime.sendMessage({action:'ajaxRequest'})` for a
+background-page fetch. Every one of those is a thing this script does not have and has decided not
+to have — the `.one('mouseover')` binding *is* the pre-scan our design invariant exists to reject.
+Porting one means porting their architecture with it.
+
+The two biggest, `facebook.js` (47 KB) and `instagram.js` (45 KB), go further: they **hook
+`XMLHttpRequest.prototype.open` and `window.fetch`** to capture the site's own API traffic, and
+issue authenticated GraphQL calls carrying `fb_dtsg` and hardcoded `doc_id` constants.
+`tiktok_a.js` reads `document.cookie` and calls the private item API. That is the same
+"permanent network interception plus a cache" that the Google Images section above refuses.
+
+### What was taken
+
+- **The marker vocabulary.** Their searches are dominated by the same token family ours uses —
+  `thumb` ×70, `small` ×63, `medium` ×37, `thumbnail` ×22. The tokens that recur in theirs and were
+  missing from ours are `square` ×15, `tiny` ×15, `mini` ×8 and `micro` ×6, so all four were added
+  to both the path-segment and filename-suffix rules in v0.86.0. `_sq`, `_th` and `_md` were already
+  covered by the opaque-size-code rule, which is why they are not in the list.
+
+### What was looked at and deliberately not taken
+
+- **`/sample/`, `/crop/`, `/cache/` as strippable segments** (~15 plugins each). `sample` on the
+  booru family is a real intermediate size whose parent directory differs per site; `crop` and
+  `cache` are structural directories that usually have no sibling original. Deleting them produces
+  a plausible URL that 404s, which is the over-match failure this file opens with.
+- **ytimg `hqdefault.jpg` → `maxresdefault.jpg`.** Correct as a transform, near-useless here: an
+  embedded YouTube thumbnail sits inside a link to a video page, so `videoLinkReason()` refuses it
+  before the resolver runs unless `videoMode` is `all`. Revisit only if that gate changes.
+
+### The one idea worth building · not built
+
+`facebook.js` does **not** rewrite the thumbnail URL — it extracts a stable id from it
+(`120042242_3034295103343234_…` out of `/v/t45.5328-4/<id>_n.jpg`) and then searches the page's own
+inline `<script>` JSON for that id, taking the `viewer_image.uri` it finds next to it.
+
+That is a **broad** mechanism wearing a site plugin's clothes, and it generalises: take a stable
+token from the displayed URL, scan the document's inline JSON for the same token, collect any URLs
+found near it. It would cover Facebook, Instagram, and every `__NEXT_DATA__` / Nuxt / Redux-state
+SPA that ships its full-size URLs in the page it already sent us. It fits our invariant — a read at
+hover time, caching nothing — and it needs no API keys, no XHR hook and no cookies.
+
+Cost to weigh before building it: inline JSON on a feed page is megabytes, so it needs a size cap
+and a cheap `indexOf` pre-filter before any `JSON.parse`, and the "URLs found near the token" step
+needs a rule for which one is the picture rather than an avatar or a preview.
+
 ### The logged-in walled gardens are entirely unsurveyed · asked about 2026-09-07
 
 Facebook, Instagram, TikTok, and the two photo-album services (Google Photos, iCloud Photos) have
@@ -594,12 +658,12 @@ check, so the next session does not repeat a guess as a finding.
 
 - **They cannot be surveyed by fetch.** Every one requires a session cookie, so the only route is a
   logged-in browser — the user's own Chrome, hovering by hand or through the extension.
-- **The suspected shape is a signed URL, which would defeat every rule in `UPGRADES` by
-  construction.** `scontent.*.fbcdn.net` and `*.cdninstagram.com` carry `_nc_ohc`, `oh=` and `oe=`
-  parameters that look like a signature over the whole URL; if they are, then dropping or editing a
-  size token yields a 403 rather than a bigger picture, and the `E50` size-parameter rule is not
-  merely useless there but actively wrong. **This is the one thing to measure first** — one hover
-  with `debug` on settles it, and a 403 on the rewrite is a definitive answer.
+- **The URL is signed, and no rule in `UPGRADES` can win against that.** `scontent.*.fbcdn.net` and
+  `*.cdninstagram.com` carry `_nc_ohc`, `oh=` and `oe=` — a signature over the whole URL. The
+  strongest available evidence is that **HZ+'s own `facebook.js`, 47 KB of dedicated site
+  knowledge, never attempts a rewrite**; it goes to the page's inline JSON for a second, separately
+  signed URL instead. Treat editing an fbcdn size token as known-not-to-work rather than untested.
+  It also means the `E50` size-parameter rule is not merely useless there but actively wrong.
 - **Google Photos is the one with a live reason to expect a hit:** `lh3.googleusercontent.com` size
   tokens are already rewritten to `=s0` by the googleusercontent rule, and that rule was measured on
   Blogger/ggpht URLs. Whether an album page's thumbnails carry that shape is unverified.

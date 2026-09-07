@@ -218,9 +218,14 @@ The rest of the testing notes — what each case is for, and the Browser pane's 
 
 ## Known limits
 
-- HZ+'s 399 plugins encode genuine per-site knowledge (Pixiv's referer requirement, Instagram's
-  URL signing, Twitter's `:orig`). The generic resolver wins on the long tail and loses on a few
-  hostile sites. Add narrowly-scoped rules to `UPGRADES` only with host checks and negative tests.
+- HZ+'s 398 plugins were classified in v0.86.0 — **173 are pure URL rewrites, 144 are jQuery
+  against a pre-scanned page, and the two biggest hook `XMLHttpRequest` to read Facebook's and
+  Instagram's own API traffic.** The vocabulary worth harvesting has been harvested. Do not re-open
+  the directory expecting more without reading
+  [`docs/RESOLVER.md`](docs/RESOLVER.md)'s survey first — it says what was taken, what was refused
+  and why, and names the one mechanism still worth building. The generic resolver wins on the long
+  tail and loses on hostile sites. Add narrowly-scoped rules to `UPGRADES` only with host checks and
+  negative tests.
 - The resolver keeps probing past the first hit and upgrades the preview in place each time
   something strictly bigger turns up. It costs up to `MAX_PROBES` (8) requests per hover instead of
   usually one. This was `keepSearching` (before that `preferLargest`, off) and is unconditional

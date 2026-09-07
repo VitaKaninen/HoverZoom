@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.85.0
+// @version     0.86.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -600,8 +600,8 @@
         // generic path markers
         function (u) {
             const p = u.pathname
-                .replace(/\/(thumb|thumbs|thumbnail|thumbnails|small|medium|preview|resized)\//i, '/')
-                .replace(/(_|-)(thumb|thumbnail|small|medium|preview|min|tn)(\.[a-z0-9]+)$/i, '$3');
+                .replace(/\/(thumb|thumbs|thumbnail|thumbnails|small|medium|preview|resized|tiny|mini|micro|square)\//i, '/')
+                .replace(/(_|-)(thumb|thumbnail|small|medium|preview|min|tn|tiny|mini|micro|square)(\.[a-z0-9]+)$/i, '$3');
             if (p === u.pathname) return null;
             u.pathname = p;
             return u.href;

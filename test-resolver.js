@@ -127,6 +127,21 @@ has('generic _thumb filename suffix',
     upgradeCandidates('https://site.com/images/pic_thumb.png'),
     'https://site.com/images/pic.png');
 
+// The marker vocabulary was widened from HZ+'s 398 plugins, where these four are the tokens
+// that recur outside our list. See RESOLVER.md "What HZ+'s plugins actually contain".
+has('generic /tiny/ path segment',
+    upgradeCandidates('https://site.com/gallery/tiny/pic.jpg'),
+    'https://site.com/gallery/pic.jpg');
+has('generic /square/ path segment',
+    upgradeCandidates('https://site.com/gallery/square/pic.jpg'),
+    'https://site.com/gallery/pic.jpg');
+has('generic _mini filename suffix',
+    upgradeCandidates('https://site.com/images/pic_mini.png'),
+    'https://site.com/images/pic.png');
+has('generic -micro filename suffix',
+    upgradeCandidates('https://site.com/images/pic-micro.png'),
+    'https://site.com/images/pic.png');
+
 // ---- an OPAQUE size code on the stem, where no vocabulary names it.
 // my.evilmilk.com serves the same picture at _t3 (340px), _s (600px) and bare (720px), so the
 // bare stem is the top of the ladder. Measured live 2026-09-05.
