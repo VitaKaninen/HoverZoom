@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.84.0
+// @version     0.85.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -421,6 +421,17 @@
         'quality', 'q', 'strip', 'thumb', 'thumbnail', 'scale', 'max', 'maxwidth',
         'maxheight', 'downsize', 'compress', 'dpr'];
 
+    // live.staticflickr.com/<farm>/<id>_<secret>[_<size>].jpg -- swap the size letter.
+    function flickrSize(u, want) {
+        if (!/(^|\.)staticflickr\.com$/.test(u.hostname)) return null;
+        const m = u.pathname.match(/^(.*\/\d+_[0-9a-f]+)(?:_[a-z0-9]{1,2})?(\.[a-z0-9]+)$/i);
+        if (!m) return null;
+        const p = m[1] + '_' + want + m[2];
+        if (p === u.pathname) return null;
+        u.pathname = p;
+        return u.href;
+    }
+
     function dropSizeParams(u) {
         let touched = false;
         SIZE_PARAMS.forEach(function (p) {
@@ -543,13 +554,41 @@
             u.pathname = m[1] + m[2];
             return u.href;
         },
-        // Reddit preview host -> direct host
+        // Reddit preview host -> direct host. The id is the last alphanumeric run before the
+        // extension, which covers both the bare form and the slug form preview.redd.it now uses.
         function (u) {
             if (!/(^|\.)redd\.it$/.test(u.hostname)) return null;
             if (u.hostname === 'i.redd.it') return null;
-            const m = u.pathname.match(/^\/([a-z0-9]+\.(?:jpe?g|png|gif|webp))$/i);
+            const m = u.pathname.match(/([a-z0-9]+)(\.(?:jpe?g|png|gif|webp))$/i);
             if (!m) return null;
-            return 'https://i.redd.it/' + m[1];
+            return 'https://i.redd.it/' + m[1] + m[2];
+        },
+        // Flickr size suffix: _n is 320, _b is 1024, _k is 2048 where it exists (else a 410,
+        // which costs one probe). _o needs a secret and is not guessable.
+        function (u) {
+            return flickrSize(u, 'b');
+        },
+        function (u) {
+            return flickrSize(u, 'k');
+        },
+        // A thumbnail marker leads the filename as often as it trails it: thumbnail_<hash>.jpg.
+        function (u) {
+            const p = u.pathname.replace(
+                /\/(?:thumb|thumbs|thumbnail|thumbnails|small|tn|preview)[_-]([^/]+)$/i, '/$1');
+            if (p === u.pathname) return null;
+            u.pathname = p;
+            return u.href;
+        },
+        // The Gelbooru family, which safebooru/rule34/konachan all descend from:
+        // /thumbnails/<dir>/thumbnail_<sha1>.jpg -> /images/<dir>/<sha1>.jpg
+        function (u) {
+            if (u.pathname.indexOf('/thumbnails/') === -1) return null;
+            const p = u.pathname.replace('/thumbnails/', '/images/')
+                .replace(/\/(?:thumbnail|thumb)[_-]([^/]+)$/i, '/$1');
+            if (p === u.pathname) return null;
+            u.pathname = p;
+            u.search = '';      // the ?<post id> cache-buster names nothing on the image host
+            return u.href;
         },
         // Squarespace: ?format=500w -> ?format=2500w
         function (u) {

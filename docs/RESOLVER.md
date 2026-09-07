@@ -551,6 +551,41 @@ What was added for this and is still worth having, just not for Google: `linkPar
 generic `?imgurl=`-style rule) and the `/s0/` path-segment form of the googleusercontent size token.
 
 
+## Sites surveyed 2026-09-07 · v0.85.0
+
+Sixteen image-heavy pages — search engines, image hosts, boorus, forums, wikis — fetched and their
+thumbnail/anchor shapes read. **Every transform below was confirmed with `curl` before a rule was
+written for it**, which is cheap and stops a plausible-looking rewrite becoming a rule that 404s.
+
+What already worked and needed nothing:
+
+- **4chan** — the thumbnail `i.4cdn.org/<b>/<id>s.jpg` sits inside `<a href=".../<id>.jpg">`, so the
+  ancestor-link path has it. The `s` size suffix would not be strippable by any rule here (no
+  separator before it), which is exactly why the link matters.
+- **imgur** — `_d.webp` is already handled; **Ecosia** — see the CSP table above.
+- **Reddit and Pinterest are CSP-permissive** (`img-src … https:` and `img-src blob: data: *`), so
+  `E49` never fires there.
+
+Rules added, each measured:
+
+| Site | Was | Now |
+|---|---|---|
+| Reddit | `preview.redd.it/<slug>-<id>.jpg`; the old rule wanted a path of *only* alphanumerics and the modern slug form never matched | `i.redd.it/<id>.jpg` — 529×706 → **3024×4032** |
+| Flickr | `…/<id>_<secret>_n.jpg`, 320 px | `_b` (1024) and `_k` (2048, a 410 where absent) — 240×177 → **1023×759** |
+| Gelbooru family (safebooru, rule34, konachan) | `/thumbnails/<dir>/thumbnail_<sha1>.jpg?<post>` | `/images/<dir>/<sha1>.jpg` — 455 KB original |
+| anywhere | a thumbnail marker was only stripped as a *suffix* | `thumbnail_<name>.jpg` → `<name>.jpg`; a marker leads as often as it trails |
+
+Two that were looked at and deliberately left alone:
+
+- **DeviantArt** carries a 4-entry `srcset`, which the existing srcset path already mines; its
+  `/v1/fit/w_…,h_…` segment is Cloudinary-shaped and the existing rule reaches it.
+- **Wikimedia** exposes `data-file-width`/`data-file-height` on the thumbnail — the original's true
+  size, free and site-agnostic. Not used: nothing in the resolver wants a declared size it has not
+  measured, and trusting one would weaken `samePicture()`. Noted because it looks useful and is not.
+
+Danbooru, Unsplash, Pexels, ArtStation, Fandom and phpbb.com all answered **403** to a plain fetch;
+they need a real browser session, and are unsurveyed rather than uninteresting.
+
 ## Nothing may downgrade the frame · `E33`
 
 `resolve()` runs two paths at once — the linked-page lookup and the candidate loop — and each

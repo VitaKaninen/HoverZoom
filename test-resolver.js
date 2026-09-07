@@ -306,6 +306,31 @@ eq('a link with no query yields nothing',
 eq('a malformed href yields nothing rather than throwing',
     linkParamCandidates('::::not a url::::'), []);
 
+// ---- sites surveyed 2026-09-07; each transform confirmed live before the rule was written
+has('reddit preview slug form yields the direct host',
+    upgradeCandidates('https://preview.redd.it/met-these-two-cuties-at-jardin-des-plantes-in-paris-v0-sw0xl9lxexnh1.jpg?width=640'),
+    'https://i.redd.it/sw0xl9lxexnh1.jpg');
+has('reddit bare form still works',
+    upgradeCandidates('https://preview.redd.it/abc123def.png'),
+    'https://i.redd.it/abc123def.png');
+eq('i.redd.it is already the direct host',
+    upgradeCandidates('https://i.redd.it/sw0xl9lxexnh1.jpg').filter(u => /redd\.it/.test(u)), []);
+has('flickr _n upgrades to _b',
+    upgradeCandidates('https://live.staticflickr.com/4120/4820124455_f657d22a9c_n.jpg'),
+    'https://live.staticflickr.com/4120/4820124455_f657d22a9c_b.jpg');
+has('flickr also offers _k, which 410s where it does not exist',
+    upgradeCandidates('https://live.staticflickr.com/4120/4820124455_f657d22a9c_n.jpg'),
+    'https://live.staticflickr.com/4120/4820124455_f657d22a9c_k.jpg');
+has('a flickr url with no size suffix still gets one',
+    upgradeCandidates('https://live.staticflickr.com/4120/4820124455_f657d22a9c.jpg'),
+    'https://live.staticflickr.com/4120/4820124455_f657d22a9c_b.jpg');
+has('a leading thumbnail marker is stripped from the filename',
+    upgradeCandidates('https://cdn.example/img/thumbnail_b3e903d8d23eaeff.jpg'),
+    'https://cdn.example/img/b3e903d8d23eaeff.jpg');
+has('the gelbooru family maps /thumbnails/ to /images/ and drops the prefix',
+    upgradeCandidates('https://safebooru.org/thumbnails/1358/thumbnail_b3e903d8d23eaeff3821e1094b8e444e6c270b54.jpg?7124806'),
+    'https://safebooru.org/images/1358/b3e903d8d23eaeff3821e1094b8e444e6c270b54.jpg');
+
 // ---- a source URL base64url-encoded in the path (E51)
 has('brave/imgproxy base64 path decodes to the source',
     upgradeCandidates('https://imgs.search.brave.com/GTjfXXbCnK5MJOjQSivz5qLFeRU73hL_-ccBZb9zk2g/rs:fit:500:0:1:0/g:ce/aHR0cHM6Ly93d3cu/bHB6b28ub3JnL3dw/LWNvbnRlbnQvdXBs/b2Fkcy8yMDIyLzEy/L2ZfcnAuanBn'),
