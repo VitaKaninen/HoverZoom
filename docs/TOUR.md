@@ -1,7 +1,9 @@
 # The tour — next/previous navigation through a page's pictures
 
-**Status: designed, not built.** Nothing in this document exists in the script yet. It is the
-whole specification: a session picking this up should not need to re-derive any of it.
+**Status: the tour itself is designed, not built. §7 and §8 ARE built** — they were the parts that
+stood alone, and they shipped in v0.88.0-v0.89.0 as ordinary-hover improvements. Everything else
+here is still specification, and complete enough that a session picking it up should not need to
+re-derive any of it.
 
 A *tour* is next/previous navigation through every picture on the page, driven from a pinned
 preview window. The window stays put; the page does not move; each step swaps a different picture
@@ -25,8 +27,10 @@ v0.80.0–v0.85.0 landed the resolver work §14 was measuring, so three items be
 - **Size parameters drop from extensionless CDN paths** (v0.83.0), plus Reddit/Flickr/gelbooru
   rules and leading thumbnail markers (v0.85.0).
 
-What is still entirely unbuilt is §7 and §8 — the retry model, the size-derived timeout budget, and
-showing anything at all when a picture fails. Those are the parts that are *not* about the tour.
+v0.86.0-v0.87.0 then took the marker vocabulary out of HZ+'s plugins and added Pinterest's size
+segment, and **v0.88.0-v0.89.0 built §7 and §8** — the retry model, the size-derived timeout budget,
+and showing the page's own picture with a reason when one fails. Those were the parts that were
+*not* about the tour, and they are done. `RESOLVER.md` holds the live account of all of it.
 
 ---
 
@@ -358,9 +362,21 @@ relies on the HTTP cache, which Chromium can evict.
 
 ---
 
-## 7. Retry and timeouts — changes to existing behaviour, not just the tour
+## 7. Retry and timeouts — BUILT, v0.88.0-v0.89.0
 
-### What happens today
+**Shipped and verified in a browser. This section is now history; the live account of what the code
+does is `RESOLVER.md` "Waiting, diagnosing, retrying".** What follows is kept because the reasoning
+still explains the shape, and because one part of it was measured wrong and is worth not repeating.
+
+**The one correction:** this section said a diagnostic that gets no response means the host is dead,
+abort now. Built that way, a server that merely answers slowly timed the diagnostic out too and was
+declared dead - killing exactly the case the design existed to rescue. Only an explicit refused
+connection is fatal now; a timeout means slow and keeps waiting. `E52`.
+
+Two smaller departures, both deliberate: attempts are 3 rather than 4 (the size-derived budget does
+the work the extra attempt was for), and the failure display fires on a real failure only - see §8.
+
+### What it replaced
 
 | | |
 |---|---|
@@ -450,10 +466,17 @@ if the fixed floor misfires.
 
 ---
 
-## 8. What a failed picture shows
+## 8. What a failed picture shows — BUILT in part, v0.88.0
 
 Never blank, never skipped. Show the page's own thumbnail as a placeholder, plus a reason in the
 status bar.
+
+**Built, with the condition narrowed: only a genuine failure shows it, not a candidate merely
+rejected for being too small.** On an ordinary hover the wider rule would pop a blurry
+thumbnail over every un-upgradable picture on the page. The wider rule is still right *inside a
+tour*, where an entry must exist even when broken — so when the tour is built, widen it gated on
+tour mode. The free/paid tiers below both exist now: `failureText()` reads the diagnosis the
+probe already paid for. The Retry button is not built and cannot be until there is a tour.
 
 Note that `minRatio` means a thumbnail is *never* what a normal hover offers, so showing one is a
 deliberate exception — which is why the note is mandatory rather than optional. Without it, "why is
@@ -613,9 +636,9 @@ probably constants rather than settings unless testing says otherwise.
    handoff and scrub (§5). Tour mode entry, corner anchor, one-time relocation, size floors (§2,
    §3).
 2. Strip restructure: nav group, counter, the five `hasvid` sites, CSS hoist (§4).
-3. Retry and timeout changes (§7) — these stand alone and improve ordinary hovering.
+3. ~~Retry and timeout changes (§7)~~ — **done, v0.88.0-v0.89.0.** They stood alone, as predicted.
 4. Concurrent preloader with slot spacing and the no-rush list (§6).
-5. Failure display and the Retry button (§8).
+5. Failure display ~~and the Retry button~~ (§8) — **display done, v0.88.0**; the button waits for the tour, and widening the trigger to every rejection is part of that step.
 6. Scroll excursion and load-more (§9).
 7. Cross-page harvesting (§10).
 

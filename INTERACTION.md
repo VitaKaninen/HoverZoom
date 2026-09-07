@@ -521,6 +521,9 @@ this table is a table.
 | `E48` | A media URL in the ancestor link's query IS the answer, so the page behind it is never fetched; and an anchor holding a strip of thumbnails only speaks for the biggest one | [`docs/RESOLVER.md`](docs/RESOLVER.md) |
 | `E49` | The page's `img-src` CSP refuses the probe, silently and in a millisecond; the bytes are then fetched with GM_xhr and shown as `blob:`, or `data:` where blob is refused too | [`docs/RESOLVER.md`](docs/RESOLVER.md) |
 | `E50` | Size parameters are dropped from an extensionless CDN path only when the last segment is an opaque id and the path is not a script endpoint | [`docs/RESOLVER.md`](docs/RESOLVER.md) |
+| `E51` | GM_xhr's own timeout does not cover a pending permission dialog, so every GM_xhr here carries a second timer of its own | [`docs/RESOLVER.md`](docs/RESOLVER.md) |
+| `E52` | A picture still silent after 3 s earns one ranged request, which says whether to keep waiting and for how long; a diagnostic that times out means slow, never dead | [`docs/RESOLVER.md`](docs/RESOLVER.md) |
+| `E53` | A hover that resolved nothing AND hit a real failure shows the page's own picture with the reason; one that merely found nothing bigger still shows nothing | [`docs/RESOLVER.md`](docs/RESOLVER.md) |
 
 `E3` is retired with the detached state (v0.28.0); `E4` and `E5` are retired as dangling.
 

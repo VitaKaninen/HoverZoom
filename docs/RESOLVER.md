@@ -786,8 +786,59 @@ the link was candidate eight and hit.
 
 ### Image probes time out, and a miss is not for life
 
-`probeImage()` gives up after `IMAGE_PROBE_MS` (20 s) and aborts the fetch; `probeVideo()` has
-always had its 6 s. Without it a stalled candidate parked the resolver on that URL for every later
-hover of the element, since the never-settling promise was cached. A probe that answers `null` —
-timeout, 404, 429 — is forgotten after `PROBE_RETRY_MS` (30 s) so a rate-limited burst is not a
-dead URL for the page's life. A hit is cached for the page's life as before.
+`probeVideo()` has always had its 6 s. Without a timeout at all, a stalled candidate parked the
+resolver on that URL for every later hover of the element, since the never-settling promise was
+cached. A probe that answers `null` is forgotten after `PROBE_RETRY_MS` (30 s) so a rate-limited
+burst is not a dead URL for the page's life. A hit is cached for the page's life.
+
+## Waiting, diagnosing, retrying · `E52` · v0.88.0–v0.89.0
+
+The flat 20 s wait is gone. One number could not serve both a dead host and an 8 MB original on a
+slow link, so the budget is now derived per URL.
+
+1. `imageAttempt()` starts a plain `Image` — **still a plain `Image`, so probing is still
+   preloading**, and the browser cache holds what it fetched. Do not swap this for GM_xhr.
+2. **At `LIVENESS_MS` (3 s) of silence, one ranged GET fires** (`diagnose()`, 4 KB, GM_xhr so CORS
+   and the page's CSP do not apply). It is the only paid step, it fires only when already waiting,
+   and it is cached per URL so retries do not re-pay it.
+3. The verdict routes: `gone` (4xx) and `busy` (429, or `Retry-After` on 403/503) are **definitive
+   and never retried**; `dead` aborts; `alive` sets the budget from the file's own size,
+   `max(5 s, size / 100 KB/s)` capped at `ATTEMPT_CEIL_MS` (20 s).
+4. Up to `IMAGE_TRIES` (3) attempts, under a `PROBE_TOTAL_MS` (30 s) wall clock.
+
+### Three things here are load-bearing and non-obvious
+
+- **A diagnostic that times out means SLOW, never dead.** This was measured wrong first: with a 4 s
+  diagnostic against an 8 s server, the ranged request timed out and the picture was declared dead
+  — the exact case the design existed to rescue. `DIAG_MS` is now 10 s, and only an explicit
+  `onerror` (a refused connection) is fatal. `ontimeout` yields `unknown`, which keeps waiting.
+  Test case B in `test-pages/failure-and-timeout.html` is that regression.
+- **`unknown` also covers "GM_xhr never worked here".** If the grant is missing or a permission
+  dialog is pending, every request answers nothing — and reading that as death would fail every
+  picture on the page in three seconds. `gmXhrWorks` is set by the first response of any kind, and
+  nothing is called dead before it is true.
+- **An error arrives in milliseconds, before the liveness deadline can fire.** So a 404 would spend
+  all three attempts un-diagnosed. `probeImage()` diagnoses after an error too, before deciding to
+  try again.
+
+### A user gesture always retries · `probe(url, fresh)`
+
+A hover is a gesture, so `onOver` sets `token.fresh` and a **settled** miss is evicted — the URL,
+its diagnosis, and its cached verdict. A probe still in flight is never evicted (that would double
+the request). `PROBE_RETRY_MS` stays as the automatic path for everything that is not a gesture.
+
+## What a failed picture shows · `E53` · v0.88.0
+
+Nothing loaded **and something actually failed**: the frame shows the page's own picture with the
+reason on the caption's meta line — `JPEG · 200 × 150 · 4 KB · not found (404)`.
+
+**The condition is narrower than `TOUR.md` §8 asks for, deliberately.** §8 says "never blank, never
+skipped", but that is written for a tour, where an entry the user is stepping through must exist
+even when it is broken. On an ordinary hover the same rule would pop a blurry thumbnail over every
+picture on the page that simply has no bigger version — which is the size gate working, not a
+failure. So `resolve()` sets `token.failure` only when a candidate was *probed and failed*, never
+when candidates were merely rejected for being too small or the wrong shape. Restore the wider
+behaviour when the tour is built, gated on tour mode.
+
+`view.reason` carries the text; `upgradeViewer()` clears it, because an upgrade landing means the
+failure has been superseded.
