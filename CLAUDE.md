@@ -75,6 +75,14 @@ has already been misdiagnosed once. (The shared ones — `innerHTML` on Trusted-
   are capture listeners on the box, so they eat a child's events first. The symptom is silence,
   and `node --check` passes. See the section below. (Anything inside `vctlEl` is already covered
   by the whole-subtree exemption; a new button in the **bar** is not — ↻ had to be added by hand.)
+- **An element from a FETCHED page resolves its URLs against that page, not this one.** Anything
+  reading a relative attribute off an element must go through `baseOf(el)`, which reads the
+  `__hzBase` the tour's harvest stamps on it. `DOMParser` also gives the parsed document *this*
+  document's base URI, so `fetchDoc()` injects a `<base>` before anything reads `img.src` or
+  `a.href`. Get it wrong and every harvested URL is plausible, wrong, and 404s.
+- **A test fixture that builds its own markup in a `<script>` is fetched EMPTY.** `DOMParser` does
+  not run scripts, so anything the cross-page walk has to read must be static HTML —
+  `test-pages/pager-*.html` are four files rather than one for exactly this reason.
 - **A new reason in the status bar must invalidate the caption.** `caption()` rebuilds only when
   the URL or the measured size changes, and a tour swaps between entries that share both. Call
   `resetCaption()`. The symptom is a stale sentence over a picture it does not describe.
@@ -206,9 +214,9 @@ static catches it — `node --check` passes and the markup is fine.
 
 ```bash
 node --check Hover-Zoom.user.js     # syntax
-node test-resolver.js               # 213 assertions: the pure URL and video-link logic, plus
-                                    # the banner gate's shape test against every measured page
-                                    # in banner-test-sites.md
+node test-resolver.js               # 271 assertions: the pure URL and video-link logic, the
+                                    # banner gate's shape test against every measured page in
+                                    # banner-test-sites.md, and the tour's next-page detector
 python make-test-images.py          # regenerate fixtures into test-images/
 ```
 

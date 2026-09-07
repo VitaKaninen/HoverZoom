@@ -1,0 +1,86 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Paged gallery — page 2 of 4</title>
+<!--
+  The fixture for TOUR.md §10, in FOUR STATIC FILES rather than one script-built page.
+  That is not a style choice: the tour reaches page 2 with fetch() + DOMParser, which does
+  not run scripts, so a fixture that builds its own markup would be fetched empty and prove
+  nothing. Real pages serve their markup; so does this.
+
+  Each page offers its "next" by a DIFFERENT rung of nextPageIn(), so one walk exercises all
+  three:
+
+    pager-1  <a rel="next">              the declared rung
+    pager-2  a numbered pager, 1 2 3 4   the number-after-this-one rung
+    pager-3  "Older posts →"              the forward-word rung
+    pager-4  nothing forward at all      exhausted; the tour ends there
+
+  Page 3 also carries the decoys the detector must refuse: "Newer posts" (backward), "Top"
+  and "Best" (sort controls, not direction), and an off-site "next".
+
+  Every tile is a distinct ?n= URL, and every href here is RELATIVE on purpose: resolving a
+  harvested page's links against the page you are standing on instead of the page they came
+  from gives the wrong URL every time, which is what `__hzBase` exists to prevent.
+
+  The 12×12 logo is under minDisplayed (16) by its own attributes, which is the only size gate
+  a fetched page can offer: it has no layout, so nothing can be measured. It must never enter
+  the tour, on page 1 by the ordinary gate and on pages 2-4 by harvestFrom().
+-->
+<style>
+  body { margin: 0; background: #11111b; color: #cdd6f4; font: 14px system-ui, sans-serif; }
+  h1 { padding: 16px; margin: 0; font-size: 16px; }
+  .grid { display: grid; grid-template-columns: repeat(3, 200px); gap: 14px; padding: 0 16px; }
+  .grid figure { margin: 0; }
+  .grid img { display: block; width: 200px; height: 150px; }
+  .grid figcaption { padding: 4px 0; font-size: 11px; color: #7f849c; }
+  nav { padding: 20px 16px; display: flex; gap: 14px; align-items: center; }
+  nav a { color: #89b4fa; }
+</style>
+
+<h1>Paged gallery — page 2 of 4</h1>
+<img src="../test-images/icon.png" width="12" height="12" alt="site logo">
+<div class="grid">
+  <figure>
+    <a href="../test-images/photo.jpg?n=7"><img src="../test-images/photo-200x150.jpg?n=7" alt="tile 7"></a>
+    <figcaption>p2 tile 7</figcaption>
+  </figure>
+  <figure>
+    <a href="../test-images/photo.jpg?n=8"><img src="../test-images/photo-200x150.jpg?n=8" alt="tile 8"></a>
+    <figcaption>p2 tile 8</figcaption>
+  </figure>
+  <figure>
+    <a href="../test-images/photo.jpg?n=9"><img src="../test-images/photo-200x150.jpg?n=9" alt="tile 9"></a>
+    <figcaption>p2 tile 9</figcaption>
+  </figure>
+  <figure>
+    <a href="../test-images/photo.jpg?n=10"><img src="../test-images/photo-200x150.jpg?n=10" alt="tile 10"></a>
+    <figcaption>p2 tile 10</figcaption>
+  </figure>
+  <figure>
+    <a href="../test-images/photo.jpg?n=11"><img src="../test-images/photo-200x150.jpg?n=11" alt="tile 11"></a>
+    <figcaption>p2 tile 11</figcaption>
+  </figure>
+  <figure>
+    <a href="../test-images/photo.jpg?n=12"><img src="../test-images/photo-200x150.jpg?n=12" alt="tile 12"></a>
+    <figcaption>p2 tile 12</figcaption>
+  </figure>
+</div>
+<nav>
+  Pages: <a href="pager-1.html">1</a> <b>2</b> <a href="pager-3.html">3</a> <a href="pager-4.html">4</a>
+</nav>
+
+<script>
+  var GM_getValue = function (key, dflt) {
+    var v = localStorage.getItem(key);
+    return v === null ? dflt : v;
+  };
+  var GM_setValue = function (key, val) { localStorage.setItem(key, val); };
+  var GM_addValueChangeListener = function (key, fn) {
+    window.addEventListener('storage', function (e) {
+      if (e.key === key) fn(key, e.oldValue, e.newValue, true);
+    });
+  };
+  var GM_registerMenuCommand = function () { return 'x'; };
+  var GM_unregisterMenuCommand = function () {};
+</script>
+<script src="../Hover-Zoom.user.js"></script>

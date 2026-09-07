@@ -457,6 +457,7 @@ inert.
 | `T33` | `S25` | Reach a picture that will not resolve | `S25` showing the page's own thumbnail with the reason in the bar, and ↻ to ask again (`E56`) |
 | `T34` | `S25` fullscreen | `f`, or the button, after stepping | `S25` windowed, fitted to the picture now in the frame and holding the bottom-right corner — not the zoom and top-left of the picture that went in (`E57`) |
 | `T35` | `S25` | Get within 10 of the end of the list, or press ▶ at the end | The page is scrolled to the bottom and straight back, so a lazy feed loads its next batch; the counter grows and the tour carries on. You never see it move. Once an excursion returns nothing, it stops trying (`E58`) |
+| `T36` | `S25` | Reach the end of a page that will not load any more | The **next page** is fetched and parsed in the background and its pictures join the list — the document is never navigated, so the window and the script survive. It stops when nothing on the page says which way is forward (`E59`) |
 | `T25` | — | *Retired in v0.34.0.* Moving the window used to freeze its size as a ceiling; it no longer touches the size at all (`E22`) |
 
 ---
@@ -566,6 +567,8 @@ this table is a table.
 
 | `E58` | A lazy page is made to load more by a real scroll to the bottom and straight back — an IntersectionObserver sentinel cannot be spoofed. It works through fullscreen's `overflow:hidden`, and it stops for good once one attempt returns nothing | [`docs/TOUR.md`](docs/TOUR.md) |
 
+| `E59` | Which link is forward is decided by three rungs — a declared `rel=next`, the hole in a numbered pager's range, then a forward word — and **ambiguity is refused, never guessed**. A harvested entry is a detached element carrying the page it came from, so its relative URLs resolve against that page and not against this one | [`docs/TOUR.md`](docs/TOUR.md) |
+
 `E3` is retired with the detached state (v0.28.0); `E4` and `E5` are retired as dangling.
 
 ---
@@ -593,7 +596,7 @@ this table is a table.
 | Grab-band clearance (`E37`) | `grabBand`, `grabInset`, `btnGutter`, `barMinW`, `layoutChrome`, `pointerOverControl` |
 | Zoom cluster (`S20`, `S21`, `E34`) | `buildZoomControl`, `syncZoom`, `openZoomField`, `closeZoomField`, `zoomAnchored`, `ZOOM_BANDS`/`walkStops`/`fitStops`/`zoomStops`/`zoomIndex`, `zoomLo`/`noBarsScale`/`zoomHi`, `parseZoom`, `commitZoomField`, `capOwns`, `minFrameW` |
 | Upgrades (`S06`, `S15`) | `resolve`, `upgradeViewer` |
-| The tour (`S25`, `S26`, `T29`–`T35`, `E54`–`E58`) | `tourEntries`/`tourOrder`/`tourSize`, `tourAt`/`tourTarget`/`tourBefore`, `tourNav`/`tourShow`/`tourFallback`, `tourStart`/`tourEnd`/`tourSync`/`tourChrome`, `tourRelocate`, `tourOwnsArrows`, `swapViewer`, `navShown`/`navW`/`stripUp`, `minFrameH`, `retryShown`, `tourExcursion`/`tourGrow`, `plFill`/`plRun`/`plPump`/`plReserve`, `noRushHosts`/`hardBlock` — see [`docs/TOUR.md`](docs/TOUR.md) |
+| The tour (`S25`, `S26`, `T29`–`T36`, `E54`–`E59`) | `tourEntries`/`tourOrder`/`tourSize`, `tourAt`/`tourTarget`/`tourBefore`, `tourNav`/`tourShow`/`tourFallback`, `tourStart`/`tourEnd`/`tourSync`/`tourChrome`, `tourRelocate`, `tourOwnsArrows`, `swapViewer`, `navShown`/`navW`/`stripUp`, `minFrameH`, `retryShown`, `tourExcursion`/`tourGrow`, `plFill`/`plRun`/`plPump`/`plReserve`, `noRushHosts`/`hardBlock`, `nextPageIn`/`pageNumOf`/`fetchDoc`/`rebase`/`harvestFrom`/`tourCross`, `baseOf` — see [`docs/TOUR.md`](docs/TOUR.md) |
 
 Function names are used rather than line numbers, which rot.
 

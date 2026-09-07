@@ -1,11 +1,10 @@
 # The tour — next/previous navigation through a page's pictures
 
-**Status: §0-§9 and §11 are BUILT (v0.96.0-v0.98.0); §7 was built earlier (v0.88.0-v0.89.0).** What is
-left is §10 (cross-page harvesting).
-Sections that are built are kept because the reasoning still explains the shape; where the build
-departed from the plan the section says so.
+**Status: BUILT, v0.96.0-v0.99.0** (§7 earlier, in v0.88.0-v0.89.0). Every section of this plan
+is now code. It is kept as the reasoning behind the shape, not as a to-do list; where the build
+departed from the plan the section says so, and §15 lists what is still only a guess.
 
-The live account of what the code does is `INTERACTION.md` `S25`, `S26`, `T29`-`T35`, `E54`-`E58`.
+The live account of what the code does is `INTERACTION.md` `S25`, `S26`, `T29`-`T36`, `E54`-`E59`.
 
 A *tour* is next/previous navigation through every picture on the page, driven from a pinned
 preview window. The window stays put; the page does not move; each step swaps a different picture
@@ -612,7 +611,46 @@ values — restore them for the excursion and re-apply after.
 
 ---
 
-## 10. Crossing to the next page
+## 10. Crossing to the next page — BUILT, v0.99.0
+
+Verified end to end on `test-pages/pager-1.html`: a tour of 6 grew to 12, 18 and 24 as pages 2, 3
+and 4 were fetched and harvested, every harvested tile resolving to its own original through a
+**relative** ancestor link, and stopping dead at page 4 because its only pager link points
+backward. The detector is asserted offline as well — 20 assertions in `test-resolver.js`, which
+matters because a wrong answer here is silent: the tour simply walks into the wrong pages.
+
+**What the build settled, beyond the plan:**
+
+- **The page number usually is not in the URL, so it is read off the pager instead.** The plan
+  reached for `derivePageTemplate()`/`pagerInfo()`, which need the URL to carry a number. Most
+  pagers do not — `pager-2.html`, `/gallery/two/`. The rung that actually works is the pager's own
+  shape: **the number inside its range that is not a link is the page you are standing on**, and
+  the link after it is next. A pager linking every page including this one is refused.
+- **No page template is needed at all.** `derivePageTemplate()` exists so you can jump to page 100
+  without fetching 99. A tour walks sequentially, so each fetched page simply yields its own next
+  link and the machinery is unnecessary.
+- **The base URL travels on the element**, as `__hzBase`, rather than through a parameter. Four
+  call sites would have needed a new argument otherwise, and an argument can be forgotten at any
+  one of them; a property stamped at harvest time cannot get out of sync with the element it
+  belongs to. `collectCandidates` and `linkedMedia` read it through `baseOf(el)`.
+- **`fetchDoc()` also injects a `<base>`**, because `DOMParser` hands the parsed document *this*
+  document's base URI and `img.src`/`a.href` are resolved properties. A page's own `<base>` is
+  kept, made absolute first.
+- **The harvest can apply almost none of the gates**, and this is inherent rather than an
+  oversight: a fetched document has no layout, so the banner shape, the wallpaper tests and the
+  peer walk have nothing to read. What survives is the block list, the page's own decoration flags
+  (`aria-hidden`, `role="presentation"`), and declared `width`/`height` against `minDisplayed`.
+  A listing page's chrome images that declare no size do get in. They are stepped past, never
+  dropped — §1's rule holds on fetched pages too.
+- **A tour entry is still always an element**, just sometimes a detached one. The plan expected
+  "a live DOM element or a bare URL"; keeping the parsed `<img>` means `collectCandidates` runs
+  unchanged and a harvested thumbnail gets the whole upgrade chain — ancestor link, `srcset`,
+  `data-src` — rather than only its own URL. `nativeSize()` returns null for it (nothing decoded),
+  which `sameShape()` already treats as "unknown: do not judge", so the stability test simply
+  stands down. The one thing that genuinely cannot work is `sizeOf()`, and `tourFallback()` probes
+  for the size instead when it needs one.
+
+### The reasoning, kept
 
 **Never navigate the document.** That destroys the pinned window and, on a non-SPA site, the whole
 script instance.
@@ -691,7 +729,7 @@ probably constants rather than settings unless testing says otherwise.
 5. ~~Failure display and the Retry button (§8)~~ — **done: display v0.88.0, the widened trigger and
    ↻ v0.96.0.**
 6. ~~Scroll excursion and load-more (§9).~~ - **done, v0.98.0.**
-7. Cross-page harvesting (§10).
+7. ~~Cross-page harvesting (§10).~~ - **done, v0.99.0.**
 
 Version bump and commit at each step, per `../../CLAUDE.md`.
 

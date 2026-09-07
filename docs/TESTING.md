@@ -79,6 +79,16 @@ ancestor-link candidate ever comes back missing on a shadow-DOM site.
   distinct `?n=` URL so the counter and the preload buffer cannot be confused by the fixtures
   sharing one file. A batch is deliberately taller than the viewport, or the sentinel never
   leaves the fold and the page loads everything at once, testing nothing.
+- **`test-pages/pager-1.html` … `pager-4.html` are the cross-page fixture** (v0.99.0), and they
+  are **four static files rather than one script-built page on purpose**: the tour reaches page 2
+  with `fetch()` + `DOMParser`, which does not run scripts, so a fixture that builds its own
+  markup is fetched empty and proves nothing. Cost one rewrite. Each page offers its "next" by a
+  different rung of `nextPageIn()` — declared `rel=next`, a numbered pager, then a forward word —
+  so one walk exercises all three, and page 3 carries the decoys that must be refused (a backward
+  link, two sort controls, an off-site "next"). Every href in them is **relative on purpose**:
+  resolving a harvested page's links against the page you are standing on gives a plausible wrong
+  URL every time, which is what `__hzBase` exists to prevent. The 12×12 logo is under
+  `minDisplayed` by its own attributes — the only size gate a page with no layout can offer.
 - **`test-server.py`, not `python -m http.server`.** It is the same static server plus
   `?slow=<seconds>`, which stalls that one response. Nothing else can reproduce the symptom that
   motivated the resolve spinner: against localhost every probe finishes in single-digit ms, so

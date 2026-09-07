@@ -709,5 +709,141 @@ eq('header names match case-insensitively',
 eq('no size header at all is zero, so the floor applies',
     sizeFromHeaders('content-type: image/png' + CRLF, 200), 0);
 
+// ---- the cross-page walk. A wrong answer here is silent: the tour simply walks into the wrong
+// pages. nextPageIn() reads only anchors, so it slices out and runs against plain objects with
+// no DOM at all. See TOUR.md §10.
+const npStart = src.indexOf('    const NEXT_WORDS');
+const npEnd = src.indexOf('    // DOMParser gives');
+if (npStart < 0 || npEnd < 0) { console.error('nextPageIn markers not found'); process.exit(1); }
+const nextPage = new Function('location', 'looksLikeImage', 'isVideoUrl',
+    src.slice(npStart, npEnd) + NL + 'return {nextPageIn, pageNumOf};')(
+    { href: 'https://ex.com/g/pager-2.html', origin: 'https://ex.com' },
+    looksLikeImage, isVideoUrl);
+const { nextPageIn, pageNumOf } = nextPage;
+
+// A stand-in for the two selectors nextPageIn() actually asks for.
+function pagerDoc(links) {
+    const nodes = links.map(function (l) {
+        return {
+            tagName: (l.tag || 'a').toUpperCase(),
+            textContent: l.text === undefined ? '' : l.text,
+            getAttribute: function (k) {
+                if (k === 'href') return l.href;
+                if (k === 'rel') return l.rel || null;
+                if (k === 'aria-label') return l.aria || null;
+                if (k === 'title') return l.title || null;
+                return null;
+            },
+        };
+    });
+    return {
+        querySelectorAll: function (sel) {
+            if (sel.indexOf('rel~="next"') !== -1) {
+                return nodes.filter(function (n) {
+                    return /(^|\s)next(\s|$)/i.test(n.getAttribute('rel') || '');
+                });
+            }
+            return nodes.filter(function (n) { return n.tagName === 'A'; });
+        },
+    };
+}
+
+const HERE = 'https://ex.com/g/pager-2.html';
+
+eq('a declared rel=next wins outright',
+    nextPageIn(pagerDoc([
+        { href: 'pager-3.html', text: 'continue', rel: 'next' },
+        { href: 'pager-1.html', text: 'Newer' },
+    ]), HERE), 'https://ex.com/g/pager-3.html');
+
+eq('two rel=next links pointing at the same page are not ambiguous',
+    nextPageIn(pagerDoc([
+        { href: 'pager-3.html', text: 'next', rel: 'next' },
+        { href: 'pager-3.html', text: 'next', rel: 'next' },
+    ]), HERE), 'https://ex.com/g/pager-3.html');
+
+eq('two rel=next links disagreeing are refused, not guessed',
+    nextPageIn(pagerDoc([
+        { href: 'pager-3.html', text: 'next', rel: 'next' },
+        { href: 'other.html', text: 'next', rel: 'next' },
+    ]), HERE), null);
+
+// The pager's own shape says which page we are on: the hole in its range. Most pagers put the
+// number nowhere a regex can find it, which is why this rung exists at all.
+eq('a numbered pager with one hole gives the link after the hole',
+    nextPageIn(pagerDoc([
+        { href: 'pager-1.html', text: '1' },
+        { href: 'pager-3.html', text: '3' },
+        { href: 'pager-4.html', text: '4' },
+    ]), HERE), 'https://ex.com/g/pager-3.html');
+
+eq('a pager that starts above 1 means we are on page 1',
+    nextPageIn(pagerDoc([
+        { href: 'p2.html', text: '2' },
+        { href: 'p3.html', text: '3' },
+    ]), 'https://ex.com/g/'), 'https://ex.com/g/p2.html');
+
+eq('a pager linking every page including this one is refused',
+    nextPageIn(pagerDoc([
+        { href: 'p1.html', text: '1' },
+        { href: 'p2.html', text: '2' },
+        { href: 'p3.html', text: '3' },
+    ]), 'https://ex.com/g/'), null);
+
+eq('the URL says which page we are on when it can',
+    nextPageIn(pagerDoc([
+        { href: '?page=1', text: '1' },
+        { href: '?page=2', text: '2' },
+        { href: '?page=3', text: '3' },
+    ]), 'https://ex.com/g/?page=2'), 'https://ex.com/g/?page=3');
+
+eq('older is forward and newer is backward',
+    nextPageIn(pagerDoc([
+        { href: 'newer.html', text: 'Newer posts' },
+        { href: 'older.html', text: 'Older posts →' },
+    ]), HERE), 'https://ex.com/g/older.html');
+
+eq('sort controls are not a direction',
+    nextPageIn(pagerDoc([
+        { href: '?sort=top', text: 'Top' },
+        { href: '?sort=best', text: 'Best' },
+        { href: '?sort=new', text: 'New' },
+    ]), HERE), null);
+
+eq('an off-site next is refused',
+    nextPageIn(pagerDoc([{ href: 'https://elsewhere.example/next', text: 'next' }]), HERE), null);
+
+eq('a link to an image is not a page',
+    nextPageIn(pagerDoc([{ href: 'photo-2.jpg', text: 'next' }]), HERE), null);
+
+eq('a link back to this very page is refused',
+    nextPageIn(pagerDoc([{ href: 'pager-2.html', text: 'next' }]), HERE), null);
+
+eq('a paragraph mentioning next is not a pager control',
+    nextPageIn(pagerDoc([{ href: 'x.html',
+        text: 'Read the next instalment of our long running series here' }]), HERE), null);
+
+eq('two different forward-worded links are refused',
+    nextPageIn(pagerDoc([
+        { href: 'a.html', text: 'Next' },
+        { href: 'b.html', text: 'More' },
+    ]), HERE), null);
+
+eq('the same forward link twice, top and bottom of the page, is not ambiguous',
+    nextPageIn(pagerDoc([
+        { href: 'a.html', text: 'Next »' },
+        { href: 'a.html', text: 'Next »' },
+    ]), HERE), 'https://ex.com/g/a.html');
+
+eq('aria-label carries the direction when the text is an arrow glyph',
+    nextPageIn(pagerDoc([{ href: 'a.html', text: '›', aria: 'Next page' }]), HERE),
+    'https://ex.com/g/a.html');
+
+eq('pageNumOf reads a query page number', pageNumOf(new URL('https://ex.com/g/?page=7')), 7);
+eq('pageNumOf reads a /page/N path', pageNumOf(new URL('https://ex.com/g/page/7/')), 7);
+eq('pageNumOf reads a /pN path', pageNumOf(new URL('https://ex.com/g/p7')), 7);
+eq('pageNumOf refuses a bare filename number',
+    pageNumOf(new URL('https://ex.com/g/pager-2.html')), 0);
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

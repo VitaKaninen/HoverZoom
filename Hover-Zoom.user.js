@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.98.0
+// @version     0.99.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -700,13 +700,20 @@
     const SRCSET_KEEP = 2;      // per list: the widest, and one behind it in case that 404s. See E46.
 
     // Ordered best-first list of candidates worth trying for this element, each as `{ url, from, keep }`.
+    // An element harvested from a FETCHED page carries the page it came from, and every relative
+    // URL on it resolves against that rather than against this document. See TOUR.md §10.
+    function baseOf(el) {
+        return (el && el.__hzBase) || location.href;
+    }
+
     function collectCandidates(el) {
         const seen = new Map();
         const out = [];
+        const at = baseOf(el);
         const add = function (u, from, keep) {
             if (!u) return;
             let abs;
-            try { abs = new URL(u, location.href).href; } catch (e) { return; }
+            try { abs = new URL(u, at).href; } catch (e) { return; }
             if (abs.startsWith('data:') || abs.startsWith('blob:')) return;
             if (blocked(abs)) return;       // never probe something the user has ruled out
             if (unstable.has(abs)) return;  // it has already been caught changing under us
@@ -1265,12 +1272,13 @@
         const a = closestAcross(el, 'a[href]');
         const href = a && a.getAttribute('href');
         if (!href) return Promise.resolve(null);
+        const at = baseOf(el);
         let u;
-        try { u = new URL(href, location.href); } catch (e) { return Promise.resolve(null); }
+        try { u = new URL(href, at); } catch (e) { return Promise.resolve(null); }
         if (!/^https?:$/.test(u.protocol)) return Promise.resolve(null);
         if (u.origin !== location.origin) return Promise.resolve(null);
         u.hash = '';
-        if (u.href === location.href.split('#')[0]) return Promise.resolve(null);   // this page
+        if (u.href === at.split('#')[0]) return Promise.resolve(null);   // the page it is on
         if (looksLikeImage(u.href) || isVideoUrl(u.href)) return Promise.resolve(null);
         if (pageCache.has(u.href)) return pageCache.get(u.href);
         const p = fetchPageMedia(u);
@@ -4740,7 +4748,10 @@
             items.push({ el: el, url: shownUrl(el), x: r.left + sx, y: r.top + sy,
                 h: r.height, n: items.length });
         }
-        return tourOrder(items);
+        const live = tourOrder(items);
+        // Pages fetched from the pager come after everything this document holds, in the order
+        // they were harvested — they have no document coordinates to be sorted by. See §10.
+        return harvest.length ? live.concat(harvest) : live;
     }
 
     // Where the anchor sits in a freshly derived list: element identity, then URL. Never an
@@ -4815,6 +4826,7 @@
         scrubTimer = 0;
         tour = null;
         plReset();
+        crossReset();
         excSpent = false;       // a fresh tour asks the page again; it may have grown since
     }
 
@@ -4914,7 +4926,7 @@
         if (myToken.cancelled || !tour || tour.el !== el || !view) return;
         plDone.set(el, { res: hit, displayed: displayed });
         if (hit) swapViewer(hit);
-        else tourFallback(el, displayed, myToken.failure);
+        else await tourFallback(el, displayed, myToken.failure);
     }
 
     // A preload measured against a stale rect would have applied the size gate to the wrong
@@ -4927,12 +4939,20 @@
     // resolve shows the page's own picture with the reason. Unlike an ordinary hover this fires
     // for a candidate merely rejected as too small as well — inside a tour the entry has to
     // exist. See TOUR.md §8.
-    function tourFallback(el, displayed, why) {
+    async function tourFallback(el, displayed, why) {
         const url = shownUrl(el);
-        const n = url ? nativeSize(el) : null;
-        const w = (n && n.w) || displayed.w;
-        const h = (n && n.h) || displayed.h;
-        if (!url || blocked(url) || !w || !h) return;
+        if (!url || blocked(url)) return;
+        const n = nativeSize(el);
+        let w = (n && n.w) || displayed.w;
+        let h = (n && n.h) || displayed.h;
+        if (!w || !h) {
+            // An entry harvested from a fetched page has no layout and nothing decoded, so its
+            // own size is not known until something measures it. See TOUR.md §10.
+            const dim = await probe(url, false);
+            if (!dim || !tour || tour.el !== el || !view) return;
+            w = dim.w;
+            h = dim.h;
+        }
         const reason = why || 'no larger version found';
         dbg('tour: showing the page\'s own picture — ' + reason, url);
         swapViewer({ url: url, w: w, h: h, reason: reason });
@@ -4990,10 +5010,202 @@
         return grew;
     }
 
+    // ---- crossing to the next page
+    //
+    // The document is NEVER navigated: that destroys the pinned window and, on a non-SPA site,
+    // the script instance with it. The next page is fetched and parsed instead, which this script
+    // already does for a linked page — it was only ever pointed at one page at a time.
+    // See TOUR.md §10.
+
+    // "Older" is forward in a blog pager; "newer" is backward. Sort controls — new, best, hot,
+    // top — are deliberately absent: they are not direction, and a wrong answer here walks the
+    // tour into the wrong pages in silence.
+    const NEXT_WORDS = /(^|\W)(next|older|forward|more)(\W|$)|»|›|→|>>/i;
+    const BACK_WORDS = /(^|\W)(prev|previous|newer|back|earlier|first)(\W|$)|«|‹|←|<</i;
+    const LABEL_MAX = 40;       // longer than this is prose, not a pager control
+
+    function pageNumOf(u) {
+        const m = /[?&](?:page|p|pg|paged|pagenum|start)=(\d+)/i.exec(u.search) ||
+                  /\/(?:page|p)\/(\d+)(?:\/|$)/i.exec(u.pathname) ||
+                  /\/(?:page|p)(\d+)(?:\/|$)/i.exec(u.pathname);
+        return m ? parseInt(m[1], 10) : 0;
+    }
+
+    // Directional, and it REFUSES ambiguity rather than guessing. Three rungs, best first; a rung
+    // offering two different destinations is discarded whole and the next one is tried.
+    function nextPageIn(root, base) {
+        const only = function (urls) { return urls.length === 1 ? urls[0] : null; };
+        const here = String(base).split('#')[0];
+        const abs = function (n) {
+            const href = n.getAttribute('href');
+            if (!href) return null;
+            let u;
+            try { u = new URL(href, base); } catch (e) { return null; }
+            if (!/^https?:$/.test(u.protocol)) return null;
+            if (u.origin !== location.origin) return null;      // same site only
+            u.hash = '';
+            if (u.href === here) return null;
+            if (looksLikeImage(u.href) || isVideoUrl(u.href)) return null;
+            return u.href;
+        };
+        const gather = function (nodes, ok) {
+            const urls = [];
+            [].forEach.call(nodes, function (n) {
+                if (ok && !ok(n)) return;
+                const u = abs(n);
+                if (u && urls.indexOf(u) === -1) urls.push(u);
+            });
+            return urls;
+        };
+
+        // 1. Declared by the page. Unambiguous by construction.
+        const declared = only(gather(
+            root.querySelectorAll('link[rel~="next" i][href],a[rel~="next" i][href]')));
+        if (declared) return declared;
+
+        const anchors = root.querySelectorAll('a[href]');
+
+        // 2. A numbered pager. Which page we are ON comes from the URL where it says so — and
+        //    otherwise from the pager's own shape, because most pagers do not put the number
+        //    anywhere a regex can find it (`pager-2.html`, `/gallery/two/`). The number inside
+        //    the pager's range that is NOT a link is the page you are standing on.
+        const byNum = new Map();
+        const clashed = new Set();
+        [].forEach.call(anchors, function (a) {
+            const t = (a.textContent || '').trim();
+            if (!/^\d{1,4}$/.test(t)) return;
+            const u = abs(a);
+            if (!u) return;
+            const n = parseInt(t, 10);
+            if (byNum.has(n)) { if (byNum.get(n) !== u) clashed.add(n); }   // two pagers agree: fine
+            else byNum.set(n, u);
+        });
+        const numbered = function (n) {
+            return (!clashed.has(n) && byNum.get(n)) || null;
+        };
+        let cur = 0;
+        try { cur = pageNumOf(new URL(base)); } catch (e) { cur = 0; }
+        if (cur && numbered(cur + 1)) return numbered(cur + 1);
+        if (byNum.size >= 2) {
+            const ns = Array.from(byNum.keys()).sort(function (a, b) { return a - b; });
+            const gaps = [];
+            for (let k = ns[0]; k <= ns[ns.length - 1]; k++) if (!byNum.has(k)) gaps.push(k);
+            // Exactly one hole: that is here, and the link after it is next.
+            if (gaps.length === 1 && numbered(gaps[0] + 1)) return numbered(gaps[0] + 1);
+            // No hole and the run starts above 1: page 1 links every other page but not itself.
+            if (!gaps.length && ns[0] > 1 && numbered(ns[0])) return numbered(ns[0]);
+        }
+
+        // 3. A forward word, with nothing backward in the same label.
+        return only(gather(anchors, function (a) {
+            const label = ((a.textContent || '') + ' ' + (a.getAttribute('aria-label') || '') +
+                ' ' + (a.getAttribute('title') || '')).trim();
+            if (!label || label.length > LABEL_MAX) return false;
+            return NEXT_WORDS.test(label) && !BACK_WORDS.test(label);
+        }));
+    }
+
+    // DOMParser gives the parsed document THIS document's base URI, so every relative URL in it
+    // would resolve against the wrong page. A page's own <base> is kept, made absolute first.
+    function rebase(doc, href) {
+        const head = doc.head || doc.documentElement;
+        if (!head) return;
+        const own = doc.querySelector('base[href]');
+        if (own) {
+            try { own.setAttribute('href', new URL(own.getAttribute('href'), href).href); }
+            catch (e) { /* unparseable; the injected one below is not reached */ }
+            return;
+        }
+        const b = doc.createElement('base');
+        b.setAttribute('href', href);
+        head.insertBefore(b, head.firstChild);
+    }
+
+    async function fetchDoc(href) {
+        try {
+            const res = await fetch(href, { credentials: 'same-origin', redirect: 'follow' });
+            if (!res.ok) return null;
+            if (!/text\/html|application\/xhtml/i.test(res.headers.get('content-type') || '')) return null;
+            const doc = new DOMParser().parseFromString(await res.text(), 'text/html');
+            rebase(doc, href);
+            return doc;
+        } catch (e) {
+            return null;                        // offline, blocked, CSP, aborted
+        }
+    }
+
+    // A fetched document has NO LAYOUT, so most of the eligibility gates cannot run: banner shape,
+    // the wallpaper tests and the peer walk all read rects. What survives is what the markup says
+    // on its own — the block list, the page's own decoration flags, and declared width/height.
+    // Everything else is settled by the probe when the entry is reached.
+    function harvestFrom(doc, href, page) {
+        const out = [], seen = new Set();
+        doc.querySelectorAll('img,video').forEach(function (n) {
+            if (n.tagName === 'VIDEO' && !videoPreviewsOn()) return;
+            if (cfg.skipFurniture && decorativeReason(n)) return;
+            n.__hzBase = href;
+            const u = shownUrl(n);
+            if (!u || seen.has(u) || blocked(u)) return;
+            if (u.indexOf('data:') === 0 || u.indexOf('blob:') === 0) return;
+            const w = parseInt(n.getAttribute('width') || '0', 10) || 0;
+            const h = parseInt(n.getAttribute('height') || '0', 10) || 0;
+            if ((w || h) && w < cfg.minDisplayed && h < cfg.minDisplayed) return;
+            seen.add(u);
+            out.push({ el: n, url: u, x: 0, y: 0, h: 0, n: out.length, page: page });
+        });
+        return out;
+    }
+
+    // Harvested entries, appended to the list after everything the live document holds. This IS
+    // kept between presses — but nothing in the DOM can invalidate it, because none of it came
+    // from the DOM.
+    let harvest = [];
+    let crossNext = null, crossBusy = false, crossSpent = false, crossPage = 1;
+
+    async function tourCross() {
+        if (crossBusy || crossSpent || !cfg.tourCrossPage) return false;
+        crossBusy = true;
+        try {
+            const href = crossNext || nextPageIn(document, location.href);
+            if (!href) {
+                crossSpent = true;
+                dbg('no next page — nothing found that says which way is forward');
+                return false;
+            }
+            const doc = await fetchDoc(href);
+            if (!doc) { crossSpent = true; dbg('the next page could not be fetched', href); return false; }
+            crossPage++;
+            const got = harvestFrom(doc, href, crossPage);
+            crossNext = nextPageIn(doc, href);
+            if (!crossNext) crossSpent = true;
+            dbg('harvested the next page', { page: href, pictures: got.length,
+                total: harvest.length + got.length, then: crossNext || '(no further page)' });
+            if (!got.length) return false;
+            harvest = harvest.concat(got);
+            return true;
+        } finally {
+            crossBusy = false;
+        }
+    }
+
+    function crossReset() {
+        harvest = [];
+        crossNext = null;
+        crossSpent = false;
+        crossPage = 1;
+    }
+
+    // Scroll first, then the next page: a page that will load more in place is cheaper, and it
+    // keeps everything in one document where the layout gates still apply.
+    async function tourMore() {
+        if (await tourExcursion()) return true;
+        return await tourCross();
+    }
+
     // Fire and forget: the refill overlaps with pictures the user is still looking at rather
     // than stalling them at the wall.
     function tourGrow(dir, stepAfter) {
-        tourExcursion().then(function (grew) {
+        tourMore().then(function (grew) {
             if (!grew || !tour || !placed) return;
             const list = tourSync();
             tourChrome();
@@ -5800,6 +6012,9 @@
         check('tourLoadMore', 'Let a scrolling page load more',
             'Near the end, the page is scrolled to the bottom and straight back so it loads ' +
             'the next batch. You do not see it move.');
+        check('tourCrossPage', 'Carry on onto the next page',
+            'When the page runs out, the next one is fetched in the background and its ' +
+            'pictures join the list. The page you are on is never left.');
 
         section('Where it runs');
         pick('siteMode', 'Site list', null, [
