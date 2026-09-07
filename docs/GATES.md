@@ -259,6 +259,32 @@ untouched page. Before it, the same hover produced nothing; making the overlay
 `pointer-events:none` by hand was what proved the cover walk was the blocker rather than the
 resolver.
 
+### An invisible placeholder is not a picture · `shownMedia()` · v0.95.0
+
+The peer rule above still counted one thing it should not: a lazy-load placeholder **at the same
+size, in the same box**. Measured on Discord 2026-09-07, every attachment is two stacked `<img>`
+elements —
+
+    IMG.lazyImg            551×290 at (447,335)   natural 640×337   opacity 1
+    IMG.imagePlaceholder   550×309 at (447,335)   natural  32×18    opacity 0
+
+— so `peerMedia()` counted 2 genuine peers at every ancestor, the walk bailed, and **nothing on
+Discord previewed at all**: not images, not the gif embeds, which sit under the same cover.
+
+`shownMedia()` now excludes `visibility: hidden` and `opacity` at or near 0, in two places: peer
+counting, and the collection of candidates *under* the cover. The second matters as much as the
+first — without it the walk can return the 32×18 placeholder, and the size gate then rejects it,
+which looks exactly like a broken resolver.
+
+Both Discord cases verified after the change: an attachment previews at **1323×1059** (bigger than
+the 512×410 shown, because the signed URL keeps its `ex`/`is`/`hm` and loses only `width`/`height`),
+and a gif embed plays as a **501×282** clip.
+
+**The next rung, if a site ever needs it:** two media elements that are *co-located* — overlapping
+rectangles rather than side by side — are one picture rendered twice, whatever their opacity. Not
+built, because the opacity test settled every case measured so far and a wrong exclusion here is
+silent.
+
 Everything found under a cover then faces `eligibleDirect()` in its own right, so looking through a
 cover can never reach something a direct hover would have refused.
 
