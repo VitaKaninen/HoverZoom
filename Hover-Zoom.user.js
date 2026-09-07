@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.83.0
+// @version     0.84.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -429,7 +429,30 @@
         return touched ? u.href : null;
     }
 
+    // base64url, and only if it looks like one: a short or non-alphabet string is not worth atob().
+    function b64UrlDecode(s) {
+        if (!s || s.length < 16 || /[^A-Za-z0-9_-]/.test(s)) return null;
+        try {
+            let b = s.replace(/-/g, '+').replace(/_/g, '/');
+            while (b.length % 4) b += '=';
+            const out = atob(b);
+            return /^[\x20-\x7e]+$/.test(out) ? out : null;
+        } catch (e) { return null; }
+    }
+
     const UPGRADES = [
+        // A proxy carrying its source base64url-encoded in the path: imgproxy and everything
+        // shaped like it, Brave image search included. Self-validating — the segments either
+        // decode to an absolute URL or they do not, so this cannot match by accident. See E51.
+        function (u) {
+            const segs = u.pathname.split('/').filter(Boolean)
+                .filter(function (s) { return s.indexOf(':') === -1; });   // processing options
+            for (let i = 0; i < segs.length; i++) {
+                const dec = b64UrlDecode(segs.slice(i).join(''));
+                if (dec && /^https?:\/\/[^\s]+$/i.test(dec)) return dec;
+            }
+            return null;
+        },
         function (u) {
             const hit = imgurId(u);
             if (!hit) return null;

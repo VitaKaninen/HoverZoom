@@ -306,6 +306,20 @@ eq('a link with no query yields nothing',
 eq('a malformed href yields nothing rather than throwing',
     linkParamCandidates('::::not a url::::'), []);
 
+// ---- a source URL base64url-encoded in the path (E51)
+has('brave/imgproxy base64 path decodes to the source',
+    upgradeCandidates('https://imgs.search.brave.com/GTjfXXbCnK5MJOjQSivz5qLFeRU73hL_-ccBZb9zk2g/rs:fit:500:0:1:0/g:ce/aHR0cHM6Ly93d3cu/bHB6b28ub3JnL3dw/LWNvbnRlbnQvdXBs/b2Fkcy8yMDIyLzEy/L2ZfcnAuanBn'),
+    'https://www.lpzoo.org/wp-content/uploads/2022/12/f_rp.jpg');
+has('a decoded source keeps its own query for the later rules to chew on',
+    upgradeCandidates('https://imgs.search.brave.com/piBq5qA1HSHU1Ws444HaWlWykU7mldkRgWcFLCRR__Y/rs:fit:0:180:1:0/g:ce/aHR0cHM6Ly9mYXVu/YWZvY3VzLmNvbS93/cC1jb250ZW50L3Vw/bG9hZHMvMjAxNy8w/OS9jcm9wcGVkLTM1/NzYwNTQ4MjM0XzZl/OWU0MGNmZjRfby5q/cGc_dz03MDA'),
+    'https://faunafocus.com/wp-content/uploads/2017/09/cropped-35760548234_6e9e40cff4_o.jpg?w=700');
+eq('ordinary path segments do not decode to anything',
+    upgradeCandidates('https://cdn.example/photos/2024/january/holiday/beach.jpg')
+        .filter(u => /^https?:\/\//.test(u) && u.indexOf('cdn.example') === -1), []);
+eq('a long hex id is not mistaken for an encoded url',
+    upgradeCandidates('https://cdn.example/i/0a1b2c3d4e5f60718293a4b5c6d7e8f9')
+        .filter(u => u.indexOf('cdn.example') === -1), []);
+
 // ---- size parameters on an extensionless CDN path (E50)
 has('extensionless CDN id path drops w/h',
     upgradeCandidates('https://th.bing.com/th/id/OIP.XwOEWPBVs8clfI8jAokcPwHaLH?w=89&h=89&c=1&pid=InlineBlock'),
