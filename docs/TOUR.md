@@ -362,6 +362,11 @@ after 3–4 attempts. **Short timeout, several attempts** — not one long wait.
 - **Failure kind decides the schedule.** A 404/410 is definitive — one attempt, cache it. A timeout
   or network error is worth retrying. A 429 stops and marks the host no-rush. This needs the
   status, which means the GM_xhr diagnosis below.
+- **A CSP refusal is definitive and free.** `securitypolicyviolation` names the blocked URL and the
+  directive in ~1 ms, before any timeout and with no request spent. Never retry one, and never spend
+  the paid diagnostic on it — the answer is already in hand. It is also not per-URL but per-host-set:
+  once `img-src` has refused one off-site URL, every other off-site candidate on that page will be
+  refused too, so the whole candidate list can be cut at once. See `RESOLVER.md` `E49`.
 - **Tour retries are less aggressive but more numerous**: same 5s per attempt, ~6 attempts, backed
   off (2s, 4s, 8s), lowest priority. There is time, and nobody is waiting.
 
@@ -649,9 +654,34 @@ for most cross-origin images today. The ranged diagnostic in §7 could supply it
 ### Failures are a normal path, not an edge case
 
 **6 of 30 (20%)** originals failed to load on a live Google Images page — `preview.redd.it` ×3,
-`trvst.world` ×2, `media.istockphoto.com` ×1. Almost certainly hotlink/referer protection, which is
-what `noReferrerHere()` (`:217`) exists for. This validates §8: a tour hits broken pictures
+`trvst.world` ×2, `media.istockphoto.com` ×1. This validates §8: a tour hits broken pictures
 constantly and must handle them gracefully rather than treat them as exceptional.
+
+**The "almost certainly hotlink/referer protection" attribution was a guess, and it did not hold.**
+Re-run 2026-09-07 over 24 Google originals: 3 failed, and retrying each with
+`referrerPolicy = 'no-referrer'` rescued **0 of 3**. Do not build a referer-retry rung on this
+evidence. What the three actually were:
+
+- one **stall, not a failure** — a 7004×4672 image that passed 12 s untouched and then loaded in
+  3.4 s on an immediate retry. This is the §7 model's whole case in one measurement: the first
+  attempt was not wrong, it was too patient. Note a *cache-busted* retry of the same file took
+  7.2 s, so a flat 5 s per-attempt cap would still have missed it — the size-derived budget is what
+  saves it, not the retry count.
+- one **dead URL** (a MediaWiki `/thumb/` path with no `NNNpx-` segment — no such file).
+- one host that refused all three attempts.
+
+### Raising a size parameter is not safe; deleting it is
+
+`th.bing.com/th/id/OIP.<id>` answers `?w=3000&h=3000` with a real **3000×3000** decode of a file
+whose honest maximum is 474×315 — an upscale, and the size gate cannot tell it from detail. Dropping
+the parameters instead returned the true 474×315. The existing rule deletes rather than raises, which
+is correct; **do not "improve" it into raising one.**
+
+### Brave's base64 rule decodes correctly and then cannot load · see `RESOLVER.md` `E49`
+
+Brave sends `img-src 'self' blob: data: https://*.search.brave.com …`, so the `t4.ftcdn.net` original
+this section verified is refused by the page before it is ever probed. The decode below is right and
+still wanted; it is **blocked on the GM_xhr → `blob:` path**, not shippable on its own.
 
 ### Brave image search needs a URL rule, and one is available
 

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.78.0
+// @version     0.79.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -346,6 +346,14 @@
 
     const THUMB_PARAM = /(?:^|[_-])(?:thumb|thumbnail|tn|small|preview|icon|avatar)(?:$|[_-])/i;
 
+    // Has the ancestor link already named the original in its query? Then its page is not worth
+    // fetching: an internal result page answers og:image with the site's own share card. See E48.
+    function linkDeclaresMedia(el) {
+        const a = el.closest && el.closest('a[href]');
+        if (!a || !a.href || looksLikeImage(a.href)) return false;
+        return linkParamCandidates(a.href).length > 0;
+    }
+
     function linkParamCandidates(href) {
         const out = [];
         let u;
@@ -608,7 +616,10 @@
         if (a && a.href) {
             if (looksLikeImage(a.href) || (videoPreviewsOn() && isVideoUrl(a.href))) add(a.href, 'the ancestor link itself', true);
             else {
-                linkParamCandidates(a.href).forEach(adder('a url inside the ancestor link\'s query'));
+                // A declaration, not a guess, so it is kept out of the probe budget. See E48.
+                linkParamCandidates(a.href).forEach(function (u) {
+                    add(u, 'a url inside the ancestor link\'s query', true);
+                });
                 upgradeCandidates(a.href).forEach(function (u) {
                     if (looksLikeImage(u)) add(u, 'url rule on the ancestor link');
                 });
@@ -617,6 +628,8 @@
 
         // 4. rewrites of the displayed src
         const shown = shownUrl(el);
+        // An image proxy carries its source in its own query: ?url=, ?piurl=, ?imgurl=. See E48.
+        if (shown) linkParamCandidates(shown).forEach(adder('a url inside the displayed src\'s query'));
         if (shown) upgradeCandidates(shown).forEach(adder('url rule on the displayed src'));
 
         // 5. the displayed src itself, last — it is the fallback, never the upgrade
@@ -901,7 +914,7 @@
             if (onHit) onHit(hit);
         }
 
-        const linked = linkedMedia(el).then(async function (page) {
+        const linked = linkDeclaresMedia(el) ? Promise.resolve(null) : linkedMedia(el).then(async function (page) {
             if (!page || token.cancelled) return null;
             const tries = [];
             // og:image is the share card on some sites, and that is the thumbnail itself.

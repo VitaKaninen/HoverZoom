@@ -77,6 +77,13 @@ ancestor-link candidate ever comes back missing on a shadow-DOM site.
   motivated the resolve spinner: against localhost every probe finishes in single-digit ms, so
   a slow resolve — the state the user actually sees as "hovering does nothing" — is otherwise
   unreachable. Case 15 uses it. It is threaded, or one `?slow=` would block the whole page.
+- **`?csp=<policy>` puts that policy on the response**, which is the only way to test `E49` — a
+  `<meta>` CSP lands too late to catch early image loads. `test-pages/csp-img-src.html` is the
+  fixture; open it with and without `?csp=img-src%20'self'` and compare. It relies on **`localhost`
+  and `127.0.0.1` being different origins**, so it needs no network and no third-party host. Read
+  its comment before editing it: every fixture in it is chosen so the status bar names the winner
+  (`scene.jpg` 1600×1200 = the probe ran, `icon_big.png` 480×360 = it was blocked), and case 2 is
+  the internal control that separates "CSP stopped the probe" from "the hover never fired".
 - **The page defines GM stand-ins** (`GM_getValue`/`GM_setValue`/`GM_addValueChangeListener`/
   `GM_registerMenuCommand`) over `localStorage` before loading the script, so the settings panel
   opens from a button in the corner instead of the manager menu. `GM_addValueChangeListener` is

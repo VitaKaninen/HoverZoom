@@ -1,0 +1,54 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Page whose CSP forbids cross-origin images</title>
+<!--
+  Does the page's `img-src` reach the userscript's probe? Every privacy search engine
+  answers this the same way for a whole class of sites at once, so it is measured rather
+  than argued about.
+
+  The server sends whatever `?csp=` asks for (see test-server.py). Open BOTH:
+
+    http://localhost:8899/test-pages/csp-img-src.html                       <- control
+    http://localhost:8899/test-pages/csp-img-src.html?csp=img-src%20'self'  <- the test
+
+  localhost and 127.0.0.1 are different origins, so `img-src 'self'` blocks the link's
+  target while leaving the thumbnail alone.
+
+  Every fixture here is chosen so the STATUS BAR names the winner. icon_big.png matches no
+  UPGRADES rule (`_big` is three letters; the opaque-size-code rule wants two plus digits),
+  so the thumbnail cannot reach scene.jpg on its own -- and both are exactly 4:3, which is
+  what sameShape() demands of a linked candidate. So:
+
+      scene.jpg 1600x1200    the cross-origin probe ran
+      icon_big.png 480x360   it did not, and the displayed src was the fallback
+
+  A preview always appears, which is the point: "nothing happened" would not separate a
+  blocked probe from a hover that never fired.
+-->
+<style>
+  body { font: 14px system-ui, sans-serif; margin: 2rem; max-width: 40rem; }
+  img { display: block; }
+  .case { margin: 2rem 0; }
+  code { background: #eee; padding: 0 .2em; }
+</style>
+
+<h1>CSP: <code>img-src</code> against the probe</h1>
+<p>Hover each thumbnail and read the status bar.</p>
+
+<div class="case">
+  <h2>1. Cross-origin original behind a link</h2>
+  <p><code>scene.jpg</code> 1600&times;1200 = the probe ran.
+     <code>icon_big.png</code> 480&times;360 = CSP stopped it.</p>
+  <a href="http://127.0.0.1:8899/test-images/scene.jpg">
+    <img src="/test-images/icon_big.png" width="200" height="150" alt="">
+  </a>
+</div>
+
+<div class="case">
+  <h2>2. Same-origin original behind a link</h2>
+  <p><code>'self'</code> covers this one, so <code>scene.jpg</code> 1600&times;1200 either
+     way. It separates "CSP stopped the probe" from "the probe was never made".</p>
+  <a href="/test-images/scene.jpg">
+    <img src="/test-images/icon_big.png" width="200" height="150" alt="">
+  </a>
+</div>

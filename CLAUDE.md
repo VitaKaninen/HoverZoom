@@ -100,6 +100,11 @@ has already been misdiagnosed once. (The shared ones — `innerHTML` on Trusted-
 - **Measure the viewport with `vpW()`/`vpH()`, never `documentElement.clientHeight` directly.** On a
   quirks-mode page (no doctype) the root answers with the whole document's height. See
   [`docs/VIEWER.md`](docs/VIEWER.md).
+- **Before writing a URL rule for a site, check that site's `img-src` CSP.** It applies to our
+  `new Image()` probe, so on Brave / DuckDuckGo / Startpage / Qwant / Mojeek a perfectly correct rule
+  decodes the right original and is then refused in a millisecond, looking exactly like a 404. One
+  line in the console settles it: `new Image().src = '<any off-site image>'` and watch for a
+  `securitypolicyviolation`. See `E49`.
 - **An `<img>` with `srcset` reports `naturalWidth` divided by the chosen candidate's density**, not
   the file's pixels. Never compare it to a probe of the same URL for equality — `nativeSize()`
   marks it `scaled` and `samePicture()` compares the ratio instead. See `E45`.

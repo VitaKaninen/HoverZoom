@@ -285,6 +285,53 @@ what a link-following site did.
 `https://gifpit.com/gifs/…`, a different host and path from the one requested, so the `og:url` guard
 correctly trusts nothing on it.
 
+### The anchor's own query outranks the page behind it · `E48` · v0.79.0
+
+When the ancestor link already names a media URL in its query, `linkedMedia()` is **not** run at all
+and that URL is added with `keep: true`. Two independent reasons, and the first is a live bug:
+
+- **An internal result page answers `og:image` with the site's generic share card.** Measured on Bing
+  image search: every result thumbnail links to `bing.com/images/search?view=detailV2&…`, whose
+  `og:image` is `www.bing.com/sa/simg/facebook_sharing_5.png` — 988×525, the same card on every page
+  of the site. It became `trusted`, and `betterHit()` puts `trusted` above size unconditionally, so a
+  988×525 logo beat a 4000×2666 original that was named in the same anchor's own `mediaurl=`.
+  `sameShape()` cannot catch this: `ASPECT_TOL` is **4**, a "wildly different picture" detector, and
+  1.88 against 1.33 is nowhere near it. Yandex has the identical shape (`img_url=`) and the same trap.
+- **The fetch is redundant.** The anchor already declared the answer; going to the page can only
+  confirm it or, as above, contradict it with furniture.
+
+Measured after the change on four live Bing results: 4/4 declared, resolving to 4000×2666, 2560×1440
+and 3072×1728 — the fourth's original is genuinely dead, and falling back to the thumbnail is right.
+
+`linkParamCandidates()` now also runs on the **displayed src**, because an image proxy carries its
+source in its own query rather than on a link (`?url=`, `?piurl=`, `?imgurl=`, `?u=`). The value must
+still be an absolute `http(s)` URL that `looksLikeImage()` accepts, so a proxy pointing at another
+extensionless proxy — which is what the Bing-backed engines below do — adds nothing.
+
+### The page's CSP can forbid the probe outright · `E49`
+
+**`img-src` applies to the userscript's `new Image()`.** Measured end-to-end with the installed
+script, not assumed: `test-pages/csp-img-src.html` serves one fixture twice, and under
+`img-src 'self'` a cross-origin original behind a link is refused while the same-origin one on the
+same page still resolves. The failure is silent and ~1 ms, identical to a 404.
+
+This is the whole story on the privacy search engines, and no URL rule can be written around it:
+
+| | off-site probe | `blob:` allowed |
+|---|---|---|
+| Google, Bing, Yandex | allowed | n/a |
+| Brave, DuckDuckGo, Startpage, Qwant, Mojeek | **blocked** | **yes**, all of them |
+
+Two consequences:
+
+- **A blocked probe is identifiable for free.** `securitypolicyviolation` on `document` carries
+  `blockedURI` and `violatedDirective`, needs no network request, and fires before any timeout. It is
+  the one failure kind that can be named exactly, and it must not be spent as a retry.
+- **`blob:` is the way out where one is wanted.** `GM_xmlhttpRequest` is not subject to page CSP, and
+  every blocked engine measured permits `blob:` — so bytes fetched by GM_xhr can be displayed. This is
+  **not built**; it is the prerequisite for the Brave rule in [`TOUR.md`](TOUR.md) §14, which decodes
+  correctly and then cannot load what it decoded.
+
 ## The preview can BE a video · `E14`
 
 "Images only" is retired deliberately. For an imgur video post there is no image answer at all, so

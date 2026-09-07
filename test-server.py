@@ -1,6 +1,7 @@
 """Static file server for the Hover Zoom test page, with two additions:
 
     ?slow=<seconds>    delay that response by that many seconds (capped at 20)
+    ?csp=<policy>      send that Content-Security-Policy on the response
     /rotate.php        a forum's "random image" endpoint: what it returns depends on
                        the query, so dropping the query asks a different question
 
@@ -63,6 +64,16 @@ class SlowHandler(SimpleHTTPRequestHandler):
         self.end_headers()
         if not head:
             self.wfile.write(body)
+
+    def end_headers(self):
+        # ?csp=<policy> puts that policy on the response, so one fixture serves both the
+        # control and the test. Only a real response header can do this -- a <meta> CSP
+        # is applied late enough that early image loads slip past it.
+        params = parse_qs(urlparse(self.path).query)
+        policy = params.get("csp", [""])[0]
+        if policy:
+            self.send_header("Content-Security-Policy", policy)
+        SimpleHTTPRequestHandler.end_headers(self)
 
     def send_head(self):
         # translate_path() already drops the query, so the delay is purely advisory
