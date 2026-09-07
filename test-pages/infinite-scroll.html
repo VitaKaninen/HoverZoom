@@ -1,0 +1,90 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Infinite scroll — the tour's excursion</title>
+<!--
+  The fixture for TOUR.md §9. An IntersectionObserver on a sentinel appends the next batch,
+  which is the shape every real infinite feed uses and the reason a synthetic `scroll` event
+  cannot make a page load more: the observer fires on a genuine viewport intersection.
+
+  What it is here to answer:
+   - does the excursion make a real IntersectionObserver-driven page load more,
+   - does the viewport come back to EXACTLY where it was,
+   - and does programmatic scrolling work through lockScroll()'s overflow:hidden (open a
+     preview, press f for fullscreen, then keep stepping — §15 listed this as unverified).
+
+  `?batches=N` caps how many times it will grow, so the exhausted flag has something to hit.
+  Every tile is a distinct URL (?n=) so the tour's counter and the preload buffer cannot be
+  confused by the fixtures sharing one file.
+-->
+<style>
+  body { margin: 0; background: #11111b; color: #cdd6f4; font: 14px system-ui, sans-serif; }
+  h1 { padding: 16px; margin: 0; font-size: 16px; }
+  .grid { display: grid; grid-template-columns: repeat(3, 200px); gap: 14px; padding: 0 16px; }
+  .grid figure { margin: 0; }
+  .grid img { display: block; width: 200px; height: 150px; }
+  .grid figcaption { padding: 4px 0; font-size: 11px; color: #7f849c; }
+  #sentinel { height: 40px; margin: 24px 16px; color: #a6adc8; font-size: 12px; }
+  #tally { position: fixed; right: 12px; top: 12px; padding: 6px 10px; background: #313244;
+           border: 1px solid #45475a; border-radius: 6px; font-variant-numeric: tabular-nums; }
+</style>
+
+<h1>Infinite scroll — each batch loads only when the bottom is genuinely reached</h1>
+<div id="tally">batch 0 · 0 pictures</div>
+<div class="grid" id="grid"></div>
+<div id="sentinel">loading more…</div>
+
+<script>
+  var params = new URLSearchParams(location.search);
+  var MAX_BATCHES = parseInt(params.get('batches') || '3', 10);
+  var PER_BATCH = 18;   // tall enough that one batch pushes the sentinel below the fold
+  var batch = 0;
+
+  function addBatch() {
+    if (batch >= MAX_BATCHES) {
+      document.getElementById('sentinel').textContent = 'no more';
+      return;
+    }
+    batch++;
+    var grid = document.getElementById('grid');
+    for (var i = 0; i < PER_BATCH; i++) {
+      var n = (batch - 1) * PER_BATCH + i + 1;
+      var fig = document.createElement('figure');
+      var a = document.createElement('a');
+      a.href = '/test-images/photo.jpg?n=' + n;
+      var img = document.createElement('img');
+      img.src = '/test-images/photo-200x150.jpg?n=' + n;
+      img.alt = 'tile ' + n;
+      a.appendChild(img);
+      var cap = document.createElement('figcaption');
+      cap.textContent = 'tile ' + n + ' (batch ' + batch + ')';
+      fig.appendChild(a);
+      fig.appendChild(cap);
+      grid.appendChild(fig);
+    }
+    document.getElementById('tally').textContent =
+      'batch ' + batch + ' · ' + grid.querySelectorAll('img').length + ' pictures';
+  }
+
+  addBatch();
+
+  // The real mechanism: no scroll listener anywhere on this page.
+  new IntersectionObserver(function (entries) {
+    if (entries.some(function (e) { return e.isIntersecting; })) addBatch();
+  }, { rootMargin: '0px' }).observe(document.getElementById('sentinel'));
+</script>
+
+<script>
+  var GM_getValue = function (key, dflt) {
+    var v = localStorage.getItem(key);
+    return v === null ? dflt : v;
+  };
+  var GM_setValue = function (key, val) { localStorage.setItem(key, val); };
+  var GM_addValueChangeListener = function (key, fn) {
+    window.addEventListener('storage', function (e) {
+      if (e.key === key) fn(key, e.oldValue, e.newValue, true);
+    });
+  };
+  var GM_registerMenuCommand = function () { return 'x'; };
+  var GM_unregisterMenuCommand = function () {};
+</script>
+<script src="../Hover-Zoom.user.js"></script>

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.97.0
+// @version     0.98.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -4815,6 +4815,7 @@
         scrubTimer = 0;
         tour = null;
         plReset();
+        excSpent = false;       // a fresh tour asks the page again; it may have grown since
     }
 
     // Once per pinned window, on the first nav press: the anchored corner goes to the bottom
@@ -4855,7 +4856,13 @@
         const list = tourEntries();
         const to = tourTarget(list, dir);
         tour.total = list.length;
-        if (to < 0) { tour.index = tourAt(list); tourChrome(); return; }
+        if (to < 0) {
+            // At the wall going forward, ▶ is a request for more rather than a dead button.
+            tour.index = tourAt(list);
+            tourChrome();
+            if (dir > 0) tourGrow(dir, true);
+            return;
+        }
         tourRemember(list[to]);
         tour.index = to;
         dbg('tour step', { at: to + 1, of: list.length, dir: dir, scrubbing: !!repeat,
@@ -4864,6 +4871,8 @@
             to: list[to].el.tagName + ' ' + (list[to].url || '(nothing)').slice(-48) });
         tourChrome();
         plFill(list, to, dir);
+        // Refill BEFORE the wall, so the page loads more while there are still pictures to look at.
+        if (dir > 0 && list.length - 1 - to < TOUR_AHEAD) tourGrow(dir, false);
         clearTimeout(scrubTimer);
         if (repeat) scrubTimer = setTimeout(tourShow, TOUR_SETTLE_MS);
         else tourShow();
@@ -4927,6 +4936,71 @@
         const reason = why || 'no larger version found';
         dbg('tour: showing the page\'s own picture — ' + reason, url);
         swapViewer({ url: url, w: w, h: h, reason: reason });
+    }
+
+    // ---- making a lazy page load more, without moving what the user is looking at
+    //
+    // There is no other way. Infinite scroll is driven by an IntersectionObserver on a sentinel,
+    // which fires on a genuine viewport intersection and cannot be spoofed: a synthetic `scroll`
+    // event does not help, because the handler reads the real `scrollY` and correctly concludes
+    // nothing moved. So the viewport goes to the bottom and comes straight back. See TOUR.md §9.
+
+    const TOUR_AHEAD = 10;          // entries left ahead of the anchor that trigger a refill
+    const EXC_POLL_MS = 150;
+    const EXC_MAX_MS = 2000;
+    const EXC_COOL_MS = 3000;
+
+    let excBusy = false, excAt = 0, excSpent = false;
+
+    function docHeight() {
+        const b = document.body, d = document.documentElement;
+        return Math.max(b ? b.scrollHeight : 0, d ? d.scrollHeight : 0);
+    }
+
+    function mediaCount() { return document.querySelectorAll('img,video').length; }
+
+    async function tourExcursion() {
+        if (excBusy || excSpent || !cfg.tourLoadMore) return false;
+        if (Date.now() - excAt < EXC_COOL_MS) return false;
+        excBusy = true;
+        excAt = Date.now();
+        const sx = window.scrollX || 0, sy = window.scrollY || 0;
+        const before = mediaCount();
+        let grew = false;
+        try {
+            // Explicitly 'auto': a page with scroll-behavior:smooth in its own CSS would
+            // otherwise turn every excursion into a visible animation.
+            window.scrollTo({ left: sx, top: docHeight(), behavior: 'auto' });
+            const until = Date.now() + EXC_MAX_MS;
+            let last = before, still = 0;
+            while (Date.now() < until) {
+                await sleep(EXC_POLL_MS);
+                const now = mediaCount();
+                if (now > last) { grew = true; last = now; still = 0; }
+                else if (grew && ++still >= 2) break;      // it has stopped arriving
+            }
+            dbg('excursion', { was: before, now: last, grew: grew,
+                ms: Date.now() - excAt, returnedTo: sx + ',' + sy });
+        } finally {
+            window.scrollTo({ left: sx, top: sy, behavior: 'auto' });
+            excBusy = false;
+        }
+        // A finite page must not scroll away and back on every press near the end.
+        if (!grew) excSpent = true;
+        return grew;
+    }
+
+    // Fire and forget: the refill overlaps with pictures the user is still looking at rather
+    // than stalling them at the wall.
+    function tourGrow(dir, stepAfter) {
+        tourExcursion().then(function (grew) {
+            if (!grew || !tour || !placed) return;
+            const list = tourSync();
+            tourChrome();
+            if (!list) return;
+            if (stepAfter) { tourNav(dir, false); return; }
+            if (tour.index >= 0) plFill(list, tour.index, dir);
+        });
     }
 
     // ---- the preloader
@@ -5723,6 +5797,9 @@
         check('tourKeys', 'Arrow keys step through the page',
             'Left and right move to the next picture unless the one you are looking at is ' +
             'zoomed in far enough to pan sideways. [ and ] always move.');
+        check('tourLoadMore', 'Let a scrolling page load more',
+            'Near the end, the page is scrolled to the bottom and straight back so it loads ' +
+            'the next batch. You do not see it move.');
 
         section('Where it runs');
         pick('siteMode', 'Site list', null, [

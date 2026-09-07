@@ -72,6 +72,13 @@ ancestor-link candidate ever comes back missing on a shadow-DOM site.
   Constructing the site's markup with its real cross-origin URLs inside `test-page.html` at
   runtime exercises the entire pipeline — cover walk, `UPGRADES`, the video probe — against the
   actual files. That is how gifwow was verified.
+- **`test-pages/infinite-scroll.html` is the tour's excursion fixture** (v0.98.0). An
+  IntersectionObserver on a sentinel appends the next batch, which is the shape every real
+  infinite feed uses and the reason a synthetic `scroll` event cannot make one load more.
+  `?batches=N` caps the growth so the exhausted flag has something to hit, and every tile is a
+  distinct `?n=` URL so the counter and the preload buffer cannot be confused by the fixtures
+  sharing one file. A batch is deliberately taller than the viewport, or the sentinel never
+  leaves the fold and the page loads everything at once, testing nothing.
 - **`test-server.py`, not `python -m http.server`.** It is the same static server plus
   `?slow=<seconds>`, which stalls that one response. Nothing else can reproduce the symptom that
   motivated the resolve spinner: against localhost every probe finishes in single-digit ms, so

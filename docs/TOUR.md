@@ -1,11 +1,11 @@
 # The tour — next/previous navigation through a page's pictures
 
-**Status: §0-§8 and §11 are BUILT (v0.96.0-v0.97.0); §7 was built earlier (v0.88.0-v0.89.0).** What is
-left is §9 (the scroll excursion) and §10 (cross-page harvesting).
+**Status: §0-§9 and §11 are BUILT (v0.96.0-v0.98.0); §7 was built earlier (v0.88.0-v0.89.0).** What is
+left is §10 (cross-page harvesting).
 Sections that are built are kept because the reasoning still explains the shape; where the build
 departed from the plan the section says so.
 
-The live account of what the code does is `INTERACTION.md` `S25`, `S26`, `T29`-`T34`, `E54`-`E57`.
+The live account of what the code does is `INTERACTION.md` `S25`, `S26`, `T29`-`T35`, `E54`-`E58`.
 
 A *tour* is next/previous navigation through every picture on the page, driven from a pinned
 preview window. The window stays put; the page does not move; each step swaps a different picture
@@ -538,7 +538,24 @@ symptom of forgetting is silence.
 
 ---
 
-## 9. Loading more of the page — the page does not move
+## 9. Loading more of the page — BUILT, v0.98.0
+
+Measured on `test-pages/infinite-scroll.html`, an IntersectionObserver-driven feed built for this:
+three excursions grew it 18 → 36 → 54 → 72 pictures at **~490 ms each**, the counter following
+each time, and `window.scrollY` read 0 at every step. A fourth found nothing in 2.1 s and set the
+exhausted flag; ▶ at 72/72 then costs nothing at all.
+
+**§15's open question is answered: programmatic scrolling works straight through `lockScroll()`'s
+`overflow:hidden`.** Scrolled to 400 and back with both `documentElement` and `body` at
+`overflow:hidden` and `scrollbar-width:none`, and the excursion grew the page 36 → 54 *while
+fullscreen*. No unlock/relock dance is needed, and none was added.
+
+One departure: the plan wanted the ▶ "load more" affordance to surface separately. It did not need
+to. **▶ at the wall simply *is* the request** — `tourNav` finds nothing ahead, runs an excursion,
+and steps into what arrives — so there is no second control to explain, and the button goes dim
+only once the page is genuinely exhausted.
+
+## 9a. Why it has to be a real scroll
 
 Confirmed with the user: during ordinary navigation **the page never scrolls**. The tour shows
 off-screen pictures in the preview and leaves the document where it is.
@@ -673,7 +690,7 @@ probably constants rather than settings unless testing says otherwise.
 4. ~~Concurrent preloader with slot spacing and the no-rush list (§6).~~ — **done, v0.97.0.**
 5. ~~Failure display and the Retry button (§8)~~ — **done: display v0.88.0, the widened trigger and
    ↻ v0.96.0.**
-6. Scroll excursion and load-more (§9).
+6. ~~Scroll excursion and load-more (§9).~~ - **done, v0.98.0.**
 7. Cross-page harvesting (§10).
 
 Version bump and commit at each step, per `../../CLAUDE.md`.
@@ -797,7 +814,6 @@ imgur mp4, four clips: **1.0–9.6 MB** (images on the same run were 40 KB–1.3
 
 ## 15. Still unverified
 
-- Whether programmatic scrolling works through `lockScroll()`'s `overflow:hidden` (§9).
 - Whether a 100ms relocation animation looks better than a jump (§3). Built as an animation; not
   yet judged by eye.
 - The right scrub rate. Shipped at 5/s and measured at 4.7-5.5 steps/sec under a 30/s key repeat,
