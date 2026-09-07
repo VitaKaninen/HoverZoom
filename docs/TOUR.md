@@ -1,0 +1,567 @@
+# The tour — next/previous navigation through a page's pictures
+
+**Status: designed, not built.** Nothing in this document exists in the script yet. It is the
+whole specification: a session picking this up should not need to re-derive any of it.
+
+A *tour* is next/previous navigation through every picture on the page, driven from a pinned
+preview window. The window stays put; the page does not move; each step swaps a different picture
+into the same frame.
+
+---
+
+## 0. Do this first — the invariant rewrite
+
+`../CLAUDE.md` currently carries, under "Design invariants":
+
+> **Nothing is decided before hover time.** … Do not add a MutationObserver or a pre-pass "for
+> performance", and never bind state to an element that might change under it.
+
+Replace it with:
+
+> **Nothing is cached that the DOM can invalidate.** Everything resolves from a read taken at the
+> moment it is needed — hover time for a preview, press time for next/prev. Do not add a
+> MutationObserver or a pre-pass "for performance", and do not hold a reference to a page element
+> across an interaction; re-derive instead. Reading the document ahead of a hover is fine, and the
+> navigation list does exactly that — keeping the answer is what causes the bugs.
+
+The old wording banned reading the document ahead of a hover. What it was actually protecting
+against was *keeping* the answer: stale `src`, SPA navigation, images added after a scan, dead
+references. The list below re-reads on every press and keeps nothing, so it has none of those
+failure modes.
+
+Approved by the user 2026-09-07. The rule is not a veto on the feature; it is being changed
+because it outlived its scope.
+
+---
+
+## 1. The list is derived, never stored
+
+On every press: `document.querySelectorAll('img,video')` → sort into reading order → find the
+anchor → step. No observer, no scroll listener, no maintained array.
+
+Why this shape rather than a maintained list:
+
+- A maintained list fills with nodes a virtualised feed has already destroyed, and you then owe
+  reconciliation code to notice.
+- Re-deriving is ~5ms on a keypress. That is a keypress budget, not a hover budget.
+- Lazy-loaded and newly appended images are picked up for free, because every press re-reads.
+
+`coveredMedia()` (`Hover-Zoom.user.js:3669`) is the existing precedent: a read performed at the
+moment of need, caching nothing.
+
+### The anchor is an element, not an index
+
+Store the current element, its URL, and its last known document-space position. Each press locates
+the anchor by, in order:
+
+1. element identity
+2. URL match
+3. nearest by last known position, in the direction of travel
+
+Step 3 is what survives a virtualised feed deleting the node under you. Never store an index — the
+list length changes under you.
+
+### Ordering
+
+- Sort in **document coordinates** (`rect.top + scrollY`), never viewport coordinates, or the
+  order changes as the page scrolls.
+- Reading order is a **row-band sort**: group items whose vertical extents overlap into a row,
+  then sort by `left` within the row. A plain `(top, left)` sort scrambles masonry and any ragged
+  grid where a neighbour sits a few px lower.
+- Ties break on document order.
+
+### Membership
+
+An entry is eligible if `eligibleDirect(el)` (`:3696`) returns it. That guarantees the list can
+only hold things that would preview if hovered, and it inherits every existing gate — `videoMode`,
+the block list, banner/furniture rules — with no new code. Clips and images share one list.
+
+**Never drop an entry for failing to resolve.** The user's stated reason: a page with 50 images
+must give a tour of 50, and a picture they spotted half way down is their landmark for "half
+done". A failure shows the thumbnail and a reason (§8); it does not vanish.
+
+That extends to the size gate. `sizeOf(el)` (`:3761`) reads the layout rect, and a below-the-fold
+`loading="lazy"` image with no width/height attributes is often 0×0 until it loads. Fall back, in
+order: layout rect → `width`/`height` attributes → probed dimensions. Only something that is
+genuinely not a picture leaves the list.
+
+**Scope limit:** `img`/`video` only. Elements with a CSS background image stay hoverable but are
+not in the tour — enumerating them needs `getComputedStyle` on every node in the document.
+
+---
+
+## 2. The swap
+
+Three functions now put media in the window, and they are not interchangeable:
+
+| Function | Used when | Keeps |
+|---|---|---|
+| `showViewer()` (`:2772`) | opening a new window | nothing; positions from the pointer, fades in |
+| `upgradeViewer()` (`:2819`) | a better version of **the same** picture arrived | zoom and pan — you stay on the same spot |
+| **`swapViewer()`** — new | a **different** picture, same window | position, and the hand-set size if there is one |
+
+`swapViewer()` resets `scale` to `fitScale` and recentres `ox`/`oy` — carrying a pan offset into a
+different picture is meaningless. Borrow the centre-preserving arithmetic from `upgradeViewer()`.
+
+It must also update `active` and `activeShown` (`:3382`), or ⊘ blocks the wrong image and unpinning
+misbehaves.
+
+### The anchored corner
+
+**The bottom-right corner of the window does not move during a tour.** The nav buttons live at the
+bottom-right of the strip, so pinning that corner keeps them under the pointer across every swap.
+
+Capture `right = view.left + outerW()` and `bottom = view.top + outerH()` before the swap; after
+`reflow()` recomputes the frame, set `view.left = right - outerW()` and
+`view.top = bottom - outerH()`. `clampPosition()` (`:1601`) still runs after.
+
+### Growing and shrinking — already free
+
+Frame follows the picture unless the user hand-resized. This is existing behaviour and needs no
+new code: `view.fixedW`/`fixedH` are null until a hand resize, `resizeBy()` (`:3290`) is their only
+writer, and `reflow()` (`:1575`) already branches on them. `swapViewer()` calls `reflow()` and gets
+the right answer either way.
+
+### Size floors
+
+- **Width is already floored.** `reflow()` floors `frameW` at `minFrameW()` → `barMinW()` when
+  placed, and centres a narrower picture inside it (`:1580`). Small images letterbox rather than
+  shrinking the controls.
+- **Height is not.** `frameH` floors at `MIN_FRAME` (48), while the strip hides below `VCTL_MIN_H`
+  (110). A short image mid-tour would make the nav buttons vanish. Add a height floor during a
+  tour.
+- **One deliberate decision reverses.** The comment at `:2345` says the strip's metrics
+  intentionally never reach `btnGutter()`, `barMinW()` or `bottomGap()` — floating it means it
+  reserves nothing. That was right for optional video controls. It is wrong once the strip holds
+  the only mouse route to next/prev: `barMinW()` must account for the strip's width when nav is
+  present, or a narrow frame clips the buttons off.
+- **Cap the frame at the viewport during a tour.** `maxSizeMultiple` defaults to 1.2 (`growBox()`,
+  `:1543`), so a frame can exceed the viewport; anchored bottom-right, a large picture would then
+  run off the top-left and be clipped there for the whole tour. Treat a tour as a lightbox.
+
+---
+
+## 3. Entering tour mode
+
+| From | Gesture | Result |
+|---|---|---|
+| hovering, not pinned | → or Next | pin, relocate, **and advance** |
+| pinned by mouse | → or Next (first time) | relocate **and advance** |
+| pinned, already relocated | → or Next | advance only |
+
+Relocation puts the anchored corner at `vpW() - EDGE_GAP`, `vpH() - EDGE_GAP`. Not flush:
+`bottomGap()`'s 20px allowance (`:1427`) is for the browser's link-target tooltip, which is painted
+bottom-**left**, so the bottom-right corner does not owe it.
+
+**Relocation happens exactly once per pinned window.** One boolean, set on the first arrow/next
+press, never consulted again. After that the window is the user's: if they drag or resize it, use
+what is there and never touch the position again — including when they walk back to the start with
+◀ and forward again.
+
+Dragging needs no flag. Each swap recomputes `left`/`top` from the bottom-right corner, so a drag
+moves that corner and later swaps hold the new one.
+
+The flag is per pinned window. Unpinning and pinning a different picture starts a fresh tour and
+relocates again on its first arrow press.
+
+Animate the move over **100ms**. Try it; a jump is acceptable if the animation looks worse.
+
+---
+
+## 4. The strip
+
+One element holds both groups. Do not build a second floating box.
+
+```
+[ ▶ 0:04/0:31 ══slider══ 100% 🔊 ]  [ ◀  124 / 294  ▶ ]
+ └────── video group, .hasvid only ──┘ └── nav group, always ──┘
+```
+
+- **Video:** full-width strip; scrubber flexes into whatever the nav group leaves.
+- **Image:** the same strip shrinks to the nav group and sits right, same height, same background,
+  same blur.
+
+The mechanism is one line: `.vctl` currently pins both edges in `layoutChrome()` (`:2573`). Make
+`left` conditional — `grabInset()` with a clip, `auto` without. An absolutely positioned box with
+only `right` set shrinks to content. Transitions between the two are free because `layoutChrome()`
+runs from every `layout()`, which runs from `setMedia()`.
+
+Give the nav-only state an **explicit width** rather than relying on shrink-to-fit — `../CLAUDE.md`
+records that shrink-to-fit for an abspos box diverges between Chromium and Firefox, and the Browser
+pane cannot see a Firefox-only fault.
+
+### Style is shared by construction
+
+- Build ◀ ▶ with `mkVBtn()` (`:2034`). Identical box, hover wash, tooltip, and mousedown/click
+  swallowing, for free.
+- Hoist the four `.vctl .vbtn` rules (`:1210`–`:1213`) to bare `.vbtn` so a restyle is one place.
+  Only `.vsound .vbtn` sizing stays scoped.
+- Hide the video group with a **class, not `hidden`**. `../CLAUDE.md`: `[hidden]` loses to an
+  explicit `display`, and the group carries `display:flex`. This has cost a version twice.
+
+### The counter
+
+`124 / 294` between the buttons, matching the reference. The total updates as scrolling and
+cross-page harvesting grow the list. It is the user's sense of how far through the page they are,
+which is also why entries are never silently dropped (§1).
+
+### Five places currently assume "strip means video"
+
+| Where | Now | Change to |
+|---|---|---|
+| `:1209` | `.box.hot.hasvid.tall .vctl{display:flex}` | drop `.hasvid`; gate the **video group** on it |
+| `:2410` `barHoverBand()` | widens the band only for a clip | widen whenever the strip is up |
+| `:2427` `pointerOverBar()` | `if (mediaEl !== vidEl) return false` | must include the strip for images, or it fades out from under the hand reaching for ◀ |
+| `:2573` `layoutChrome()` | sets both edges | `left` conditional as above |
+| `VCTL_MIN_H` (110) | strip hides on short frames | a lower threshold for nav-only, or the §2 height floor |
+
+`isBoxControl()` (`:3107`) already exempts the whole `vctlEl` subtree, so buttons inside the strip
+are safe from the capture-listener trap with no extra code. A separate box would have to be
+registered there by hand — and the symptom of forgetting is silence.
+
+---
+
+## 5. Keys
+
+`onPinKey()` (`:3325`).
+
+- **Left/Right navigate when the picture cannot pan horizontally**, and pan when it can. Test
+  `view.imgW > view.frameW + 0.5` — per-axis, not `pannable()` (`:1549`), which is either-axis.
+  Correct edge case falls out: a tall picture at fit-width pans vertically, so Up/Down pan while
+  Left/Right navigate.
+- **Up/Down always pan.** Unchanged.
+- **Add an always-navigates pair** (`[` / `]`, or PageUp/PageDown), or zooming in traps the user on
+  the current picture.
+- `capOwns()` (`:3313`) already stands the arrows down while the zoom field, scrubber or volume
+  slider has focus. Unchanged, works for free.
+
+### Scrub
+
+OS key repeat is ~30/s, ten times the target rate, and would outrun any buffer instantly.
+
+- **Holding an arrow scrubs**: step through the list without resolving, and start resolving only
+  once the key has been still for ~150ms.
+- **Throttle the scrub to 5 steps/sec.** Faster than that and the user cannot see the pictures well
+  enough to know when to stop. Start at 5/s and tune.
+
+---
+
+## 6. The preloader
+
+### Why depth alone does not work
+
+Measured by the user, 2026-09-07, on a Google image search results page: hovering 20 images in
+sequence, each started when the previous finished, took **29 seconds — 1.45s per image**. The
+target is 3 images/second.
+
+Serial preloading N ahead still finishes one image every 1.45s regardless of N. Consuming at 3/s
+while producing at 0.69/s drains the buffer at 2.31/s: a 10-deep buffer lasts ~4 seconds, about 13
+images, then you are back to waiting. **Depth buys a burst; only concurrency buys a rate.**
+
+With P resolves in flight, throughput is P/1.45 per second:
+
+| P | images/sec |
+|---|---|
+| 1 | 0.7 |
+| 3 | 2.1 |
+| **5** | **3.4** |
+| 6 | 4.1 |
+
+**Target: 5–6 concurrent, window 10–15.** The window absorbs bursts; the concurrency sustains the
+rate. Forum Stumbler independently landed on `PAGE_WORKERS = 6`.
+
+The two are separate settings and scale in opposite directions with connection quality: a slow link
+wants a **deeper window** (more buffer), while **concurrency** only multiplies if the 1.45s is
+latency rather than bandwidth. Google Images is expected to be latency-dominated — every result is
+on a different third-party host, so each pays fresh DNS + TLS, and `collectCandidates` must pull
+the real URL out of Google's `imgres?imgurl=` link via `linkParamCandidates` (`:349`) before
+probing. **Not verified.** The test is to re-run the same 20-image walk against the concurrent
+preloader and compare wall-clock.
+
+### Structure — take this from Forum Stumbler
+
+Read `../Forum-Stumbler/Forum-Stumbler.user.js`:
+
+| Piece | Where | Why |
+|---|---|---|
+| **Slot-based request spacing** | `walkPageRange`, `:4048` | The standout. Reserves request *start times* spaced by `pageGap()`, computed synchronously before any `await` so two workers cannot claim one slot. Its comment: *"This, not the worker count, is what bounds the load on the forum."* Lets us have 6-wide concurrency **and** a bounded request rate. Hover Zoom has no politeness mechanism at all today — fine for one hover, not for a 6-wide preloader. |
+| **`hardBlock()`** | `:3843` | Detects 429, Cloudflare interstitials, `Retry-After` on 403/503. |
+| **`noRushHosts()` / `workersFor()`** | `:3867`, `:3891` | A host that pushed back drops to strictly serial, remembered in GM storage across sessions. This is the safety valve an aggressive preloader needs, already written. |
+| **`ctl.cancelled`** | throughout | Matches Hover Zoom's existing `token.cancelled`. |
+| **`ctl.mark(page, SEG_BUSY/DONE/TODO)`** | `:4085` | Per-item state, reported on **arrival** not delivery. What a buffer indicator would use. |
+| **Failure containment** | `:4098` | `endAt = Math.min(endAt, page)` — stop scheduling past a failure, still deliver what is in hand. |
+| **GM_xhr first, `fetch` fallback** | `fetchRes`, `:3902` | GM_xhr is not subject to the page's CSP/connect-src. Hover Zoom already does this in `headBytes` (`:754`). |
+
+**Do not take** the ordered-delivery machinery — the `got` map and `flush()` (`:4058`). Forum
+Stumbler needs pages in order because `prevKey` and the `n` sequence only mean anything
+sequentially. A preload buffer is a set, not a sequence; the user jumps to whichever picture they
+are on. Dropping it removes most of the complexity. `PAGE_DELAY`'s 400ms serial politeness is also
+an order of magnitude too slow for 3/s — slot spacing replaces it.
+
+### Rules
+
+- **A global cap on in-flight preload requests**, separate from resolve concurrency. `MAX_PROBES`
+  is 8 (`:747`), so six concurrent resolves is up to 48 simultaneous requests without one.
+- **Cut the probe budget for speculative items.** `resolve()` always tries the `keep` candidates —
+  the link and the displayed src (`:882`) — and spends the rest of the 8 on guesses. Keep plus one
+  or two guesses is enough for a preload; the full search runs on arrival if it came up empty.
+- **Foreground jumps the queue.** A resolve the user is waiting on must never sit behind six
+  speculative ones. Two priority tiers.
+- **Cancel on direction change.** Reversing with ◀ or blocking with ⊘ drops queued preloads that
+  are no longer near the cursor.
+- **Preloads never write to `view`.** Own token; `onHit` records only.
+- `probeCache` (`:687`) is keyed by URL and holds a promise, so concurrent probes of one URL
+  collapse automatically. Free.
+
+### Arrival must be flash-free
+
+`resolve()` emits every improvement as it lands and `upgradeViewer()` swaps it in live — on a tour
+that means watching a thumbnail resolve into a mid-size into the original, fifty times. Eliminating
+that, not just the latency, is the point of preloading.
+
+So: on arrival, use the **completed** preload result and go straight to the final URL, skipping the
+progressive emit path. Fall back to the live path only if the preload has not settled.
+
+### Videos are not preloaded by probing
+
+`probeVideo()` (`:691`) sets `preload='metadata'` and then calls `v.load()` to **abort** the fetch
+once it has dimensions. Images land in the HTTP cache as a side effect of probing; clips do not.
+Pre-warming a clip needs a separate hidden `<video preload="auto">` for the winning URL.
+
+Also keep the winning `Image` object alive for buffered entries — `probeImage` lets it go and
+relies on the HTTP cache, which Chromium can evict.
+
+---
+
+## 7. Retry and timeouts — changes to existing behaviour, not just the tour
+
+### What happens today
+
+| | |
+|---|---|
+| Image probe timeout | **20s** (`IMAGE_PROBE_MS`, `:715`) |
+| Video metadata timeout | 6s (`VIDEO_PROBE_MS`, `:689`) |
+| Retry on re-hover | **No, not for 30s.** `probe()` caches the *promise*; a null result schedules its removal after `PROBE_RETRY_MS = 30000` (`:741`). A re-hover inside that window gets the cached failure instantly. |
+| Shown on failure | **Nothing.** `resolve()` never emits, `onHit` never fires, `showViewer` is never called, the `finally` hides the spinner (`:3885`). The ring spins, then vanishes. |
+| Can it tell a 404 from a timeout? | **No.** `probeImage`'s `onerror` (`:729`) fires identically for 404, dead host, CORS rejection and corrupt file. `new Image()` exposes no status. |
+
+### The model to build
+
+The user's analogy: type a URL, wait 3–4s, hit enter again, wait, open a new tab and retry, give up
+after 3–4 attempts. **Short timeout, several attempts** — not one long wait.
+
+- **Per-attempt timeout 5s** (from 20s), up to **4 attempts**, giving up at ~15s total.
+- **A user gesture always retries.** Moving off an image and back, or pressing Retry, evicts that
+  URL from `probeCache` and tries again. Automatic paths still honour the cached failure, so a page
+  with a dead image does not re-probe forever.
+- **Failure kind decides the schedule.** A 404/410 is definitive — one attempt, cache it. A timeout
+  or network error is worth retrying. A 429 stops and marks the host no-rush. This needs the
+  status, which means the GM_xhr diagnosis below.
+- **Tour retries are less aggressive but more numerous**: same 5s per attempt, ~6 attempts, backed
+  off (2s, 4s, 8s), lowest priority. There is time, and nobody is waiting.
+
+### The trap in shortening the timeout
+
+`probeImage` resolves on `onload`, which is the **whole file**. A large JPEG on a slow link
+legitimately takes more than 5s, so a flat 5s timeout would abort real downloads and retry from
+scratch — an infinite failure loop on exactly the biggest pictures.
+
+Make it a **stall timeout, not a total timeout**: 5s with no bytes arriving. Resource Timing can
+tell the difference, and `transferBytes()` (`:1708`) already reads it for the status bar — if
+`performance.getEntriesByName(url)` shows bytes moving, extend rather than abort. **Verify this
+works before relying on it**; the fallback is `GM_xmlhttpRequest`, whose `onprogress` reports
+bytes directly.
+
+---
+
+## 8. What a failed picture shows
+
+Never blank, never skipped. Show the page's own thumbnail as a placeholder, plus a reason in the
+status bar.
+
+Note that `minRatio` means a thumbnail is *never* what a normal hover offers, so showing one is a
+deliberate exception — which is why the note is mandatory rather than optional. Without it, "why is
+this blurry" reads as a bug.
+
+Reasons come in two tiers:
+
+- **Free** — already computed and currently thrown away. `resolve()` knows exactly why it rejected
+  each candidate: *"under the required upsize"* (`:966`), *"a different shape, so a different
+  picture"* (`:955`), blocked, caught changing size. Each is logged under the `debug` flag and
+  discarded. Capture the last rejection instead.
+- **Paid** — anything needing an HTTP status. On total failure only, fire one `GM_xmlhttpRequest`
+  to learn why. Rare path, and it is what makes "404 — not found" vs "site did not respond"
+  sayable. The same response feeds `hardBlock()`, so failure diagnosis and 429 detection share one
+  request.
+
+The caption is built in `caption()` (`:1731`); `capMetaEl` carries the type/dimensions/bytes line
+and is where a reason belongs. Note the `capFor`/`capDims` guard — the caption only rebuilds when
+the URL or measured size changes, so a reason must invalidate it (`resetCaption()`, `:1727`).
+
+### The Retry button
+
+In the bar, **only during a tour**, and only on a failed picture. Outside a tour the user already
+has re-hover. It clears the URL from `probeCache` and re-resolves at foreground priority.
+
+Any new control in the bar must be added to `isBoxControl()` (`:3107`) — not optional, and the
+symptom of forgetting is silence.
+
+---
+
+## 9. Loading more of the page — the page does not move
+
+Confirmed with the user: during ordinary navigation **the page never scrolls**. The tour shows
+off-screen pictures in the preview and leaves the document where it is.
+
+The list already handles this — `querySelectorAll` sees the whole document regardless of viewport,
+and `collectCandidates` reads `data-src`/`data-srcset` (`:578`), so below-the-fold lazy images
+usually resolve to a real URL without ever being displayed. On the user's Google Images case ~50
+results are in the DOM at load while only 20 are visible; all 50 are in the tour immediately.
+
+### The hard constraint
+
+**Without moving the viewport there is no reliable way to make a lazy page load more.** Most modern
+infinite scroll uses an IntersectionObserver on a sentinel, which fires on genuine viewport
+intersection and cannot be spoofed. Synthetic `scroll` events do not help — the handler reads the
+real `scrollY` and correctly concludes nothing moved.
+
+Worse on **virtualised** feeds (Twitter, Reddit, most modern infinite feeds): they have already
+destroyed the pictures above and below the viewport, keeping ~20 posts in the DOM. A non-scrolling
+tour there reaches maybe 10–30 pictures. That is not fixable without moving the viewport. Ordinary
+pages — forums, imgur, boorus, blogs, image hosts, search results — keep everything in the DOM and
+are fully reachable.
+
+### The excursion
+
+Fires **automatically when fewer than 10 entries remain ahead**, so the refill overlaps with
+pictures the user is still looking at rather than stalling them at the wall.
+
+1. Record scroll position.
+2. Scroll to the bottom.
+3. Bounded poll (~150ms, up to ~2s) for new nodes.
+4. Scroll back to the exact prior position.
+5. Re-derive; new entries join in document order and feed the preload queue with no extra plumbing.
+
+- **Cooldown**, or it re-fires on every press while content loads.
+- **An exhausted flag** — if an excursion returns nothing new, stop trying. A finite page must not
+  scroll-and-return on every press near the end.
+- The ▶ "load more" affordance surfaces only if the automatic attempt failed or is still running.
+- Pass `behavior:'auto'` explicitly to `scrollIntoView`. A page with `scroll-behavior:smooth` in
+  its CSS otherwise turns every excursion into a slow animation.
+
+### Fullscreen
+
+Fullscreen is the **easy** case. `borderPx()` returns 0 and `fitFull()` (`:3050`) sizes to the
+screen, so the frame is always the whole viewport: the corner anchor is a no-op, every picture
+re-fits, and the controls are stationary because the frame never changes size. Nothing extra.
+
+Excursions are better there too — `.dim.full` blacks the page out completely, so the scroll is
+literally invisible rather than merely subtle.
+
+**One thing to verify:** `lockScroll()` (`:2972`) sets `overflow:hidden` on both `documentElement`
+and `body`. Programmatic scrolling normally still works through `overflow:hidden`, but confirm it
+in a real browser rather than assuming. If it blocks, `scrollLock` already stores the previous
+values — restore them for the excursion and re-apply after.
+
+---
+
+## 10. Crossing to the next page
+
+**Never navigate the document.** That destroys the pinned window and, on a non-SPA site, the whole
+script instance.
+
+Not needed anyway. Hover Zoom already fetches and parses other pages — `linkedMedia()` /
+`pageMediaFrom()` (`:821`, `:857`) GM_xhr a linked page and `DOMParser` it to find media. The
+capability is in the file; it is just pointed at one page at a time.
+
+At 10-from-the-end with no more scroll content: find page 2's URL, fetch and parse it in the
+background, harvest its pictures, append to the tour.
+
+### Which detector
+
+They are not interchangeable:
+
+- **`../Open-Links-in-New-Tab/Open-Links-in-New-Tab.user.js:1314`, `nextPageReason()`** — a
+  *negative, non-directional* classifier: "is this link a pagination or sort control, so do not
+  open it in a new tab." Deliberately lumps in `new`, `best`, `hot`, `top`. **Cannot tell you which
+  link is forward.** Useful only as a word list.
+- **`../Forum-Stumbler/Forum-Stumbler.user.js:1198`, `detectNextPage()`** — directional. This is
+  the one. Its companions:
+  - `derivePageTemplate()` (`:1216`) builds a "page N → URL" function from two numbered pager
+    links, so you can jump to page 100 without fetching 99. Note its digit-backoff reasoning —
+    `/p12` and `/p13` share the prefix `/p1`, which would put the number in the wrong place.
+  - `deriveTemplateFromChain()` (`:1268`) does the same job from just the current URL and its next
+    link, for pagers with no numbered links at all ("← Older posts", WordPress's default). This is
+    the more useful one here. **Ambiguity is refused, never guessed** — a wrong template silently
+    generates plausible URLs for the wrong pages.
+  - `pagerInfo()` (`:1296`) reads which page we are on and the highest page named.
+
+### The structural change
+
+**A tour entry becomes either a live DOM element (this page) or a bare URL harvested from a fetched
+page.** Most of the pipeline is URL-based and does not care. Two things do:
+
+- `collectCandidates(el)` (`:560`) works fine against an element from the parsed detached document
+  — it only reads attributes and `closest('a')`.
+- `sizeOf(el)` (`:3761`) **cannot** — a detached document has no layout. Fetched entries fall back
+  to probed dimensions for the `minDisplayed` gate.
+
+This is the largest piece of the feature. Build it last, after the tour works on one page.
+
+---
+
+## 11. Settings
+
+Proposed keys, added to `DEFAULTS` (`:38`). Remember the hoisting trap in `../CLAUDE.md`: every
+`const` the loader touches must be declared **above** the `cfg =` line, or `readSettings()`'s own
+`catch` swallows the `ReferenceError` and the script silently runs on defaults.
+
+| Key | Default | What |
+|---|---|---|
+| `tourButtons` | `true` | show ◀ ▶ in the strip |
+| `tourKeys` | `true` | arrows navigate when the picture cannot pan horizontally |
+| `tourWindow` | `12` | how many entries to keep buffered ahead |
+| `tourWorkers` | `6` | concurrent preload resolves |
+| `tourScrubRate` | `5` | max steps/sec while an arrow is held |
+| `tourLoadMore` | `true` | the scroll excursion |
+| `tourCrossPage` | `true` | harvest the next page in the background |
+
+Retry timings (5s stall, 4 attempts, 15s ceiling) apply to all hovers, not only tours, and are
+probably constants rather than settings unless testing says otherwise.
+
+---
+
+## 12. Build order
+
+1. Rewrite the invariant (§0). Derive-on-demand list, anchor resolution, ordering (§1). Arrow-key
+   handoff and scrub (§5). Tour mode entry, corner anchor, one-time relocation, size floors (§2,
+   §3).
+2. Strip restructure: nav group, counter, the five `hasvid` sites, CSS hoist (§4).
+3. Retry and timeout changes (§7) — these stand alone and improve ordinary hovering.
+4. Concurrent preloader with slot spacing and the no-rush list (§6).
+5. Failure display and the Retry button (§8).
+6. Scroll excursion and load-more (§9).
+7. Cross-page harvesting (§10).
+
+Version bump and commit at each step, per `../../CLAUDE.md`.
+
+## 13. Documentation owed
+
+- `INTERACTION.md` needs new IDs. Highest currently used: **S24, T28, E47, P12**. Reserve S25+ for
+  tour states, T29+ for the transitions (enter tour, next, previous, relocate, load more, cross
+  page), E48+ for the edges — the arrow-key handoff, the scrub throttle, the thumbnail fallback,
+  the anchored corner surviving a user drag.
+- Add a row to the "Start here" table in `../CLAUDE.md` pointing at this file.
+- New traps that belong in `../CLAUDE.md`'s "Traps that fire BEFORE you act": the Retry button and
+  any new bar control needing `isBoxControl()`; the stall-vs-total timeout distinction.
+
+## 14. Unverified
+
+Flagged so a future session measures rather than inherits:
+
+- Whether the 1.45s/image is latency or bandwidth (§6). Decides whether concurrency multiplies.
+- Whether programmatic scrolling works through `lockScroll()`'s `overflow:hidden` (§9).
+- Whether a Resource-Timing-based stall timeout can distinguish "still downloading" from "dead"
+  (§7).
+- Whether a 100ms relocation animation looks better than a jump (§3).
+- The right scrub rate. Starting at 5/s (§5).
