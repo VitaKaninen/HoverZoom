@@ -747,9 +747,14 @@ check, so the next session does not repeat a guess as a finding.
   knowledge, never attempts a rewrite**; it goes to the page's inline JSON for a second, separately
   signed URL instead. Treat editing an fbcdn size token as known-not-to-work rather than untested.
   It also means the `E50` size-parameter rule is not merely useless there but actively wrong.
-- **Google Photos is the one with a live reason to expect a hit:** `lh3.googleusercontent.com` size
-  tokens are already rewritten to `=s0` by the googleusercontent rule, and that rule was measured on
-  Blogger/ggpht URLs. Whether an album page's thumbnails carry that shape is unverified.
+- **Google Photos: measured and now works · v0.94.0.** The grid renders every thumbnail as a **CSS
+  background on a `<div>`**, not an `<img>`, from
+  `photos.fife.usercontent.google.com/pw/<opaque>=w384-h216-p-k-rw-no`. That is the same size-token
+  syntax the googleusercontent rule already handles — on a host it did not list, because
+  `usercontent.google.com` is not `googleusercontent.com`. Adding the host was the whole fix; the
+  regex needed no change. Verified live: `=s0` returns the 1024×768 original against a 384×216
+  thumbnail, and the hover previews it. Nothing else about the page needed work — the tile div is
+  the topmost element at the pointer, so no cover walk is involved.
 - **TikTok is a video site**, so `GATES.md`'s player rule governs before the resolver ever runs. The
   question there is not "which URL" but "does `gifLike()` classify a feed tile as a gif or a
   player" — a gates question, answered on that page, not this one.

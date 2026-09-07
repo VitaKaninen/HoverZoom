@@ -504,6 +504,30 @@ exception, since it asks a different question (*is it a band*).
   The threshold is what lets a tile's caption ("Sunset, 2019") through. Only reachable by hovering
   the element's own blank space, since text hit-tests first.
 
+### A wallpaper can be an `<img>` · `pinnedWallpaperReason()` · v0.93.0
+
+Every test above reads a CSS background property, so a backdrop built as an **element** passed all
+of them. Discord's login page is the case: `<img class="artwork">`, `position: fixed`, `inset: 0`,
+sized to the viewport in both axes at every window size, `alt=""`, no `aria-hidden`. It previewed,
+which is absurd — it is the wallpaper.
+
+The new test is the element-shaped statement of a rule already argued here:
+**`background-attachment: fixed` says "it does not scroll with the page", and `position: fixed`
+says exactly the same thing.** Two conditions, both required:
+
+- `position: fixed`, and
+- the rect spans ≥ `BAND_WIDTH` (98 %) of the viewport in **both** axes.
+
+**Both axes is what keeps a lightbox safe.** A photo opened full-screen is letterboxed — it fits
+one axis and falls short on the other — while a `cover`/`fill` backdrop matches both exactly. The
+`vw <= 0 || vh <= 0` guard is the usual one: the Browser pane reports zero while hidden, and
+without it every element spans a zero-width viewport.
+
+Known and accepted: a full-bleed *fixed* photo that a site genuinely wants you to look at is now
+refused. It is already displayed at screen size, so little is lost, and `skipFurniture` turns the
+whole family off. Regression test: `test-pages/wallpaper-fixed.html`, which pairs the backdrop with
+an ordinary card picture that must still preview.
+
 `decorativeReason()` is a separate test under the same `skipFurniture` switch and **does** apply to
 `<img>`: `aria-hidden="true"` and `role="presentation"`/`"none"` are the page stating outright that
 something is not content. **Read on the element itself, never inherited** — carousels routinely mark
