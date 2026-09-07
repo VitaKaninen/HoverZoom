@@ -240,6 +240,25 @@ what keeps it from being dangerous:**
   `querySelectorAll(...).length`** — gifwow's card also holds a `display:none` loader `<img>`, and
   counting it bounds the walk one level too early, at `FIGCAPTION`, which finds nothing.
 
+### "Exactly one picture" was too literal — count PEERS, not pictures · v0.92.0
+
+An avatar in the card is laid out, so it counted, so the walk bailed and **nothing on the page
+previewed at all**. Measured on ArtStation's grid 2026-09-07: `A.gallery-grid-link` holds the
+209×209 tile *and* a 40×40 artist avatar that appears on hover, with `DIV.gallery-grid-overlay` on
+top of both — the exact `E18` shape, refused by the exact guard that exists to make `E18` safe.
+
+`peerMedia(n)` replaces `laidOutMedia(n)`: it counts only pictures whose area is at least
+`COVER_PEER` (0.25) of the biggest one in the container. The avatar is 3.7 % of the tile and is not
+a peer; two tiles of a grid are peers and still stop the walk, which is the whole point of the
+guard. **The failure was silent and total** — no preview, no ring, nothing to debug — and it will
+be just as silent on every other card that puts a badge, an avatar or a play icon beside its
+picture, which is most of them.
+
+Verified end to end: ArtStation's grid previews the 762×1047 original after this change, on an
+untouched page. Before it, the same hover produced nothing; making the overlay
+`pointer-events:none` by hand was what proved the cover walk was the blocker rather than the
+resolver.
+
 Everything found under a cover then faces `eligibleDirect()` in its own right, so looking through a
 cover can never reach something a direct hover would have refused.
 

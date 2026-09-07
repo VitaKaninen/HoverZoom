@@ -699,10 +699,10 @@ one the thumbnail URL was read off the live page and every candidate transform w
 
 | Site | Thumbnail | Verdict |
 |---|---|---|
-| **Unsplash** | `images.unsplash.com/photo-<id>?w=400&q=60&fit=crop&…` | **Already worked.** `E50` drops `w`/`q`/`fit` from the extensionless path; the survivor `?auto=format&ixlib=…` serves the **10.9 MB** original against the thumbnail's 29 KB. |
+| **Unsplash** | `images.unsplash.com/photo-<id>?w=400&q=60&fit=crop&…` | **Already worked.** `E50` drops `w`/`q`/`fit` from the extensionless path; the survivor `?auto=format&ixlib=…` serves the **10.9 MB** original against the thumbnail's 29 KB. Verified live: 5563×3622 previewed. |
 | **Pexels** | `images.pexels.com/photos/<id>/pexels-photo-<id>.jpeg?auto=compress&w=400` | **Already worked.** The media-path query strip leaves `?auto=compress`, which is compression not size: 1.15 MB against 16.6 KB. |
-| **Etsy** | `i.etsystatic.com/…/il_510x638.<id>_<code>.jpg` | **Rule added.** The size is a *prefix* on the filename, which no existing rule reads. `il_fullxfull` measured 323 KB against 70 KB, and beats `il_1140xN` (223 KB). |
-| **ArtStation** | `cdn*.artstation.com/p/assets/…/<date>/smaller_square/<name>.jpg` | **Fixed generically, not with a rule** — see below. |
+| **Etsy** | `i.etsystatic.com/…/il_510x638.<id>_<code>.jpg` | **Rule added.** The size is a *prefix* on the filename, which no existing rule reads. `il_fullxfull` measured 323 KB against 70 KB, and beats `il_1140xN` (223 KB). Verified live: 1080×1153 previewed. |
+| **ArtStation** | `cdn*.artstation.com/p/assets/…/<date>/smaller_square/<name>.jpg` | **Fixed with two generic changes, no site rule** — 762×1047 verified. See below. |
 | **Vimeo** | `i.vimeocdn.com/video/<id>-<hash>?r=…&region=…` | **Out of scope, correctly.** A video site: the thumbnail links to a player page, so `videoLinkReason()` refuses it before the resolver runs, exactly as on TikTok. The URL carries no size token to raise anyway — 640×360 is what is served. |
 
 ### ArtStation is why the filename rule now covers `og:image` · v0.90.0
@@ -723,11 +723,15 @@ page-body ones. It is now: `named` is set from `sameStem(declared, shown)`.
 portrait original is one of the most common shapes on the web, and every site that names its files
 consistently now gets the linked page's answer instead of a shape rejection.
 
-**Unverified:** the end-to-end hover on ArtStation. The URL logic, the stem match and the og:image
-target are all measured; what has not been watched is `linkedMedia()` actually fetching
-`artstation.com/artwork/<id>`, which answers **403** to a cookieless request. GM_xhr sends the
-browser's cookies, so it should pass for a signed-in visitor and may not for anyone else. Check
-this before treating ArtStation as done.
+**It also needed a second, unrelated fix, and that one was the reason nothing happened at all.**
+ArtStation's grid tile carries an overlay and a 40×40 artist avatar inside the same anchor, and the
+`E18` cover walk bailed on the avatar — so the resolver never ran. See `GATES.md`, "count PEERS,
+not pictures" (v0.92.0). With both changes the hover previews 762×1047 on an untouched page,
+verified 2026-09-07.
+
+The lesson is worth keeping: **the og:image fix alone looked correct and changed nothing visible.**
+A URL-level fix cannot be called done until a real hover has been watched, because a gate upstream
+can make it unreachable.
 
 ### The logged-in walled gardens are entirely unsurveyed · asked about 2026-09-07
 
