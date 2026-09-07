@@ -6,10 +6,16 @@
   answers this the same way for a whole class of sites at once, so it is measured rather
   than argued about.
 
-  The server sends whatever `?csp=` asks for (see test-server.py). Open BOTH:
+  The server sends whatever `?csp=` asks for (see test-server.py). Four runs, and since v0.83.0
+  the last three are also the fallback ladder:
 
-    http://localhost:8899/test-pages/csp-img-src.html                       <- control
-    http://localhost:8899/test-pages/csp-img-src.html?csp=img-src%20'self'  <- the test
+    ?                                     control              -> scene.jpg 1600x1200
+    ?csp=img-src%20'self'%20blob:%20data: Brave/DDG/Startpage  -> scene.jpg, fetched, shown as blob:
+    ?csp=img-src%20'self'%20data:         Mojeek/SearXNG       -> scene.jpg, blob refused, shown as data:
+    ?csp=img-src%20'self'                 nothing displayable  -> icon_big.png 480x360
+
+  All four verified in Chrome, v0.83.0. The third is not hypothetical: SearXNG and Mojeek really
+  do allow data: and not blob:, which is why the ladder has that rung.
 
   localhost and 127.0.0.1 are different origins, so `img-src 'self'` blocks the link's
   target while leaving the thumbnail alone.

@@ -306,6 +306,24 @@ eq('a link with no query yields nothing',
 eq('a malformed href yields nothing rather than throwing',
     linkParamCandidates('::::not a url::::'), []);
 
+// ---- size parameters on an extensionless CDN path (E50)
+has('extensionless CDN id path drops w/h',
+    upgradeCandidates('https://th.bing.com/th/id/OIP.XwOEWPBVs8clfI8jAokcPwHaLH?w=89&h=89&c=1&pid=InlineBlock'),
+    'https://th.bing.com/th/id/OIP.XwOEWPBVs8clfI8jAokcPwHaLH?c=1&pid=InlineBlock');
+// The guards. Each of these would be an unrelated picture, not a bigger one.
+eq('a script endpoint keeps its query, whatever it looks like',
+    upgradeCandidates('https://forum.example/rotate.php?loc=header&w=200')
+        .filter(u => u.indexOf('rotate.php') >= 0 && u.indexOf('loc=header') === -1), []);
+eq('a short generic last segment is not an opaque id',
+    upgradeCandidates('https://searx.be/image_proxy?w=200&h=100')
+        .filter(u => u.indexOf('image_proxy') >= 0), []);
+eq('a next/image style endpoint is left to the proxy rule',
+    upgradeCandidates('https://site.com/_next/image?w=640&q=75')
+        .filter(u => u.indexOf('_next/image') >= 0), []);
+eq('an id with no digits is not opaque enough',
+    upgradeCandidates('https://cdn.example/assets/somethinglong?w=200')
+        .filter(u => u.indexOf('somethinglong') >= 0), []);
+
 // ---- upgrades must never return the input unchanged, and never throw
 const noisy = ['https://a.com/x.jpg', 'not a url at all', '/relative/p.png', 'data:image/png;base64,AAA',
     'https://a.com/', 'https://a.com/x.jpg?w=1', 'https://lh3.googleusercontent.com/abc'];

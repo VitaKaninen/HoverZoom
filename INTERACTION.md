@@ -519,7 +519,8 @@ this table is a table.
 | `E46` | The probe budget falls on the guesses; the ancestor link and the displayed src are always tried, and a srcset list contributes two | [`docs/RESOLVER.md`](docs/RESOLVER.md) |
 | `E47` | A fullscreen exit waits for the request still in flight, or the change it fires finds nothing to undo | [`docs/VIEWER.md`](docs/VIEWER.md) |
 | `E48` | A media URL in the ancestor link's query IS the answer, so the page behind it is never fetched; and an anchor holding a strip of thumbnails only speaks for the biggest one | [`docs/RESOLVER.md`](docs/RESOLVER.md) |
-| `E49` | The page's `img-src` CSP refuses the probe, silently and in a millisecond; every privacy search engine does this, and `blob:` is the only way through | [`docs/RESOLVER.md`](docs/RESOLVER.md) |
+| `E49` | The page's `img-src` CSP refuses the probe, silently and in a millisecond; the bytes are then fetched with GM_xhr and shown as `blob:`, or `data:` where blob is refused too | [`docs/RESOLVER.md`](docs/RESOLVER.md) |
+| `E50` | Size parameters are dropped from an extensionless CDN path only when the last segment is an opaque id and the path is not a script endpoint | [`docs/RESOLVER.md`](docs/RESOLVER.md) |
 
 `E3` is retired with the detached state (v0.28.0); `E4` and `E5` are retired as dangling.
 

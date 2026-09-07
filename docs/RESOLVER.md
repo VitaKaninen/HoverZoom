@@ -339,10 +339,30 @@ Audited over one live Bing page, 164 linked images: **82 resolve** from the anch
 **37** that would otherwise have shown the share card are now refused by this guard.
 
 - **A declined strip thumb now previews nothing at all**, which is correct but incomplete: its own
-  `th.bing.com/th/id/OIP.<id>?w=89&h=89&…` would give an honest 474×315 if the size parameters were
-  dropped, and the param-drop rule refuses because `MEDIA_RE` does not match an extensionless CDN
-  path. Widening that gate is wanted and **not done** — `/rotate.php` in `test-server.py` is the
-  standing reason a bare path may not have its query stripped.
+  `th.bing.com/th/id/OIP.<id>?w=89&h=89&…` gives an honest 474×711 once the size parameters are
+  dropped. **Done in v0.83.0** — see `E50` below.
+
+## Size parameters on an extensionless CDN path · `E50` · v0.83.0
+
+The param-drop rule required `MEDIA_RE` on the pathname, which excludes every extensionless image
+CDN. A second rule now covers those, gated so it cannot repeat the `/rotate.php` mistake — there the
+query **is** the request, and stripping it asks a different question and returns an unrelated
+picture, consistently enough that no later check catches it.
+
+Two guards, both necessary:
+
+- **No script endpoint** — `.php`, `.aspx`, `.jsp`, `.cgi` and friends.
+- **The last path segment must be an opaque id**: 12+ characters with at least one letter and one
+  digit. `OIP.XwOEWPBVs8clfI8jAokcPwHaLH` passes; `rotate`, `image_proxy` and `_next/image` do not.
+  The point is that such a URL's identity lives in the **path**, so the query can only be a rendering
+  instruction.
+
+Measured on `th.bing.com`: dropping just `w` and `h` takes 89×89 to **474×711** — the full uncropped
+frame. The other parameters (`c`, `rs`, `qlt`, `pid`, `rm`) make no difference, so the rule stays on
+the shared `SIZE_PARAMS` list and needs no CDN-specific knowledge.
+
+**Raising a size parameter would have been wrong.** The same CDN answers `?w=3000&h=3000` with a real
+3000×3000 upscale of a 474×315 file, which the size gate cannot tell from detail. Drop, never raise.
 
 `linkParamCandidates()` now also runs on the **displayed src**, because an image proxy carries its
 source in its own query rather than on a link (`?url=`, `?piurl=`, `?imgurl=`, `?u=`). The value must
@@ -373,6 +393,25 @@ Two consequences:
 - **A blocked probe is identifiable for free.** `securitypolicyviolation` on `document` carries
   `blockedURI` and `violatedDirective`, needs no network request, and fires before any timeout. It is
   the one failure kind that can be named exactly, and it must not be spent as a retry.
+**Built in v0.83.0.** `probeImage()` treats a refusal as a redirection, not a failure: on `error` it
+asks `cspRefused()` — the exact URL from a recorded violation, or any off-site URL once the page has
+refused one — and if so hands off to `bytesFor()`, which fetches through `GM_xmlhttpRequest` and
+measures the result. A hit may then carry a **`display`** URL separate from its real `url`, and
+`setMedia()` writes `res.display || res.url`. The caption keeps the real name, so the status bar says
+`scene.jpg`, never a blob UUID.
+
+Four things this needed that are easy to get wrong:
+
+- **`@connect *` in the header.** Without it Tampermonkey prompts per host, and a pending prompt
+  means GM_xhr **never calls back at all** — not an error, not a timeout. That parks the candidate
+  loop on that URL and the whole hover produces nothing, on every site. `fetchBlob()` therefore also
+  carries its own wall-clock `setTimeout`, because GM_xhr's `timeout` option does not cover a dialog.
+- **`onerror` is deferred one tick** before deciding why a probe failed, so the violation event has
+  landed and `cspRefused()` can see it.
+- **Blob URLs are revoked**, oldest first, past `BYTES_MAX` (12) — enough for a tour's window.
+- **The bytes are never fetched speculatively.** Only a refusal triggers the path, so the ordinary
+  case still costs one image load and "probing is preloading" survives.
+
 - **`data:` is the universal escape hatch, not `blob:`.** `GM_xmlhttpRequest` is not subject to page
   CSP, so the bytes can always be fetched; the question is only what may then be *displayed*. Four of
   the six blocked engines allow `blob:`, but SearXNG (`img-src 'self' data:

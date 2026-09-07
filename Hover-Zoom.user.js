@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.82.0
+// @version     0.83.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -11,6 +11,7 @@
 // @grant       GM_addValueChangeListener
 // @grant       GM_registerMenuCommand
 // @grant       GM_unregisterMenuCommand
+// @connect     *
 // @run-at      document-idle
 // @downloadURL https://raw.githubusercontent.com/VitaKaninen/HoverZoom/master/Hover-Zoom.user.js
 // @updateURL   https://raw.githubusercontent.com/VitaKaninen/HoverZoom/master/Hover-Zoom.user.js
@@ -412,6 +413,22 @@
         return { id: id, ext: m[2] };
     }
 
+    // An endpoint whose query is the REQUEST, not a resize: /rotate.php?loc=header asks a
+    // different question once stripped. Never drop a query from one of these. See E50.
+    const SCRIPT_EXT_RE = /\.(php\d?|aspx?|jsp|cgi|pl|py|rb|do|action)(?=$|[?#])/i;
+
+    const SIZE_PARAMS = ['w', 'h', 'width', 'height', 'size', 's', 'fit', 'resize', 'crop',
+        'quality', 'q', 'strip', 'thumb', 'thumbnail', 'scale', 'max', 'maxwidth',
+        'maxheight', 'downsize', 'compress', 'dpr'];
+
+    function dropSizeParams(u) {
+        let touched = false;
+        SIZE_PARAMS.forEach(function (p) {
+            if (u.searchParams.has(p)) { u.searchParams.delete(p); touched = true; }
+        });
+        return touched ? u.href : null;
+    }
+
     const UPGRADES = [
         function (u) {
             const hit = imgurId(u);
@@ -436,14 +453,16 @@
         },
         function (u) {
             if (!MEDIA_RE.test(u.pathname) && !VIDEO_EXT_RE.test(u.pathname)) return null;
-            const drop = ['w', 'h', 'width', 'height', 'size', 's', 'fit', 'resize', 'crop',
-                'quality', 'q', 'strip', 'thumb', 'thumbnail', 'scale', 'max', 'maxwidth',
-                'maxheight', 'downsize', 'compress', 'dpr'];
-            let touched = false;
-            drop.forEach(function (p) {
-                if (u.searchParams.has(p)) { u.searchParams.delete(p); touched = true; }
-            });
-            return touched ? u.href : null;
+            return dropSizeParams(u);
+        },
+        // The same, for a CDN whose path carries an opaque id and no extension:
+        // th.bing.com/th/id/OIP.<id>?w=89&h=89 -> 474x711, measured. See E50.
+        function (u) {
+            if (MEDIA_RE.test(u.pathname) || VIDEO_EXT_RE.test(u.pathname)) return null;
+            if (SCRIPT_EXT_RE.test(u.pathname)) return null;
+            const last = u.pathname.split('/').filter(Boolean).pop() || '';
+            if (last.length < 12 || !/[A-Za-z]/.test(last) || !/\d/.test(last)) return null;
+            return dropSizeParams(u);
         },
         // Twitter / X: ?name=small -> ?name=orig
         function (u) {
@@ -744,6 +763,116 @@
     const IMAGE_PROBE_MS = 20000;
     const PROBE_RETRY_MS = 30000;   // a miss is forgotten after this; a stall or a 429 is not for life
 
+    // ---- the page's own CSP refuses our probes. See E49.
+
+    let cspBlocksOffsite = false;   // this page has refused at least one off-site image
+    let blobRefused = false;        // ...and refuses blob: as well, so data: is the only way in
+    const cspHits = new Set();      // exact URLs the page has refused
+
+    document.addEventListener('securitypolicyviolation', function (e) {
+        if (!/^(?:img-src|default-src)/.test(e.violatedDirective || '')) return;
+        const u = String(e.blockedURI || '');
+        if (!u) return;
+        if (u === 'blob' || u.indexOf('blob:') === 0) { blobRefused = true; return; }
+        if (u === 'data' || u.indexOf('data:') === 0) return;
+        cspHits.add(u);
+        cspBlocksOffsite = true;
+    });
+
+    // Was this URL refused by policy rather than by the server? The exact hit if we have it,
+    // otherwise any off-site URL on a page already known to refuse them.
+    function cspRefused(url) {
+        if (cspHits.has(url)) return true;
+        if (!cspBlocksOffsite) return false;
+        try { return new URL(url, location.href).origin !== location.origin; } catch (e) { return false; }
+    }
+
+    function measureSrc(src) {
+        return new Promise(function (res) {
+            const im = new Image();
+            let t = 0;
+            const fin = function (ok) {
+                clearTimeout(t);
+                im.onload = im.onerror = null;
+                res(ok && im.naturalWidth > 0 ? { w: im.naturalWidth, h: im.naturalHeight } : null);
+            };
+            im.onload = function () { fin(true); };
+            im.onerror = function () { setTimeout(function () { fin(false); }, 0); };
+            t = setTimeout(function () { fin(false); }, IMAGE_PROBE_MS);
+            im.src = src;
+        });
+    }
+
+    // GM_xhr is not subject to the page's CSP, so the bytes are always reachable.
+    function fetchBlob(url) {
+        return new Promise(function (res) {
+            if (typeof GM_xmlhttpRequest !== 'function') { res(null); return; }
+            let settled = false;
+            const fin = function (v) { if (!settled) { settled = true; res(v); } };
+            // GM_xhr's own timeout does not cover a pending permission dialog, and a request that
+            // never calls back parks the whole candidate loop on this URL.
+            setTimeout(function () { fin(null); }, IMAGE_PROBE_MS);
+            try {
+                GM_xmlhttpRequest({
+                    method: 'GET', url: url, responseType: 'blob', timeout: IMAGE_PROBE_MS,
+                    onload: function (r) {
+                        if (r.status && (r.status < 200 || r.status >= 300)) { fin(null); return; }
+                        fin(r.response || null);
+                    },
+                    onerror: function () { fin(null); },
+                    ontimeout: function () { fin(null); },
+                });
+            } catch (e) { fin(null); }
+        });
+    }
+
+    function blobToDataUrl(blob) {
+        return new Promise(function (res) {
+            try {
+                const fr = new FileReader();
+                fr.onload = function () { res(String(fr.result)); };
+                fr.onerror = function () { res(null); };
+                fr.readAsDataURL(blob);
+            } catch (e) { res(null); }
+        });
+    }
+
+    const bytesCache = new Map();   // url -> Promise<{w,h,display}|null>
+    const liveBlobs = [];           // object URLs held open, oldest first
+    const BYTES_MAX = 12;           // enough for a tour's window; the oldest is revoked
+
+    function keepBlob(url, objUrl) {
+        liveBlobs.push({ url: url, objUrl: objUrl });
+        while (liveBlobs.length > BYTES_MAX) {
+            const old = liveBlobs.shift();
+            bytesCache.delete(old.url);
+            URL.revokeObjectURL(old.objUrl);
+        }
+    }
+
+    // blob: where the policy allows it, data: otherwise — every blocked engine measured takes one.
+    async function probeBytes(url) {
+        const blob = await fetchBlob(url);
+        if (!blob) return null;
+        if (!blobRefused) {
+            const objUrl = URL.createObjectURL(blob);
+            const dim = await measureSrc(objUrl);
+            if (dim) { keepBlob(url, objUrl); return { w: dim.w, h: dim.h, display: objUrl }; }
+            URL.revokeObjectURL(objUrl);
+        }
+        const data = await blobToDataUrl(blob);
+        if (!data) return null;
+        const dim = await measureSrc(data);
+        return dim ? { w: dim.w, h: dim.h, display: data } : null;
+    }
+
+    function bytesFor(url) {
+        if (bytesCache.has(url)) return bytesCache.get(url);
+        const p = probeBytes(url);
+        bytesCache.set(url, p);
+        return p;
+    }
+
     function probeImage(url) {
         return new Promise(function (resolve) {
             const img = new Image();
@@ -752,10 +881,14 @@
             const done = function (ok) {
                 clearTimeout(timer);
                 img.onload = img.onerror = null;
-                resolve(ok ? { w: img.naturalWidth, h: img.naturalHeight } : null);
+                if (ok) { resolve({ w: img.naturalWidth, h: img.naturalHeight }); return; }
+                // A refusal is not a failure: the bytes are still reachable. See E49.
+                if (cspRefused(url)) { dbg('refused by the page CSP — fetching the bytes instead', url); resolve(bytesFor(url)); return; }
+                resolve(null);
             };
             img.onload = function () { done(img.naturalWidth > 0); };
-            img.onerror = function () { done(false); };   // HZ+ omits this; a failed probe there wedges the page
+            // Deferred a tick: the violation event must land before done() decides why this failed.
+            img.onerror = function () { setTimeout(function () { done(false); }, 0); };
             timer = setTimeout(function () { done(false); img.src = ''; }, IMAGE_PROBE_MS);
             img.src = url;
             if (img.complete && img.naturalWidth > 0) done(true);
@@ -984,7 +1117,7 @@
                 if (trusted && dim.w * dim.h <= trusted.w * trusted.h) continue;
                 if (trusted && trusted.video && !dim.video) continue;
                 trusted = { url: t.url, w: dim.w, h: dim.h, video: !!dim.video, duration: dim.duration,
-                    trusted: true, from: t.from };
+                    display: dim.display, trusted: true, from: t.from };
                 dbg('hit (declared by the linked page)', trusted);
                 emit(trusted);
             }
@@ -1021,7 +1154,7 @@
             if (best && dim.w * dim.h <= best.w * best.h) continue;   // not an improvement
             if (best && best.video && !dim.video) continue;
             best = { url: url, w: dim.w, h: dim.h, video: !!dim.video, duration: dim.duration,
-                from: c.from };
+                display: dim.display, from: c.from };
             dbg('hit', best);
             emit(best);
         }
@@ -2557,7 +2690,7 @@
         mediaEl.hidden = false;
         applySmoothing();
         if (!wantsVideo && noReferrerHere()) imgEl.referrerPolicy = 'no-referrer';
-        mediaEl.src = res.url;
+        mediaEl.src = res.display || res.url;   // a CSP-refused picture displays from bytes. See E49.
         if (wantsVideo) {
             // The site's remembered answer, not the last clip's: a fresh tab on a site that has
             // never been unmuted starts silent, which is what AUDIO_DEFAULT is for.
