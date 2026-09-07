@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.80.0
+// @version     0.82.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -346,6 +346,10 @@
 
     const THUMB_PARAM = /(?:^|[_-])(?:thumb|thumbnail|tn|small|preview|icon|avatar)(?:$|[_-])/i;
 
+    // A parameter that says its value IS an image needs no extension to prove it: Bing's
+    // ?mediaurl=, Google's ?imgurl=, Yandex's ?img_url=, Startpage's ?piurl=. See E48.
+    const IMAGE_PARAM = /^(?:media|img|image|photo|pic|picture|pi)[_-]?(?:url|src)$/i;
+
     // A card links once but can hold a strip of extra thumbnails; the link is about the biggest
     // image inside it and says nothing about the others. See E48.
     function anchorOwns(el, a) {
@@ -374,7 +378,7 @@
         u.searchParams.forEach(function (value, name) {
             if (THUMB_PARAM.test(name)) return;          // never trade an original for a thumbnail
             if (!/^https?:\/\//i.test(value)) return;    // absolute only; a bare path is ambiguous
-            if (looksLikeImage(value)) out.push(value);
+            if (looksLikeImage(value) || IMAGE_PARAM.test(name)) out.push(value);
         });
         return out;
     }
@@ -844,6 +848,18 @@
     }
 
     // What a fetched page says its media is: what it declares, and what its markup holds.
+    // The og:image THIS page declares for itself. A linked page repeating it is showing the site's
+    // share card, which says nothing about the picture. See E48.
+    let ownOg;
+    function ownOgImage() {
+        if (ownOg === undefined) {
+            const m = document.querySelector('meta[property="og:image"], meta[name="og:image"]');
+            const v = m && m.getAttribute('content');
+            try { ownOg = v ? new URL(v, location.href).href : null; } catch (e) { ownOg = null; }
+        }
+        return ownOg;
+    }
+
     function pageMediaFrom(doc, pageUrl) {
         const declared = metaContent(doc, ['og:url']);
         if (declared) {
@@ -861,7 +877,11 @@
             const img = metaContent(doc, ['og:image:secure_url', 'og:image', 'twitter:image:src',
                 'twitter:image']);
             if (img && looksLikeImage(img)) {
-                try { og = { url: new URL(img, pageUrl.href).href }; } catch (e) { /* none */ }
+                try {
+                    const abs = new URL(img, pageUrl.href).href;
+                    if (abs === ownOgImage()) dbg('linked page rejected — it declares the same share card this page does', abs);
+                    else og = { url: abs };
+                } catch (e) { /* none */ }
             }
         }
         return { declared: og, body: pageBodyMedia(doc, pageUrl) };

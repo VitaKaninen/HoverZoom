@@ -288,6 +288,19 @@ eq('relative parameter values are ignored',
 eq('thumbnail-named parameters are skipped even when they are images',
     linkParamCandidates('https://site.com/v?thumb=https://cdn/small.jpg&preview_url=https://cdn/p.jpg'),
     []);
+// An extension is not the only proof: the parameter's NAME can declare the value is an image.
+// Bing's mediaurl is an extensionless resize endpoint, and requiring an extension sent the
+// resolver to the linked page instead, which answers og:image with Bing's own share card. See E48.
+eq('mediaurl= is taken even with no extension on the path',
+    linkParamCandidates('https://www.bing.com/images/search?view=detailV2&mediaurl=https%3A%2F%2Fhost.com%2Fup%2Fresize%2F1280x720!%2Fquality%2F90%2F'),
+    ['https://host.com/up/resize/1280x720!/quality/90/']);
+eq('img_url= and piurl= are image-declaring names too',
+    linkParamCandidates('https://yandex.com/images/search?img_url=https%3A%2F%2Fa.com%2Fx&piurl=https%3A%2F%2Fb.com%2Fy'),
+    ['https://a.com/x', 'https://b.com/y']);
+eq('an image-declaring name still loses to a thumbnail name',
+    linkParamCandidates('https://site.com/v?thumb_url=https://cdn/small'), []);
+eq('a bare ?url= still needs an extension, so a redirect target is not an image',
+    linkParamCandidates('https://site.com/go?url=https://site.com/article'), []);
 eq('a link with no query yields nothing',
     linkParamCandidates('https://site.com/gallery/item'), []);
 eq('a malformed href yields nothing rather than throwing',

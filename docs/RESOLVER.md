@@ -316,6 +316,28 @@ were. So `anchorOwns()` gates the whole anchor branch — its query, the link it
 - **A tie leaves everyone an owner.** `>` not `>=`, so `<a>` with a front image and an equal-sized
   hover-swap keeps working. A grid of equal images under one anchor would therefore all claim its
   declared URL; no measured layout does this, and refusing on a tie would cost the swap case.
+#### The parameter's NAME can declare an image · v0.81.0
+
+`looksLikeImage()` wanted an extension, and Bing's `mediaurl` is often an extensionless resize
+endpoint (`…/wp-content/uploads/2022/09/resize/1280x720!/quality/90/`). The candidate was dropped,
+`skipLinkedPage()` therefore said no, and the share card came back by the long way round. A parameter
+literally called `mediaurl` / `imgurl` / `img_url` / `piurl` **has already said its value is an
+image**; requiring the extension as well is asking for the same proof twice. `IMAGE_PARAM` accepts
+those names without one — `THUMB_PARAM` is still tested first, and a bare `?url=` still needs an
+extension because on a link that usually means a redirect target.
+
+#### A share card the current page also declares is furniture · v0.82.0
+
+The remaining case has no media URL on the anchor at all — Bing's cluster and related-search tiles
+link to another `bing.com/images/search` page — so `linkedMedia()` runs and gets the card again.
+The free guard: **this page declares `og:image` = `…/facebook_sharing_5.png` for itself**, and so does
+every page it links to. `pageMediaFrom()` now rejects a linked page's `og:image` when it equals
+`ownOgImage()`. One cached `querySelector`, no request, no site knowledge.
+
+Audited over one live Bing page, 164 linked images: **82 resolve** from the anchor's declared URL
+(4 of them only because of the `IMAGE_PARAM` rule), **45 decline** as not the anchor's owner, and the
+**37** that would otherwise have shown the share card are now refused by this guard.
+
 - **A declined strip thumb now previews nothing at all**, which is correct but incomplete: its own
   `th.bing.com/th/id/OIP.<id>?w=89&h=89&…` would give an honest 474×315 if the size parameters were
   dropped, and the param-drop rule refuses because `MEDIA_RE` does not match an extensionless CDN
