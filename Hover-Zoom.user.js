@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.96.0
+// @version     0.97.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -181,6 +181,7 @@
                 if (!remote) return;                // our own write; cfg already matches
                 reloadSettings();
                 probeCache.clear();
+                plReset();
                 refreshSiteMenu();                  // the mode or the list may have changed
                 if (panelHost) openPanel();         // re-render an open panel onto fresh values
             });
@@ -1020,6 +1021,7 @@
             else if (r.status >= 500) v = { kind: 'dead', status: r.status, total: 0 };
             else v = { kind: 'alive', status: r.status, total: sizeFromHeaders(r.headers, r.status) };
             diagValue.set(url, v);
+            hardBlock(url, v);      // the one answer that changes how hard we may push the host
             return v;
         });
         diagCache.set(url, p);
@@ -1282,10 +1284,13 @@
         return dim.w > displayed.w * cfg.minRatio || dim.h > displayed.h * cfg.minRatio;
     }
 
-    async function resolve(el, displayed, token, onHit) {
+    // `guesses` caps the non-keep candidates for a SPECULATIVE resolve; the full search runs on
+    // arrival if a cut one came up empty. See TOUR.md §6.
+    async function resolve(el, displayed, token, onHit, guesses) {
         // The budget falls on the guesses; the link and the displayed src are always tried. See E46.
         const all = collectCandidates(el);
-        let budget = MAX_PROBES - all.filter(function (c) { return c.keep; }).length;
+        const keeps = all.filter(function (c) { return c.keep; }).length;
+        let budget = guesses === undefined ? MAX_PROBES - keeps : Math.max(0, guesses | 0);
         const candidates = all.filter(function (c) { return c.keep || budget-- > 0; });
         const shown = shownUrl(el);
         const native = nativeSize(el);      // the bytes on screen, for the stability test
@@ -3431,7 +3436,7 @@
         seekDrag = false;
         volDrag = false;
         closeVol();
-        box.classList.remove('on', 'hot', 'pan', 'drag', 'full');
+        box.classList.remove('on', 'hot', 'pan', 'drag', 'full', 'hasnav', 'moving');
         box.style.cursor = '';      // onMove writes this inline over the bands; see hitRegion
         if (gripEl) { gripEl.classList.remove('hot'); gripEl.style.cursor = ''; }
         clearTimeout(hideTimer);
@@ -3778,6 +3783,7 @@
         if (added) saveSettings();
         dbg('blocked', cfg.blockList);
         probeCache.clear();
+        plReset();                  // buffered answers may have been reached through this URL
         refreshPanel();             // the Exceptions list is on screen behind this window
         // Mid-tour, blocking is "not this one" — it moves on rather than tearing the window down.
         if (tourActive()) { tourNav(scrubDir, false); return; }
@@ -4808,6 +4814,7 @@
         clearTimeout(scrubTimer);
         scrubTimer = 0;
         tour = null;
+        plReset();
     }
 
     // Once per pinned window, on the first nav press: the anchored corner goes to the bottom
@@ -4856,6 +4863,7 @@
             doc: Math.round(list[to].x) + ',' + Math.round(list[to].y),
             to: list[to].el.tagName + ' ' + (list[to].url || '(nothing)').slice(-48) });
         tourChrome();
+        plFill(list, to, dir);
         clearTimeout(scrubTimer);
         if (repeat) scrubTimer = setTimeout(tourShow, TOUR_SETTLE_MS);
         else tourShow();
@@ -4874,17 +4882,36 @@
         activeShown = shownUrl(el);
         if (token) token.cancelled = true;
         const myToken = token = { cancelled: false, fresh: true };
+        // A settled preload goes straight in: the point of preloading is not only the latency but
+        // the flashing, and the live path emits every improvement as it lands. A cut budget that
+        // found nothing, or one measured against a different displayed size, is not usable.
+        const pre = plDone.get(el);
+        if (pre && pre.res && sameDisplayed(pre.displayed, displayed)) {
+            dbg('tour: from the preload buffer', pre.res);
+            swapViewer(pre.res);
+            return;
+        }
+        plPaused = true;            // a resolve the user is waiting on never queues behind six
         showSpinner();
         dockSpinner();
         let hit = null;
         try {
             hit = await resolve(el, displayed, myToken, null);
         } finally {
+            plPaused = false;
+            plPump();
             if (!myToken.cancelled) hideSpinner();
         }
         if (myToken.cancelled || !tour || tour.el !== el || !view) return;
+        plDone.set(el, { res: hit, displayed: displayed });
         if (hit) swapViewer(hit);
         else tourFallback(el, displayed, myToken.failure);
+    }
+
+    // A preload measured against a stale rect would have applied the size gate to the wrong
+    // number, so its answer is only usable while the picture is still that size.
+    function sameDisplayed(a, b) {
+        return !!a && !!b && Math.abs(a.w - b.w) <= 1 && Math.abs(a.h - b.h) <= 1;
     }
 
     // Never blank, never skipped: a page of 50 pictures gives a tour of 50, and one that will not
@@ -4900,6 +4927,181 @@
         const reason = why || 'no larger version found';
         dbg('tour: showing the page\'s own picture — ' + reason, url);
         swapViewer({ url: url, w: w, h: h, reason: reason });
+    }
+
+    // ---- the preloader
+    //
+    // Depth buys a burst; only concurrency buys a rate. Measured: serial resolves land one picture
+    // every ~1.1-1.45s, against a 3/s target — so the window absorbs the burst and six workers
+    // sustain the rate. Do not raise the worker count without re-measuring. TOUR.md §6 and §14.
+
+    const PL_GAP_MS = 120;      // minimum spacing between speculative request STARTS
+    const PL_GUESSES = 1;       // guesses a speculative resolve may spend beyond its keeps
+    const PL_VIDEO_AHEAD = 2;   // clips buffered in full rather than to metadata
+    const PL_MAX_WORKERS = 12;
+
+    const plDone = new Map();   // element -> { res, displayed } for everything already resolved
+    let plQueue = [];
+    let plLive = [];            // tokens of running speculative resolves, for cancellation
+    let plRunning = 0;
+    let plSlotAt = 0;           // the next reserved request start time
+    let plPaused = false;       // a foreground resolve is waiting: start nothing speculative
+    let plSerial = false;       // some host in the window pushed back
+    let plGen = 0;              // bumped on a direction change; older jobs fall out
+    let plDir = 0;
+
+    function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+    // Reserved SYNCHRONOUSLY, before any await, so two workers cannot claim one slot. This, not
+    // the worker count, is what bounds the load a 6-wide preloader puts on a site.
+    function plReserve() {
+        const now = Date.now();
+        const at = Math.max(now, plSlotAt);
+        plSlotAt = at + PL_GAP_MS;
+        return at - now;
+    }
+
+    function plWorkers() {
+        if (plSerial) return 1;
+        const n = cfg.tourWorkers | 0;
+        return Math.max(1, Math.min(PL_MAX_WORKERS, n || 6));
+    }
+
+    // Everything queued or in flight is abandoned; what has already been answered is kept.
+    function plCancel() {
+        plGen++;
+        plQueue = [];
+        plLive.forEach(function (t) { t.cancelled = true; });
+        plLive = [];
+    }
+
+    function plReset() {
+        plCancel();
+        plDone.clear();
+        plKeep.length = 0;
+        plDir = 0;
+    }
+
+    function plPump() {
+        if (plPaused) return;
+        while (plRunning < plWorkers() && plQueue.length) {
+            const job = plQueue.shift();
+            if (job.gen !== plGen) continue;
+            plRunning++;
+            plRun(job).then(plDoneOne, plDoneOne);
+        }
+    }
+
+    function plDoneOne() { plRunning--; plPump(); }
+
+    async function plRun(job) {
+        const wait = plReserve();
+        if (wait > 0) await sleep(wait);
+        if (job.gen !== plGen || !tour || plDone.has(job.el)) return;
+        const token = { cancelled: false, fresh: false };
+        plLive.push(token);
+        let hit = null;
+        try { hit = await resolve(job.el, job.displayed, token, null, PL_GUESSES); }
+        catch (e) { hit = null; }
+        plLive = plLive.filter(function (t) { return t !== token; });
+        if (job.gen !== plGen || token.cancelled) return;
+        plDone.set(job.el, { res: hit, displayed: job.displayed });
+        dbg('preloaded', { ahead: job.dist, buffered: plDone.size, queued: plQueue.length,
+            workers: plWorkers(), got: hit ? hit.w + '×' + hit.h + ' ' + hit.url.slice(-48)
+                                          : 'nothing (the full search runs on arrival)' });
+        if (!hit) return;
+        // Probing an image leaves it in the HTTP cache; probing a clip does not, because
+        // probeVideo() aborts the fetch the moment it has the dimensions.
+        if (hit.video) { if (job.dist <= PL_VIDEO_AHEAD) plWarmVideo(hit.url); }
+        else plKeepImage(hit.url);
+    }
+
+    // Queue the entries ahead of the anchor and drop everything outside the window either way,
+    // which is also what keeps the map from holding nodes a virtualised feed has destroyed.
+    function plFill(list, at, dir) {
+        const depth = Math.max(0, Math.min(40, cfg.tourWindow | 0));
+        if (!depth || at < 0) return;
+        if (dir !== plDir) { plCancel(); plDir = dir; }
+        const ahead = [];
+        const keep = new Set();
+        if (list[at]) keep.add(list[at].el);
+        for (let i = 1; i <= depth; i++) {
+            const f = list[at + i * dir], b = list[at - i * dir];
+            if (f) { ahead.push({ e: f, dist: i }); keep.add(f.el); }
+            if (b) keep.add(b.el);
+        }
+        plDone.forEach(function (v, k) { if (!keep.has(k)) plDone.delete(k); });
+        plQueue = plQueue.filter(function (j) { return keep.has(j.el); });
+        plSerial = ahead.some(function (a) { return noRush(hostOf(a.e.url)); });
+        ahead.forEach(function (a) {
+            if (plDone.has(a.e.el)) return;
+            if (plQueue.some(function (j) { return j.el === a.e.el; })) return;
+            plQueue.push({ el: a.e.el, displayed: sizeOf(a.e.el), dist: a.dist, gen: plGen });
+        });
+        plPump();
+    }
+
+    // A probe lets its Image go and relies on the HTTP cache, which Chromium can evict.
+    const plKeep = [];
+
+    function plKeepImage(url) {
+        const im = new Image();
+        if (noReferrerHere()) im.referrerPolicy = 'no-referrer';
+        im.src = url;
+        plKeep.push(im);
+        while (plKeep.length > Math.max(4, cfg.tourWindow | 0)) plKeep.shift();
+    }
+
+    // Stage 2 for clips: a real buffered fetch, which the metadata probe deliberately aborts.
+    let plVids = [];
+
+    function plWarmVideo(url) {
+        if (plVids.some(function (v) { return v.src === url; })) return;
+        const v = document.createElement('video');
+        v.preload = 'auto';
+        v.muted = true;
+        v.src = url;
+        plVids.push(v);
+        while (plVids.length > PL_VIDEO_AHEAD) {
+            const old = plVids.shift();
+            old.removeAttribute('src');
+            old.load();
+        }
+    }
+
+    // ---- hosts that pushed back
+    //
+    // Remembered across sessions, because a 429 is a fact about the site rather than about
+    // this page load. The verdict comes from the diagnosis a failed probe already paid for.
+
+    const NORUSH_KEY = 'hoverZoomNoRush';
+    let noRushSet = null;
+
+    function hostOf(url) {
+        try { return new URL(url, location.href).hostname.toLowerCase(); } catch (e) { return ''; }
+    }
+
+    function noRushHosts() {
+        if (noRushSet) return noRushSet;
+        noRushSet = new Set();
+        try {
+            const raw = GM_getValue(NORUSH_KEY, '');
+            if (raw) JSON.parse(raw).forEach(function (h) { noRushSet.add(h); });
+        } catch (e) { /* nothing stored, or unreadable */ }
+        return noRushSet;
+    }
+
+    function noRush(h) { return !!h && noRushHosts().has(h); }
+
+    function hardBlock(url, verdict) {
+        if (!verdict || verdict.kind !== 'busy') return;
+        const h = hostOf(url);
+        if (!h || noRush(h)) return;
+        noRushHosts().add(h);
+        try { GM_setValue(NORUSH_KEY, JSON.stringify(Array.from(noRushHosts()))); }
+        catch (e) { /* the list is an optimisation; losing it costs politeness, not correctness */ }
+        plSerial = true;
+        dbg('the host asked us to slow down — serial from here', { host: h, status: verdict.status });
     }
 
     // -------------------------------------------------------------- settings UI
@@ -5557,6 +5759,12 @@
         advanced('Advanced options');
 
         section('Next and previous');
+        num('tourWindow', 'Pictures to load ahead',
+            'How far ahead of where you are the next pictures are fetched. Deeper absorbs a ' +
+            'burst; it does not make them arrive faster. (default: 12)', 0, 40, 1);
+        num('tourWorkers', 'Loaded at once',
+            'How many are fetched in parallel. This is what sets the rate. Measured at about ' +
+            '5 pictures a second at 6. (default: 6)', 1, 12, 1);
         num('tourScrubRate', 'Scrub rate',
             'Pictures per second while an arrow is held down. Faster than about 5 and they go ' +
             'by too quickly to see. (default: 5)', 1, 30, 1);

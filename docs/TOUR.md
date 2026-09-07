@@ -1,7 +1,7 @@
 # The tour — next/previous navigation through a page's pictures
 
-**Status: §0-§5, §8 and §11 are BUILT (v0.96.0); §7 was built earlier (v0.88.0-v0.89.0).** What is
-left is §6 (the concurrent preloader), §9 (the scroll excursion) and §10 (cross-page harvesting).
+**Status: §0-§8 and §11 are BUILT (v0.96.0-v0.97.0); §7 was built earlier (v0.88.0-v0.89.0).** What is
+left is §9 (the scroll excursion) and §10 (cross-page harvesting).
 Sections that are built are kept because the reasoning still explains the shape; where the build
 departed from the plan the section says so.
 
@@ -36,9 +36,12 @@ and showing the page's own picture with a reason when one fails. Those were the 
 
 ---
 
-## 0. Do this first — the invariant rewrite
+## 0. The invariant rewrite — DONE, v0.96.0
 
-`../CLAUDE.md` currently carries, under "Design invariants":
+The rule in `../CLAUDE.md` was rewritten, and so was the script's own header comment. What follows
+is why, kept because the reason is the part that stops it being rewritten back.
+
+`../CLAUDE.md` used to carry, under "Design invariants":
 
 > **Nothing is decided before hover time.** … Do not add a MutationObserver or a pre-pass "for
 > performance", and never bind state to an element that might change under it.
@@ -272,7 +275,33 @@ OS key repeat is ~30/s, ten times the target rate, and would outrun any buffer i
 
 ---
 
-## 6. The preloader
+## 6. The preloader — BUILT, v0.97.0
+
+**What the build settled, beyond the plan:**
+
+- **A speculative resolve issues one request at a time, not eight.** The plan feared "six
+  concurrent resolves is up to 48 simultaneous requests" and asked for a global in-flight cap.
+  There is none, because `resolve()`'s candidate loop `await`s each probe: a resolve has at most
+  two requests open, its current probe and the linked-page fetch running beside it. The worker
+  count IS the cap. **Slot spacing is still what bounds the request rate** — `plReserve()` hands
+  out start times `PL_GAP_MS` apart, computed synchronously before any `await`.
+- **A preload answer is only usable while the picture is still the size it was measured at.**
+  `plRun` records the `displayed` rect it applied the `minRatio` gate against; `tourShow` refuses
+  a buffered answer whose rect no longer matches (`sameDisplayed`). Without that, a below-the-fold
+  entry measured at 0×0 passes the size gate trivially and caches an answer the foreground would
+  have rejected.
+- **`probeCache` dedup is worth more than expected.** Five separate entries in one window resolved
+  to the same slow URL and cost one request between them, because the cache holds the *promise*.
+- **The buffer is bounded by eviction, not by a cap.** `plFill` keeps `tourWindow` entries either
+  side of the anchor and deletes the rest — which is also what stops the map holding element
+  references a virtualised feed has already destroyed.
+- **The no-rush list rides on the diagnosis that already exists.** `diagnose()` classifies a 429 /
+  `Retry-After` as `busy`; `hardBlock()` hangs off that one line and needs no request of its own.
+  It is remembered in GM storage across sessions, and it drops the pool to strictly serial.
+
+Measured against localhost, buffered arrivals land in **~25 ms with no spinner and no upgrade
+flash**. The local server cannot show the concurrency win — latency is what six workers multiply,
+and there is none here; §14's live measurement is what that rests on.
 
 ### Why depth alone does not work
 
@@ -641,7 +670,7 @@ probably constants rather than settings unless testing says otherwise.
    v0.96.0**, in the same version as step 1: the counter is what step 1's derivation is *for*, so
    splitting them would have shipped a version whose only new state nothing displayed.
 3. ~~Retry and timeout changes (§7)~~ — **done, v0.88.0-v0.89.0.** They stood alone, as predicted.
-4. Concurrent preloader with slot spacing and the no-rush list (§6).
+4. ~~Concurrent preloader with slot spacing and the no-rush list (§6).~~ — **done, v0.97.0.**
 5. ~~Failure display and the Retry button (§8)~~ — **done: display v0.88.0, the widened trigger and
    ↻ v0.96.0.**
 6. Scroll excursion and load-more (§9).
