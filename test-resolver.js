@@ -120,6 +120,13 @@ has('googleusercontent =s400 -> =s0',
     upgradeCandidates('https://lh3.googleusercontent.com/abc=s400-c'),
     'https://lh3.googleusercontent.com/abc=s0');
 
+// Google Photos serves every grid thumbnail as a CSS background on photos.fife.usercontent.
+// google.com — the same size-token syntax, a host the rule did not list. Measured live
+// 2026-09-07: =w384-h216-p-k-rw-no is 384x216, =s0 is the 1024x768 original.
+has('google photos host uses the same size token',
+    upgradeCandidates('https://photos.fife.usercontent.google.com/pw/AP1GczABCxyz=w384-h216-p-k-rw-no'),
+    'https://photos.fife.usercontent.google.com/pw/AP1GczABCxyz=s0');
+
 has('mediawiki thumb path',
     upgradeCandidates('https://upload.wikimedia.org/wikipedia/commons/thumb/a/ab/Cat.jpg/220px-Cat.jpg'),
     'https://upload.wikimedia.org/wikipedia/commons/a/ab/Cat.jpg');
