@@ -89,11 +89,12 @@ ancestor-link candidate ever comes back missing on a shadow-DOM site.
   resolving a harvested page's links against the page you are standing on gives a plausible wrong
   URL every time, which is what `__hzBase` exists to prevent. The 12×12 logo is under
   `minDisplayed` by its own attributes — the only size gate a page with no layout can offer.
-- **`test-pages/forum-thread.html` is the tour's scope fixture** (v0.100.0): one post with ten
-  pictures, dressed with everything a tour must leave out — avatar, badges, emoji, signature,
-  sidebar, five replies with their own. A tour begun on picture 1 must read `1 / 10`; `}` must go
-  to 12 (the thread) then 14 (the page). Post 4's two pictures are 160×120 on purpose, under the
-  floor, so the thread level is 12 and not 14. **Dispatch synthetic keys on `document.body`, not
+- **`test-pages/forum-thread.html` is the tour's scope fixture** (v0.100.0): one post with eleven
+  pictures — one drawn 60×150 — dressed with everything a tour must leave out: avatar, badges,
+  emoji, signature, sidebar, five replies with their own. A tour begun on picture 1 must read
+  `1 / 12` (the eleven and the post's signature, which the longer-side floor admits); `}` must go
+  to 15 (the thread) then 17 (the page). Post 4's two pictures are 100×75 on purpose, under the
+  floor, so the thread level is 15 and not 17. **Dispatch synthetic keys on `document.body`, not
   `window`** — the hover-then-arrow path (`T29`) is a `document` listener and an event dispatched
   at `window` never reaches it, which reads as "→ does not pin". Cost one round.
 - **`test-server.py`, not `python -m http.server`.** It is the same static server plus

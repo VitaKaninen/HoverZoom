@@ -2,15 +2,17 @@
 <meta charset="utf-8">
 <title>Forum thread — the tour's scope</title>
 <!--
-  The fixture for TOUR.md §1a. One post with ten pictures, dressed the way a forum dresses it:
+  The fixture for TOUR.md §1a. One post with eleven pictures, dressed the way a forum dresses it:
   an avatar, badges, emoji in the text, a signature banner, a sidebar with its own pictures,
   and five replies under it each carrying an avatar, emoji and a picture or two. A tour begun
-  on the post's first picture must hold the post's ten and nothing else; `}` must widen it to
-  the thread, then the page; `{` must bring it back.
+  on the post's first picture must hold the post's eleven and nothing else; `}` must widen it
+  to the thread, then the page; `{` must bring it back. Picture 11 is drawn 60×150: a narrow
+  picture is still a picture, so the floor reads the LONGER side (reported 2026-09-11).
 
   Every picture is a distinct ?n= URL so the counter cannot be confused by the fixtures
-  sharing one file. Sizes as drawn: post pictures 200×150, reply pictures 200×150 (post 4's two are 160×120, under the floor),
-  avatars 96, badges 24, emoji 20, the signature 468×60, the sidebar 200×200 and 200×150.
+  sharing one file. Sizes as drawn: post pictures 200×150 (and one 60×150), reply pictures
+  200×150 (post 4's two are 100×75, under the floor), avatars 96, badges 24, emoji 20, the
+  signature 468×60, the sidebar 200×200 and 200×150.
 -->
 <style>
   body { margin: 0; background: #11111b; color: #cdd6f4; font: 14px system-ui, sans-serif; }
@@ -27,7 +29,8 @@
   .body p { margin: 0 0 10px; }
   .emoji { width: 20px; height: 20px; vertical-align: -4px; }
   .pics img { width: 200px; height: 150px; margin: 0 6px 6px 0; }
-  .pics.small img { width: 160px; height: 120px; }
+  .pics.small img { width: 100px; height: 75px; }
+  .pics img.tall { width: 60px; height: 150px; }
   .sig { border-top: 1px solid #313244; margin-top: 10px; padding-top: 8px; }
   .sig img { display: block; width: 468px; height: 60px; }
   .actions { margin-top: 8px; font-size: 12px; color: #7f849c; }
@@ -52,7 +55,7 @@
     </div>
     <div class="body">
       <p>Here are the pictures from the trip <img class="emoji" src="/test-images/icon.png?e=1" alt=":)">.
-         Ten of them, two to a row, and nothing else in this post should turn up in the tour.</p>
+         Eleven of them, two to a row, and nothing else in this post should turn up in the tour.</p>
       <p class="pics"><a href="/test-images/photo.jpg?n=1"><img src="/test-images/photo-200x150.jpg?n=1" alt="1"></a>
                       <a href="/test-images/photo.jpg?n=2"><img src="/test-images/photo-200x150.jpg?n=2" alt="2"></a></p>
       <p class="pics"><a href="/test-images/photo.jpg?n=3"><img src="/test-images/photo-200x150.jpg?n=3" alt="3"></a>
@@ -63,7 +66,8 @@
       <p class="pics"><a href="/test-images/photo.jpg?n=7"><img src="/test-images/photo-200x150.jpg?n=7" alt="7"></a>
                       <a href="/test-images/photo.jpg?n=8"><img src="/test-images/photo-200x150.jpg?n=8" alt="8"></a></p>
       <p class="pics"><a href="/test-images/photo.jpg?n=9"><img src="/test-images/photo-200x150.jpg?n=9" alt="9"></a>
-                      <a href="/test-images/photo.jpg?n=10"><img src="/test-images/photo-200x150.jpg?n=10" alt="10"></a></p>
+                      <a href="/test-images/photo.jpg?n=10"><img src="/test-images/photo-200x150.jpg?n=10" alt="10"></a>
+                      <a href="/test-images/photo.jpg?n=11"><img class="tall" src="/test-images/photo-200x150.jpg?n=11" alt="11, drawn 60 wide"></a></p>
       <div class="sig"><img src="/test-images/banner-1200x125.jpg?sig=op" alt="signature"></div>
       <div class="actions"><a href="#">quote</a><a href="#">like</a><a href="#">report</a></div>
     </div>
@@ -99,7 +103,7 @@
       <b>reply four</b>
     </div>
     <div class="body">
-      <p>Two more, a bit smaller — under the floor, so they never join.</p>
+      <p>Two more, drawn small — under the floor, so they never join.</p>
       <p class="pics small"><a href="/test-images/photo.jpg?n=r4a"><img src="/test-images/photo-200x150.jpg?n=r4a" alt="r4a"></a>
                       <a href="/test-images/photo.jpg?n=r4b"><img src="/test-images/photo-200x150.jpg?n=r4b" alt="r4b"></a></p>
       <div class="actions"><a href="#">quote</a><a href="#">like</a></div>

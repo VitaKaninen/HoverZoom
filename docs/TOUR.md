@@ -125,11 +125,13 @@ emoji, a signature, a sidebar, and fifty replies each with their own avatars and
 tour is the post's ten and nothing else. **The picture the window was pinned on is the user's
 example of what they want**, and two things are read off it at `tourStart()`:
 
-- **The floor** (`tour.floor`): `tourMinDisplayed` (default 128), on the **shorter side as drawn**,
-  either side under it and the picture is out. Emoji, badges and 96px avatars fall under it;
-  signature banners do too (468×60). Unknown size stays in, as before. The floor is lowered to the
-  start picture's own shorter side when that is smaller — a tour begun on a 100px thumbnail admits
-  100px, or an old forum's attachment thumbs would give an empty tour.
+- **The floor** (`tour.floor`): `tourMinDisplayed` (default 128), on the **longer side as drawn**.
+  Emoji, badges and 96px avatars fall under it. It was the shorter side in v0.100.0, which threw
+  out a 60×150 picture (reported 2026-09-11) — a narrow picture is still a picture, so v0.101.0
+  reads the long edge; the cost is that a 468×60 signature banner now passes. Unknown size stays
+  in, as before. The floor is lowered to the start picture's own longer side when that is
+  smaller — a tour begun on a 100px thumbnail admits 100px, or an old forum's attachment thumbs
+  would give an empty tour.
 - **The scope** (`tour.scope`): an ancestor of the start picture; only pictures inside it are in
   the list. Chosen by `tourPick()` from the *levels* (`tourLevels()`): the chain of ancestors at
   which the count of floor-passing pictures grows, one level per count, holding the **outermost**
@@ -161,7 +163,8 @@ heuristic — the thresholds (8 elements, 200 characters) are starting values, m
 as `– / n` and the next step goes by position, exactly as a destroyed anchor does.
 
 `test-pages/forum-thread.html` is the fixture: levels come out as `img(1) → p.pics(2) →
-article#post-1(10) → main(12) → html(14)`, the pick is the article, and `}` `}` walks to 12 and 14.
+article#post-1(12) → main(15) → html(17)`, the pick is the article, and `}` `}` walks to 15 and 17.
+The 12 are eleven pictures — one drawn 60×150 — and the post's signature.
 
 ---
 
@@ -756,7 +759,7 @@ Proposed keys, added to `DEFAULTS`. Remember the hoisting trap in `../CLAUDE.md`
 |---|---|---|
 | `tourButtons` | `true` | show ◀ ▶ in the strip |
 | `tourKeys` | `true` | arrows navigate when the picture cannot pan horizontally |
-| `tourMinDisplayed` | `128` | the tour's floor on the shorter side as drawn, px (§1a) |
+| `tourMinDisplayed` | `128` | the tour's floor on the longer side as drawn, px (§1a) |
 | `tourWindow` | `12` | how many entries to keep buffered ahead |
 | `tourWorkers` | `6` | concurrent preload resolves |
 | `tourScrubRate` | `5` | max steps/sec while an arrow is held |

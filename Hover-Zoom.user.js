@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.100.0
+// @version     0.101.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -53,7 +53,7 @@
         // the tour — next/previous through every picture on the page, from a pinned window
         tourButtons: true,          // ◀ ▶ and the counter in the floating strip
         tourKeys: true,             // arrows navigate when the picture cannot pan sideways
-        tourMinDisplayed: 128,      // the tour's own floor: shorter side as drawn, px; emoji and badges fall under it
+        tourMinDisplayed: 128,      // the tour's own floor: longer side as drawn, px; emoji and badges fall under it
         tourWindow: 12,             // entries kept buffered ahead
         tourWorkers: 6,             // concurrent speculative resolves
         tourScrubRate: 5,           // steps/sec ceiling while an arrow is held
@@ -4749,7 +4749,7 @@
         const s = tourSize(el);
         if (!s) return true;
         if (s.w && s.w < cfg.minDisplayed && s.h && s.h < cfg.minDisplayed) return false;
-        return !(s.w && s.w < floor) && !(s.h && s.h < floor);
+        return Math.max(s.w, s.h) >= floor;
     }
 
     function tourPics(floor) {
@@ -4947,8 +4947,8 @@
             tour.x = r.left + (window.scrollX || 0);
             tour.y = r.top + (window.scrollY || 0);
             const s = tourSize(tour.el);
-            const short = s ? Math.min(s.w || s.h, s.h || s.w) : 0;
-            if (short >= 1 && short < tour.floor) tour.floor = Math.floor(short);
+            const long = s ? Math.max(s.w, s.h) : 0;
+            if (long >= 1 && long < tour.floor) tour.floor = Math.floor(long);
         }
         if (cfg.tourButtons) tourSync();    // only the counter needs the number up front
     }
@@ -5292,7 +5292,7 @@
             const w = parseInt(n.getAttribute('width') || '0', 10) || 0;
             const h = parseInt(n.getAttribute('height') || '0', 10) || 0;
             if ((w || h) && w < cfg.minDisplayed && h < cfg.minDisplayed) return;
-            if ((w && w < floor) || (h && h < floor)) return;
+            if ((w || h) && Math.max(w, h) < floor) return;
             seen.add(u);
             out.push({ el: n, url: u, x: 0, y: 0, h: 0, n: out.length, page: page });
         });
@@ -6156,12 +6156,11 @@
             'With a counter saying where you are among the page’s pictures.');
         check('tourKeys', 'Arrow keys step through the page',
             'Left and right move to the next picture unless the one you are looking at is ' +
-            'zoomed in far enough to pan sideways. [ and ] always move. The tour stays in ' +
-            'the part of the page it started in; { and } make that part narrower or wider.');
-        num('tourMinDisplayed', 'Leave out pictures drawn smaller than',
-            'In px, the shorter side as shown on the page — emoji, badges and avatars fall ' +
-            'under it. The one you started from never does: starting on a 100px thumbnail ' +
-            'admits 100px. (default: 128)', 0, 1000, 8);
+            'zoomed in far enough to pan sideways. [ and ] always move; { and } narrow and ' +
+            'widen the part of the page the tour covers.');
+        num('tourMinDisplayed', 'Leave out pictures smaller than',
+            'Longer side as drawn, in px. Starting on a smaller one lowers it. (default: 128)',
+            0, 1000, 8);
         check('tourLoadMore', 'Let a scrolling page load more',
             'Near the end, the page is scrolled to the bottom and straight back so it loads ' +
             'the next batch. You do not see it move.');

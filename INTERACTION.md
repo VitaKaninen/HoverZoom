@@ -385,7 +385,7 @@ not move, and each step swaps a different picture into the same frame.
   rules — with no separate list. Clips and images share one list. Elements with a CSS background
   image are hoverable but not in the tour.
 - **Then the tour's own two gates, both read off the picture it started on** (`E60`): a floor on
-  the shorter side as drawn (`tourMinDisplayed`, 128 — emoji, badges and avatars fall under it;
+  the longer side as drawn (`tourMinDisplayed`, 128 — emoji, badges and avatars fall under it;
   a start picture smaller than that lowers it to its own size), and a **scope** — the smallest
   area of the page around the start picture that holds two or more pictures and is not merely a
   wrapper for them, so a forum post's ten pictures tour without the replies, the sidebar or the
@@ -577,7 +577,7 @@ this table is a table.
 | `E58` | A lazy page is made to load more by a real scroll to the bottom and straight back — an IntersectionObserver sentinel cannot be spoofed. It works through fullscreen's `overflow:hidden`, and it stops for good once one attempt returns nothing | [`docs/TOUR.md`](docs/TOUR.md) |
 
 | `E59` | Which link is forward is decided by three rungs — a declared `rel=next`, the hole in a numbered pager's range, then a forward word — and **ambiguity is refused, never guessed**. A harvested entry is a detached element carrying the page it came from, so its relative URLs resolve against that page and not against this one | [`docs/TOUR.md`](docs/TOUR.md) |
-| `E60` | The tour is stricter than a hover, and the picture it started on is the example: a floor on the shorter side as drawn (`tourMinDisplayed`, lowered to the start picture's own size when that is smaller), and a **scope** — the outermost ancestor holding the same pictures as the smallest one that holds two, climbed past every wrapper (under 8 elements of chrome and 200 characters of text). `{`/`}` move it a level; the next page is only fetched from the whole page | [`docs/TOUR.md`](docs/TOUR.md) §1a |
+| `E60` | The tour is stricter than a hover, and the picture it started on is the example: a floor on the longer side as drawn (`tourMinDisplayed`, lowered to the start picture's own size when that is smaller), and a **scope** — the outermost ancestor holding the same pictures as the smallest one that holds two, climbed past every wrapper (under 8 elements of chrome and 200 characters of text). `{`/`}` move it a level; the next page is only fetched from the whole page | [`docs/TOUR.md`](docs/TOUR.md) §1a |
 
 `E3` is retired with the detached state (v0.28.0); `E4` and `E5` are retired as dangling.
 
