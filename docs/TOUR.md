@@ -4,7 +4,7 @@
 is now code. It is kept as the reasoning behind the shape, not as a to-do list; where the build
 departed from the plan the section says so, and §15 lists what is still only a guess.
 
-The live account of what the code does is `INTERACTION.md` `S25`, `S26`, `T29`-`T36`, `E54`-`E59`.
+The live account of what the code does is `INTERACTION.md` `S25`, `S26`, `T29`-`T37`, `E54`-`E60`.
 
 A *tour* is next/previous navigation through every picture on the page, driven from a pinned
 preview window. The window stays put; the page does not move; each step swaps a different picture
@@ -117,6 +117,52 @@ genuinely not a picture leaves the list.
 **Scope limit:** `img`/`video` only. Elements with a CSS background image stay hoverable but are
 not in the tour — enumerating them needs `getComputedStyle` on every node in the document.
 
+## 1a. The scope and the floor — BUILT, v0.100.0
+
+A hover may expand anything — an icon, an avatar, a sidebar picture. A tour must not: asked for
+2026-09-11 with the forum case — one post carrying ten pictures, dressed with an avatar, badges,
+emoji, a signature, a sidebar, and fifty replies each with their own avatars and pictures. The
+tour is the post's ten and nothing else. **The picture the window was pinned on is the user's
+example of what they want**, and two things are read off it at `tourStart()`:
+
+- **The floor** (`tour.floor`): `tourMinDisplayed` (default 128), on the **shorter side as drawn**,
+  either side under it and the picture is out. Emoji, badges and 96px avatars fall under it;
+  signature banners do too (468×60). Unknown size stays in, as before. The floor is lowered to the
+  start picture's own shorter side when that is smaller — a tour begun on a 100px thumbnail admits
+  100px, or an old forum's attachment thumbs would give an empty tour.
+- **The scope** (`tour.scope`): an ancestor of the start picture; only pictures inside it are in
+  the list. Chosen by `tourPick()` from the *levels* (`tourLevels()`): the chain of ancestors at
+  which the count of floor-passing pictures grows, one level per count, holding the **outermost**
+  element with that count (so the post, not its body — the post's chrome is what the next test
+  needs). Start at the smallest level holding two pictures, then climb past every **wrapper**:
+  an element with under 200 characters of text whose element count, once each picture's own
+  single-picture wrapper is subtracted, is under 8 (`tourWrapper()`). A `<p>` holding two
+  thumbnails, a `<figure>`, a gallery row are wrappers; a post with a header, buttons and text is
+  not. The first non-wrapper level is the scope.
+
+Consequences that follow from that rule and are intended:
+
+- A post with **one** picture is a wrapper by count, so its tour is the thread. A tour of one is
+  no tour; the thread is the next-best answer.
+- A picture in a *reply* tours the thread, for the same reason.
+- A grid page with nothing else on it scopes to the whole page, which is what it was before.
+- The scope element is held like the anchor is: kept while it is in the document, re-derived
+  from the start picture when a virtualised feed destroys it. `tour.level` survives that.
+- **The next page is only fetched from a scope that is the whole page** (`tourCross()` refuses,
+  without setting `crossSpent`). A tour confined to one post has no business on page 2; `}` up to
+  the whole page and ▶ at the wall crosses as before. The excursion (§9) still runs — it is
+  invisible and a scoped infinite grid benefits.
+- Harvested entries join the list only while the scope is the whole page, for the same reason.
+
+**`{` narrows the scope one level, `}` widens it** (`tourRescope()`), never below two pictures,
+and the counter is the feedback: `1 / 10` → `1 / 47` → `13 / 49`. This is the escape hatch for the
+heuristic — the thresholds (8 elements, 200 characters) are starting values, measured on
+`test-pages/forum-thread.html` and nothing else yet. An anchor left outside a narrowed scope shows
+as `– / n` and the next step goes by position, exactly as a destroyed anchor does.
+
+`test-pages/forum-thread.html` is the fixture: levels come out as `img(1) → p.pics(2) →
+article#post-1(10) → main(12) → html(14)`, the pick is the article, and `}` `}` walks to 12 and 14.
+
 ---
 
 ## 2. The swap
@@ -173,9 +219,13 @@ the right answer either way.
 
 | From | Gesture | Result |
 |---|---|---|
-| hovering, not pinned | → or Next | pin, relocate, **and advance** |
-| pinned by mouse | → or Next (first time) | relocate **and advance** |
-| pinned, already relocated | → or Next | advance only |
+| hovering, not pinned | → or Next | pin, relocate, enter — **the picture stays** |
+| pinned by mouse | → or Next (first time) | relocate, enter — **the picture stays** |
+| in the tour | → or Next | advance |
+
+Entering and advancing were one press until v0.100.0; the user asked for them to be two, and
+`tourNav()`'s `!tour.on` branch is that: relocate, derive, counter, preload, return. The next
+press is the first step. A held key still scrubs — the first `keydown` is never a repeat.
 
 Relocation puts the anchored corner at `vpW() - EDGE_GAP`, `vpH() - EDGE_GAP`. Not flush:
 `bottomGap()`'s 20px allowance is for the browser's link-target tooltip, which is painted
@@ -260,6 +310,7 @@ registered there by hand — and the symptom of forgetting is silence.
 - **Up/Down always pan.** Unchanged.
 - **Add an always-navigates pair** (`[` / `]`, or PageUp/PageDown), or zooming in traps the user on
   the current picture.
+- **`{` / `}` narrow and widen the scope** (§1a). Not on repeat.
 - `capOwns()` already stands the arrows down while the zoom field, scrubber or volume
   slider has focus. Unchanged, works for free.
 
@@ -705,6 +756,7 @@ Proposed keys, added to `DEFAULTS`. Remember the hoisting trap in `../CLAUDE.md`
 |---|---|---|
 | `tourButtons` | `true` | show ◀ ▶ in the strip |
 | `tourKeys` | `true` | arrows navigate when the picture cannot pan horizontally |
+| `tourMinDisplayed` | `128` | the tour's floor on the shorter side as drawn, px (§1a) |
 | `tourWindow` | `12` | how many entries to keep buffered ahead |
 | `tourWorkers` | `6` | concurrent preload resolves |
 | `tourScrubRate` | `5` | max steps/sec while an arrow is held |

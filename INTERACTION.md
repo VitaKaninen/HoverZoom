@@ -374,7 +374,9 @@ Hover the sound button and a vertical column appears above it; clicking the butt
 A placed window stepping through every picture on the page. The window stays put, the page does
 not move, and each step swaps a different picture into the same frame.
 - **Entered from:** the first ◀ / ▶ or navigating arrow press on any placed window (`T29`, `T30`).
-  There is no separate mode to turn on; a pinned window is already carrying the strip.
+  There is no separate mode to turn on; a pinned window is already carrying the strip. **The
+  entering press does not advance** — the picture stays, the window slides to its corner, and
+  the next press is the first step.
 - **The list is derived on every press and kept nowhere** (`E54`). Lazy-loaded and newly appended
   images are picked up for free, and a virtualised feed deleting the picture under you is
   survivable — the anchor is the element, then its URL, then the place it was last seen.
@@ -382,6 +384,12 @@ not move, and each step swaps a different picture into the same frame.
   hovered, and it inherits every gate — `videoMode`, the block list, the banner and furniture
   rules — with no separate list. Clips and images share one list. Elements with a CSS background
   image are hoverable but not in the tour.
+- **Then the tour's own two gates, both read off the picture it started on** (`E60`): a floor on
+  the shorter side as drawn (`tourMinDisplayed`, 128 — emoji, badges and avatars fall under it;
+  a start picture smaller than that lowers it to its own size), and a **scope** — the smallest
+  area of the page around the start picture that holds two or more pictures and is not merely a
+  wrapper for them, so a forum post's ten pictures tour without the replies, the sidebar or the
+  avatars. `{` and `}` move the scope a level in or out (`T37`).
 - **Nothing is ever dropped for failing to resolve** (`E56`): a page of 50 gives a tour of 50, so
   the counter means what it says and a picture spotted half way down stays where it was.
 - **The bottom-right corner is what does not move** (`E54`), because the buttons live there.
@@ -450,14 +458,15 @@ inert.
 | `T26` | `S10` | Single click on the picture — not the bar, not a control — with under 4 px of travel | `S10`; a clip pauses or resumes, a still image does nothing (`E39`) |
 | `T27` | `S10` | Double click in the same place | `S10` fullscreen, or back out of it if already there. Click 1's pause is undone (`E39`); the border comes off for as long as it lasts (`E43`) |
 | `T28` | `S10` fullscreen | Drag the picture, an edge, or the status bar | Nothing moves — fullscreen is locked to the screen, and the cursor stays an arrow. A spilling picture still pans, with the `grab` cursor, and panning past its edge does not carry the window with it (`E35`, `E40`) |
-| `T29` | `S05` | `→` or `←` (or `[` / `]`) on a preview you are only hovering | `S25` — it pins, slides to the bottom-right corner, and advances, all on the one press (`E54`) |
-| `T30` | `S10`/`S25` | ◀ ▶ in the strip, or `→` `←` where the picture cannot pan sideways, or `[` `]` always | `S25` on the next picture. Position and any hand-set size stay; zoom and pan reset; the **bottom-right corner does not move** (`E54`, `E55`) |
+| `T29` | `S05` | `→` or `←` (or `[` / `]`) on a preview you are only hovering | `S25` — it pins, slides to the bottom-right corner and brings up the counter, **on the same picture**; the next press is the first step (`E54`) |
+| `T30` | `S10`/`S25` | ◀ ▶ in the strip, or `→` `←` where the picture cannot pan sideways, or `[` `]` always | From `S10`: `S25` on the same picture, relocated. From `S25`: the next picture. Position and any hand-set size stay; zoom and pan reset; the **bottom-right corner does not move** (`E54`, `E55`) |
 | `T31` | `S25` | Hold the key | `S26` — the counter steps at up to `tourScrubRate`/sec and nothing resolves until the key has been still 150 ms |
 | `T32` | `S25` | ⊘ on the picture | `S25` on the next one — mid-tour, blocking means "not this one", not "close the window" |
 | `T33` | `S25` | Reach a picture that will not resolve | `S25` showing the page's own thumbnail with the reason in the bar, and ↻ to ask again (`E56`) |
 | `T34` | `S25` fullscreen | `f`, or the button, after stepping | `S25` windowed, fitted to the picture now in the frame and holding the bottom-right corner — not the zoom and top-left of the picture that went in (`E57`) |
 | `T35` | `S25` | Get within 10 of the end of the list, or press ▶ at the end | The page is scrolled to the bottom and straight back, so a lazy feed loads its next batch; the counter grows and the tour carries on. You never see it move. Once an excursion returns nothing, it stops trying (`E58`) |
-| `T36` | `S25` | Reach the end of a page that will not load any more | The **next page** is fetched and parsed in the background and its pictures join the list — the document is never navigated, so the window and the script survive. It stops when nothing on the page says which way is forward (`E59`) |
+| `T36` | `S25` | Reach the end of a page that will not load any more | The **next page** is fetched and parsed in the background and its pictures join the list — the document is never navigated, so the window and the script survive. It stops when nothing on the page says which way is forward (`E59`). Only from a scope that is the whole page: a tour confined to one post stays on this page until `}` widens it (`E60`) |
+| `T37` | `S10`/`S25` | `{` or `}` | The scope narrows or widens by one level of the page — the counter's total changes to say so. Never below two pictures, never past the whole page. An anchor left outside a narrowed scope shows as `– / n` and the next step goes by position (`E60`) |
 | `T25` | — | *Retired in v0.34.0.* Moving the window used to freeze its size as a ceiling; it no longer touches the size at all (`E22`) |
 
 ---
@@ -568,6 +577,7 @@ this table is a table.
 | `E58` | A lazy page is made to load more by a real scroll to the bottom and straight back — an IntersectionObserver sentinel cannot be spoofed. It works through fullscreen's `overflow:hidden`, and it stops for good once one attempt returns nothing | [`docs/TOUR.md`](docs/TOUR.md) |
 
 | `E59` | Which link is forward is decided by three rungs — a declared `rel=next`, the hole in a numbered pager's range, then a forward word — and **ambiguity is refused, never guessed**. A harvested entry is a detached element carrying the page it came from, so its relative URLs resolve against that page and not against this one | [`docs/TOUR.md`](docs/TOUR.md) |
+| `E60` | The tour is stricter than a hover, and the picture it started on is the example: a floor on the shorter side as drawn (`tourMinDisplayed`, lowered to the start picture's own size when that is smaller), and a **scope** — the outermost ancestor holding the same pictures as the smallest one that holds two, climbed past every wrapper (under 8 elements of chrome and 200 characters of text). `{`/`}` move it a level; the next page is only fetched from the whole page | [`docs/TOUR.md`](docs/TOUR.md) §1a |
 
 `E3` is retired with the detached state (v0.28.0); `E4` and `E5` are retired as dangling.
 
@@ -596,7 +606,7 @@ this table is a table.
 | Grab-band clearance (`E37`) | `grabBand`, `grabInset`, `btnGutter`, `barMinW`, `layoutChrome`, `pointerOverControl` |
 | Zoom cluster (`S20`, `S21`, `E34`) | `buildZoomControl`, `syncZoom`, `openZoomField`, `closeZoomField`, `zoomAnchored`, `ZOOM_BANDS`/`walkStops`/`fitStops`/`zoomStops`/`zoomIndex`, `zoomLo`/`noBarsScale`/`zoomHi`, `parseZoom`, `commitZoomField`, `capOwns`, `minFrameW` |
 | Upgrades (`S06`, `S15`) | `resolve`, `upgradeViewer` |
-| The tour (`S25`, `S26`, `T29`–`T36`, `E54`–`E59`) | `tourEntries`/`tourOrder`/`tourSize`, `tourAt`/`tourTarget`/`tourBefore`, `tourNav`/`tourShow`/`tourFallback`, `tourStart`/`tourEnd`/`tourSync`/`tourChrome`, `tourRelocate`, `tourOwnsArrows`, `swapViewer`, `navShown`/`navW`/`stripUp`, `minFrameH`, `retryShown`, `tourExcursion`/`tourGrow`, `plFill`/`plRun`/`plPump`/`plReserve`, `noRushHosts`/`hardBlock`, `nextPageIn`/`pageNumOf`/`fetchDoc`/`rebase`/`harvestFrom`/`tourCross`, `baseOf` — see [`docs/TOUR.md`](docs/TOUR.md) |
+| The tour (`S25`, `S26`, `T29`–`T37`, `E54`–`E60`) | `tourEntries`/`tourOrder`/`tourSize`, `tourWorthy`/`tourPics`/`tourLevels`/`tourWrapper`/`tourPick`/`tourScopeNow`/`tourRescope`, `tourAt`/`tourTarget`/`tourBefore`, `tourNav`/`tourShow`/`tourFallback`, `tourStart`/`tourEnd`/`tourSync`/`tourChrome`, `tourRelocate`, `tourOwnsArrows`, `swapViewer`, `navShown`/`navW`/`stripUp`, `minFrameH`, `retryShown`, `tourExcursion`/`tourGrow`, `plFill`/`plRun`/`plPump`/`plReserve`, `noRushHosts`/`hardBlock`, `nextPageIn`/`pageNumOf`/`fetchDoc`/`rebase`/`harvestFrom`/`tourCross`, `baseOf` — see [`docs/TOUR.md`](docs/TOUR.md) |
 
 Function names are used rather than line numbers, which rot.
 

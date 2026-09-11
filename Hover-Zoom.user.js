@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.99.0
+// @version     0.100.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -53,6 +53,7 @@
         // the tour — next/previous through every picture on the page, from a pinned window
         tourButtons: true,          // ◀ ▶ and the counter in the floating strip
         tourKeys: true,             // arrows navigate when the picture cannot pan sideways
+        tourMinDisplayed: 128,      // the tour's own floor: shorter side as drawn, px; emoji and badges fall under it
         tourWindow: 12,             // entries kept buffered ahead
         tourWorkers: 6,             // concurrent speculative resolves
         tourScrubRate: 5,           // steps/sec ceiling while an arrow is held
@@ -3965,6 +3966,9 @@
             // The always-navigates pair, or zooming in traps you on the current picture.
             case '[': tourNav(-1, e.repeat); break;
             case ']': tourNav(1, e.repeat); break;
+            // The tour's area: one level of the page narrower or wider. See TOUR.md §1a.
+            case '{': if (!e.repeat) tourRescope(-1); break;
+            case '}': if (!e.repeat) tourRescope(1); break;
             case '+': case '=': zoomCentre(view.scale * KEY_ZOOM); break;
             case '-': case '_': zoomCentre(view.scale / KEY_ZOOM); break;
             case '0': zoomCentre(view.fitScale); break;
@@ -4732,18 +4736,140 @@
         return out;
     }
 
-    // Everything on the page a hover would preview, in reading order. Derived on every press;
+    // ---- the scope: the tour stays inside the area of the page it started in. See TOUR.md §1a.
+
+    const TOUR_WRAP_ELS = 8;    // fewer elements around its pictures than this, and a block is a wrapper
+    const TOUR_WRAP_TEXT = 200; // ...and fewer characters of text than this
+
+    // What the tour may hold: a hover's gates, then the tour's own floor on the drawn size.
+    // Unknown size stays in — a lazy image below the fold is often 0×0 until it loads.
+    function tourWorthy(el, floor) {
+        if (!el.getClientRects().length || !shownMedia(el)) return false;
+        if (!eligibleDirect(el)) return false;
+        const s = tourSize(el);
+        if (!s) return true;
+        if (s.w && s.w < cfg.minDisplayed && s.h && s.h < cfg.minDisplayed) return false;
+        return !(s.w && s.w < floor) && !(s.h && s.h < floor);
+    }
+
+    function tourPics(floor) {
+        const all = document.querySelectorAll('img,video');
+        const pics = [];
+        for (let i = 0; i < all.length; i++) if (tourWorthy(all[i], floor)) pics.push(all[i]);
+        return pics;
+    }
+
+    function countIn(node, pics) {
+        let n = 0;
+        for (let i = 0; i < pics.length; i++) if (node.contains(pics[i])) n++;
+        return n;
+    }
+
+    function elsIn(node) { return node.querySelectorAll(':not(svg, svg *)').length; }
+
+    // The ancestors of the start picture at which the count of pictures grows — one level per
+    // count, holding the OUTERMOST element with it. The last level is the whole document.
+    function tourLevels(start, pics) {
+        const levels = [];
+        let node = start, n = -1;
+        while (node) {
+            const k = countIn(node, pics);
+            if (k === n) levels[levels.length - 1].el = node;
+            else levels.push({ el: node, n: k });
+            n = k;
+            node = node.parentElement || (node.getRootNode && node.getRootNode().host) || null;
+        }
+        return levels;
+    }
+
+    // A block that only holds pictures — a row, a paragraph, a figure — as opposed to a post,
+    // which has a header, buttons and text around them. Chrome is what is left of the element
+    // count once every picture's own wrapper is taken out.
+    function tourWrapper(el, pics) {
+        const text = (el.textContent || '').replace(/\s+/g, ' ').trim().length;
+        if (text >= TOUR_WRAP_TEXT) return false;
+        const inside = pics.filter(function (p) { return el.contains(p); });
+        let chrome = elsIn(el);
+        inside.forEach(function (p) {
+            let w = p;
+            while (w.parentElement && w.parentElement !== el && countIn(w.parentElement, inside) === 1) w = w.parentElement;
+            chrome -= elsIn(w) + 1;
+        });
+        return chrome < TOUR_WRAP_ELS;
+    }
+
+    // The level the tour starts at: the smallest area holding at least two pictures, widened
+    // past every wrapper. `{` and `}` move it from there.
+    function tourPick(levels, pics) {
+        let i = 0;
+        while (i < levels.length - 1 && levels[i].n < 2) i++;
+        while (i < levels.length - 1 && tourWrapper(levels[i].el, pics)) i++;
+        return i;
+    }
+
+    function tourFloor() { return tour ? tour.floor : (cfg.tourMinDisplayed | 0); }
+
+    function tourStartEl() {
+        if (!tour) return null;
+        if (tour.start && tour.start.isConnected) return tour.start;
+        return tour.el && tour.el.isConnected ? tour.el : null;
+    }
+
+    // The scope element, re-derived from the start picture only when the one held has left the
+    // document — the anchor's own rule.
+    function tourScopeNow(pics) {
+        const root = document.documentElement;
+        if (!tour) return root;
+        if (tour.scope && tour.scope.isConnected) return tour.scope;
+        const start = tourStartEl();
+        if (!start) { tour.scope = root; return root; }
+        const levels = tourLevels(start, pics);
+        if (tour.level < 0) tour.level = tourPick(levels, pics);
+        tour.level = Math.max(0, Math.min(levels.length - 1, tour.level));
+        tour.scope = levels[tour.level].el;
+        return tour.scope;
+    }
+
+    function describeEl(el) {
+        if (!el || el === document.documentElement) return 'the whole page';
+        let s = el.tagName.toLowerCase();
+        if (el.id) s += '#' + el.id;
+        if (el.classList.length) s += '.' + Array.prototype.slice.call(el.classList, 0, 3).join('.');
+        return s;
+    }
+
+    // `{` narrows the scope one level, `}` widens it; neither goes below two pictures.
+    function tourRescope(dir) {
+        if (!tour) return;
+        const pics = tourPics(tourFloor());
+        const start = tourStartEl();
+        if (!start) return;
+        const levels = tourLevels(start, pics);
+        let min = 0;
+        while (min < levels.length - 1 && levels[min].n < 2) min++;
+        let cur = levels.length - 1;
+        if (tour.scope) for (let i = 0; i < levels.length; i++) if (levels[i].el.contains(tour.scope)) { cur = i; break; }
+        const to = Math.max(min, Math.min(levels.length - 1, cur + dir));
+        if (to === cur) { dbg('tour scope: already ' + (dir > 0 ? 'the whole page' : 'as narrow as it goes')); return; }
+        tour.level = to;
+        tour.scope = levels[to].el;
+        const list = tourSync();
+        tourChrome();
+        dbg('tour scope: ' + describeEl(tour.scope), { level: to + 1 + ' of ' + levels.length, pictures: list.length });
+        if (tour.on && tour.index >= 0) plFill(list, tour.index, scrubDir);
+    }
+
+    // Everything in the scope a hover would preview, in reading order. Derived on every press;
     // sorted in DOCUMENT coordinates, or the order changes as the page scrolls.
     function tourEntries() {
-        const all = document.querySelectorAll('img,video');
+        const pics = tourPics(tourFloor());
+        const scope = tourScopeNow(pics);
+        const root = document.documentElement;
         const sx = window.scrollX || 0, sy = window.scrollY || 0;
         const items = [];
-        for (let i = 0; i < all.length; i++) {
-            const el = all[i];
-            if (!el.getClientRects().length || !shownMedia(el)) continue;
-            if (!eligibleDirect(el)) continue;
-            const s = tourSize(el);
-            if (s && s.w < cfg.minDisplayed && s.h < cfg.minDisplayed) continue;
+        for (let i = 0; i < pics.length; i++) {
+            const el = pics[i];
+            if (scope !== root && !scope.contains(el)) continue;
             const r = el.getBoundingClientRect();
             items.push({ el: el, url: shownUrl(el), x: r.left + sx, y: r.top + sy,
                 h: r.height, n: items.length });
@@ -4751,7 +4877,7 @@
         const live = tourOrder(items);
         // Pages fetched from the pager come after everything this document holds, in the order
         // they were harvested — they have no document coordinates to be sorted by. See §10.
-        return harvest.length ? live.concat(harvest) : live;
+        return harvest.length && scope === root ? live.concat(harvest) : live;
     }
 
     // Where the anchor sits in a freshly derived list: element identity, then URL. Never an
@@ -4810,13 +4936,19 @@
         if (view && placed) layout();       // the counter's width feeds barMinW()
     }
 
+    // The picture the window was pinned on sets the tour's area and its size floor: it is the
+    // user's example of what they want to see. A tour begun on a 100px thumbnail admits 100px.
     function tourStart() {
-        tour = { el: active || null, url: activeShown || (view ? view.url : ''),
-            x: 0, y: 0, index: -1, total: 0, relocated: false, on: false };
+        tour = { el: active || null, start: active || null, url: activeShown || (view ? view.url : ''),
+            x: 0, y: 0, index: -1, total: 0, relocated: false, on: false,
+            scope: null, level: -1, floor: Math.max(0, cfg.tourMinDisplayed | 0) };
         if (tour.el) {
             const r = tour.el.getBoundingClientRect();
             tour.x = r.left + (window.scrollX || 0);
             tour.y = r.top + (window.scrollY || 0);
+            const s = tourSize(tour.el);
+            const short = s ? Math.min(s.w || s.h, s.h || s.w) : 0;
+            if (short >= 1 && short < tour.floor) tour.floor = Math.floor(short);
         }
         if (cfg.tourButtons) tourSync();    // only the counter needs the number up front
     }
@@ -4862,9 +4994,19 @@
             if (Date.now() - scrubAt < gap) return;
         }
         scrubAt = Date.now();
-        tour.on = true;
         scrubDir = dir;
-        if (!tour.relocated) tourRelocate();
+        if (!tour.on) {
+            // The first press only enters the tour: the picture stays, the window goes to its
+            // corner, the counter and the buffer come up. The next press is the first step.
+            tour.on = true;
+            if (!tour.relocated) tourRelocate();
+            const list = tourSync();
+            tourChrome();
+            dbg('tour entered: ' + describeEl(tour.scope), { pictures: list.length,
+                at: tour.index >= 0 ? tour.index + 1 : '–', floor: tour.floor + 'px' });
+            if (tour.index >= 0) plFill(list, tour.index, dir);
+            return;
+        }
         const list = tourEntries();
         const to = tourTarget(list, dir);
         tour.total = list.length;
@@ -5139,7 +5281,7 @@
     // on its own — the block list, the page's own decoration flags, and declared width/height.
     // Everything else is settled by the probe when the entry is reached.
     function harvestFrom(doc, href, page) {
-        const out = [], seen = new Set();
+        const out = [], seen = new Set(), floor = tourFloor();
         doc.querySelectorAll('img,video').forEach(function (n) {
             if (n.tagName === 'VIDEO' && !videoPreviewsOn()) return;
             if (cfg.skipFurniture && decorativeReason(n)) return;
@@ -5150,6 +5292,7 @@
             const w = parseInt(n.getAttribute('width') || '0', 10) || 0;
             const h = parseInt(n.getAttribute('height') || '0', 10) || 0;
             if ((w || h) && w < cfg.minDisplayed && h < cfg.minDisplayed) return;
+            if ((w && w < floor) || (h && h < floor)) return;
             seen.add(u);
             out.push({ el: n, url: u, x: 0, y: 0, h: 0, n: out.length, page: page });
         });
@@ -5164,6 +5307,11 @@
 
     async function tourCross() {
         if (crossBusy || crossSpent || !cfg.tourCrossPage) return false;
+        // A tour confined to part of this page has no business on the next one. Not spent: } widens.
+        if (tour && tour.scope && tour.scope !== document.documentElement) {
+            dbg('no next page — the tour is confined to ' + describeEl(tour.scope) + '; } widens it');
+            return false;
+        }
         crossBusy = true;
         try {
             const href = crossNext || nextPageIn(document, location.href);
@@ -6008,7 +6156,12 @@
             'With a counter saying where you are among the page’s pictures.');
         check('tourKeys', 'Arrow keys step through the page',
             'Left and right move to the next picture unless the one you are looking at is ' +
-            'zoomed in far enough to pan sideways. [ and ] always move.');
+            'zoomed in far enough to pan sideways. [ and ] always move. The tour stays in ' +
+            'the part of the page it started in; { and } make that part narrower or wider.');
+        num('tourMinDisplayed', 'Leave out pictures drawn smaller than',
+            'In px, the shorter side as shown on the page — emoji, badges and avatars fall ' +
+            'under it. The one you started from never does: starting on a 100px thumbnail ' +
+            'admits 100px. (default: 128)', 0, 1000, 8);
         check('tourLoadMore', 'Let a scrolling page load more',
             'Near the end, the page is scrolled to the bottom and straight back so it loads ' +
             'the next batch. You do not see it move.');

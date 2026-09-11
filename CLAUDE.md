@@ -45,7 +45,7 @@ needs. **Opening all five defeats the point**; if a task genuinely spans two, re
 | finding the original — URL rules, linked pages, imgur, video previews, the loading ring | [`docs/RESOLVER.md`](docs/RESOLVER.md) |
 | the settings panel, stored settings, the manager's menu | [`docs/SETTINGS.md`](docs/SETTINGS.md) |
 | the test page, the `debug` log, the Browser pane's many lies | [`docs/TESTING.md`](docs/TESTING.md) |
-| the tour — next/previous navigation through a page's pictures | [`docs/TOUR.md`](docs/TOUR.md). §0–§5, §8, §11 built in v0.96.0; §7 in v0.88.0–v0.89.0 (that half now lives in [`docs/RESOLVER.md`](docs/RESOLVER.md)). §6, §9 and §10 are still specification |
+| the tour — next/previous navigation through a page's pictures | [`docs/TOUR.md`](docs/TOUR.md). All built, v0.96.0–v0.100.0 (§7 in v0.88.0–v0.89.0, now in [`docs/RESOLVER.md`](docs/RESOLVER.md)); §1a is the scope — what a tour leaves out that a hover would show |
 | any banner-gate threshold | [`banner-test-sites.md`](banner-test-sites.md) — ~40 live pages measured in two browsers; every number in the gate sits next to a row |
 | the zoom **percentage** — what it counts, and why it once moved with browser zoom (fixed in v0.72.0) | [`docs/ZOOM-UNITS.md`](docs/ZOOM-UNITS.md) |
 | the user cited an ID — `S05`, `E22`, `T17`, `P4` | [`INTERACTION.md`](INTERACTION.md) says what it is in one line; then `grep -rn "E22" docs/` for the argument |

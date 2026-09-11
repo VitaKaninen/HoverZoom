@@ -1,0 +1,154 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Forum thread — the tour's scope</title>
+<!--
+  The fixture for TOUR.md §1a. One post with ten pictures, dressed the way a forum dresses it:
+  an avatar, badges, emoji in the text, a signature banner, a sidebar with its own pictures,
+  and five replies under it each carrying an avatar, emoji and a picture or two. A tour begun
+  on the post's first picture must hold the post's ten and nothing else; `}` must widen it to
+  the thread, then the page; `{` must bring it back.
+
+  Every picture is a distinct ?n= URL so the counter cannot be confused by the fixtures
+  sharing one file. Sizes as drawn: post pictures 200×150, reply pictures 200×150 (post 4's two are 160×120, under the floor),
+  avatars 96, badges 24, emoji 20, the signature 468×60, the sidebar 200×200 and 200×150.
+-->
+<style>
+  body { margin: 0; background: #11111b; color: #cdd6f4; font: 14px system-ui, sans-serif; }
+  .layout { display: flex; gap: 24px; padding: 16px; }
+  main { flex: 1; min-width: 0; }
+  aside { width: 220px; flex: none; }
+  aside img { display: block; margin-bottom: 12px; }
+  .post { display: flex; gap: 14px; background: #1e1e2e; border: 1px solid #313244;
+          border-radius: 6px; margin-bottom: 14px; padding: 12px; }
+  .user { width: 110px; flex: none; text-align: center; font-size: 12px; }
+  .user .avatar { display: block; width: 96px; height: 96px; margin: 0 auto 6px; border-radius: 50%; }
+  .user .badge { width: 24px; height: 24px; margin: 2px; }
+  .body { flex: 1; min-width: 0; }
+  .body p { margin: 0 0 10px; }
+  .emoji { width: 20px; height: 20px; vertical-align: -4px; }
+  .pics img { width: 200px; height: 150px; margin: 0 6px 6px 0; }
+  .pics.small img { width: 160px; height: 120px; }
+  .sig { border-top: 1px solid #313244; margin-top: 10px; padding-top: 8px; }
+  .sig img { display: block; width: 468px; height: 60px; }
+  .actions { margin-top: 8px; font-size: 12px; color: #7f849c; }
+  .actions a { margin-right: 10px; color: #89b4fa; }
+  h1 { font-size: 16px; margin: 0 0 12px; }
+</style>
+
+<div class="layout">
+<main class="thread">
+  <h1>Trip photos — ten of them, and then everyone's replies</h1>
+
+  <article class="post op" id="post-1">
+    <div class="user">
+      <img class="avatar" src="/test-images/icon_big.png?who=op" alt="op's avatar">
+      <b>original poster</b>
+      <div>
+        <img class="badge" src="/test-images/icon.png?b=1" alt="badge">
+        <img class="badge" src="/test-images/icon.png?b=2" alt="badge">
+        <img class="badge" src="/test-images/icon.png?b=3" alt="badge">
+      </div>
+      <div>posts: 2,314</div>
+    </div>
+    <div class="body">
+      <p>Here are the pictures from the trip <img class="emoji" src="/test-images/icon.png?e=1" alt=":)">.
+         Ten of them, two to a row, and nothing else in this post should turn up in the tour.</p>
+      <p class="pics"><a href="/test-images/photo.jpg?n=1"><img src="/test-images/photo-200x150.jpg?n=1" alt="1"></a>
+                      <a href="/test-images/photo.jpg?n=2"><img src="/test-images/photo-200x150.jpg?n=2" alt="2"></a></p>
+      <p class="pics"><a href="/test-images/photo.jpg?n=3"><img src="/test-images/photo-200x150.jpg?n=3" alt="3"></a>
+                      <a href="/test-images/photo.jpg?n=4"><img src="/test-images/photo-200x150.jpg?n=4" alt="4"></a></p>
+      <p>A few words between the rows <img class="emoji" src="/test-images/icon.png?e=2" alt=":D">.</p>
+      <p class="pics"><a href="/test-images/photo.jpg?n=5"><img src="/test-images/photo-200x150.jpg?n=5" alt="5"></a>
+                      <a href="/test-images/photo.jpg?n=6"><img src="/test-images/photo-200x150.jpg?n=6" alt="6"></a></p>
+      <p class="pics"><a href="/test-images/photo.jpg?n=7"><img src="/test-images/photo-200x150.jpg?n=7" alt="7"></a>
+                      <a href="/test-images/photo.jpg?n=8"><img src="/test-images/photo-200x150.jpg?n=8" alt="8"></a></p>
+      <p class="pics"><a href="/test-images/photo.jpg?n=9"><img src="/test-images/photo-200x150.jpg?n=9" alt="9"></a>
+                      <a href="/test-images/photo.jpg?n=10"><img src="/test-images/photo-200x150.jpg?n=10" alt="10"></a></p>
+      <div class="sig"><img src="/test-images/banner-1200x125.jpg?sig=op" alt="signature"></div>
+      <div class="actions"><a href="#">quote</a><a href="#">like</a><a href="#">report</a></div>
+    </div>
+  </article>
+
+  <article class="post reply" id="post-2">
+    <div class="user">
+      <img class="avatar" src="/test-images/icon_big.png?who=r2" alt="avatar">
+      <b>reply two</b>
+      <div><img class="badge" src="/test-images/icon.png?b=4" alt="badge"></div>
+    </div>
+    <div class="body">
+      <p>Great shots <img class="emoji" src="/test-images/icon.png?e=3" alt=":)">! Here is mine from the same spot.</p>
+      <p class="pics"><a href="/test-images/photo.jpg?n=r2"><img src="/test-images/photo-200x150.jpg?n=r2" alt="r2"></a></p>
+      <div class="actions"><a href="#">quote</a><a href="#">like</a></div>
+    </div>
+  </article>
+
+  <article class="post reply" id="post-3">
+    <div class="user">
+      <img class="avatar" src="/test-images/icon_big.png?who=r3" alt="avatar">
+      <b>reply three</b>
+    </div>
+    <div class="body">
+      <p>lol <img class="emoji" src="/test-images/icon.png?e=4" alt=":D"> <img class="emoji" src="/test-images/icon.png?e=5" alt=":D"></p>
+      <div class="actions"><a href="#">quote</a><a href="#">like</a></div>
+    </div>
+  </article>
+
+  <article class="post reply" id="post-4">
+    <div class="user">
+      <img class="avatar" src="/test-images/icon_big.png?who=r4" alt="avatar">
+      <b>reply four</b>
+    </div>
+    <div class="body">
+      <p>Two more, a bit smaller — under the floor, so they never join.</p>
+      <p class="pics small"><a href="/test-images/photo.jpg?n=r4a"><img src="/test-images/photo-200x150.jpg?n=r4a" alt="r4a"></a>
+                      <a href="/test-images/photo.jpg?n=r4b"><img src="/test-images/photo-200x150.jpg?n=r4b" alt="r4b"></a></p>
+      <div class="actions"><a href="#">quote</a><a href="#">like</a></div>
+    </div>
+  </article>
+
+  <article class="post reply" id="post-5">
+    <div class="user">
+      <img class="avatar" src="/test-images/icon_big.png?who=r5" alt="avatar">
+      <b>reply five</b>
+    </div>
+    <div class="body">
+      <p>Quoting the third one, which is the best of the set.</p>
+      <p class="pics"><a href="/test-images/photo.jpg?n=r5"><img src="/test-images/photo-200x150.jpg?n=r5" alt="r5"></a></p>
+      <div class="sig"><img src="/test-images/banner-1200x125.jpg?sig=r5" alt="signature"></div>
+      <div class="actions"><a href="#">quote</a><a href="#">like</a></div>
+    </div>
+  </article>
+
+  <article class="post reply" id="post-6">
+    <div class="user">
+      <img class="avatar" src="/test-images/icon_big.png?who=r6" alt="avatar">
+      <b>reply six</b>
+    </div>
+    <div class="body">
+      <p>Thanks for sharing <img class="emoji" src="/test-images/icon.png?e=6" alt=":)"></p>
+      <div class="actions"><a href="#">quote</a><a href="#">like</a></div>
+    </div>
+  </article>
+</main>
+
+<aside>
+  <img src="/test-images/sidebar-600x600.jpg?side=1" width="200" height="200" alt="sidebar">
+  <img src="/test-images/photo-200x150.jpg?side=2" width="200" height="150" alt="sidebar">
+</aside>
+</div>
+
+<script>
+  var GM_getValue = function (key, dflt) {
+    var v = localStorage.getItem(key);
+    return v === null ? dflt : v;
+  };
+  var GM_setValue = function (key, val) { localStorage.setItem(key, val); };
+  var GM_addValueChangeListener = function (key, fn) {
+    window.addEventListener('storage', function (e) {
+      if (e.key === key) fn(key, e.oldValue, e.newValue, true);
+    });
+  };
+  var GM_registerMenuCommand = function () { return 'x'; };
+  var GM_unregisterMenuCommand = function () {};
+</script>
+<script src="../Hover-Zoom.user.js"></script>
