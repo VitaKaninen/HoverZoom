@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.101.0
+// @version     0.102.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -1658,8 +1658,9 @@
             'width:' + VBTN_W + 'px;height:' + VBTN_W + 'px;border-radius:4px;cursor:pointer;color:#cdd6f4}',
             '.vbtn svg{display:block;width:14px;height:14px;fill:currentColor}',
             '.vbtn:hover{background:rgba(205,214,244,.18)}',
-            '.vbtn.dim{opacity:.3;cursor:default}',
-            '.vbtn.dim:hover{background:none}',
+            // `faint`, not `dim`: .dim is the page overlay, position:fixed, and a button wearing it leaves the row
+            '.vbtn.faint{opacity:.3;cursor:default}',
+            '.vbtn.faint:hover{background:none}',
             '.vctl .vtime{flex:none;min-width:62px;font-variant-numeric:tabular-nums;',
             'letter-spacing:.02em;color:#bac2de;white-space:nowrap}',
             '.vctl .vseek{flex:1;min-width:0;height:14px;margin:0;padding:0;',
@@ -4931,8 +4932,8 @@
         if (!navCountEl || !tour) return;
         const at = tour.index, n = tour.total;
         navCountEl.textContent = (at >= 0 ? at + 1 : '–') + ' / ' + n;
-        navPrevEl.classList.toggle('dim', at === 0 || !n);
-        navNextEl.classList.toggle('dim', !n || (at >= 0 && at >= n - 1));
+        navPrevEl.classList.toggle('faint', at === 0 || !n);
+        navNextEl.classList.toggle('faint', !n || (at >= 0 && at >= n - 1));
         if (view && placed) layout();       // the counter's width feeds barMinW()
     }
 

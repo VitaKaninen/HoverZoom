@@ -106,6 +106,10 @@ has already been misdiagnosed once. (The shared ones — `innerHTML` on Trusted-
 - **A class that grants `pointer-events` must be removed on the path that HIDES the element**, not
   the path that lays it out. `layout()` stops running once the frame is down, so a `hot` left set
   leaves an invisible rectangle that eats clicks and blocks hover where the window used to be.
+- **The shadow root's stylesheet is one namespace: grep a state class before reusing it.** `.dim`
+  is the page overlay (`position:fixed;inset:0`), and a nav button toggled to `dim` for "nothing
+  that way" left the flex row and sat over the counter. It faded correctly, so it read as a
+  layout bug. Cost v0.102.0.
 - **`[hidden]` loses to an explicit `display`.** `img[hidden]`, `video[hidden]` and `.row[hidden]`
   each need their own `display:none` rule, because the rule above sets `display:block`/`flex` and
   outranks the UA sheet. It has cost a version twice.
