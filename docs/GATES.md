@@ -296,17 +296,34 @@ stack instead (`stillUnderPointer`). **Deliberately not used for a direct hover:
 boundary pixel the stack still holds the image, which would keep the preview alive a moment too long
 and cost the one-preview-per-image row scan that pointer-transparency exists for.
 
-**A cover can also arrive AFTER the hover** (`E61`, v0.104.0). YouTube's subscriptions grid slides
-its inline player — a `<video>` that is a player, muted but with no `loop`/`autoplay`, so rightly
-refused — under the stationary pointer ~200 ms in. Chromium then fires mouseout/mouseover with no
-pointer movement; mouseout's `contains(to)` says "left", and the preview closed within a frame of
-opening (or, when the player beat the resolve, never opened). Measured in real Chrome: `mouseover
-IMG` 78224, box on 78380, `mouseover VIDEO` 78430, box off 78434. Both handlers now ask
-`underCover(active, x, y)` before cancelling — the picture is in the stack **with something above
-it** — and on yes set `activeCovered`, so from then on it is an ordinary covered hover. Requiring
-"above" is what keeps the boundary-pixel objection answered: a neighbour never sits above the
-picture at one point, so the row scan cannot trip it. `test-pages/inline-player.html` is the
-regression, with a 600 ms cover so the preview is up before it lands.
+**A cover can also arrive AFTER the hover** (`E61`, v0.105.0). YouTube's subscriptions grid puts its
+inline player — a `<video>` that is a player, muted but with no `loop`/`autoplay`, so rightly
+refused — over the thumbnail somewhere between 200 ms and 2 s into the hover (measured both). Three
+things were true and each cost a version:
+
+- **Chromium's mouseout/mouseover for a layout change under a still pointer is best-effort.** It
+  came 206 ms after the hover once, 3 s later once, and not at all once. Nothing that waits for the
+  event is reliable; the check is geometric — `overVideoSurface(active)` — asked at paint time and on
+  every `mousemove` (`playerArrived()`), and it withdraws the preview. `lateCover()` still takes the
+  event when it does come: a player cover cancels, any other late cover (`underCover`: the picture
+  is in the stack with the target *above* it) turns the hover into a covered one. Requiring
+  "above" is what keeps the boundary-pixel objection answered — a neighbour never sits above the
+  picture at one point, so the row scan cannot trip it.
+- **No grace period can beat a delay that varies by 10×.** v0.105.0 briefly held the paint 400 ms
+  for video-link thumbnails; YouTube landed at 2 s that day. Removed the same session.
+- **A page holding a dormant `<video>` — laid out under 2 px — is a page that previews its own
+  videos.** So under `all`, a video-link thumbnail on such a page is refused up front
+  (`videoLinkRefused()`, reported as `dormantPlayer` on the debug line): the site's player will land
+  on it and win, and ours would only ever be withdrawn. This is the rule that makes YouTube quiet;
+  the geometry above is the backstop for a player created on demand. The cost: a page with any
+  hidden `<video>` — a background clip, an ad slot — refuses `/watch?`-shaped thumbnails under
+  `all`. Narrow, and the debug line names it.
+
+v0.104.0 shipped the opposite — holding the preview *over* the arrived player — and the user's
+first look said it: "since the video is playing behind it, the preview should not be showing at
+all." `P4` already said a player on the page always wins; a player that arrives late is not an
+exception. `test-pages/inline-player.html` holds both shapes: dormant (nothing opens) and
+`?nodormant` (opens, then withdrawn by geometry on the next move; a plain overlay holds).
 
 Case 30 is the negative bound (two pictures under one cover → no preview); case 31 puts text over a
 background and must not reach through to it.

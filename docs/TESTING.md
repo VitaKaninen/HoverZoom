@@ -12,6 +12,11 @@ this script is a DOM read, so only the DOM in front of the user can say which on
   cannot drift from the header. The settings panel shows the same string in its heading. For a
   "works in Chrome, not in Firefox" report, *is the installed copy even current* is the first
   question and this is how it gets answered without opening the manager.
+- **`document.dispatchEvent(new CustomEvent('hover-zoom:debug', {detail: true}))` turns the log
+  on for this page only** (v0.105.0) — from the console, or from a browser tool's JS. Never stored,
+  gone on reload, and a page that fires it gains nothing but its own console noise. Reports print
+  as one JSON string in this mode, because a tool reading the console sees `Object` otherwise.
+  The manager's copy cannot be reached any other way from a page.
 - `hoverReport()` prints one line per hover: what was under the pointer, `playerGate` and
   `videoLinkGate` (the two halves of the old `videoGate`, reported separately since v0.59.0
   because they answer to different settings), whether an `<a href>` ancestor was findable **at

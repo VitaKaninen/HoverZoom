@@ -117,7 +117,7 @@ arrives — nothing is decided in advance.
 | `P7` | Not page furniture — a CSS background that is part of the page rather than a picture on it (`E17`) | `skipFurniture` on |
 | `P8` | Neither the displayed URL nor any candidate is on the never-preview list | `blockList` empty |
 | `P9` | Not marked decoration by the page itself: no `aria-hidden="true"`, no `role="presentation"`/`"none"` on the element | `skipFurniture` on |
-| `P11` | Not a thumbnail leading AWAY to a video page: no ancestor `a[href]` matching the video-URL shapes. A different question from `P4` and a different setting since v0.59.0 — that one is about where you are standing, this one about where the picture goes (`E31`) | `videoMode` = `clips` |
+| `P11` | Not a thumbnail leading AWAY to a video page: no ancestor `a[href]` matching the video-URL shapes. A different question from `P4` and a different setting since v0.59.0 — that one is about where you are standing, this one about where the picture goes (`E31`). Under `all` it still refuses when the page holds a dormant `<video>` — a site that previews its own videos (`E61`) | `videoMode` = `clips` |
 | `P12` | Anything that moves is allowed to reach the frame at all — a video file by its URL, an animated GIF/WebP/APNG by sniffing its first 4 KB (`E27`, `E31`, `E32`) | `videoMode` ≠ `none` |
 | `P10` | Not a **band** across the top of the page (`E20`) — a masthead, channel banner or leaderboard ad. The one furniture rule that applies to an `<img>` as well | `skipFurniture` on |
 
@@ -578,7 +578,7 @@ this table is a table.
 
 | `E59` | Which link is forward is decided by three rungs — a declared `rel=next`, the hole in a numbered pager's range, then a forward word — and **ambiguity is refused, never guessed**. A harvested entry is a detached element carrying the page it came from, so its relative URLs resolve against that page and not against this one | [`docs/TOUR.md`](docs/TOUR.md) |
 | `E60` | The tour is stricter than a hover, and the picture it started on is the example: a floor on the longer side as drawn (`tourMinDisplayed`, lowered to the start picture's own size when that is smaller), and a **scope** — the outermost ancestor holding the same pictures as the smallest one that holds two, climbed past every wrapper (under 8 elements of chrome and 200 characters of text). `{`/`}` move it a level; the next page is only fetched from the whole page | [`docs/TOUR.md`](docs/TOUR.md) §1a |
-| `E61` | A cover that arrives AFTER the hover — YouTube's inline player sliding under a stationary pointer — does not close the preview: the picture is still under the pointer with the new target above it, so the hover becomes a covered one. A neighbour is never above it at the same point, so the row scan is untouched | [`docs/GATES.md`](docs/GATES.md) |
+| `E61` | A player that arrives AFTER the hover — YouTube's inline preview landing on the thumbnail — is withdrawn from under, by geometry, not by waiting for a mouse event; and a page holding a dormant `<video>` refuses its video-link thumbnails under `all` up front, because its own player is coming. A late cover that is not a player only makes the hover a covered one | [`docs/GATES.md`](docs/GATES.md) |
 
 `E3` is retired with the detached state (v0.28.0); `E4` and `E5` are retired as dangling.
 

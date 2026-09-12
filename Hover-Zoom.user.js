@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.104.0
+// @version     0.105.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -282,9 +282,24 @@
             Math.round(r.width) + '×' + Math.round(r.height);
     }
 
+    // This page only, never stored: `document.dispatchEvent(new CustomEvent('hover-zoom:debug',
+    // {detail: true}))` from the console turns the log on without touching the settings.
+    let pageDebug = false;
+    document.addEventListener('hover-zoom:debug', function (e) {
+        pageDebug = !!e.detail;
+        try { console.log('[HoverZoom ' + version() + '] debug ' + (pageDebug ? 'on' : 'off') + ' for this page'); } catch (x) { /* no console */ }
+    });
+
+    function debugOn() { return pageDebug || !!cfg.debug; }
+
     function dbg(label, data) {
-        if (!cfg.debug) return;
-        try { console.log('[HoverZoom ' + version() + '] ' + label, data); } catch (e) { /* no console */ }
+        if (!debugOn()) return;
+        try {
+            // Page debug is read by a tool, not a person: one flat string, no collapsed Object.
+            const head = '[HoverZoom ' + version() + '] ' + label;
+            if (data === undefined) console.log(head);
+            else console.log(head, pageDebug ? JSON.stringify(data) : data);
+        } catch (e) { /* no console */ }
     }
 
     // ------------------------------------------------------------- url helpers
@@ -4164,6 +4179,25 @@
         return null;
     }
 
+    // A <video> the page holds but has not laid out: an inline preview waiting for a hover.
+    function dormantPlayer() {
+        const vids = document.getElementsByTagName('video');
+        for (let i = 0; i < vids.length; i++) {
+            const r = vids[i].getBoundingClientRect();
+            if (r.width < 2 || r.height < 2) return true;
+        }
+        return false;
+    }
+
+    // Even under 'all', a video-link thumbnail on a page with a dormant player is the SITE's to
+    // preview — its player will land on the thumbnail and win. See E61.
+    function videoLinkRefused(el) {
+        const why = videoLinkReason(el);
+        if (!why) return null;
+        if (cfg.videoMode !== 'all') return why;
+        return dormantPlayer() ? why + ' — and this page holds a dormant player' : null;
+    }
+
     const BAND_WIDTH = 0.98;    // of the viewport — a full-bleed band reaches both edges
     const CONTENT_CHARS = 40;   // text this long is a paragraph, not a tile's caption
 
@@ -4338,12 +4372,12 @@
         if (el.tagName === 'VIDEO') {
             if (!videoPreviewsOn() || !gifLike(el)) return null;
             if (playerSurfaceReason(el)) return null;
-            if (cfg.videoMode !== 'all' && videoLinkReason(el)) return null;
+            if (videoLinkRefused(el)) return null;
             return blocked(shownUrl(el)) ? null : el;
         }
         if (NEVER[el.tagName]) return null;
         if (playerSurfaceReason(el)) return null;
-        if (cfg.videoMode !== 'all' && videoLinkReason(el)) return null;
+        if (videoLinkRefused(el)) return null;
         if (cfg.skipFurniture && decorativeReason(el)) return null;
         // Before the <img> branch, because these are the furniture rules that apply to one.
         if (cfg.skipFurniture && bannerReason(el)) return null;
@@ -4383,6 +4417,7 @@
             videoMode: cfg.videoMode + (playVideos ? '' : ' (turned off in this tab)'),
             playerGate: playerSurfaceReason(t) || 'none — no player on this page covers it',
             videoLinkGate: videoLinkReason(t) || 'none — does not lead to a video page',
+            dormantPlayer: dormantPlayer(),
             backgroundGate: t.tagName === 'IMG' || t.tagName === 'VIDEO'
                 ? (pinnedWallpaperReason(t) || 'n/a — not a background')
                 : !backgroundUrl(t) ? 'n/a — no background image'
@@ -4459,6 +4494,7 @@
     function onMove(e) {
         pointer.x = e.clientX;
         pointer.y = e.clientY;
+        if (active && !placed && playerArrived(active)) return;
         if (spinEl && spinEl.classList.contains('on')) moveSpinner();
         const over = !!view && !!box && box.classList.contains('on') &&
             pointInPreview(e.clientX, e.clientY);
@@ -4498,13 +4534,11 @@
         if (cfg.activation === 'modifier' && !modifierHeld(e) && !modifierDown) return;
 
         const el = eligible(e.target, e.clientX, e.clientY);
-        if (cfg.debug) dbg('hover', hoverReport(e.target, el, e));
+        if (debugOn()) dbg('hover', hoverReport(e.target, el, e));
         if (!el) {
             if (!active || active.contains(e.target)) return;
             if (activeCovered && stillUnderPointer(active, e.clientX, e.clientY)) return;
-            // The page put something over the picture after the hover — YouTube's inline player.
-            // From here on it is a covered hover. See E61.
-            if (underCover(active, e.clientX, e.clientY)) { activeCovered = true; return; }
+            if (lateCover(e.target, e.clientX, e.clientY)) return;
             cancel();
             return;
         }
@@ -4526,7 +4560,7 @@
             try {
                 await resolve(el, displayed, myToken,
                     function (hit) {
-                        if (myToken.cancelled || active !== el) return;
+                        if (myToken.cancelled || active !== el || playerArrived(el)) return;
                         got = true;
                         if (view && box.classList.contains('on')) upgradeViewer(hit);
                         else { showViewer(hit, pointer); dockSpinner(); }
@@ -4539,6 +4573,15 @@
         }, cfg.hoverDelay);
     }
 
+    // A player now covers the picture we are previewing. Chromium's mouseover for a layout change
+    // under a still pointer is best-effort, so this is asked by geometry, not waited for. See E61.
+    function playerArrived(el) {
+        if (!overVideoSurface(el)) return false;
+        dbg('a player arrived over the picture — preview withdrawn');
+        cancel();
+        return true;
+    }
+
     // Nothing loaded and something genuinely failed: show the page's own picture with the reason,
     // so a hover is never a ring that spins and vanishes. Deliberately NOT shown when every
     // candidate was merely rejected for being too small — that is the size gate working, and
@@ -4549,7 +4592,7 @@
         const url = shownUrl(el);
         if (!url || blocked(url)) return;
         const dim = await probe(url);       // resolve() already tried the displayed src; cached
-        if (!dim || token.cancelled || active !== el) return;
+        if (!dim || token.cancelled || active !== el || playerArrived(el)) return;
         dbg('showing the page\'s own picture instead — ' + why, url);
         showViewer({ url: url, w: dim.w, h: dim.h, video: !!dim.video, duration: dim.duration,
             display: dim.display, reason: why }, pointer);
@@ -4587,9 +4630,18 @@
         if (!active) return;
         if (to && active.contains && active.contains(to)) return;   // still inside the image
         if (activeCovered && stillUnderPointer(active, e.clientX, e.clientY)) return;
-        // mouseout precedes the mouseover that onOver holds on; same test, same answer.
-        if (underCover(active, e.clientX, e.clientY)) { activeCovered = true; return; }
+        // mouseout precedes the mouseover that onOver decides on; same test, same answer.
+        if (lateCover(to, e.clientX, e.clientY)) return;
         cancel();
+    }
+
+    // Something the page put over the picture AFTER the hover. A player wins, as it does
+    // everywhere else; anything else makes this a covered hover from here on. See E61.
+    function lateCover(t, x, y) {
+        if (!t || !t.tagName || !underCover(active, x, y)) return false;
+        if (playerSurfaceReason(t)) { cancel(); return true; }
+        activeCovered = true;
+        return true;
     }
 
     document.addEventListener('mousemove', onMove, true);
