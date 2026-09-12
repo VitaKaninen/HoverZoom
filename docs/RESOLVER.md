@@ -889,3 +889,12 @@ behaviour when the tour is built, gated on tour mode.
 
 `view.reason` carries the text; `upgradeViewer()` clears it, because an upgrade landing means the
 failure has been superseded.
+
+**`showFallback()` sizes the picture from `probe(url)`, never from `nativeSize(el)`.** The
+displayed src is always a candidate, so the probe is already cached and costs nothing. Sizing it
+from the element is `E45`: a `srcset` `<img>` reports `naturalWidth` divided by the chosen
+candidate's density, `verifyMedia()` then sees the file's real pixels on `load`, marks the URL
+unstable for the tab and calls `cancel()` — the window opens and closes in one frame, and the
+picture is refused for the rest of the tab. Shipped that way in v0.88.0, reported as "the preview
+flashes and goes away" (the pre-v0.10.0 symptom, back through a different door), fixed in
+v0.103.0. Case D in `test-pages/failure-and-timeout.html` is the regression: A with a 2× `srcset`.

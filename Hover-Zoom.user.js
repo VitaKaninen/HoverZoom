@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.102.0
+// @version     0.103.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -4528,7 +4528,7 @@
                         else { showViewer(hit, pointer); dockSpinner(); }
                     });
                 if (!got && !myToken.cancelled && active === el && myToken.failure)
-                    showFallback(el, displayed, myToken.failure);
+                    await showFallback(el, myToken, myToken.failure);
             } finally {
                 if (!myToken.cancelled) hideSpinner();
             }
@@ -4539,15 +4539,16 @@
     // so a hover is never a ring that spins and vanishes. Deliberately NOT shown when every
     // candidate was merely rejected for being too small — that is the size gate working, and
     // previewing every un-upgradable thumbnail on a page would be noise. See TOUR.md §8.
-    function showFallback(el, displayed, why) {
+    // Sized from the probe, never nativeSize(): a srcset <img> reports a density-divided size,
+    // and verifyMedia() closes the window on the real one. See E45.
+    async function showFallback(el, token, why) {
         const url = shownUrl(el);
         if (!url || blocked(url)) return;
-        const n = nativeSize(el);
-        const w = (n && n.w) || displayed.w;
-        const h = (n && n.h) || displayed.h;
-        if (!w || !h) return;
+        const dim = await probe(url);       // resolve() already tried the displayed src; cached
+        if (!dim || token.cancelled || active !== el) return;
         dbg('showing the page\'s own picture instead — ' + why, url);
-        showViewer({ url: url, w: w, h: h, reason: why }, pointer);
+        showViewer({ url: url, w: dim.w, h: dim.h, video: !!dim.video, duration: dim.duration,
+            display: dim.display, reason: why }, pointer);
         dockSpinner();
     }
 

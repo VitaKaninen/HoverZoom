@@ -11,6 +11,8 @@
       200 with a real size, the budget stretches, and the 800x600 original arrives normally.
       Nothing must be shown from the failure path here.
   C · the control. Fast, alive, upgrades as it always did.
+  D · A again, but the thumbnail carries a srcset at 2x density, so naturalWidth reports half
+      the file's pixels. The failure display must not measure it from that.
 -->
 <style>
   body { font: 14px system-ui, sans-serif; margin: 24px; max-width: 60em; }
@@ -29,6 +31,13 @@
 </div>
 
 <div class="case">
+  <h2>D · the original is a 404, and the thumbnail has a srcset</h2>
+  <p>Expect: exactly A. A flash that closes itself is the bug.</p>
+  <a href="/test-images/no-such-original.jpg"><img src="/test-images/mural.jpg"
+     srcset="/test-images/mural.jpg 400w" sizes="200px" alt=""></a>
+</div>
+
+<div class="case">
   <h2>B · the original is alive but takes 8 seconds</h2>
   <p>Expect: the ring keeps turning, then the real 800×600 original. No failure text.</p>
   <a href="/test-images/photo-800x600.jpg?slow=8"><img src="/test-images/mural.jpg" alt=""></a>
@@ -39,3 +48,19 @@
   <p>Expect: the 800×600 original, immediately.</p>
   <a href="/test-images/photo-800x600.jpg"><img src="/test-images/mural.jpg" alt=""></a>
 </div>
+
+<script>
+  var GM_getValue = function (key, dflt) {
+    var v = localStorage.getItem(key);
+    return v === null ? dflt : v;
+  };
+  var GM_setValue = function (key, val) { localStorage.setItem(key, val); };
+  var GM_addValueChangeListener = function (key, fn) {
+    window.addEventListener('storage', function (e) {
+      if (e.key === key) fn(key, e.oldValue, e.newValue, true);
+    });
+  };
+  var GM_registerMenuCommand = function () { return 'x'; };
+  var GM_unregisterMenuCommand = function () {};
+</script>
+<script src="../Hover-Zoom.user.js"></script>

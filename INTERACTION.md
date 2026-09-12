@@ -559,7 +559,7 @@ this table is a table.
 | `E42` | Real fullscreen measures the screen with `innerWidth`, and frees the scrollbar's strip with `scrollbar-width:none` — `overflow` alone does not reclaim it there | [`docs/VIEWER.md`](docs/VIEWER.md) |
 | `E43` | Fullscreen wears no border, and it goes before the fit measures — removed afterwards the frame stays short by it | [`docs/VIEWER.md`](docs/VIEWER.md) |
 | `E44` | A dismiss suppresses only while the pointer is on the picture; armed from anywhere else nothing lifts it until the visit after next | [`docs/VIEWER.md`](docs/VIEWER.md) |
-| `E45` | `naturalWidth` is density-corrected under `srcset`, so the "same URL, same picture" test compares ratio there, not pixels | [`docs/GATES.md`](docs/GATES.md) |
+| `E45` | `naturalWidth` is density-corrected under `srcset`, so the "same URL, same picture" test compares ratio there, not pixels — and the failure display (`E53`) sizes from the probe, not the element, or `verifyMedia()` closes it in one frame | [`docs/GATES.md`](docs/GATES.md), [`docs/RESOLVER.md`](docs/RESOLVER.md) |
 | `E46` | The probe budget falls on the guesses; the ancestor link and the displayed src are always tried, and a srcset list contributes two | [`docs/RESOLVER.md`](docs/RESOLVER.md) |
 | `E47` | A fullscreen exit waits for the request still in flight, or the change it fires finds nothing to undo | [`docs/VIEWER.md`](docs/VIEWER.md) |
 | `E48` | A media URL in the ancestor link's query IS the answer, so the page behind it is never fetched; and an anchor holding a strip of thumbnails only speaks for the biggest one | [`docs/RESOLVER.md`](docs/RESOLVER.md) |
