@@ -1,0 +1,83 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>A player that arrives under the pointer</title>
+<!--
+  YouTube's subscriptions grid, reduced: 600 ms after the pointer lands (YouTube: ~200) on a card, the page lays a
+  muted, controls-less <video> — a player, not a clip: no loop, no autoplay — over the thumbnail.
+  Chromium then fires mouseout/mouseover under the stationary pointer. The preview must stay up
+  (E61); before v0.104.0 it closed within a frame of opening.
+
+  Needs videoMode 'all' — the cards link to /watch?, which 'clips' refuses before anything shows.
+  The page sets it in localStorage on load, and debug on, for the page copy of the script.
+-->
+<style>
+  body { font: 14px system-ui, sans-serif; margin: 24px; max-width: 60em; }
+  .grid { display: flex; gap: 24px; }
+  .card { position: relative; width: 200px; }
+  .card img { display: block; width: 200px; height: 150px; }
+  .card .preview { position: absolute; left: 0; top: 0; width: 200px; height: 150px; background: #000; }
+  .card .preview video { width: 200px; height: 150px; }
+  .card p { margin: 6px 0 0; color: #555; }
+</style>
+
+<h1>A player that arrives under the pointer</h1>
+<p>Expect: hover a card, the preview opens and <b>stays</b> while the black player sits over the
+thumbnail. Leaving the card closes it.</p>
+
+<div class="grid">
+  <div class="card">
+    <a href="/watch?v=one"><img src="/test-images/photo-200x150.jpg" alt=""></a>
+    <p>1 · player after 600 ms</p>
+  </div>
+  <div class="card">
+    <a href="/watch?v=two"><img src="/test-images/photo-200x150.jpg?b" alt=""></a>
+    <p>2 · the same, a second card for the row scan</p>
+  </div>
+  <div class="card">
+    <a href="/watch?v=three"><img src="/test-images/photo-200x150.jpg?c" alt=""></a>
+    <p>3 · control, never covered</p>
+  </div>
+</div>
+
+<script>
+  document.querySelectorAll('.card').forEach(function (card, i) {
+    if (i === 2) return;
+    var timer = 0, pv = null;
+    card.addEventListener('mouseenter', function () {
+      timer = setTimeout(function () {
+        pv = document.createElement('div');
+        pv.className = 'preview';
+        var v = document.createElement('video');
+        v.muted = true;
+        v.src = '/test-images/clip-2s.mp4';
+        pv.appendChild(v);
+        card.appendChild(pv);
+        v.play().catch(function () {});
+      }, 600);
+    });
+    card.addEventListener('mouseleave', function () {
+      clearTimeout(timer);
+      if (pv) { pv.remove(); pv = null; }
+    });
+  });
+
+  var s = {};
+  try { s = JSON.parse(localStorage.getItem('hoverZoomSettings') || '{}'); } catch (e) {}
+  s.videoMode = 'all';
+  s.debug = true;
+  localStorage.setItem('hoverZoomSettings', JSON.stringify(s));
+
+  var GM_getValue = function (key, dflt) {
+    var v = localStorage.getItem(key);
+    return v === null ? dflt : v;
+  };
+  var GM_setValue = function (key, val) { localStorage.setItem(key, val); };
+  var GM_addValueChangeListener = function (key, fn) {
+    window.addEventListener('storage', function (e) {
+      if (e.key === key) fn(key, e.oldValue, e.newValue, true);
+    });
+  };
+  var GM_registerMenuCommand = function () { return 'x'; };
+  var GM_unregisterMenuCommand = function () {};
+</script>
+<script src="../Hover-Zoom.user.js"></script>

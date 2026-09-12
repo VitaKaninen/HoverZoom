@@ -296,6 +296,18 @@ stack instead (`stillUnderPointer`). **Deliberately not used for a direct hover:
 boundary pixel the stack still holds the image, which would keep the preview alive a moment too long
 and cost the one-preview-per-image row scan that pointer-transparency exists for.
 
+**A cover can also arrive AFTER the hover** (`E61`, v0.104.0). YouTube's subscriptions grid slides
+its inline player — a `<video>` that is a player, muted but with no `loop`/`autoplay`, so rightly
+refused — under the stationary pointer ~200 ms in. Chromium then fires mouseout/mouseover with no
+pointer movement; mouseout's `contains(to)` says "left", and the preview closed within a frame of
+opening (or, when the player beat the resolve, never opened). Measured in real Chrome: `mouseover
+IMG` 78224, box on 78380, `mouseover VIDEO` 78430, box off 78434. Both handlers now ask
+`underCover(active, x, y)` before cancelling — the picture is in the stack **with something above
+it** — and on yes set `activeCovered`, so from then on it is an ordinary covered hover. Requiring
+"above" is what keeps the boundary-pixel objection answered: a neighbour never sits above the
+picture at one point, so the row scan cannot trip it. `test-pages/inline-player.html` is the
+regression, with a 600 ms cover so the preview is up before it lands.
+
 Case 30 is the negative bound (two pictures under one cover → no preview); case 31 puts text over a
 background and must not reach through to it.
 

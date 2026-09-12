@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.103.0
+// @version     0.104.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -4500,8 +4500,12 @@
         const el = eligible(e.target, e.clientX, e.clientY);
         if (cfg.debug) dbg('hover', hoverReport(e.target, el, e));
         if (!el) {
-            if (active && !active.contains(e.target) &&
-                !(activeCovered && stillUnderPointer(active, e.clientX, e.clientY))) cancel();
+            if (!active || active.contains(e.target)) return;
+            if (activeCovered && stillUnderPointer(active, e.clientX, e.clientY)) return;
+            // The page put something over the picture after the hover — YouTube's inline player.
+            // From here on it is a covered hover. See E61.
+            if (underCover(active, e.clientX, e.clientY)) { activeCovered = true; return; }
+            cancel();
             return;
         }
         if (el === suppressed) return;      // dismissed; stays down until the pointer leaves
@@ -4560,6 +4564,15 @@
         return false;
     }
 
+    // Is the picture under the pointer with something ABOVE it? A neighbour is never above it at
+    // the same point, so a boundary pixel on the row scan does not answer yes. See E61.
+    function underCover(el, x, y) {
+        if (!el || !document.elementsFromPoint) return false;
+        const stack = document.elementsFromPoint(x, y);
+        for (let i = 1; i < stack.length; i++) if (stack[i] === el) return true;
+        return false;
+    }
+
     function onOut(e) {
         if (placed || drag) return;
         const to = e.relatedTarget;
@@ -4574,6 +4587,8 @@
         if (!active) return;
         if (to && active.contains && active.contains(to)) return;   // still inside the image
         if (activeCovered && stillUnderPointer(active, e.clientX, e.clientY)) return;
+        // mouseout precedes the mouseover that onOver holds on; same test, same answer.
+        if (underCover(active, e.clientX, e.clientY)) { activeCovered = true; return; }
         cancel();
     }
 

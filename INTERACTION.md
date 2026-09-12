@@ -578,6 +578,7 @@ this table is a table.
 
 | `E59` | Which link is forward is decided by three rungs — a declared `rel=next`, the hole in a numbered pager's range, then a forward word — and **ambiguity is refused, never guessed**. A harvested entry is a detached element carrying the page it came from, so its relative URLs resolve against that page and not against this one | [`docs/TOUR.md`](docs/TOUR.md) |
 | `E60` | The tour is stricter than a hover, and the picture it started on is the example: a floor on the longer side as drawn (`tourMinDisplayed`, lowered to the start picture's own size when that is smaller), and a **scope** — the outermost ancestor holding the same pictures as the smallest one that holds two, climbed past every wrapper (under 8 elements of chrome and 200 characters of text). `{`/`}` move it a level; the next page is only fetched from the whole page | [`docs/TOUR.md`](docs/TOUR.md) §1a |
+| `E61` | A cover that arrives AFTER the hover — YouTube's inline player sliding under a stationary pointer — does not close the preview: the picture is still under the pointer with the new target above it, so the hover becomes a covered one. A neighbour is never above it at the same point, so the row scan is untouched | [`docs/GATES.md`](docs/GATES.md) |
 
 `E3` is retired with the detached state (v0.28.0); `E4` and `E5` are retired as dangling.
 
