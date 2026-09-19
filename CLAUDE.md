@@ -41,7 +41,7 @@ needs. **Opening all five defeats the point**; if a task genuinely spans two, re
 | Working on | Read |
 |---|---|
 | the preview window — states, geometry, the frame and its handles, dragging, zoom, the status bar, the context menu | [`docs/VIEWER.md`](docs/VIEWER.md) |
-| whether something may be hovered at all — video, banner, page background, covers, the block list | [`docs/GATES.md`](docs/GATES.md) |
+| whether something may be hovered at all — video, banner, page background, covers, the block list, a player that lands late and the wait learned for it | [`docs/GATES.md`](docs/GATES.md) |
 | finding the original — URL rules, linked pages, imgur, video previews, the loading ring | [`docs/RESOLVER.md`](docs/RESOLVER.md) |
 | the settings panel, stored settings, the manager's menu | [`docs/SETTINGS.md`](docs/SETTINGS.md) |
 | the test page, the `debug` log, the Browser pane's many lies | [`docs/TESTING.md`](docs/TESTING.md) |
@@ -218,9 +218,10 @@ static catches it — `node --check` passes and the markup is fine.
 
 ```bash
 node --check Hover-Zoom.user.js     # syntax
-node test-resolver.js               # 271 assertions: the pure URL and video-link logic, the
+node test-resolver.js               # 289 assertions: the pure URL and video-link logic, the
                                     # banner gate's shape test against every measured page in
-                                    # banner-test-sites.md, and the tour's next-page detector
+                                    # banner-test-sites.md, the tour's next-page detector, and
+                                    # the learned wait's arithmetic
 python make-test-images.py          # regenerate fixtures into test-images/
 ```
 

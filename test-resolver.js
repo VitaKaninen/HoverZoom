@@ -845,5 +845,44 @@ eq('pageNumOf reads a /pN path', pageNumOf(new URL('https://ex.com/g/p7')), 7);
 eq('pageNumOf refuses a bare filename number',
     pageNumOf(new URL('https://ex.com/g/pager-2.html')), 0);
 
+// ---- the learned wait for a late player (E62). vdLearn() is arithmetic on a stored entry and
+// reads no DOM, so every transition the panel can show is asserted here.
+const vdStart = src.indexOf('    const VDELAY_SAMPLES');
+const vdEnd = src.indexOf('    // The entry for a host');
+if (vdStart < 0 || vdEnd < 0) { console.error('vdLearn markers not found'); process.exit(1); }
+const vd = new Function(src.slice(vdStart, vdEnd) +
+    NL + 'return {vdLearn, vdRound, VDELAY_SAMPLES, VDELAY_ANY};')();
+
+eq('vdRound rounds up to 50 ms', vd.vdRound(1001), 1050);
+eq('vdRound never goes under one step', vd.vdRound(10), 250);
+eq('vdRound is capped', vd.vdRound(99999), 10000);
+
+let e = vd.vdLearn(null, 800, 'r1', false);
+eq('first withdrawal starts sampling', e.change, 'sampled');
+eq('  and stores it', e.entry, { samples: [{ ms: 800, region: 'r1' }] });
+e = vd.vdLearn(e.entry, 1000, 'r1', false);
+eq('second withdrawal is still sampling', e.change, 'sampled');
+e = vd.vdLearn(e.entry, 900, 'r1', false);
+eq('third withdrawal writes the rule', e.change, 'learned');
+eq('  slowest arrival × 1.25, for the one region', e.entry, { ms: 1250, region: 'r1' });
+
+let mixed = vd.vdLearn(vd.vdLearn(vd.vdLearn(null, 800, 'r1', false).entry, 1000, 'r2', false).entry, 900, 'r1', false);
+eq('samples from different regions learn a whole-site wait', mixed.entry, { ms: 1250, region: vd.VDELAY_ANY });
+
+let late = vd.vdLearn({ ms: 1250, region: 'r1' }, 1400, 'r1', true);
+eq('a player after the wait makes it longer', late.change, 'longer');
+eq('  by a step, or to elapsed × 1.25, whichever is more', late.entry.ms, 1750);
+eq('  the region is kept', late.entry.region, 'r1');
+eq('a small overrun still adds a whole step', vd.vdLearn({ ms: 1250, region: 'r1' }, 1100, 'r1', true).entry.ms, 1500);
+
+let wide = vd.vdLearn({ ms: 1250, region: 'r1' }, 700, 'r2', false);
+eq('a withdrawal the region did not cover widens it to the site', wide.change, 'widened');
+eq('  the wait is unchanged', wide.entry, { ms: 1250, region: vd.VDELAY_ANY });
+eq('a whole-site rule not in force cannot widen further',
+    vd.vdLearn({ ms: 1250, region: vd.VDELAY_ANY }, 700, 'r2', false).change, null);
+
+eq('a user entry is never touched', vd.vdLearn({ ms: 0, region: vd.VDELAY_ANY, user: true }, 700, 'r2', false).change, null);
+eq('  whatever its wait', vd.vdLearn({ ms: 2000, region: vd.VDELAY_ANY, user: true }, 3000, 'r2', true).change, null);
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

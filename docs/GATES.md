@@ -303,14 +303,21 @@ things were true and each cost a version:
 
 - **Chromium's mouseout/mouseover for a layout change under a still pointer is best-effort.** It
   came 206 ms after the hover once, 3 s later once, and not at all once. Nothing that waits for the
-  event is reliable; the check is geometric — `overVideoSurface(active)` — asked at paint time and on
-  every `mousemove` (`playerArrived()`), and it withdraws the preview. `lateCover()` still takes the
-  event when it does come: a player cover cancels, any other late cover (`underCover`: the picture
-  is in the stack with the target *above* it) turns the hover into a covered one. Requiring
-  "above" is what keeps the boundary-pixel objection answered — a neighbour never sits above the
-  picture at one point, so the row scan cannot trip it.
-- **No grace period can beat a delay that varies by 10×.** v0.105.0 briefly held the paint 400 ms
-  for video-link thumbnails; YouTube landed at 2 s that day. Removed the same session.
+  event is reliable; the check is geometric — `overVideoSurface(active)` — asked at paint time, on
+  every `mousemove`, and since v0.106.0 on a 100 ms poll (`watchTimer`) for as long as a hover is
+  pending or open (`playerArrived()`), and it withdraws the preview. The poll is what makes the
+  learned wait's timings honest: a still pointer is the normal case, and a withdrawal timed from
+  the next mouse event measured 1399 ms for a player that landed at 600. `lateCover()` still takes
+  the event when it does come: a player cover cancels, any other late cover (`underCover`: the
+  picture is in the stack with the target *above* it) turns the hover into a covered one.
+  Requiring "above" is what keeps the boundary-pixel objection answered — a neighbour never sits
+  above the picture at one point, so the row scan cannot trip it. `playerReplaced()` covers the
+  third shape: the picture itself is removed and a `<video>` is where it was, which arrives as a
+  mouseout with the picture no longer in the stack at all.
+- **No FIXED grace period can beat a delay that varies by 10× between sites.** v0.105.0 briefly
+  held the paint 400 ms for video-link thumbnails; YouTube landed at 2 s that day. Removed the same
+  session. What replaced it (v0.106.0, `E62`, below) is a wait that is *measured per site* and
+  corrects itself — the objection was to guessing one number for every site, not to waiting.
 - **A page holding a dormant `<video>` — laid out under 2 px — is a page that previews its own
   videos.** So under `all`, a video-link thumbnail on such a page is refused up front
   (`videoLinkRefused()`, reported as `dormantPlayer` on the debug line): the site's player will land
@@ -327,6 +334,47 @@ exception. `test-pages/inline-player.html` holds both shapes: dormant (nothing o
 
 Case 30 is the negative bound (two pictures under one cover → no preview); case 31 puts text over a
 background and must not reach through to it.
+
+### A site that lands players late is learned, and waited for · `E62` · v0.106.0
+
+Asked for after a site whose thumbnails start a muted clip about a second into the hover: every
+hover opened a preview that the withdrawal above closed a second later — correct, and useless.
+The user's design, built as stated: notice the withdrawal, sample a few, then wait that long on
+that site before showing anything.
+
+**The record.** `cfg.videoDelays` is `host → {ms, region, user, samples}`. `vdLearn()` is the
+whole arithmetic and is asserted in `test-resolver.js`:
+
+- **Learning.** Each withdrawal not caught by a wait appends `{ms, region}` to `samples`. At
+  `VDELAY_SAMPLES` (3) the entry becomes `{ms: slowest × 1.25 rounded up to 50, region}` — the
+  region if all three agree, `'*'` (the whole site) if they do not. The samples persist, because
+  three hovers on one page is not a given.
+- **Applying.** `vdHoldFor(region)` gives the wait when the entry's region is `'*'` or equal to
+  this hover's. During it nothing appears — no ring either, since a ring that spins and vanishes
+  on every thumbnail is the noise this removes — but the resolve runs, its best hit is kept in
+  `heldHit`, and the wait's timer paints it (or shows the ring if still resolving, or the failure
+  display) the moment it ends. A player landing inside the wait is `withdrawn()` "during the
+  wait": logged, not recorded — that is the wait working.
+- **Correcting.** A withdrawal *after* a wait that applied is a timing miss: `ms` becomes
+  `max(ms + 250, elapsed × 1.25)`. A withdrawal on a thumbnail the region did **not** cover is a
+  shape miss: the region becomes `'*'`. Which of the two is decided by whether `holdMs` was set
+  for that hover, nothing else.
+- **The user's entries** (`user: true`, from the panel) are never written by the script; adding
+  one removes every learned entry it covers; **0 ms** turns learning off for the site. Lookup
+  (`vdEntryFor`) is the host's own key, else the most specific user entry that covers it.
+
+**The region** (`regionKey()`) is structural — tag plus digit-free class names, from the picture
+up to the first ancestor holding more than one `img`/`video`, at most 8 levels. Pixel rectangles
+would not survive a scroll, let alone a reload; digit-bearing classes are usually build hashes.
+When the key is the wrong shape the site-wide fallback is the safety net, so it need not be
+clever. **It is taken once, at hover time (`activeRegion`).** Computed at withdrawal it stops at
+the card — the card now contains the `<video>` — and never equals the hover-time key, so every
+site "widens" on its fourth hover. Found in the first browser run.
+
+`test-pages/late-player.html` is the fixture: grid A lands a player at 600 ms (`?slow`: 1200),
+grid B never does. Measured there: three samples at ~700 ms learn 900 ms for
+`img>div.card.video>div.grid`; A4 then waits 900, the player lands at 714, nothing opens; B1 opens
+at once; on `?slow` A1 opens at 900 and is withdrawn at 1302 → 1650 ms.
 
 ## The preview is a completely different picture · `E19`
 

@@ -1,0 +1,113 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>A player that lands late, learned</title>
+<!--
+  A site whose thumbnails play a video a moment after the pointer lands on them. See E62.
+
+  Grid A — every card creates a player over its thumbnail 600 ms after mouseenter (nothing
+  dormant on the page, so no card is refused up front). Grid B — plain pictures, never covered.
+
+  The first three withdrawals on grid A are measured; the fourth hover onward waits ~750 ms
+  (600 × 1.25) before previewing, and the player lands inside that wait, so nothing opens and
+  nothing closes. Grid B is a different region, so its previews still open at once.
+
+  ?slow — grid A's player lands at 1200 ms instead. On a page that has already learned 750 ms,
+  the preview opens after the wait and is then withdrawn; that withdrawal makes the wait longer.
+
+  "Forget this site" removes the learned entry for localhost and reloads.
+  The page sets debug in localStorage on load, for the page copy of the script.
+-->
+<style>
+  body { font: 14px system-ui, sans-serif; margin: 24px; max-width: 60em; }
+  h2 { font-size: 15px; margin: 24px 0 8px; }
+  .grid { display: flex; gap: 24px; }
+  .card { position: relative; width: 200px; }
+  .card img { display: block; width: 200px; height: 150px; }
+  .card .cover { position: absolute; left: 0; top: 0; width: 200px; height: 150px; }
+  .card .cover video { width: 200px; height: 150px; background: #000; }
+  .card p { margin: 6px 0 0; color: #555; }
+  #state { color: #555; }
+</style>
+
+<h1>A player that lands late, learned</h1>
+<p id="expect"></p>
+<p id="state"></p>
+<p><button id="forget">Forget this site</button></p>
+
+<h2>Grid A — a player lands on every card</h2>
+<div class="grid" id="a">
+  <div class="card video"><img src="/test-images/photo-200x150.jpg?a1" alt=""><p>A1</p></div>
+  <div class="card video"><img src="/test-images/photo-200x150.jpg?a2" alt=""><p>A2</p></div>
+  <div class="card video"><img src="/test-images/photo-200x150.jpg?a3" alt=""><p>A3</p></div>
+  <div class="card video"><img src="/test-images/photo-200x150.jpg?a4" alt=""><p>A4</p></div>
+</div>
+
+<h2>Grid B — plain pictures</h2>
+<div class="grid" id="b">
+  <div class="tile"><img src="/test-images/photo-200x150.jpg?b1" alt=""><p>B1</p></div>
+  <div class="tile"><img src="/test-images/photo-200x150.jpg?b2" alt=""><p>B2</p></div>
+</div>
+
+<script>
+  var landAt = location.search.indexOf('slow') >= 0 ? 1200 : 600;
+  document.getElementById('expect').textContent =
+    'Grid A lands a player ' + landAt + ' ms after the pointer arrives. Hover A1–A3: each opens and is ' +
+    'withdrawn. From then on grid A waits before previewing; grid B never waits.';
+
+  document.querySelectorAll('#a .card').forEach(function (card) {
+    var timer = 0, cv = null, v = null;
+    card.addEventListener('mouseenter', function () {
+      timer = setTimeout(function () {
+        cv = document.createElement('div');
+        cv.className = 'cover';
+        v = document.createElement('video');
+        v.muted = true;
+        v.src = '/test-images/clip-2s.mp4';
+        cv.appendChild(v);
+        card.appendChild(cv);
+        v.play().catch(function () {});
+      }, landAt);
+    });
+    card.addEventListener('mouseleave', function () {
+      clearTimeout(timer);
+      if (v) { v.pause(); v = null; }
+      if (cv) { cv.remove(); cv = null; }
+    });
+  });
+
+  function readState() {
+    var s = {};
+    try { s = JSON.parse(localStorage.getItem('hoverZoomSettings') || '{}'); } catch (e) {}
+    return s;
+  }
+  function showState() {
+    var e = (readState().videoDelays || {})[location.hostname];
+    document.getElementById('state').textContent = 'Stored for ' + location.hostname + ': ' +
+      (e ? JSON.stringify(e) : 'nothing');
+  }
+  document.getElementById('forget').addEventListener('click', function () {
+    var s = readState();
+    if (s.videoDelays) delete s.videoDelays[location.hostname];
+    localStorage.setItem('hoverZoomSettings', JSON.stringify(s));
+    location.reload();
+  });
+
+  var s = readState();
+  s.debug = true;
+  localStorage.setItem('hoverZoomSettings', JSON.stringify(s));
+  showState();
+
+  var GM_getValue = function (key, dflt) {
+    var v = localStorage.getItem(key);
+    return v === null ? dflt : v;
+  };
+  var GM_setValue = function (key, val) { localStorage.setItem(key, val); showState(); };
+  var GM_addValueChangeListener = function (key, fn) {
+    window.addEventListener('storage', function (e) {
+      if (e.key === key) fn(key, e.oldValue, e.newValue, true);
+    });
+  };
+  var GM_registerMenuCommand = function () { return 'x'; };
+  var GM_unregisterMenuCommand = function () {};
+</script>
+<script src="../Hover-Zoom.user.js"></script>

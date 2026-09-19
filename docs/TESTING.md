@@ -102,6 +102,13 @@ ancestor-link candidate ever comes back missing on a shadow-DOM site.
   floor, so the thread level is 15 and not 17. **Dispatch synthetic keys on `document.body`, not
   `window`** — the hover-then-arrow path (`T29`) is a `document` listener and an event dispatched
   at `window` never reaches it, which reads as "→ does not pin". Cost one round.
+- **`test-pages/late-player.html` is the learned-wait fixture** (`E62`, v0.106.0): grid A lands a
+  player on every card 600 ms in (`?slow`: 1200), grid B never does, and the page prints the
+  stored entry for `localhost` with a "Forget this site" button. The expected numbers are in
+  [`GATES.md`](GATES.md) under `E62`. Hover with the pointer **still** — that is the user's
+  case, and the poll is what makes the timing right there. The Browser pane maps hover
+  coordinates at 1.28× the screenshot frame at 1024×768; probe it with a `mousemove` listener
+  before trusting a coordinate, because the first run here hovered A2 while aiming at A1.
 - **`test-server.py`, not `python -m http.server`.** It is the same static server plus
   `?slow=<seconds>`, which stalls that one response. Nothing else can reproduce the symptom that
   motivated the resolve spinner: against localhost every probe finishes in single-digit ms, so

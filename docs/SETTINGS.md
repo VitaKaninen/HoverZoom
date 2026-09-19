@@ -201,11 +201,30 @@ next confirmation will want the same shape.
 `noReferrer` was a global checkbox, and that was the wrong shape: stripping the referrer fixes
 hosts that refuse a request naming another site and breaks hosts that require their own site as
 the referrer, so one switch means flipping it at every navigation. It is now `referrerSites`, a
-suffix-matched host list beside the block list under **Exceptions**, with a *+ This Site*
-button; `noReferrerHere()` reads it against `pageHost()`.
+suffix-matched host list with a *+ This Site* button; `noReferrerHere()` reads it against
+`pageHost()`. Since v0.106.0 it sits under **Per-site fixes** at the bottom of Advanced, beside
+the learned-wait list (below), because both are "this one site misbehaves" answers nobody needs
+until they do.
 
 The site to add is the one you are **on**, not the image's host — that is what the browser sends
 as the referrer and what `pageHost()` returns.
+
+## The wait for a late player, per site · `E62` (v0.106.0)
+
+`videoDelays` is `host → {ms, region, user, samples}`; the behaviour and the arithmetic are in
+[`GATES.md`](GATES.md) under `E62`. What the panel does with it, `delayList()`:
+
+- **Not built on `list()`** — an entry is a host *and* a number, so the add row carries an `ms`
+  field and there is no "Edit as text". Adding with the number blank focuses the number.
+- **Adding a host writes `{ms, region: '*', user: true}`** and drops every learned entry the new
+  host covers (`entryCovers`), so a user's `example.com` retires the script's `www.example.com`
+  and the script never re-learns under it (`vdEntryFor` answers with the user's). Adding a host
+  that is already there replaces it — that is how the number is changed.
+- **Each row says where it came from:** `1250 ms — learned, one area` / `whole site`,
+  `learning, 2 of 3`, or `0 ms — yours`. The ✕ removes it; a learned one comes back after three
+  more withdrawals, which is the point of adding a 0 ms entry instead.
+- The script's own writes go through `vdRecord()` → `refreshPanel()`, so an open panel shows a
+  sample landing. `RESET_KEEPS` includes it; Undo restores it with everything else.
 
 ## The panel is never modal · `E33`
 

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.105.0
+// @version     0.106.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -84,6 +84,8 @@
         smoothing: 'auto',          // 'auto' | 'pixelated' | 'crisp-edges' — image-rendering
         spinnerTheme: 'auto',       // 'auto' (follows the browser) | 'dark' | 'light'
         referrerSites: [],          // sites to load previews from WITHOUT a referrer
+        videoDelays: {},            // host -> {ms, region, user, samples}: wait for the page's own
+                                    // player before previewing; learned, or set by the user
         siteAudio: {},              // host -> {muted, volume}; absent means muted, which is the
                                     // only default a first visit may have — see AUDIO_DEFAULT
 
@@ -4018,6 +4020,13 @@
     let suppressed = null;  // element whose preview was dismissed; skipped until re-entered
     let activeCovered = false;
     let suppressedCovered = false;
+    let hoverAt = 0;            // when the current hover began
+    let activeRect = null;      // where the picture was then; a player landing inside it is a late one
+    let activeRegion = '';      // regionKey() taken then — a player landing later changes the answer
+    let holdMs = 0;             // the wait this hover is under, 0 for none
+    let holding = false;        // still inside that wait
+    let holdTimer = null;
+    let watchTimer = null;      // the poll for a player under the picture
     let swallowMenuAt = 0;      // when the right press that dismissed a preview happened; its menu is ours
     const MENU_CLAIM_MS = 1500; // and only that long, or a press released off-window eats the next menu
     let pointer = { x: 0, y: 0 };
@@ -4196,6 +4205,94 @@
         if (!why) return null;
         if (cfg.videoMode !== 'all') return why;
         return dormantPlayer() ? why + ' — and this page holds a dormant player' : null;
+    }
+
+    // ---- the learned wait for a player that lands late. See E62.
+
+    const VDELAY_SAMPLES = 3;       // withdrawals measured before a site gets a wait
+    const VDELAY_MARGIN = 1.25;     // the wait, as a multiple of the slowest arrival seen
+    const VDELAY_STEP = 250;        // ms added when the wait turns out short
+    const VDELAY_MAX = 10000;
+    const VDELAY_POLL_MS = 100;     // how often the picture is checked for a player under it
+    const VDELAY_ANY = '*';         // a region meaning the whole site
+
+    function vdRound(ms) {
+        return Math.min(VDELAY_MAX, Math.max(VDELAY_STEP, Math.ceil(ms / 50) * 50));
+    }
+
+    // One withdrawal, folded into a site's entry. `covered` says the wait applied to that hover.
+    function vdLearn(entry, elapsed, region, covered) {
+        const e = entry ? JSON.parse(JSON.stringify(entry)) : { samples: [] };
+        if (e.user) return { entry: e, change: null };
+        if (e.ms == null) {
+            e.samples = (e.samples || []).concat([{ ms: elapsed, region: region }]);
+            if (e.samples.length < VDELAY_SAMPLES) return { entry: e, change: 'sampled' };
+            const slowest = Math.max.apply(null, e.samples.map(function (x) { return x.ms; }));
+            const same = e.samples.every(function (x) { return x.region === region; });
+            return { entry: { ms: vdRound(slowest * VDELAY_MARGIN), region: same ? region : VDELAY_ANY },
+                     change: 'learned' };
+        }
+        if (covered) {          // the wait was in force and the player still came after it
+            e.ms = Math.min(VDELAY_MAX, Math.max(e.ms + VDELAY_STEP, vdRound(elapsed * VDELAY_MARGIN)));
+            return { entry: e, change: 'longer' };
+        }
+        if (e.region === VDELAY_ANY) return { entry: e, change: null };
+        e.region = VDELAY_ANY;  // the wait did not apply here, so the region was the wrong shape
+        return { entry: e, change: 'widened' };
+    }
+
+    // The entry for a host: its own, else the most specific user entry covering it.
+    function vdEntryFor(host) {
+        const all = cfg.videoDelays || {};
+        if (all[host]) return all[host];
+        let best = null, bestLen = 0;
+        Object.keys(all).forEach(function (k) {
+            if (all[k].user && entryCovers(k, host) && k.length > bestLen) { best = all[k]; bestLen = k.length; }
+        });
+        return best;
+    }
+
+    function nodeSig(n) {
+        const cls = [];
+        for (let i = 0; n.classList && i < n.classList.length; i++) {
+            if (!/\d/.test(n.classList[i])) cls.push(n.classList[i]);
+        }
+        cls.sort();
+        return n.tagName.toLowerCase() + (cls.length ? '.' + cls.slice(0, 4).join('.') : '');
+    }
+
+    // The shape of the card around a picture, up to the grid that holds its siblings.
+    function regionKey(el) {
+        const parts = [];
+        let n = el;
+        for (let up = 0; n && n.nodeType === 1 && up < 8; up++, n = n.parentElement) {
+            parts.push(nodeSig(n));
+            if (up > 0 && n.querySelectorAll('img, video').length > 1) break;
+        }
+        return parts.join('>');
+    }
+
+    // How long this hover waits for the page's own player before previewing. 0 = no wait.
+    function vdHoldFor(region) {
+        const e = vdEntryFor(pageHost());
+        if (!e || e.ms == null || !(e.ms > 0)) return 0;
+        if (e.region !== VDELAY_ANY && e.region !== region) return 0;
+        return e.ms;
+    }
+
+    // Read-modify-write against storage, as saveAudio() does.
+    function vdRecord(region, elapsed, covered) {
+        const host = pageHost();
+        if (!host) return;
+        reloadSettings();
+        const r = vdLearn(vdEntryFor(host), elapsed, region, covered);
+        if (!r.change) return;
+        const all = Object.assign({}, cfg.videoDelays);
+        all[host] = r.entry;
+        cfg.videoDelays = all;
+        saveSettings();
+        refreshPanel();
+        dbg('late player: ' + r.change, { host: host, after: elapsed + ' ms', region: region, entry: r.entry });
     }
 
     const BAND_WIDTH = 0.98;    // of the viewport — a full-bleed band reaches both edges
@@ -4418,6 +4515,14 @@
             playerGate: playerSurfaceReason(t) || 'none — no player on this page covers it',
             videoLinkGate: videoLinkReason(t) || 'none — does not lead to a video page',
             dormantPlayer: dormantPlayer(),
+            lateWait: (function () {
+                const w = vdEntryFor(pageHost());
+                if (!w) return 'none — no entry for this site';
+                if (w.user) return (w.ms || 0) + ' ms, set by the user';
+                if (w.ms == null) return 'learning — ' + w.samples.length + ' of ' + VDELAY_SAMPLES + ' samples';
+                return w.ms + ' ms, learned, for ' + (w.region === VDELAY_ANY ? 'the whole site'
+                    : (el && w.region === regionKey(el) ? 'this area — applies' : 'another area — does not apply'));
+            })(),
             backgroundGate: t.tagName === 'IMG' || t.tagName === 'VIDEO'
                 ? (pinnedWallpaperReason(t) || 'n/a — not a background')
                 : !backgroundUrl(t) ? 'n/a — no background image'
@@ -4443,6 +4548,12 @@
     function cancel() {
         if (placed) return;         // a placed viewer outlives hover entirely
         clearTimeout(timer);
+        clearTimeout(holdTimer);
+        clearInterval(watchTimer);
+        holding = false;
+        holdMs = 0;
+        activeRect = null;
+        activeRegion = '';
         if (token) token.cancelled = true;
         token = null;
         active = null;
@@ -4539,6 +4650,7 @@
             if (!active || active.contains(e.target)) return;
             if (activeCovered && stillUnderPointer(active, e.clientX, e.clientY)) return;
             if (lateCover(e.target, e.clientX, e.clientY)) return;
+            if (playerReplaced(e.clientX, e.clientY)) return;
             cancel();
             return;
         }
@@ -4552,23 +4664,49 @@
         active = el;
         activeCovered = (el !== e.target);
         activeShown = shownUrl(el);
+        hoverAt = Date.now();
+        activeRect = el.getBoundingClientRect();
+        activeRegion = regionKey(el);
+        holdMs = vdHoldFor(activeRegion);
+        holding = holdMs > 0;
+        // A player landing under a still pointer raises no mouse event worth waiting for. See E61.
+        watchTimer = setInterval(function () {
+            if (active === el && !placed) playerArrived(el);
+        }, VDELAY_POLL_MS);
         // A hover is a user gesture, and a gesture always retries a cached miss. See TOUR.md §7.
         const myToken = token = { cancelled: false, fresh: true };
+        let heldHit = null;     // the best hit so far, kept back until the wait is over
+        function paint(hit) {
+            if (view && box.classList.contains('on')) upgradeViewer(hit);
+            else { showViewer(hit, pointer); dockSpinner(); }
+        }
+        if (holding) {
+            dbg('waiting ' + holdMs + ' ms for the page\'s own player before previewing');
+            holdTimer = setTimeout(async function () {
+                holding = false;
+                if (myToken.cancelled || active !== el || playerArrived(el)) return;
+                if (heldHit) { paint(heldHit); return; }
+                if (!myToken.done) { showSpinner(); return; }   // hits paint directly from here
+                if (myToken.failure) await showFallback(el, myToken, myToken.failure);
+            }, holdMs);
+        }
         timer = setTimeout(async function () {
-            showSpinner();
+            if (!holding) showSpinner();
             let got = false;
             try {
                 await resolve(el, displayed, myToken,
                     function (hit) {
                         if (myToken.cancelled || active !== el || playerArrived(el)) return;
                         got = true;
-                        if (view && box.classList.contains('on')) upgradeViewer(hit);
-                        else { showViewer(hit, pointer); dockSpinner(); }
+                        if (holding) { heldHit = hit; return; }
+                        paint(hit);
                     });
+                myToken.done = true;
+                if (holding) return;            // the wait's timer paints, or shows the failure
                 if (!got && !myToken.cancelled && active === el && myToken.failure)
                     await showFallback(el, myToken, myToken.failure);
             } finally {
-                if (!myToken.cancelled) hideSpinner();
+                if (!myToken.cancelled && !holding) hideSpinner();
             }
         }, cfg.hoverDelay);
     }
@@ -4577,9 +4715,34 @@
     // under a still pointer is best-effort, so this is asked by geometry, not waited for. See E61.
     function playerArrived(el) {
         if (!overVideoSurface(el)) return false;
-        dbg('a player arrived over the picture — preview withdrawn');
-        cancel();
+        withdrawn('over a laid-out <video> rectangle');
         return true;
+    }
+
+    // The page put a player over the picture after the hover: the preview is withdrawn, and the
+    // wait for this site learns from it — unless the wait itself is what caught it. See E62.
+    function withdrawn(why) {
+        const elapsed = Date.now() - hoverAt;
+        dbg('a player arrived over the picture — preview withdrawn' + (holding ? ' during the wait' : ''),
+            { after: elapsed + ' ms', why: why, waited: holdMs + ' ms' });
+        if (!holding) vdRecord(activeRegion, elapsed, holdMs > 0);
+        cancel();
+    }
+
+    // The picture itself went, and a player is where it was: the same withdrawal, seen from the
+    // mouseout it causes. Only inside the rectangle the picture had, so leaving onto a neighbouring
+    // player is still just leaving.
+    function playerReplaced(x, y) {
+        if (!active || !activeRect || !holds(activeRect, x, y)) return false;
+        if (!document.elementsFromPoint) return false;
+        const stack = document.elementsFromPoint(x, y);
+        for (let i = 0; i < stack.length; i++) {
+            if (stack[i].tagName === 'VIDEO' && !gifLike(stack[i])) {
+                withdrawn('a <video> is now where the picture was');
+                return true;
+            }
+        }
+        return false;
     }
 
     // Nothing loaded and something genuinely failed: show the page's own picture with the reason,
@@ -4632,6 +4795,7 @@
         if (activeCovered && stillUnderPointer(active, e.clientX, e.clientY)) return;
         // mouseout precedes the mouseover that onOver decides on; same test, same answer.
         if (lateCover(to, e.clientX, e.clientY)) return;
+        if (playerReplaced(e.clientX, e.clientY)) return;
         cancel();
     }
 
@@ -4639,7 +4803,8 @@
     // everywhere else; anything else makes this a covered hover from here on. See E61.
     function lateCover(t, x, y) {
         if (!t || !t.tagName || !underCover(active, x, y)) return false;
-        if (playerSurfaceReason(t)) { cancel(); return true; }
+        const why = playerSurfaceReason(t);
+        if (why) { withdrawn(why); return true; }
         activeCovered = true;
         return true;
     }
@@ -5619,7 +5784,7 @@
     let panelOpened = null;     // Undo's snapshot — see openPanel(); MUST outlive a re-render
 
     // What the user entered per site, not knobs: `Reset to defaults` leaves these alone.
-    const RESET_KEEPS = ['siteList', 'blockList', 'referrerSites', 'siteAudio'];
+    const RESET_KEEPS = ['siteList', 'blockList', 'referrerSites', 'siteAudio', 'videoDelays'];
 
     function closePanel() {
         if (panelFlush) { panelFlush(); panelFlush = null; }
@@ -5708,6 +5873,8 @@
             '.listex{margin-top:4px;color:#6c7086;font-style:italic}',
             '.addrow{display:flex;gap:6px;margin-top:8px}',
             '.addrow input[type=text]{flex:1;padding:6px 10px;border-radius:6px;font-size:13px}',
+            '.addrow input[type=number]{width:84px;padding:6px 8px;border-radius:6px;font-size:13px}',
+            '.entry .prov{color:#9399b2;font-size:12px;margin-left:8px;word-break:normal}',
             '.addrow button{padding:6px 12px;border-radius:6px;border:none;font-weight:700;',
             'font-size:13px;white-space:nowrap}',
             '.addrow button.primary{background:' + C.blue + ';color:' + C.base + '}',
@@ -5923,6 +6090,134 @@
         }
 
         // A list editor for one of the array settings, laid out the same way as the one in Open Links in New Tab.
+        // Host -> {ms, region, user, samples}: the learned wait for a late player, and the
+        // user's own. Adding a host the script already holds replaces its entry.
+        function delayList(opts) {
+            const wrap = document.createElement('div');
+            wrap.className = 'listwrap';
+
+            const hd = document.createElement('div');
+            hd.className = 'listhead';
+            hd.textContent = opts.heading;
+            wrap.appendChild(hd);
+
+            const desc = document.createElement('div');
+            desc.className = 'listdesc';
+            const descMain = document.createElement('div');
+            descMain.textContent = opts.description;
+            desc.appendChild(descMain);
+            const ex = document.createElement('div');
+            ex.className = 'listex';
+            ex.textContent = opts.examples;
+            desc.appendChild(ex);
+            wrap.appendChild(desc);
+
+            const addRow = document.createElement('div');
+            addRow.className = 'addrow';
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.spellcheck = false;
+            input.placeholder = 'e.g. example.com';
+            const ms = document.createElement('input');
+            ms.type = 'number';
+            ms.min = 0; ms.max = VDELAY_MAX; ms.step = 50;
+            ms.placeholder = 'ms';
+            setTip(ms, 'Milliseconds to wait; 0 stops the script adding a wait for the site');
+            const addBtn = document.createElement('button');
+            addBtn.className = 'primary';
+            addBtn.textContent = 'Add';
+            const cur = document.createElement('button');
+            cur.className = 'add';
+            cur.textContent = '+ This site';
+            setTip(cur, pageHost());
+            addRow.appendChild(input);
+            addRow.appendChild(ms);
+            addRow.appendChild(addBtn);
+            addRow.appendChild(cur);
+
+            const entries = document.createElement('div');
+            entries.className = 'entries';
+
+            function describe(e) {
+                if (e.user) return (e.ms | 0) + ' ms — yours';
+                if (e.ms == null) return 'learning, ' + (e.samples || []).length + ' of ' + VDELAY_SAMPLES;
+                return e.ms + ' ms — learned, ' + (e.region === VDELAY_ANY ? 'whole site' : 'one area');
+            }
+
+            function hosts() {
+                return Object.keys(cfg.videoDelays || {}).sort(function (a, b) {
+                    return a.localeCompare(b);
+                });
+            }
+
+            function render() {
+                while (entries.firstChild) entries.removeChild(entries.firstChild);
+                const keys = hosts();
+                if (!keys.length) {
+                    const empty = document.createElement('div');
+                    empty.className = 'empty';
+                    empty.textContent = 'No entries yet.';
+                    entries.appendChild(empty);
+                    return;
+                }
+                keys.forEach(function (host) {
+                    const e = cfg.videoDelays[host];
+                    const r = document.createElement('div');
+                    r.className = 'entry';
+                    const label = document.createElement('span');
+                    label.textContent = host;
+                    const prov = document.createElement('span');
+                    prov.className = 'prov';
+                    prov.textContent = describe(e);
+                    label.appendChild(prov);
+                    const rm = document.createElement('button');
+                    rm.textContent = '✕';
+                    setTip(rm, 'Remove ' + host);
+                    rm.addEventListener('click', function () {
+                        const all = Object.assign({}, cfg.videoDelays);
+                        delete all[host];
+                        cfg.videoDelays = all;
+                        persist();
+                        render();
+                    });
+                    r.appendChild(label);
+                    r.appendChild(rm);
+                    entries.appendChild(r);
+                });
+            }
+
+            // A user's entry also retires every learned one it covers, so the script's cannot win.
+            function add(raw) {
+                const host = String(raw || '').trim().toLowerCase().replace(/^\*\./, '');
+                const v = parseInt(ms.value, 10);
+                if (!host || isNaN(v)) { if (host) ms.focus(); return; }
+                const all = {};
+                Object.keys(cfg.videoDelays || {}).forEach(function (k) {
+                    if (!(!cfg.videoDelays[k].user && entryCovers(host, k))) all[k] = cfg.videoDelays[k];
+                });
+                all[host] = { ms: Math.max(0, Math.min(VDELAY_MAX, v)), region: VDELAY_ANY, user: true };
+                cfg.videoDelays = all;
+                persist();
+                input.value = '';
+                ms.value = '';
+                render();
+            }
+
+            addBtn.addEventListener('click', function () { add(input.value); });
+            cur.addEventListener('click', function () { add(pageHost()); });
+            input.addEventListener('keydown', function (e) {
+                if (e.key === 'Enter') { e.preventDefault(); add(input.value); }
+            });
+            ms.addEventListener('keydown', function (e) {
+                if (e.key === 'Enter') { e.preventDefault(); add(input.value); }
+            });
+
+            wrap.appendChild(addRow);
+            wrap.appendChild(entries);
+            render();
+            mount.appendChild(wrap);
+        }
+
         function list(key, opts) {
             const items = cfg[key].slice();
 
@@ -6259,16 +6554,6 @@
             placeholder: 'e.g. https://example.com/watermark.png',
         });
 
-        const refSites = list('referrerSites', {
-            heading: 'Load previews without a referrer on these sites',
-            description: 'For a site whose previews come up blank or say “no hotlinking”.',
-            examples: 'example.com also covers www.example.com',
-            placeholder: 'e.g. example.com',
-            addCurrentLabel: '+ This site',
-            addCurrentTitle: pageHost(),
-            currentValue: function () { return pageHost(); },
-        });
-
         advanced('Advanced options');
 
         section('Next and previous');
@@ -6332,6 +6617,25 @@
         check('debug', 'Log every hover to the console',
             'One line per hover in the console (F12). Leave off unless chasing a problem.');
 
+        section('Per-site fixes');
+        const refSites = list('referrerSites', {
+            heading: 'Load previews without a referrer on these sites',
+            description: 'For a site whose previews come up blank or say “no hotlinking”.',
+            examples: 'example.com also covers www.example.com',
+            placeholder: 'e.g. example.com',
+            addCurrentLabel: '+ This site',
+            addCurrentTitle: pageHost(),
+            currentValue: function () { return pageHost(); },
+        });
+        delayList({
+            heading: 'Wait for the page’s own video preview on these sites',
+            description: 'Some sites play a video over a thumbnail a moment after the pointer ' +
+                'lands on it. When that closes a preview, the script measures the delay over a ' +
+                'few hovers and adds the site here, then waits that long before previewing. ' +
+                'Add a site yourself to set the wait by hand; 0 ms stops the script adding one.',
+            examples: 'example.com also covers www.example.com. Adding a site again replaces its entry.',
+        });
+
         const foot = document.createElement('div');
         foot.className = 'foot';
 
@@ -6342,7 +6646,7 @@
         const reset = document.createElement('button');
         reset.className = 'danger';
         reset.textContent = 'Reset to defaults';
-        setTip(reset, 'Every option back to its default; the three lists and per-site sound are kept.');
+        setTip(reset, 'Every option back to its default; the lists and per-site sound and waits are kept.');
         reset.addEventListener('click', function () {
             const kept = {};
             RESET_KEEPS.forEach(function (k) { kept[k] = cfg[k]; });
@@ -6411,6 +6715,7 @@
         playVideos: playVideos,
         skipFurniture: cfg.skipFurniture,
         blockList: cfg.blockList.length,
+        lateWait: (function () { const w = vdEntryFor(pageHost()); return w ? (w.ms == null ? 'learning' : w.ms + ' ms') : 'none'; })(),
         minRatio: cfg.minRatio,
         minDisplayed: cfg.minDisplayed,
     });
