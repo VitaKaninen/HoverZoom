@@ -71,6 +71,18 @@ relearn under v0.112.0 before diagnosing anything.**
    new, or two class variants of the same card), and the flashes are on a third variant. Same
    root cause as 3, seen from the other side. The stored rules' `dom` strings show it.
 
+### Observed 2026-09-18, relearned clean under v0.112.0
+
+- ~30 % of hovers paint a preview; the first flash starts learning, three flashes make a rule.
+- **Cards in one row learn as one area; a card in another row is "another area".** So the chain
+  differs between rows at a level inside the rule's prefix — the `hover` line's `lateWait` now
+  prints the picture's chain next to every stored rule's `dom` when none covers it (v0.113.0).
+- **With a rule in place, previews still paint and the flash is neither `updating` nor
+  `another area`.** So either `vdHoldFor` found no rule for that hover (chain drift), or the
+  close never reached `vdRecord`. v0.113.0 makes every silent `selfClosed` return print why
+  (`closing, not counted — …` / `closing with the pointer outside …`), and `cancel()` prints
+  `a painted preview is closing` with its caller when a painted preview goes down.
+
 ### What to collect from the user, verbatim
 
 Debug on (settings → Diagnostics, or `document.dispatchEvent(new CustomEvent('hover-zoom:debug',

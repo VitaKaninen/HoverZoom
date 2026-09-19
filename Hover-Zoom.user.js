@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.112.0
+// @version     0.113.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -4610,7 +4610,9 @@
                 if (w.ms == null) return 'learning — ' + (w.samples || []).length + ' of ' + VDELAY_SAMPLES + ' samples';
                 const r = el && vdRuleFor(w, domChain(el), pagePath());
                 return w.ms + ' ms, learned, ' + (w.rules || []).length + ' area(s) — ' +
-                    (r ? 'applies here (' + r.dom + ' on ' + r.path + ')' : 'none covers this picture on ' + pagePath());
+                    (r ? 'applies here (' + r.dom + ' on ' + r.path + ')'
+                       : 'none covers this picture on ' + pagePath() + ' — its chain: ' + (el ? domChain(el) : '?') +
+                         ' — rules: ' + (w.rules || []).map(function (x) { return x.dom + ' on ' + x.path; }).join(' | '));
             })(),
             backgroundGate: t.tagName === 'IMG' || t.tagName === 'VIDEO'
                 ? (pinnedWallpaperReason(t) || 'n/a — not a background')
@@ -4636,6 +4638,13 @@
 
     function cancel() {
         if (placed) return;         // a placed viewer outlives hover entirely
+        if (active && view && box && box.classList.contains('on') && debugOn()) {
+            const lines = String(new Error().stack || '').split('\n');
+            let i = 0;
+            while (i < lines.length && lines[i].indexOf('cancel') === -1) i++;
+            dbg('a painted preview is closing', { from: (lines[i + 1] || '?').trim(),
+                after: (Date.now() - hoverAt) + ' ms', lastUserAct: (Date.now() - lastUserAct) + ' ms ago' });
+        }
         clearTimeout(timer);
         clearTimeout(holdTimer);
         clearInterval(watchTimer);
@@ -4833,10 +4842,19 @@
     // it away, not the user. Whatever the path, this is the one event the wait learns from — a
     // rule that is wrong keeps being corrected by the flash it failed to prevent. See E62.
     function selfClosed(why, x, y) {
-        if (!active || placed || holding || !activeRect) return;
-        if (!(view && box && box.classList.contains('on'))) return;
+        const painted = !!(view && box && box.classList.contains('on'));
+        if (!active || placed || holding || !activeRect || !painted) {
+            if (painted || holding) dbg('closing, not counted — ' + why,
+                { active: !!active, placed: placed, holding: holding, rect: !!activeRect, painted: painted });
+            return;
+        }
         if (x <= activeRect.left + 1 || x >= activeRect.right - 1 ||
-            y <= activeRect.top + 1 || y >= activeRect.bottom - 1) return;
+            y <= activeRect.top + 1 || y >= activeRect.bottom - 1) {
+            const now = active.isConnected ? active.getBoundingClientRect() : null;
+            dbg('closing with the pointer outside the picture\'s hover-time rectangle — ' + why,
+                { x: x, y: y, hoverRect: rectStr(activeRect), nowRect: now ? rectStr(now) : 'gone' });
+            return;
+        }
         // A captcha tile swaps its picture because it was CLICKED: a page change the user caused.
         if (Date.now() - lastUserAct < USER_QUIET_MS) {
             dbg('the preview closed on its own, but after a press or key — not counted', why);
