@@ -851,7 +851,7 @@ const vdStart = src.indexOf('    const VDELAY_SAMPLES');
 const vdEnd = src.indexOf('    // The entry for a host');
 if (vdStart < 0 || vdEnd < 0) { console.error('vdLearn markers not found'); process.exit(1); }
 const vd = new Function(src.slice(vdStart, vdEnd) +
-    NL + 'return {vdLearn, vdRound, vdRuleFor, vdNorm, chainPrefix, pathPrefix, chainMatches, pathMatches, sharedHead, vdWaitOf, VDELAY_SAMPLES};')();
+    NL + 'return {vdLearn, vdRound, vdRuleFor, chainPrefix, pathPrefix, chainMatches, pathMatches, sharedHead, vdWaitOf, VDELAY_SAMPLES};')();
 
 eq('vdRound rounds up to 50 ms', vd.vdRound(1001), 1050);
 eq('vdRound never goes under one step', vd.vdRound(10), 250);
@@ -871,9 +871,10 @@ eq('a prefix matches a chain that starts with it', vd.chainMatches(C3, 'img>a.th
 eq('  and not one that merely shares a tag', vd.chainMatches(SIDE, 'img>a.thumb'), false);
 eq('  extra classes on the picture side do not matter', vd.chainMatches('img>a.fade.fadeUp.thumb>div.card', 'img>a.thumb>div.card'), true);
 eq('  a class the rule names must be there', vd.chainMatches('img>a.fade>div.card', 'img>a.thumb>div.card'), false);
-eq('  an empty prefix matches anything', vd.chainMatches(SIDE, ''), true);
+eq('  an empty prefix matches nothing — no rule is site-wide', vd.chainMatches(SIDE, ''), false);
 eq('paths share their head', vd.pathPrefix(['/videos/page/2', '/videos/page/3', '/videos']), '/videos');
 eq('  nothing in common is the root', vd.pathPrefix(['/videos', '/photos']), '/');
+eq('  the root alone is the root', vd.pathPrefix(['/', '/']), '/');
 eq('a path prefix matches by segment', vd.pathMatches('/videos/page/7', '/videos'), true);
 eq('  not by string', vd.pathMatches('/videos-of-cats', '/videos'), false);
 eq('  the root matches everything', vd.pathMatches('/photos', '/'), true);
@@ -896,6 +897,11 @@ eq('  the site now holds two rules and the longer wait', side.entry,
 
 let noise = vd.vdLearn(vd.vdLearn(null, 800, C1, '/v').entry, 700, SIDE, '/v');
 eq('a sample from a different area drops the earlier one', noise.entry.samples.length, 1);
+
+// Each of two older samples shares a head with the newest, but the three share none jointly.
+let joint = vd.vdLearn(vd.vdLearn(vd.vdLearn(null, 700, 'img>a.x>div.p', '/v').entry, 700, 'img>a.y>div.p', '/v').entry, 700, 'img>a.x.y>div.p', '/v');
+eq('three samples with no joint head do not write a rule', joint.entry.rules, undefined);
+eq('  the oldest is dropped and sampling goes on', joint.entry.samples.length, 2);
 
 let late = vd.vdLearn(e.entry, 1400, C1, '/videos/page/4');
 eq('a flash under a rule starts an update', late.change, 'resampled');
@@ -925,9 +931,6 @@ eq('  the same card on another path is not', !!vd.vdRuleFor(wide.entry, R2, '/ph
 eq('a different structure is still another area', vd.vdLearn(wide.entry, 330, SIDE, '/video/search').change, 'sampled');
 let zero = vd.vdLearn(vd.vdLearn(vd.vdLearn({ ms: 0, rules: [{ dom: 'img>a.thumb', path: '/' }] }, 700, C1, '/x').entry, 700, C1, '/x').entry, 700, C1, '/x');
 eq('a learned wait the user set to 0 is still adjusted', zero.entry.ms, 900);
-
-eq('an old one-region entry becomes one rule', vd.vdNorm({ ms: 900, region: 'img>div.card' }), { ms: 900, rules: [{ dom: 'img>div.card', path: '/' }] });
-eq('  an old whole-site one covers everything', !!vd.vdRuleFor(vd.vdNorm({ ms: 900, region: '*' }), SIDE, '/anything'), true);
 
 eq('a user entry covers the whole site', !!vd.vdRuleFor({ ms: 500, user: true }, SIDE, '/anything'), true);
 eq('a user entry is never touched', vd.vdLearn({ ms: 0, user: true }, 700, C1, '/v').change, null);

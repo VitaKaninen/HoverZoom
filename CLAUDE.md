@@ -48,7 +48,6 @@ needs. **Opening all five defeats the point**; if a task genuinely spans two, re
 | the tour — next/previous navigation through a page's pictures | [`docs/TOUR.md`](docs/TOUR.md). All built, v0.96.0–v0.100.0 (§7 in v0.88.0–v0.89.0, now in [`docs/RESOLVER.md`](docs/RESOLVER.md)); §1a is the scope — what a tour leaves out that a hover would show |
 | any banner-gate threshold | [`banner-test-sites.md`](banner-test-sites.md) — ~40 live pages measured in two browsers; every number in the gate sits next to a row |
 | the zoom **percentage** — what it counts, and why it once moved with browser zoom (fixed in v0.72.0) | [`docs/ZOOM-UNITS.md`](docs/ZOOM-UNITS.md) |
-| **resuming the late-player / learned-wait troubleshooting** (`E62`) | [`docs/HANDOFF.md`](docs/HANDOFF.md) — state at v0.112.0, the open issue, ranked hypotheses, what to collect. Delete it when the issue closes |
 | the user cited an ID — `S05`, `E22`, `T17`, `P4` | [`INTERACTION.md`](INTERACTION.md) says what it is in one line; then `grep -rn "E22" docs/` for the argument |
 
 **Find code by name, not by reading the file.** `Hover-Zoom.user.js` is ~4,800 lines, and a
@@ -219,7 +218,7 @@ static catches it — `node --check` passes and the markup is fine.
 
 ```bash
 node --check Hover-Zoom.user.js     # syntax
-node test-resolver.js               # 329 assertions: the pure URL and video-link logic, the
+node test-resolver.js               # 330 assertions: the pure URL and video-link logic, the
                                     # banner gate's shape test against every measured page in
                                     # banner-test-sites.md, the tour's next-page detector, the
                                     # learned wait's arithmetic and the captcha gate

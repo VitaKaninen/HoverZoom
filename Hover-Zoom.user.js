@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.116.0
+// @version     0.117.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -84,8 +84,8 @@
         smoothing: 'auto',          // 'auto' | 'pixelated' | 'crisp-edges' — image-rendering
         spinnerTheme: 'auto',       // 'auto' (follows the browser) | 'dark' | 'light'
         referrerSites: [],          // sites to load previews from WITHOUT a referrer
-        videoDelays: {},            // host -> {ms, region, user, samples}: wait for the page's own
-                                    // player before previewing; learned, or set by the user
+        videoDelays: {},            // host -> {ms, rules, samples, fixes, user}: wait for the page's
+                                    // own player before previewing; learned, or set by the user
         siteAudio: {},              // host -> {muted, volume}; absent means muted, which is the
                                     // only default a first visit may have — see AUDIO_DEFAULT
 
@@ -3526,6 +3526,7 @@
         if (placed || !view) return;
         placed = true;
         clearTimeout(timer);
+        clearInterval(watchTimer);      // a placed window outlives whatever lands under it
         box.classList.add('placed');
         dimEl.classList.add('catch');
         CAP_TARGET.addEventListener('keydown', onPinKey, true);
@@ -4237,20 +4238,9 @@
     const RULE_DEPTH = 4;           // levels a rule may pin; deeper is per-row noise
     const RULE_MIN = 2;             // fewer shared levels is not the same area
     const RULE_MAX = 6;             // areas one site may hold
-    const SAMPLE_MAX = 12;
 
     function vdRound(ms) {
         return Math.min(VDELAY_MAX, Math.max(VDELAY_STEP, Math.ceil(ms / 50) * 50));
-    }
-
-    // The shared head of several '>'- or '/'-joined chains, as a count of levels.
-    function sharedLevels(list, sep) {
-        const split = list.map(function (c) { return c.split(sep); });
-        let n = 0;
-        outer: for (; n < split[0].length; n++) {
-            for (let i = 1; i < split.length; i++) if (split[i][n] !== split[0][n]) break outer;
-        }
-        return n;
     }
 
     // 'tag.a.b' -> {tag, cls: ['a','b']}
@@ -4289,17 +4279,21 @@
         return head.slice(0, RULE_DEPTH).join('>');
     }
 
-    // The page-path head several paths share; '/' when none.
+    // The page-path head several paths share, by segment; '/' when none.
     function pathPrefix(paths) {
-        const n = sharedLevels(paths.map(function (p) { return p.replace(/^\//, ''); }), '/');
-        if (!n) return '/';
-        return '/' + paths[0].replace(/^\//, '').split('/').slice(0, n).join('/');
+        const split = paths.map(function (p) { return p.replace(/^\//, '').split('/'); });
+        let n = 0;
+        outer: for (; n < split[0].length; n++) {
+            for (let i = 1; i < split.length; i++) if (split[i][n] !== split[0][n]) break outer;
+        }
+        return n ? '/' + split[0].slice(0, n).join('/') : '/';
     }
 
     // A chain matches a rule when, level for level, the tag agrees and it carries every class the
-    // rule names — extra classes on the picture's side (state, animation) do not matter.
+    // rule names — extra classes on the picture's side (state, animation) do not matter. A rule
+    // with no dom covers nothing: nothing is ever site-wide.
     function chainMatches(chain, prefix) {
-        if (!prefix) return true;
+        if (!prefix) return false;
         const want = prefix.split('>').map(levelOf);
         const have = chain.split('>').map(levelOf);
         if (have.length < want.length) return false;
@@ -4327,15 +4321,6 @@
         return !prefix || prefix === '/' || path === prefix || path.indexOf(prefix + '/') === 0;
     }
 
-    // Entries written before v0.112.0 held one `region`; it becomes the one rule.
-    function vdNorm(e) {
-        if (!e || e.region === undefined) return e;
-        const n = Object.assign({}, e);
-        if (!n.user) n.rules = [{ dom: e.region === '*' ? '' : e.region, path: '/' }];
-        delete n.region;
-        return n;
-    }
-
     // The rule of an entry that covers this hover, or null. A user's entry covers the whole site.
     function vdRuleFor(e, chain, path) {
         if (!e) return null;
@@ -4351,13 +4336,8 @@
     // longer. Under none: three from one area make that area a rule — the head its chains share,
     // on the page-path they share — and a site may hold several. Nothing is ever site-wide.
     function vdLearn(entry, elapsed, chain, path) {
-        const e = entry ? JSON.parse(JSON.stringify(vdNorm(entry))) : {};
+        const e = entry ? JSON.parse(JSON.stringify(entry)) : {};
         if (e.user) return { entry: e, change: null };
-        if (!vdRuleFor(e, chain, path)) {
-            // This flash was measured against the grace, not the wait, so it says nothing about ms.
-            const near = vdNearRule(e, chain, path);
-            if (near) { near.dom = sharedHead([near.dom, chain]).join('>'); return { entry: e, change: 'widened' }; }
-        }
         if (vdRuleFor(e, chain, path)) {
             e.fixes = (e.fixes || []).concat([{ ms: elapsed }]);
             if (e.fixes.length < VDELAY_SAMPLES) return { entry: e, change: 'resampled' };
@@ -4366,15 +4346,19 @@
             e.ms = Math.min(VDELAY_MAX, Math.max(e.ms + VDELAY_STEP, vdRound(slowest * VDELAY_MARGIN)));
             return { entry: e, change: 'longer' };
         }
+        // Measured against the grace, not the wait, so it says nothing about ms.
+        const near = vdNearRule(e, chain, path);
+        if (near) { near.dom = sharedHead([near.dom, chain]).join('>'); return { entry: e, change: 'widened' }; }
         // Samples that share no area with the newest belong to another area, or were noise.
         const samples = (e.samples || []).concat([{ ms: elapsed, chain: chain, path: path }])
-            .filter(function (x) { return chainPrefix([x.chain, chain]) !== ''; })
-            .slice(-SAMPLE_MAX);
+            .filter(function (x) { return chainPrefix([x.chain, chain]) !== ''; });
         e.samples = samples;
         if (samples.length < VDELAY_SAMPLES) return { entry: e, change: 'sampled' };
+        // Each shares an area with the newest; all three together may still not. Drop the oldest.
+        const dom = chainPrefix(samples.map(function (x) { return x.chain; }));
+        if (!dom) { e.samples = samples.slice(1); return { entry: e, change: 'sampled' }; }
         const slowest = Math.max.apply(null, samples.map(function (x) { return x.ms; }));
-        const rule = { dom: chainPrefix(samples.map(function (x) { return x.chain; })),
-                       path: pathPrefix(samples.map(function (x) { return x.path; })) };
+        const rule = { dom: dom, path: pathPrefix(samples.map(function (x) { return x.path; })) };
         delete e.samples;
         e.rules = (e.rules || []).concat([rule]).slice(-RULE_MAX);
         const ms = vdRound(slowest * VDELAY_MARGIN);
@@ -4385,20 +4369,19 @@
     // The wait an entry gives this hover. While a correction is being sampled the wait is OFF, so
     // the flashes that finish it come as fast as the page makes them.
     function vdWaitOf(e, chain, path) {
-        if (!e || e.ms == null || !(e.ms > 0)) return 0;
-        if (!vdRuleFor(e, chain, path)) return 0;
+        if (!e || !(e.ms > 0) || !vdRuleFor(e, chain, path)) return 0;
         return !e.user && e.fixes && e.fixes.length ? 0 : e.ms;
     }
 
     // The entry for a host: its own, else the most specific user entry covering it.
     function vdEntryFor(host) {
         const all = cfg.videoDelays || {};
-        if (all[host]) return vdNorm(all[host]);
+        if (all[host]) return all[host];
         let best = null, bestLen = 0;
         Object.keys(all).forEach(function (k) {
             if (all[k].user && entryCovers(k, host) && k.length > bestLen) { best = all[k]; bestLen = k.length; }
         });
-        return vdNorm(best);
+        return best;
     }
 
     // tag + every class, digits normalised to '#' and sorted: item-12 and item-13 are one shape.
@@ -4709,7 +4692,7 @@
             let i = 0;
             while (i < lines.length && lines[i].indexOf('cancel') === -1) i++;
             dbg('a painted preview is closing', { from: (lines[i + 1] || '?').trim(),
-                after: (Date.now() - hoverAt) + ' ms', lastUserAct: (Date.now() - lastUserAct) + ' ms ago' });
+                after: (Date.now() - hoverAt) + ' ms', lastUserAct: lastUserAct ? (Date.now() - lastUserAct) + ' ms ago' : 'never' });
         }
         clearTimeout(timer);
         clearTimeout(holdTimer);
@@ -4825,8 +4808,6 @@
 
         if (active) selfClosed('something else took its place: ' + el.tagName, e.clientX, e.clientY);
         cancel();
-        const chain = domChain(el);
-        const path = pagePath();
         const displayed = sizeOf(el);
         if (displayed.w < cfg.minDisplayed && displayed.h < cfg.minDisplayed) return;
 
@@ -4835,9 +4816,9 @@
         activeShown = shownUrl(el);
         hoverAt = Date.now();
         activeRect = el.getBoundingClientRect();
-        activeChain = chain;
-        activePath = path;
-        ruleMs = vdHoldFor(chain, path);
+        activeChain = domChain(el);     // taken now: at close the card holds the player too
+        activePath = pagePath();
+        ruleMs = vdHoldFor(activeChain, activePath);
         holdMs = Math.max(ruleMs, PLAYER_GRACE_MS);
         holding = true;
         // A player landing under a still pointer raises no mouse event worth waiting for. See E61.
@@ -4853,21 +4834,21 @@
         // A hover is a user gesture, and a gesture always retries a cached miss. See TOUR.md §7.
         const myToken = token = { cancelled: false, fresh: true };
         let heldHit = null;     // the best hit so far, kept back until the wait is over
+        let resolving = false;  // the resolve has started; the ring belongs to it, not to the wait
         function paint(hit) {
             if (view && box.classList.contains('on')) upgradeViewer(hit);
             else { showViewer(hit, pointer); dockSpinner(); }
         }
-        if (holding) {
-            if (ruleMs) dbg('waiting ' + holdMs + ' ms for the page\'s own player before previewing');
-            holdTimer = setTimeout(async function () {
-                holding = false;
-                if (myToken.cancelled || active !== el || playerArrived(el)) return;
-                if (heldHit) { paint(heldHit); return; }
-                if (!myToken.done) { showSpinner(); return; }   // hits paint directly from here
-                if (myToken.failure) await showFallback(el, myToken, myToken.failure);
-            }, holdMs);
-        }
+        if (ruleMs) dbg('waiting ' + holdMs + ' ms for the page\'s own player before previewing');
+        holdTimer = setTimeout(async function () {
+            if (myToken.cancelled || active !== el || playerArrived(el)) return;
+            holding = false;
+            if (heldHit) { paint(heldHit); return; }
+            if (!myToken.done) { if (resolving) showSpinner(); return; }   // hits paint directly from here
+            if (myToken.failure) await showFallback(el, myToken, myToken.failure);
+        }, holdMs);
         timer = setTimeout(async function () {
+            resolving = true;
             if (!holding) showSpinner();
             let got = false;
             try {
@@ -4933,15 +4914,15 @@
         vdRecord(activeChain, activePath, elapsed);
     }
 
-    // The picture itself went, and a player is where it was: the same withdrawal, seen from the
-    // mouseout it causes. Only inside the rectangle the picture had, so leaving onto a neighbouring
-    // player is still just leaving.
+    // The picture itself went, and a <video> is where it was — a clip included, since it is never
+    // the hovered media (E12): the same withdrawal, seen from the mouseout it causes. Only inside
+    // the rectangle the picture had, so leaving onto a neighbouring player is still just leaving.
     function playerReplaced(x, y) {
         if (!active || !activeRect || !holds(activeRect, x, y)) return false;
         if (!document.elementsFromPoint) return false;
         const stack = document.elementsFromPoint(x, y);
         for (let i = 0; i < stack.length; i++) {
-            if (stack[i].tagName === 'VIDEO' && !gifLike(stack[i])) {
+            if (stack[i].tagName === 'VIDEO') {
                 withdrawn('a <video> is now where the picture was');
                 return true;
             }
@@ -5103,7 +5084,9 @@
             e.stopPropagation();
             return;
         }
-        lastUserAct = Date.now();
+        // A bare modifier changes no page, and a held one repeats: under modifier activation it
+        // would stamp every hover as the user's doing and nothing would ever be learned.
+        if (!e.repeat && !/^(Shift|Control|Alt|Meta)$/.test(e.key)) lastUserAct = Date.now();
         if (e.key === 'Escape' && panelHost) {
             closePanel();                       // the panel is on top; it closes first
             e.stopPropagation();
@@ -6337,7 +6320,7 @@
         }
 
         // A list editor for one of the array settings, laid out the same way as the one in Open Links in New Tab.
-        // Host -> {ms, region, user, samples}: the learned wait for a late player, and the
+        // Host -> {ms, rules, samples, fixes, user}: the learned wait for a late player, and the
         // user's own. Adding a host the script already holds replaces its entry.
         function delayList(opts) {
             const wrap = document.createElement('div');

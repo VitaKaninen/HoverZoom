@@ -321,8 +321,9 @@ things were true and each cost a version:
   picture is in the stack with the target *above* it) turns the hover into a covered one.
   Requiring "above" is what keeps the boundary-pixel objection answered — a neighbour never sits
   above the picture at one point, so the row scan cannot trip it. `playerReplaced()` covers the
-  third shape: the picture itself is removed and a `<video>` is where it was, which arrives as a
-  mouseout with the picture no longer in the stack at all.
+  third shape: the picture itself is removed and a `<video>` — a clip included, since it is never
+  the hovered media — is where it was, which arrives as a mouseover on the video (a detached
+  picture raises no mouseout that bubbles) or, under a still pointer, as the poll's `isConnected`.
 - **No FIXED grace period can beat a delay that varies by 10× between sites.** v0.105.0 briefly
   held the paint 400 ms for video-link thumbnails; YouTube landed at 2 s that day. Removed the same
   session. What replaced it (v0.106.0, `E62`, below) is a wait that is *measured per site* and
@@ -344,7 +345,7 @@ exception. `test-pages/inline-player.html` holds both shapes: dormant (nothing o
 Case 30 is the negative bound (two pictures under one cover → no preview); case 31 puts text over a
 background and must not reach through to it.
 
-### A site that lands players late is learned, and waited for · `E62` · v0.106.0–v0.109.0
+### A site that lands players late is learned, and waited for · `E62` · v0.106.0–v0.117.0
 
 Asked for after a site whose thumbnails start a clip about a second into the hover: every hover
 opened a preview that then closed a second later — correct, and useless. The design is the user's,
@@ -410,7 +411,10 @@ arithmetic on that object and is asserted in `test-resolver.js`:
   that share no head with the newest are dropped (another area, or noise); three of one area add
   a rule (up to `RULE_MAX`, 6) and raise `ms` to the new area's figure if it is higher. v0.106.0–
   v0.111.0 widened to the whole site on the first uncovered flash, which on a site with a photo
-  section is exactly wrong; only a user's own entry covers a whole site now.
+  section is exactly wrong; only a user's own entry covers a whole site now. Two guards keep it
+  so (v0.117.0): a rule with an empty `dom` matches nothing (`chainMatches`), and three samples
+  that each share a head with the newest but none jointly (`a.x`, `a.y`, `a.x.y`) write no rule —
+  the oldest is dropped and sampling goes on.
 - **Correcting.** A flash on a covered picture is sampled (`fixes`, the panel says
   `updating, n of 3, no wait meanwhile`); the third makes `ms`
   `max(ms + 250, slowest × 1.25)`. One `ms` per site, shared by its areas — the slowest wins.
@@ -423,14 +427,18 @@ arithmetic on that object and is asserted in `test-resolver.js`:
 - **A flash within 2.5 s of a press or key is the user's doing** (`lastUserAct`, `USER_QUIET_MS`)
   and never counts. Found on Google's captcha interstitial: a clicked tile swaps its picture under
   the pointer, which is a page-driven close in every respect except cause, and `google.com` had a
-  learning entry before Google Images was ever hovered.
+  learning entry before Google Images was ever hovered. A bare modifier (Shift/Control/Alt/Meta)
+  and a key repeat do not stamp it (v0.117.0): under modifier activation the press that starts
+  the hover is a key, and a held modifier repeats, so every flash was "the user's" and nothing
+  could ever be learned.
 - **The user's entries** (`user: true`, from the panel) cover the whole site, are never written
   by the script, and adding one removes every learned entry it covers; **0 ms** turns learning off
   for the site. Lookup (`vdEntryFor`) is the host's own key, else the most specific user entry that
   covers it. The number on a *learned* row can be clicked and changed in place; that keeps it
-  learned, so the script goes on adjusting from the new value.
-- **Old entries** (`{ms, region}`, v0.106.0–v0.111.0) are read through `vdNorm()`: the region
-  becomes one rule on `/`; `'*'` becomes a rule with an empty `dom`, which matches everything.
+  learned, so the script goes on adjusting from the new value, and it ends a correction in
+  progress (`fixes` is dropped), so the wait is back on at that value.
+- **Entries from before v0.112.0** (`{ms, region}`) are not migrated; the one user relearned. An
+  old entry has no `rules`, so it covers nothing and fills in from samples like a fresh one.
 
 **The chain is taken once, at hover time (`activeChain`, `activePath`).** Computed at close it is
 a different chain — the card now contains the `<video>` — and the rule never matches. Found in the
