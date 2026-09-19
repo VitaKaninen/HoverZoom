@@ -857,32 +857,52 @@ eq('vdRound rounds up to 50 ms', vd.vdRound(1001), 1050);
 eq('vdRound never goes under one step', vd.vdRound(10), 250);
 eq('vdRound is capped', vd.vdRound(99999), 10000);
 
-let e = vd.vdLearn(null, 800, 'r1', false);
-eq('first withdrawal starts sampling', e.change, 'sampled');
+let e = vd.vdLearn(null, 800, 'r1');
+eq('first flash starts sampling', e.change, 'sampled');
 eq('  and stores it', e.entry, { samples: [{ ms: 800, region: 'r1' }] });
-e = vd.vdLearn(e.entry, 1000, 'r1', false);
-eq('second withdrawal is still sampling', e.change, 'sampled');
-e = vd.vdLearn(e.entry, 900, 'r1', false);
-eq('third withdrawal writes the rule', e.change, 'learned');
+e = vd.vdLearn(e.entry, 1000, 'r1');
+eq('second flash is still sampling', e.change, 'sampled');
+e = vd.vdLearn(e.entry, 900, 'r1');
+eq('third flash writes the rule', e.change, 'learned');
 eq('  slowest arrival × 1.25, for the one region', e.entry, { ms: 1250, region: 'r1' });
 
-let mixed = vd.vdLearn(vd.vdLearn(vd.vdLearn(null, 800, 'r1', false).entry, 1000, 'r2', false).entry, 900, 'r1', false);
+let mixed = vd.vdLearn(vd.vdLearn(vd.vdLearn(null, 800, 'r1').entry, 1000, 'r2').entry, 900, 'r1');
 eq('samples from different regions learn a whole-site wait', mixed.entry, { ms: 1250, region: vd.VDELAY_ANY });
 
-let late = vd.vdLearn({ ms: 1250, region: 'r1' }, 1400, 'r1', true);
-eq('a player after the wait makes it longer', late.change, 'longer');
-eq('  by a step, or to elapsed × 1.25, whichever is more', late.entry.ms, 1750);
-eq('  the region is kept', late.entry.region, 'r1');
-eq('a small overrun still adds a whole step', vd.vdLearn({ ms: 1250, region: 'r1' }, 1100, 'r1', true).entry.ms, 1500);
+let late = vd.vdLearn({ ms: 1250, region: 'r1' }, 1400, 'r1');
+eq('a flash after the wait starts an update', late.change, 'resampled');
+eq('  the wait stands while it samples', late.entry, { ms: 1250, region: 'r1', samples: [{ ms: 1400, region: 'r1' }] });
+late = vd.vdLearn(vd.vdLearn(late.entry, 1300, 'r1').entry, 1350, 'r1');
+eq('the third makes it longer', late.change, 'longer');
+eq('  by a step, or to the slowest × 1.25, whichever is more', late.entry, { ms: 1750, region: 'r1' });
+let small = vd.vdLearn(vd.vdLearn(vd.vdLearn({ ms: 1250, region: 'r1' }, 1100, 'r1').entry, 1050, 'r1').entry, 1000, 'r1');
+eq('a small overrun still adds a whole step', small.entry.ms, 1500);
+let zero = vd.vdLearn(vd.vdLearn(vd.vdLearn({ ms: 0, region: 'r1' }, 700, 'r1').entry, 700, 'r1').entry, 700, 'r1');
+eq('a learned wait the user set to 0 is still adjusted', zero.entry, { ms: 900, region: 'r1' });
 
-let wide = vd.vdLearn({ ms: 1250, region: 'r1' }, 700, 'r2', false);
-eq('a withdrawal the region did not cover widens it to the site', wide.change, 'widened');
+let wide = vd.vdLearn({ ms: 1250, region: 'r1' }, 700, 'r2');
+eq('a flash the region did not cover widens it to the site at once', wide.change, 'widened');
 eq('  the wait is unchanged', wide.entry, { ms: 1250, region: vd.VDELAY_ANY });
-eq('a whole-site rule not in force cannot widen further',
-    vd.vdLearn({ ms: 1250, region: vd.VDELAY_ANY }, 700, 'r2', false).change, null);
+eq('a whole-site rule applies everywhere, so it resamples instead',
+    vd.vdLearn({ ms: 1250, region: vd.VDELAY_ANY }, 700, 'r2').change, 'resampled');
 
-eq('a user entry is never touched', vd.vdLearn({ ms: 0, region: vd.VDELAY_ANY, user: true }, 700, 'r2', false).change, null);
-eq('  whatever its wait', vd.vdLearn({ ms: 2000, region: vd.VDELAY_ANY, user: true }, 3000, 'r2', true).change, null);
+eq('a user entry is never touched', vd.vdLearn({ ms: 0, region: vd.VDELAY_ANY, user: true }, 700, 'r2').change, null);
+eq('  whatever its wait', vd.vdLearn({ ms: 2000, region: vd.VDELAY_ANY, user: true }, 3000, 'r2').change, null);
+
+// ---- the captcha gate reads only the frame's own URL and whether it is the top frame.
+const cStart = src.indexOf('    const CAPTCHA_HERE');
+const cEnd = src.indexOf('    let siteMenuId');
+if (cStart < 0 || cEnd < 0) { console.error('captcha markers not found'); process.exit(1); }
+const captchaAt = new Function('location', 'isTopFrame', src.slice(cStart, cEnd) + NL + 'return CAPTCHA_HERE;');
+function cap(url, top) { const u = new URL(url); return captchaAt({ hostname: u.hostname, pathname: u.pathname }, top); }
+eq('reCAPTCHA frame', cap('https://www.google.com/recaptcha/api2/bframe?hl=en', false), true);
+eq('Google sorry page, top frame', cap('https://www.google.com/sorry/index?continue=x', true), true);
+eq('hCaptcha frame', cap('https://newassets.hcaptcha.com/captcha/v1/abc/static/hcaptcha.html', false), true);
+eq('Cloudflare challenge frame', cap('https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile/if/ov2/av0/x', false), true);
+eq('any frame with captcha in the path', cap('https://cdn.example.com/widgets/captcha/frame.html', false), true);
+eq('a top-level article about captchas is NOT one', cap('https://example.com/blog/how-captcha-works', true), false);
+eq('Google Images itself is not one', cap('https://www.google.com/search?tbm=isch&q=x', true), false);
+eq('an ordinary iframe is not one', cap('https://ads.example.com/frame.html', false), false);
 
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

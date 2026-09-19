@@ -378,12 +378,23 @@ arithmetic and is asserted in `test-resolver.js`:
   is kept in `heldHit`, and the wait's timer paints it (or shows the ring if still resolving, or the
   failure display) the moment it ends. A close inside the wait is the wait working: logged, not
   recorded.
-- **Correcting.** A trigger after a wait that applied (`ruleMs > 0`) is a timing miss: `ms` becomes
-  `max(ms + 250, elapsed × 1.25)`. A trigger on a thumbnail the region did **not** cover is a shape
-  miss: the region becomes `'*'`. Which of the two is decided by `ruleMs`, nothing else.
+- **Correcting.** A trigger on a thumbnail the rule's region covers is a timing miss: it is
+  sampled like the first three (`samples` alongside `ms`, the panel says `updating, n of 3`, and
+  the wait stands meanwhile), and the third makes `ms` `max(ms + 250, slowest × 1.25)`. A trigger
+  on a thumbnail the region did **not** cover is a shape miss: the region becomes `'*'` at once.
+  Whether the region matched decides — not the wait's length, so a learned wait the user has set
+  to 0 is still adjusted. v0.109.0 lengthened on the first miss, with nothing in the panel to say
+  it was happening; the user watched 750 climb to 2650 without knowing whether it was working.
+- **A flash within 2.5 s of a press or key is the user's doing** (`lastUserAct`, `USER_QUIET_MS`)
+  and never counts. Found on Google's captcha interstitial: a clicked tile swaps its picture under
+  the pointer, which is a page-driven close in every respect except cause, and `google.com` had a
+  learning entry before Google Images was ever hovered.
 - **The user's entries** (`user: true`, from the panel) are never written by the script; adding
   one removes every learned entry it covers; **0 ms** turns learning off for the site. Lookup
-  (`vdEntryFor`) is the host's own key, else the most specific user entry that covers it.
+  (`vdEntryFor`) is the host's own key, else the most specific user entry that covers it. The
+  number on a *learned* row can be clicked and changed in place; that keeps it learned, so the
+  script goes on adjusting from the new value — the way to try a lower wait without giving up the
+  corrections.
 
 **The region** (`regionKey()`) is structural — tag plus digit-free class names, from the picture
 up to the first ancestor holding more than one `img`/`video`, at most 8 levels. Pixel rectangles
@@ -680,6 +691,18 @@ content thumbnails, so it separates nothing, and being wrong here is silent.
 | require a positive signal (figure, data-full, meaningful alt) | inverts the project's premise. The gate is *is it bigger than what is displayed*, measured by loading it; a positive-signal requirement is an allowlist by another name and loses the long tail this exists to win |
 | minimum size, tracking pixels | already `minDisplayed` (48 px) |
 | `background-repeat: repeat` alone | breaks test case 9 — see above |
+
+## A captcha is never previewed · `P13` · v0.111.0
+
+Google's "unusual traffic" interstitial puts a reCAPTCHA picture grid in an iframe; every tile is
+an eligible `<img>`, so each square hovered raised a preview to be dismissed before the tile could
+be clicked. Excluding the site is wrong (it is `google.com`) and excluding the image is useless
+(every challenge is new). `CAPTCHA_HERE` is decided once per frame from the frame's own URL and
+`onOver` returns on it: hCaptcha, Cloudflare's challenge platform, Arkose/FunCaptcha by hostname;
+`/recaptcha/` by path; Google's `/sorry/` page in the top frame; and, in a frame only, `captcha`
+anywhere in the path — a top-level article about captchas must still preview. `pageHost()` is not
+involved, deliberately: the decision is about the frame the picture is in, not the site the user
+is on. Asserted in `test-resolver.js`.
 
 ## Images the user has ruled out — the ⊘ and `blockList` · `E11`
 

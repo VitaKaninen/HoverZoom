@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.110.0
+// @version     0.111.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -227,6 +227,15 @@
     function siteEnabled() {
         return cfg.siteMode === 'whitelist' ? siteListed() : !siteListed();
     }
+
+    // A captcha's picture grid is never something to preview, and it is almost always an iframe.
+    const CAPTCHA_HERE = (function () {
+        const h = location.hostname, p = location.pathname;
+        if (/(^|\.)(hcaptcha\.com|challenges\.cloudflare\.com|arkoselabs\.com|funcaptcha\.com)$/i.test(h)) return true;
+        if (/^\/recaptcha\//i.test(p)) return true;
+        if (/(^|\.)google\.[a-z.]+$/i.test(h) && /^\/sorry\//i.test(p)) return true;
+        return !isTopFrame && /captcha/i.test(p);
+    })();
 
     // Per site, because stripping it fixes one host and breaks the next.
     function noReferrerHere() {
@@ -4032,6 +4041,8 @@
     const MENU_CLAIM_MS = 1500; // and only that long, or a press released off-window eats the next menu
     let pointer = { x: 0, y: 0 };
     let mouseDown = false;
+    let lastUserAct = 0;            // the last press or key; a close soon after is the user's doing
+    const USER_QUIET_MS = 2500;
     let modifierDown = false;
 
     // A hover preview cannot be hit-tested, so "is the pointer on it" is answered from `view` instead.
@@ -4223,27 +4234,28 @@
         return Math.min(VDELAY_MAX, Math.max(VDELAY_STEP, Math.ceil(ms / 50) * 50));
     }
 
-    // One withdrawal, folded into a site's entry. `covered` says the wait applied to that hover.
-    function vdLearn(entry, elapsed, region, covered) {
+    // One flash, folded into a site's entry. Three samples learn a wait; three more after a wait
+    // that applied make it longer; one where it did not apply widens it to the whole site.
+    function vdLearn(entry, elapsed, region) {
         const e = entry ? JSON.parse(JSON.stringify(entry)) : { samples: [] };
         if (e.user) return { entry: e, change: null };
-        if (e.ms == null) {
-            e.samples = (e.samples || []).concat([{ ms: elapsed, region: region }]);
-            if (e.samples.length < VDELAY_SAMPLES) return { entry: e, change: 'sampled' };
-            const slowest = Math.max.apply(null, e.samples.map(function (x) { return x.ms; }));
-            const same = e.samples.every(function (x) { return x.region === region; });
-            delete e.samples;
-            e.ms = vdRound(slowest * VDELAY_MARGIN);
-            e.region = same ? region : VDELAY_ANY;
-            return { entry: e, change: 'learned' };
+        const applied = e.ms != null && (e.region === VDELAY_ANY || e.region === region);
+        if (e.ms != null && !applied) {
+            e.region = VDELAY_ANY;
+            return { entry: e, change: 'widened' };
         }
-        if (covered) {          // the wait was in force and the player still came after it
-            e.ms = Math.min(VDELAY_MAX, Math.max(e.ms + VDELAY_STEP, vdRound(elapsed * VDELAY_MARGIN)));
+        e.samples = (e.samples || []).concat([{ ms: elapsed, region: region }]);
+        if (e.samples.length < VDELAY_SAMPLES) return { entry: e, change: applied ? 'resampled' : 'sampled' };
+        const slowest = Math.max.apply(null, e.samples.map(function (x) { return x.ms; }));
+        const same = e.samples.every(function (x) { return x.region === region; });
+        delete e.samples;
+        if (applied) {
+            e.ms = Math.min(VDELAY_MAX, Math.max(e.ms + VDELAY_STEP, vdRound(slowest * VDELAY_MARGIN)));
             return { entry: e, change: 'longer' };
         }
-        if (e.region === VDELAY_ANY) return { entry: e, change: null };
-        e.region = VDELAY_ANY;  // the wait did not apply here, so the region was the wrong shape
-        return { entry: e, change: 'widened' };
+        e.ms = vdRound(slowest * VDELAY_MARGIN);
+        e.region = same ? region : VDELAY_ANY;
+        return { entry: e, change: 'learned' };
     }
 
     // The entry for a host: its own, else the most specific user entry covering it.
@@ -4286,11 +4298,11 @@
     }
 
     // Read-modify-write against storage, as saveAudio() does.
-    function vdRecord(region, elapsed, covered) {
+    function vdRecord(region, elapsed) {
         const host = pageHost();
         if (!host) return;
         reloadSettings();
-        const r = vdLearn(vdEntryFor(host), elapsed, region, covered);
+        const r = vdLearn(vdEntryFor(host), elapsed, region);
         if (!r.change) return;
         const all = Object.assign({}, cfg.videoDelays);
         all[host] = r.entry;
@@ -4646,7 +4658,7 @@
         if (placed) return;
         if (drag) return;
         if (ours(e.target)) return;         // on our own overlay
-        if (!siteEnabled()) return;
+        if (!siteEnabled() || CAPTCHA_HERE) return;
         if (mouseDown) return;
         if (cfg.activation === 'modifier' && !modifierHeld(e) && !modifierDown) return;
 
@@ -4751,10 +4763,15 @@
         if (!(view && box && box.classList.contains('on'))) return;
         if (x <= activeRect.left + 1 || x >= activeRect.right - 1 ||
             y <= activeRect.top + 1 || y >= activeRect.bottom - 1) return;
+        // A captcha tile swaps its picture because it was CLICKED: a page change the user caused.
+        if (Date.now() - lastUserAct < USER_QUIET_MS) {
+            dbg('the preview closed on its own, but after a press or key — not counted', why);
+            return;
+        }
         const elapsed = Date.now() - hoverAt;
         dbg('the page took the preview away — ' + why,
             { after: elapsed + ' ms', waited: ruleMs ? ruleMs + ' ms, learned' : 'the grace only' });
-        vdRecord(activeRegion, elapsed, ruleMs > 0);
+        vdRecord(activeRegion, elapsed);
     }
 
     // The picture itself went, and a player is where it was: the same withdrawal, seen from the
@@ -4853,6 +4870,7 @@
         if (e.button === 2 && overOurs(e) && altButton(e)) { claimClick(); return; }
         releaseClick();
         mouseDown = true;
+        lastUserAct = Date.now();
         cancel();
     }, true);
     CAP_TARGET.addEventListener('click', function (e) {
@@ -4926,6 +4944,7 @@
             e.stopPropagation();
             return;
         }
+        lastUserAct = Date.now();
         if (e.key === 'Escape' && panelHost) {
             closePanel();                       // the panel is on top; it closes first
             e.stopPropagation();
@@ -5931,6 +5950,9 @@
             '.addrow input[type=text]{flex:1;padding:6px 10px;border-radius:6px;font-size:13px}',
             '.addrow input[type=number]{width:84px;padding:6px 8px;border-radius:6px;font-size:13px}',
             '.entry .prov{color:#9399b2;font-size:12px;margin-left:8px;word-break:normal}',
+            '.entry .msval{color:' + C.text + ';cursor:pointer;border-bottom:1px dotted #9399b2}',
+            '.entry .msval:hover{border-bottom-color:' + C.text + '}',
+            '.entry .msedit{width:70px;padding:1px 4px;font-size:12px}',
             '.addrow button{padding:6px 12px;border-radius:6px;border:none;font-weight:700;',
             'font-size:13px;white-space:nowrap}',
             '.addrow button.primary{background:' + C.blue + ';color:' + C.base + '}',
@@ -6194,10 +6216,51 @@
             const entries = document.createElement('div');
             entries.className = 'entries';
 
+            // The text after the number; the number itself is its own span, so it can be edited.
             function describe(e) {
-                if (e.user) return (e.ms | 0) + ' ms — yours';
+                if (e.user) return ' — yours';
                 if (e.ms == null) return 'learning, ' + (e.samples || []).length + ' of ' + VDELAY_SAMPLES;
-                return e.ms + ' ms — learned, ' + (e.region === VDELAY_ANY ? 'whole site' : 'one area');
+                return ' — learned, ' + (e.region === VDELAY_ANY ? 'whole site' : 'one area') +
+                    (e.samples ? ' · updating, ' + e.samples.length + ' of ' + VDELAY_SAMPLES : '');
+            }
+
+            // Click the number to change it. A learned entry stays learned: the script goes on
+            // adjusting it from there.
+            function msField(host, e) {
+                const val = document.createElement('span');
+                val.className = 'msval';
+                val.textContent = (e.ms | 0) + ' ms';
+                setTip(val, 'Click to change the wait');
+                val.addEventListener('click', function () {
+                    const inp = document.createElement('input');
+                    inp.type = 'number';
+                    inp.min = 0; inp.max = VDELAY_MAX; inp.step = 50;
+                    inp.value = e.ms | 0;
+                    inp.className = 'msedit';
+                    val.replaceWith(inp);
+                    inp.focus();
+                    inp.select();
+                    let done = false;
+                    function commit() {
+                        if (done) return;
+                        done = true;
+                        const v = parseInt(inp.value, 10);
+                        if (!isNaN(v) && v !== e.ms) {
+                            const all = Object.assign({}, cfg.videoDelays);
+                            const ne = Object.assign({}, e, { ms: Math.max(0, Math.min(VDELAY_MAX, v)) });
+                            delete ne.samples;
+                            all[host] = ne;
+                            cfg.videoDelays = all;
+                            persist();
+                        }
+                        render();
+                    }
+                    inp.addEventListener('keydown', function (ev) {
+                        if (ev.key === 'Enter') { ev.preventDefault(); commit(); }
+                    });
+                    inp.addEventListener('blur', commit);
+                });
+                return val;
             }
 
             function hosts() {
@@ -6224,7 +6287,8 @@
                     label.textContent = host;
                     const prov = document.createElement('span');
                     prov.className = 'prov';
-                    prov.textContent = describe(e);
+                    if (e.ms != null) prov.appendChild(msField(host, e));
+                    prov.appendChild(document.createTextNode(describe(e)));
                     label.appendChild(prov);
                     const rm = document.createElement('button');
                     rm.textContent = '✕';
@@ -6773,6 +6837,7 @@
         url: location.href,
         topFrame: isTopFrame,
         siteEnabled: siteEnabled(),
+        captcha: CAPTCHA_HERE,
         videoMode: cfg.videoMode,
         playVideos: playVideos,
         skipFurniture: cfg.skipFurniture,

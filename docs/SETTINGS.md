@@ -220,8 +220,12 @@ as the referrer and what `pageHost()` returns.
   host covers (`entryCovers`), so a user's `example.com` retires the script's `www.example.com`
   and the script never re-learns under it (`vdEntryFor` answers with the user's). Adding a host
   that is already there replaces it — that is how the number is changed.
-- **Each row says where it came from:** `1250 ms — learned, one area` / `whole site`,
-  `learning, 2 of 3`, or `0 ms — yours`. The ✕ removes it; a learned one comes back after three
+- **Each row says where it came from:** `1250 ms — learned, one area` / `whole site`, with
+  `· updating, 2 of 3` appended while a correction is being sampled; `learning, 2 of 3` before a
+  rule exists; `0 ms — yours`.
+- **The number is clickable** (`msField`): a number input in place, Enter or blur commits, and the
+  entry keeps whatever it was — a learned one stays learned and goes on being adjusted from the new
+  value. Only the ✕ and re-adding change an entry's kind. The ✕ removes it; a learned one comes back after three
   more withdrawals, which is the point of adding a 0 ms entry instead.
 - The script's own writes go through `vdRecord()` → `refreshPanel()`, so an open panel shows a
   sample landing. `RESET_KEEPS` includes it; Undo restores it with everything else.
