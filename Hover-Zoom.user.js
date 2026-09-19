@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.107.0
+// @version     0.108.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -84,8 +84,8 @@
         smoothing: 'auto',          // 'auto' | 'pixelated' | 'crisp-edges' — image-rendering
         spinnerTheme: 'auto',       // 'auto' (follows the browser) | 'dark' | 'light'
         referrerSites: [],          // sites to load previews from WITHOUT a referrer
-        videoDelays: {},            // host -> {ms, region, user, samples}: wait for the page's own
-                                    // player before previewing; learned, or set by the user
+        videoDelays: {},            // host -> {ms, region, user, samples, skip}: wait for the page's
+                                    // own player before previewing, or skip an area of it outright
         siteAudio: {},              // host -> {muted, volume}; absent means muted, which is the
                                     // only default a first visit may have — see AUDIO_DEFAULT
 
@@ -4229,8 +4229,10 @@
             if (e.samples.length < VDELAY_SAMPLES) return { entry: e, change: 'sampled' };
             const slowest = Math.max.apply(null, e.samples.map(function (x) { return x.ms; }));
             const same = e.samples.every(function (x) { return x.region === region; });
-            return { entry: { ms: vdRound(slowest * VDELAY_MARGIN), region: same ? region : VDELAY_ANY },
-                     change: 'learned' };
+            delete e.samples;       // the excluded areas, if any, stay
+            e.ms = vdRound(slowest * VDELAY_MARGIN);
+            e.region = same ? region : VDELAY_ANY;
+            return { entry: e, change: 'learned' };
         }
         if (covered) {          // the wait was in force and the player still came after it
             e.ms = Math.min(VDELAY_MAX, Math.max(e.ms + VDELAY_STEP, vdRound(elapsed * VDELAY_MARGIN)));
@@ -4239,6 +4241,24 @@
         if (e.region === VDELAY_ANY) return { entry: e, change: null };
         e.region = VDELAY_ANY;  // the wait did not apply here, so the region was the wrong shape
         return { entry: e, change: 'widened' };
+    }
+
+    const VDELAY_SKIPS = 8;         // areas one site may have excluded
+
+    // One area of a site whose player beats the preview: excluded outright, on the first sighting.
+    function vdSkip(entry, region) {
+        const e = entry ? JSON.parse(JSON.stringify(entry)) : {};
+        if (e.user) return { entry: e, change: null };
+        const skip = (e.skip || []).slice();
+        if (skip.indexOf(region) !== -1) return { entry: e, change: null };
+        skip.push(region);
+        e.skip = skip.slice(-VDELAY_SKIPS);
+        return { entry: e, change: 'excluded' };
+    }
+
+    function vdSkipped(region) {
+        const e = vdEntryFor(pageHost());
+        return !!e && !e.user && !!e.skip && e.skip.indexOf(region) !== -1;
     }
 
     // The entry for a host: its own, else the most specific user entry covering it.
@@ -4285,7 +4305,8 @@
         const host = pageHost();
         if (!host) return;
         reloadSettings();
-        const r = vdLearn(vdEntryFor(host), elapsed, region, covered);
+        const r = covered === 'skip' ? vdSkip(vdEntryFor(host), region)
+                                     : vdLearn(vdEntryFor(host), elapsed, region, covered);
         if (!r.change) return;
         const all = Object.assign({}, cfg.videoDelays);
         all[host] = r.entry;
@@ -4519,8 +4540,10 @@
                 const w = vdEntryFor(pageHost());
                 if (!w) return 'none — no entry for this site';
                 if (w.user) return (w.ms || 0) + ' ms, set by the user';
-                if (w.ms == null) return 'learning — ' + w.samples.length + ' of ' + VDELAY_SAMPLES + ' samples';
-                return w.ms + ' ms, learned, for ' + (w.region === VDELAY_ANY ? 'the whole site'
+                const skips = w.skip ? w.skip.length + ' area(s) excluded' +
+                    (el && w.skip.indexOf(regionKey(el)) !== -1 ? ', THIS one' : ', not this one') + '; ' : '';
+                if (w.ms == null) return skips + (w.samples ? 'learning — ' + w.samples.length + ' of ' + VDELAY_SAMPLES + ' samples' : 'no wait');
+                return skips + w.ms + ' ms, learned, for ' + (w.region === VDELAY_ANY ? 'the whole site'
                     : (el && w.region === regionKey(el) ? 'this area — applies' : 'another area — does not apply'));
             })(),
             backgroundGate: t.tagName === 'IMG' || t.tagName === 'VIDEO'
@@ -4658,6 +4681,11 @@
         if (el === active) return;
 
         cancel();
+        const region = regionKey(el);
+        if (vdSkipped(region)) {        // this area of the site puts its own player on the picture
+            if (debugOn()) dbg('skipped — an excluded area of this site', region);
+            return;
+        }
         const displayed = sizeOf(el);
         if (displayed.w < cfg.minDisplayed && displayed.h < cfg.minDisplayed) return;
 
@@ -4666,7 +4694,7 @@
         activeShown = shownUrl(el);
         hoverAt = Date.now();
         activeRect = el.getBoundingClientRect();
-        activeRegion = regionKey(el);
+        activeRegion = region;
         holdMs = vdHoldFor(activeRegion);
         holding = holdMs > 0;
         // A player landing under a still pointer raises no mouse event worth waiting for. See E61.
@@ -4719,16 +4747,19 @@
         return true;
     }
 
-    // The page put a player over the picture after the hover: the preview is withdrawn. Only a
-    // preview that was ON SCREEN teaches the wait — one withdrawn before it opened was never a
-    // problem, and the wait cannot fix what nobody saw. See E62.
+    // The page put a player over the picture after the hover: the preview is withdrawn, and the
+    // site learns from it. A player that beat the preview excludes the area — the answer was known
+    // at hover time; one that landed on an open preview teaches the wait. See E62.
     function withdrawn(why) {
         const elapsed = Date.now() - hoverAt;
         const shown = !!view && !!box && box.classList.contains('on');
-        dbg('a player arrived over the picture — preview withdrawn' + (holding ? ' during the wait' : ''),
-            { after: elapsed + ' ms', why: why, waited: holdMs + ' ms',
-              shown: shown ? 'yes — this one counts' : 'no — it never opened, nothing to learn' });
-        if (shown && !holding) vdRecord(activeRegion, elapsed, holdMs > 0);
+        const verdict = holding ? 'the wait caught it'
+            : holdMs > 0 ? 'after the wait — it gets longer'
+            : shown ? 'the preview was up — a sample for the wait'
+            : 'it beat the preview — this area is excluded';
+        dbg('a player arrived over the picture — preview withdrawn',
+            { after: elapsed + ' ms', why: why, waited: holdMs + ' ms', verdict: verdict });
+        if (!holding) vdRecord(activeRegion, elapsed, holdMs > 0 ? true : shown ? false : 'skip');
         cancel();
     }
 
@@ -6143,8 +6174,11 @@
 
             function describe(e) {
                 if (e.user) return (e.ms | 0) + ' ms — yours';
-                if (e.ms == null) return 'learning, ' + (e.samples || []).length + ' of ' + VDELAY_SAMPLES;
-                return e.ms + ' ms — learned, ' + (e.region === VDELAY_ANY ? 'whole site' : 'one area');
+                const parts = [];
+                if (e.skip && e.skip.length) parts.push(e.skip.length === 1 ? 'one area excluded' : e.skip.length + ' areas excluded');
+                if (e.ms != null) parts.push(e.ms + ' ms wait, ' + (e.region === VDELAY_ANY ? 'whole site' : 'one area'));
+                else if (e.samples) parts.push('learning a wait, ' + e.samples.length + ' of ' + VDELAY_SAMPLES);
+                return parts.join(' · ') + ' — learned';
             }
 
             function hosts() {
@@ -6631,11 +6665,12 @@
             currentValue: function () { return pageHost(); },
         });
         delayList({
-            heading: 'Wait for the page’s own video preview on these sites',
-            description: 'Some sites play a video over a thumbnail a moment after the pointer ' +
-                'lands on it. When that closes a preview, the script measures the delay over a ' +
-                'few hovers and adds the site here, then waits that long before previewing. ' +
-                'Add a site yourself to set the wait by hand; 0 ms stops the script adding one.',
+            heading: 'Sites that play their own video preview on hover',
+            description: 'Some sites play their own video over a thumbnail once the pointer is ' +
+                'on it. An area of a site that does so before a preview could open is excluded ' +
+                'outright; one that does so after a preview has opened is measured over a few ' +
+                'hovers, and previews there then wait that long. Add a site yourself to set the ' +
+                'wait by hand; 0 ms stops the script learning anything for it.',
             examples: 'example.com also covers www.example.com. Adding a site again replaces its entry.',
         });
 
@@ -6718,7 +6753,7 @@
         playVideos: playVideos,
         skipFurniture: cfg.skipFurniture,
         blockList: cfg.blockList.length,
-        lateWait: (function () { const w = vdEntryFor(pageHost()); return w ? (w.ms == null ? 'learning' : w.ms + ' ms') : 'none'; })(),
+        lateWait: (function () { const w = vdEntryFor(pageHost()); return w ? ((w.skip ? w.skip.length + ' excluded; ' : '') + (w.ms == null ? (w.samples ? 'learning' : 'no wait') : w.ms + ' ms')) : 'none'; })(),
         minRatio: cfg.minRatio,
         minDisplayed: cfg.minDisplayed,
     });

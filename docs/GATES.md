@@ -342,15 +342,21 @@ hover opened a preview that the withdrawal above closed a second later — corre
 The user's design, built as stated: notice the withdrawal, sample a few, then wait that long on
 that site before showing anything.
 
-**The record.** `cfg.videoDelays` is `host → {ms, region, user, samples}`. `vdLearn()` is the
-whole arithmetic and is asserted in `test-resolver.js`:
+**The record.** `cfg.videoDelays` is `host → {skip, ms, region, user, samples}`. `vdSkip()` and
+`vdLearn()` are the whole arithmetic and are asserted in `test-resolver.js`. Which one a
+withdrawal feeds is decided by when the player came, relative to the preview (`withdrawn()`):
 
-- **Learning.** Each withdrawal **of a preview that was on screen** (`box` has `on`) and not
-  caught by a wait appends `{ms, region}` to `samples`. A player that beats the resolve — the
-  hit callback's `playerArrived()` check, or the poll, fires before anything paints — withdraws
-  silently and teaches nothing: that is `E61` being the whole fix already, and v0.106.0 counting
-  those as samples is why a site learned a rule after one visible flash and two hovers nobody saw
-  fail (v0.107.0). The debug line says `shown: yes/no`. At
+- **It beat the preview → the area is excluded** (`skip`, v0.108.0). The hit callback's
+  `playerArrived()` check, the poll, or a mouse event saw a player before anything painted, so the
+  answer was known at hover time and there is nothing a wait could add: `regionKey()` joins the
+  site's `skip` list on the first sighting (capped at `VDELAY_SKIPS`, oldest dropped), and
+  `onOver` returns before the resolve for any hover whose key is in it — no probes, no ring, no
+  poll. v0.106.0 counted these as wait samples and v0.107.0 ignored them; the user's objection to
+  both was the same: *"if we already know, can't we just have images such as that excluded to
+  begin with?"* The cost, once: an area mixing image cards with video cards loses the image
+  previews too. The ✕ in the panel is the answer to that.
+- **It landed on an open preview → a sample for the wait.** Each such withdrawal not caught by a
+  wait appends `{ms, region}` to `samples`. At
   `VDELAY_SAMPLES` (3) the entry becomes `{ms: slowest × 1.25 rounded up to 50, region}` — the
   region if all three agree, `'*'` (the whole site) if they do not. The samples persist, because
   three hovers on one page is not a given.
