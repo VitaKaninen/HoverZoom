@@ -34,12 +34,20 @@ chain differed between rows and `chainPrefix` found only `img` in common. Fix in
 levels compare by tag + shared classes, and a near-miss narrows the rule instead of starting
 another area.
 
+Second finding, same day, from the relearn under v0.114.0: with the wait in place the preview
+painted and STAYED — the site's hover preview is a muted looping clip, gif-like once its metadata
+is in, and `overVideoSurface()` skipped every gif, so it was caught only while `duration` was
+`NaN`. v0.115.0 counts a clip over another picture as a player (`E12`); `?clip` on the fixture
+reproduces it and is verified in the pane.
+
 **Not yet confirmed on the site.** What to check after the user deletes the entry and relearns:
 
 - three flashes → one rule whose `dom` is `img>a.<classes>>div.phimage>div.flexibleHeight.wrap`;
 - a card in another row: either covered (`lateWait: applies here`) or `late player: widened`,
   never `another area`;
-- a flash on a covered card with the wait in place → `resampled` / `updating, n of 3`.
+- a flash on a covered card with the wait in place → `resampled` / `updating, n of 3`;
+- a withdrawal's `why` reads `(clip, Ns)` — and the preview no longer stays up over a playing
+  clip.
 
 Delete this file once that is seen.
 

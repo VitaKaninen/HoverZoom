@@ -21,6 +21,11 @@
   picture, not a player, so no player gate sees it). The preview still closes on its own with the
   pointer where the picture was, and that is the trigger: it teaches the wait like any other.
 
+  ?clip — grid A's landing video is a muted looping 2 s clip whose metadata is loaded ahead of
+  the hover, so it is gif-like the moment it lands (the real site of 2026-09-18, which holds its
+  clips dormant). It must still withdraw the preview: over another picture a clip is the page's
+  own preview, however short.
+
   "Forget this site" removes the learned entry for localhost and reloads.
   The page sets debug in localStorage on load, for the page copy of the script.
 -->
@@ -59,12 +64,18 @@
   var landAt = location.search.indexOf('slow') >= 0 ? 1200
              : location.search.indexOf('instant') >= 0 ? 0 : 600;
   var swap = location.search.indexOf('swap') >= 0;
+  var clip = location.search.indexOf('clip') >= 0;
   document.getElementById('expect').textContent =
     'Grid A lands a player ' + landAt + ' ms after the pointer arrives. Hover A1–A3: each opens and is ' +
     'withdrawn. From then on grid A waits before previewing; grid B never waits.';
 
   document.querySelectorAll('#a .card').forEach(function (card) {
-    var timer = 0, cv = null, v = null, img = card.querySelector('img');
+    var timer = 0, cv = null, v = null, img = card.querySelector('img'), ready = null;
+    if (clip) {
+      ready = document.createElement('video');
+      ready.muted = true; ready.loop = true; ready.autoplay = true; ready.preload = 'auto';
+      ready.src = '/test-images/clip-2s.mp4';
+    }
     card.addEventListener('mouseenter', function () {
       timer = setTimeout(function () {
         if (swap) {
@@ -77,9 +88,9 @@
         }
         cv = document.createElement('div');
         cv.className = 'cover';
-        v = document.createElement('video');
+        v = ready || document.createElement('video');
         v.muted = true;
-        v.src = '/test-images/clip-2s.mp4';
+        if (!ready) v.src = '/test-images/clip-2s.mp4';
         cv.appendChild(v);
         card.appendChild(cv);
         v.play().catch(function () {});

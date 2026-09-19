@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.114.0
+// @version     0.115.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -4131,10 +4131,10 @@
             const v = vids[i].getBoundingClientRect();
             if (v.width < 2 || v.height < 2) continue;   // not laid out; contains nothing
             if (gifLike(vids[i])) {
-                out.push({ what: 'clip, ' + secsOf(vids[i]), rect: v, gif: true });
+                out.push({ what: 'clip, ' + secsOf(vids[i]), rect: v, gif: true, el: vids[i] });
                 continue;
             }
-            out.push({ what: 'player — ' + notGifBecause(vids[i]), rect: v });
+            out.push({ what: 'player — ' + notGifBecause(vids[i]), rect: v, el: vids[i] });
             const area = v.width * v.height;
             let n = vids[i].parentElement;
             for (let up = 0; n && up < PLAYER_UP; up++, n = n.parentElement) {
@@ -4142,7 +4142,7 @@
                 if (r.width < 2 || r.height < 2) continue;
                 if (area < r.width * r.height * PLAYER_FILL) break;   // too big to be this video's player
                 if (r.width < v.width - 1 || r.height < v.height - 1) continue;
-                out.push({ what: 'player box', rect: r });
+                out.push({ what: 'player box', rect: r, el: vids[i] });
             }
         }
         return out;
@@ -4152,18 +4152,21 @@
         return cx >= rect.left && cx <= rect.right && cy >= rect.top && cy <= rect.bottom;
     }
 
+    // What laid-out <video> covers the picture's centre: '' when none. A clip counts unless it IS
+    // the hovered media — over another picture it is the page's own preview, however short. See E12.
     function overVideoSurface(el) {
         const surfaces = videoSurfaces();
-        if (!surfaces.length) return false;
+        if (!surfaces.length) return '';
         const r = el.getBoundingClientRect();
-        if (!r.width || !r.height) return false;
+        if (!r.width || !r.height) return '';
         const cx = r.left + r.width / 2;
         const cy = r.top + r.height / 2;
         for (let i = 0; i < surfaces.length; i++) {
-            if (surfaces[i].gif) continue;
-            if (holds(surfaces[i].rect, cx, cy)) return true;
+            const s = surfaces[i];
+            if (s.gif && (s.el === el || s.el.contains(el))) continue;
+            if (holds(s.rect, cx, cy)) return s.what;
         }
-        return false;
+        return '';
     }
 
     // closest() and parentElement both stop dead at a shadow-root boundary.
@@ -4184,7 +4187,8 @@
     function playerSurfaceReason(el) {
         const own = el.closest && el.closest('video');
         if (own && own !== el && !gifLike(own)) return 'inside a <video>';
-        if (overVideoSurface(el)) return 'over a laid-out <video> rectangle';
+        const over = overVideoSurface(el);
+        if (over) return 'over a laid-out <video> rectangle (' + over + ')';
         let n = el;
         for (let up = 0; n && up < 4; up++, n = n.parentElement) {
             if (up > 0 && n.querySelectorAll && n.querySelectorAll('img').length > 1) break;
@@ -4881,8 +4885,9 @@
     // A player now covers the picture we are previewing. Chromium's mouseover for a layout change
     // under a still pointer is best-effort, so this is asked by geometry, not waited for. See E61.
     function playerArrived(el) {
-        if (!overVideoSurface(el)) return false;
-        withdrawn('over a laid-out <video> rectangle');
+        const over = overVideoSurface(el);
+        if (!over) return false;
+        withdrawn('over a laid-out <video> rectangle (' + over + ')');
         return true;
     }
 

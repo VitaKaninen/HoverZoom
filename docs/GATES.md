@@ -24,10 +24,19 @@ positive:
   empty `<video>` (duration `NaN`) refused.
 
 Applied in exactly two places, both load-bearing: `videoSurfaces()` lists a gif but **flags** it, so
-`overVideoSurface()` skips it *and no player box is derived from it*; and the structural ancestor
-walk goes through `playerIn()` rather than `querySelector('video')`. The debug line still prints
-every video, gifs labelled as ignored — a gate that silently stops considering something is exactly
-what the log exists to make visible.
+*no player box is derived from it* and `overVideoSurface()` skips it **only when it is the hovered
+media itself** (`s.el === el`); and the structural ancestor walk goes through `playerIn()` rather
+than `querySelector('video')`. The debug line still prints every video, gifs labelled as ignored —
+a gate that silently stops considering something is exactly what the log exists to make visible.
+
+**A clip covering a DIFFERENT picture is a player** (v0.115.0). Until then `overVideoSurface()`
+skipped every gif, so a site whose hover preview is a muted looping ~10 s clip inserted over the
+thumbnail was caught only while its `duration` was still `NaN`: during learning the poll saw it at
+~300 ms and withdrew; with the learned wait in place the check ran later, the metadata was in, the
+clip was "gif-like", and the preview painted over the playing clip and stayed — nothing to learn
+from, so the wait never corrected either. Seen 2026-09-18 on the 4×9 grid; `?clip` on the fixture
+reproduces it (a preloaded clip lands gif-like at 600 ms and must withdraw with `(clip, 2s)`).
+The imgur shape is untouched: the clip under the pointer is `el`, and the exemption is exactly that.
 
 **What this deliberately cannot do is judge the destination.** A muted, playing, controls-less clip
 on a video site's *listing* page is pixel-for-pixel the imgur shape; nothing in the DOM separates
@@ -389,6 +398,9 @@ arithmetic on that object and is asserted in `test-resolver.js`:
   area. Before v0.114.0 a level was compared as a string, and a card's `<a>` carrying scroll-in
   state (`fade` / `fadeUp`) made every row its own area: two samples shared only `img`, each
   new one evicted the last, and the panel went 2 of 3 → 1 of 3. Seen 2026-09-18 on a 4×9 grid.
+- **A withdrawal is any `<video>` landing over the picture, a short clip included** — `E12`'s
+  clip exemption applies to the hovered media only (v0.115.0). The `why` names it: `(clip, 8s)` or
+  `(player — its duration is unknown (NaN))`.
 - **A rule is narrowed, not duplicated.** A flash no rule covers, whose chain has a rule's tags
   at every level on a matching path, replaces that rule's `dom` with what the two share
   (`vdNearRule`, change `widened`) and is NOT a `fixes` sample — it was measured against the
