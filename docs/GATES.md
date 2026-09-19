@@ -345,7 +345,12 @@ that site before showing anything.
 **The record.** `cfg.videoDelays` is `host → {ms, region, user, samples}`. `vdLearn()` is the
 whole arithmetic and is asserted in `test-resolver.js`:
 
-- **Learning.** Each withdrawal not caught by a wait appends `{ms, region}` to `samples`. At
+- **Learning.** Each withdrawal **of a preview that was on screen** (`box` has `on`) and not
+  caught by a wait appends `{ms, region}` to `samples`. A player that beats the resolve — the
+  hit callback's `playerArrived()` check, or the poll, fires before anything paints — withdraws
+  silently and teaches nothing: that is `E61` being the whole fix already, and v0.106.0 counting
+  those as samples is why a site learned a rule after one visible flash and two hovers nobody saw
+  fail (v0.107.0). The debug line says `shown: yes/no`. At
   `VDELAY_SAMPLES` (3) the entry becomes `{ms: slowest × 1.25 rounded up to 50, region}` — the
   region if all three agree, `'*'` (the whole site) if they do not. The samples persist, because
   three hovers on one page is not a given.
@@ -355,7 +360,7 @@ whole arithmetic and is asserted in `test-resolver.js`:
   `heldHit`, and the wait's timer paints it (or shows the ring if still resolving, or the failure
   display) the moment it ends. A player landing inside the wait is `withdrawn()` "during the
   wait": logged, not recorded — that is the wait working.
-- **Correcting.** A withdrawal *after* a wait that applied is a timing miss: `ms` becomes
+- **Correcting.** Same rule — only a shown preview's withdrawal corrects. One *after* a wait that applied is a timing miss: `ms` becomes
   `max(ms + 250, elapsed × 1.25)`. A withdrawal on a thumbnail the region did **not** cover is a
   shape miss: the region becomes `'*'`. Which of the two is decided by whether `holdMs` was set
   for that hover, nothing else.

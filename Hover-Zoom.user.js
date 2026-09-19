@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.106.0
+// @version     0.107.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -4719,13 +4719,16 @@
         return true;
     }
 
-    // The page put a player over the picture after the hover: the preview is withdrawn, and the
-    // wait for this site learns from it — unless the wait itself is what caught it. See E62.
+    // The page put a player over the picture after the hover: the preview is withdrawn. Only a
+    // preview that was ON SCREEN teaches the wait — one withdrawn before it opened was never a
+    // problem, and the wait cannot fix what nobody saw. See E62.
     function withdrawn(why) {
         const elapsed = Date.now() - hoverAt;
+        const shown = !!view && !!box && box.classList.contains('on');
         dbg('a player arrived over the picture — preview withdrawn' + (holding ? ' during the wait' : ''),
-            { after: elapsed + ' ms', why: why, waited: holdMs + ' ms' });
-        if (!holding) vdRecord(activeRegion, elapsed, holdMs > 0);
+            { after: elapsed + ' ms', why: why, waited: holdMs + ' ms',
+              shown: shown ? 'yes — this one counts' : 'no — it never opened, nothing to learn' });
+        if (shown && !holding) vdRecord(activeRegion, elapsed, holdMs > 0);
         cancel();
     }
 
