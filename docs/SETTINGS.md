@@ -245,6 +245,12 @@ modal half was a mode that only took things away.
 - **`advOpen`, `panelPos` and the body's `scrollTop` survive a re-render**, because `openPanel()`
   is how *every* outside write refreshes the panel (below). `showPanel()` — the manager's menu
   command — is the one entry point that resets them, so a fresh visit starts shut and placed.
+- **The same four survive a navigation within the tab (v0.110.0).** `savePanelState()` writes
+  `{open, adv, scroll, pos}` to `sessionStorage` under `hz-panel` on open, close, the fold's
+  `toggle`, and `pagehide` (scroll and drag are only captured there); `restorePanelState()` at
+  the bottom of the script reopens it. `sessionStorage` is per tab and per origin, which is the
+  scope asked for: a same-site link or a refresh keeps it, a closed tab forgets it, a different
+  site starts fresh. Top frame only — the storage is shared with same-origin iframes.
 
 ### Two regressions the collapse introduced, both fixed in the same version
 

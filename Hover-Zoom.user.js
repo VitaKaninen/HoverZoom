@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.109.0
+// @version     0.110.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -5815,9 +5815,36 @@
     // What the user entered per site, not knobs: `Reset to defaults` leaves these alone.
     const RESET_KEEPS = ['siteList', 'blockList', 'referrerSites', 'siteAudio', 'videoDelays'];
 
+    // Open/closed, the fold, scroll and position for this TAB — sessionStorage is per tab and
+    // per origin, so it follows a same-site link or a refresh and dies with the tab.
+    const PANEL_STATE_KEY = 'hz-panel';
+
+    function savePanelState() {
+        if (!isTopFrame) return;
+        try {
+            sessionStorage.setItem(PANEL_STATE_KEY, JSON.stringify({
+                open: !!panelHost, adv: advOpen, scroll: panelScroll(), pos: panelPos,
+            }));
+        } catch (e) { /* sandboxed or storage-less page; the panel simply starts fresh */ }
+    }
+
+    function restorePanelState() {
+        if (!isTopFrame) return;
+        let s = null;
+        try { s = JSON.parse(sessionStorage.getItem(PANEL_STATE_KEY)); } catch (e) { return; }
+        if (!s || typeof s !== 'object') return;
+        advOpen = !!s.adv;
+        if (s.pos && typeof s.pos.left === 'number' && typeof s.pos.top === 'number') panelPos = s.pos;
+        if (!s.open) return;
+        openPanel();
+        const b = panelHost.shadowRoot.querySelector('.body');
+        b.scrollTop = +s.scroll || 0;
+    }
+
     function closePanel() {
         if (panelFlush) { panelFlush(); panelFlush = null; }
         if (panelHost) { panelHost.remove(); panelHost = null; }
+        savePanelState();
     }
 
     // Anything writing cfg from OUTSIDE the panel re-renders it, or it shows stale values.
@@ -6055,7 +6082,7 @@
             sum.textContent = title;
             d.appendChild(sum);
             d.open = advOpen;
-            d.addEventListener('toggle', function () { advOpen = d.open; });
+            d.addEventListener('toggle', function () { advOpen = d.open; savePanelState(); });
             body.appendChild(d);
             mount = d;
         }
@@ -6729,12 +6756,17 @@
         }
         placePanel();
         body.scrollTop = keepScroll;
+        savePanelState();
     }
 
     if (isTopFrame && typeof GM_registerMenuCommand === 'function') {
         GM_registerMenuCommand('Hover Zoom settings', showPanel);
         refreshSiteMenu();
     }
+
+    // Scroll and drag are not written as they happen; the snapshot at unload carries them.
+    window.addEventListener('pagehide', savePanelState);
+    restorePanelState();
 
     dbg('loaded', {
         version: version(),
