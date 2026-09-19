@@ -412,8 +412,14 @@ arithmetic on that object and is asserted in `test-resolver.js`:
   v0.111.0 widened to the whole site on the first uncovered flash, which on a site with a photo
   section is exactly wrong; only a user's own entry covers a whole site now.
 - **Correcting.** A flash on a covered picture is sampled (`fixes`, the panel says
-  `updating, n of 3`, the wait stands meanwhile); the third makes `ms`
+  `updating, n of 3, no wait meanwhile`); the third makes `ms`
   `max(ms + 250, slowest × 1.25)`. One `ms` per site, shared by its areas — the slowest wins.
+  **The wait is OFF while `fixes` is non-empty** (`vdWaitOf`, v0.116.0): under the wait only a
+  player slower than `ms` flashes, so the two flashes that finish a correction could take
+  minutes to find — *"it is taking forever for me to find another video where it will trigger
+  again"* — and a sample taken at the grace measures the true arrival, which is what
+  `slowest × 1.25` wants anyway. v0.111.0–v0.115.0 kept the wait meanwhile, for a steadier
+  experience during the update; the user chose speed.
 - **A flash within 2.5 s of a press or key is the user's doing** (`lastUserAct`, `USER_QUIET_MS`)
   and never counts. Found on Google's captcha interstitial: a clicked tile swaps its picture under
   the pointer, which is a page-driven close in every respect except cause, and `google.com` had a

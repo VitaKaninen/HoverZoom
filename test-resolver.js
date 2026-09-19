@@ -851,7 +851,7 @@ const vdStart = src.indexOf('    const VDELAY_SAMPLES');
 const vdEnd = src.indexOf('    // The entry for a host');
 if (vdStart < 0 || vdEnd < 0) { console.error('vdLearn markers not found'); process.exit(1); }
 const vd = new Function(src.slice(vdStart, vdEnd) +
-    NL + 'return {vdLearn, vdRound, vdRuleFor, vdNorm, chainPrefix, pathPrefix, chainMatches, pathMatches, sharedHead, VDELAY_SAMPLES};')();
+    NL + 'return {vdLearn, vdRound, vdRuleFor, vdNorm, chainPrefix, pathPrefix, chainMatches, pathMatches, sharedHead, vdWaitOf, VDELAY_SAMPLES};')();
 
 eq('vdRound rounds up to 50 ms', vd.vdRound(1001), 1050);
 eq('vdRound never goes under one step', vd.vdRound(10), 250);
@@ -899,7 +899,11 @@ eq('a sample from a different area drops the earlier one', noise.entry.samples.l
 
 let late = vd.vdLearn(e.entry, 1400, C1, '/videos/page/4');
 eq('a flash under a rule starts an update', late.change, 'resampled');
-eq('  the wait stands while it samples', late.entry.fixes, [{ ms: 1400 }]);
+eq('  the first sample is kept', late.entry.fixes, [{ ms: 1400 }]);
+eq('  the wait is off while it samples, so the next flashes come fast', vd.vdWaitOf(late.entry, C1, '/videos'), 0);
+eq('  a covered hover waits the full figure otherwise', vd.vdWaitOf(e.entry, C1, '/videos'), 1250);
+eq('  an uncovered one never waits', vd.vdWaitOf(e.entry, SIDE, '/videos'), 0);
+eq('  a user entry always waits', vd.vdWaitOf({ ms: 500, user: true, fixes: [{ ms: 1 }] }, SIDE, '/x'), 500);
 late = vd.vdLearn(vd.vdLearn(late.entry, 1300, C2, '/videos').entry, 1350, C3, '/videos');
 eq('the third makes it longer', late.change, 'longer');
 eq('  by a step, or to the slowest × 1.25, whichever is more', late.entry, { rules: [{ dom: 'img>a.thumb>div.card.item-#>div.grid', path: '/videos' }], ms: 1750 });

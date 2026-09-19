@@ -22,7 +22,7 @@ Seven versions in one day, v0.106.0 → v0.112.0, all on this one feature. The s
   "Wait for the page's own video preview on these sites" at the bottom of Advanced; the number
   on a learned row is click-to-edit and stays learned.
 - **Pure arithmetic** — `vdLearn`, `vdRuleFor`, `chainPrefix`, `pathPrefix`, `vdNorm` — is
-  sliced into `test-resolver.js` (325 assertions pass). Browser-verified on
+  sliced into `test-resolver.js` (329 assertions pass). Browser-verified on
   `test-pages/late-player.html` in all four modes (default, `?slow`, `?instant`, `?swap`).
 
 ## The open issue — closed in v0.114.0

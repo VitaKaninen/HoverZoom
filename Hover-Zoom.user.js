@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.115.0
+// @version     0.116.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -4382,6 +4382,14 @@
         return { entry: e, change: e.rules.length === 1 ? 'learned' : 'another area' };
     }
 
+    // The wait an entry gives this hover. While a correction is being sampled the wait is OFF, so
+    // the flashes that finish it come as fast as the page makes them.
+    function vdWaitOf(e, chain, path) {
+        if (!e || e.ms == null || !(e.ms > 0)) return 0;
+        if (!vdRuleFor(e, chain, path)) return 0;
+        return !e.user && e.fixes && e.fixes.length ? 0 : e.ms;
+    }
+
     // The entry for a host: its own, else the most specific user entry covering it.
     function vdEntryFor(host) {
         const all = cfg.videoDelays || {};
@@ -4423,9 +4431,7 @@
 
     // How long this hover waits for the page's own player before previewing. 0 = no wait.
     function vdHoldFor(chain, path) {
-        const e = vdEntryFor(pageHost());
-        if (!e || e.ms == null || !(e.ms > 0)) return 0;
-        return vdRuleFor(e, chain, path) ? e.ms : 0;
+        return vdWaitOf(vdEntryFor(pageHost()), chain, path);
     }
 
     // Read-modify-write against storage, as saveAudio() does.
@@ -4670,7 +4676,7 @@
                 if (w.ms == null) return 'learning — ' + (w.samples || []).length + ' of ' + VDELAY_SAMPLES + ' samples';
                 const r = el && vdRuleFor(w, domChain(el), pagePath());
                 return w.ms + ' ms, learned, ' + (w.rules || []).length + ' area(s) — ' +
-                    (r ? 'applies here (' + r.dom + ' on ' + r.path + ')'
+                    (r ? 'applies here (' + r.dom + ' on ' + r.path + ')' + (w.fixes && w.fixes.length ? ' — updating, no wait' : '')
                        : 'none covers this picture on ' + pagePath() + ' — its chain: ' + (el ? domChain(el) : '?') +
                          ' — rules: ' + (w.rules || []).map(function (x) { return x.dom + ' on ' + x.path; }).join(' | '));
             })(),
@@ -6389,7 +6395,7 @@
                 const where = paths.length === 1 && paths[0] === '/' ? 'any page'
                     : paths.slice(0, 2).join(', ') + (paths.length > 2 ? ', …' : '');
                 return ' — learned, ' + (rules.length === 1 ? 'one area' : rules.length + ' areas') + ' on ' + where +
-                    (e.fixes ? ' · updating, ' + e.fixes.length + ' of ' + VDELAY_SAMPLES : '') +
+                    (e.fixes ? ' · updating, ' + e.fixes.length + ' of ' + VDELAY_SAMPLES + ', no wait meanwhile' : '') +
                     (e.samples && e.samples.length ? ' · another area, ' + e.samples.length + ' of ' + VDELAY_SAMPLES : '');
             }
 
