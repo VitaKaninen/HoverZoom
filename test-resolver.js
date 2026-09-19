@@ -851,7 +851,7 @@ const vdStart = src.indexOf('    const VDELAY_SAMPLES');
 const vdEnd = src.indexOf('    // The entry for a host');
 if (vdStart < 0 || vdEnd < 0) { console.error('vdLearn markers not found'); process.exit(1); }
 const vd = new Function(src.slice(vdStart, vdEnd) +
-    NL + 'return {vdLearn, vdRound, vdRuleFor, vdNorm, chainPrefix, pathPrefix, chainMatches, pathMatches, VDELAY_SAMPLES};')();
+    NL + 'return {vdLearn, vdRound, vdRuleFor, vdNorm, chainPrefix, pathPrefix, chainMatches, pathMatches, sharedHead, VDELAY_SAMPLES};')();
 
 eq('vdRound rounds up to 50 ms', vd.vdRound(1001), 1050);
 eq('vdRound never goes under one step', vd.vdRound(10), 250);
@@ -863,10 +863,14 @@ const C2 = 'img>a.thumb>div.card.item-#.watched>div.grid>main>div.page';   // a 
 const C3 = 'img>a.thumb>div.card.item-#>div.grid>main.narrow>div.page';    // deeper variation
 const SIDE = 'img>a>li.related>ul.sidebar>aside>div.page';
 eq('the shared head of one area, capped at 4 levels', vd.chainPrefix([C1, C3]), 'img>a.thumb>div.card.item-#>div.grid');
-eq('a state class on the card stops the prefix there', vd.chainPrefix([C1, C2]), 'img>a.thumb');
+eq('a state class on the card is dropped, not a stop', vd.chainPrefix([C1, C2]), 'img>a.thumb>div.card.item-#>div.grid');
+eq('a bare tag against a classed one is not shared', vd.chainPrefix(['img>a>div.x', 'img>a.thumb>div.x']), '');
+eq('  two bare tags are', vd.chainPrefix(['img>a>div.x', 'img>a>div.x']), 'img>a>div.x');
 eq('too little in common is no area', vd.chainPrefix([C1, SIDE]), '');
 eq('a prefix matches a chain that starts with it', vd.chainMatches(C3, 'img>a.thumb>div.card.item-#>div.grid'), true);
 eq('  and not one that merely shares a tag', vd.chainMatches(SIDE, 'img>a.thumb'), false);
+eq('  extra classes on the picture side do not matter', vd.chainMatches('img>a.fade.fadeUp.thumb>div.card', 'img>a.thumb>div.card'), true);
+eq('  a class the rule names must be there', vd.chainMatches('img>a.fade>div.card', 'img>a.thumb>div.card'), false);
 eq('  an empty prefix matches anything', vd.chainMatches(SIDE, ''), true);
 eq('paths share their head', vd.pathPrefix(['/videos/page/2', '/videos/page/3', '/videos']), '/videos');
 eq('  nothing in common is the root', vd.pathPrefix(['/videos', '/photos']), '/');
@@ -881,14 +885,14 @@ eq('second flash, same area, other row', e.change, 'sampled');
 e = vd.vdLearn(e.entry, 900, C3, '/videos/page/3');
 eq('third flash writes the rule', e.change, 'learned');
 eq('  the shared head of the three, on the shared path, slowest × 1.25', e.entry,
-    { rules: [{ dom: 'img>a.thumb', path: '/videos' }], ms: 1250 });
+    { rules: [{ dom: 'img>a.thumb>div.card.item-#>div.grid', path: '/videos' }], ms: 1250 });
 eq('  a fourth row on page 9 is covered', !!vd.vdRuleFor(e.entry, C1, '/videos/page/9'), true);
 eq('  the same markup on the photos page is NOT', !!vd.vdRuleFor(e.entry, C1, '/photos'), false);
 
 let side = vd.vdLearn(vd.vdLearn(vd.vdLearn(e.entry, 600, SIDE, '/watch/1').entry, 650, SIDE, '/watch/2').entry, 700, SIDE, '/watch/3');
 eq('three flashes elsewhere are another area, never the whole site', side.change, 'another area');
 eq('  the site now holds two rules and the longer wait', side.entry,
-    { rules: [{ dom: 'img>a.thumb', path: '/videos' }, { dom: 'img>a>li.related>ul.sidebar', path: '/watch' }], ms: 1250 });
+    { rules: [{ dom: 'img>a.thumb>div.card.item-#>div.grid', path: '/videos' }, { dom: 'img>a>li.related>ul.sidebar', path: '/watch' }], ms: 1250 });
 
 let noise = vd.vdLearn(vd.vdLearn(null, 800, C1, '/v').entry, 700, SIDE, '/v');
 eq('a sample from a different area drops the earlier one', noise.entry.samples.length, 1);
@@ -898,7 +902,23 @@ eq('a flash under a rule starts an update', late.change, 'resampled');
 eq('  the wait stands while it samples', late.entry.fixes, [{ ms: 1400 }]);
 late = vd.vdLearn(vd.vdLearn(late.entry, 1300, C2, '/videos').entry, 1350, C3, '/videos');
 eq('the third makes it longer', late.change, 'longer');
-eq('  by a step, or to the slowest × 1.25, whichever is more', late.entry, { rules: [{ dom: 'img>a.thumb', path: '/videos' }], ms: 1750 });
+eq('  by a step, or to the slowest × 1.25, whichever is more', late.entry, { rules: [{ dom: 'img>a.thumb>div.card.item-#>div.grid', path: '/videos' }], ms: 1750 });
+
+// The grid seen 2026-09-18: the card's <a> carries scroll-in state, and three same-row samples
+// all had it, so the rule named it and the next row was 'another area'.
+const R1 = 'img>a.fade.fadeUp.latestThumb.videoPreviewBg>div.phimage>div.flexibleHeight.wrap>li.pcVideoListItem.videoBox>ul.col-#.videos';
+const R2 = 'img>a.fade.latestThumb.videoPreviewBg>div.phimage>div.flexibleHeight.wrap>li.pcVideoListItem.videoBox>ul.col-#.videos';
+let grid = vd.vdLearn(vd.vdLearn(vd.vdLearn(null, 300, R1, '/video/search').entry, 320, R1, '/video/search').entry, 310, R1, '/video/search');
+eq('three same-row samples learn the row state into the rule', grid.entry.rules[0].dom, 'img>a.fade.fadeUp.latestThumb.videoPreviewBg>div.phimage>div.flexibleHeight.wrap');
+eq('  a sample from the next row keeps the earlier one', vd.vdLearn(vd.vdLearn(null, 300, R1, '/v').entry, 300, R2, '/v').entry.samples.length, 2);
+let wide = vd.vdLearn(grid.entry, 330, R2, '/video/search');
+eq('a flash in the next row widens the rule instead of starting another area', wide.change, 'widened');
+eq('  to what the two share', wide.entry.rules[0].dom, 'img>a.fade.latestThumb.videoPreviewBg>div.phimage>div.flexibleHeight.wrap');
+eq('  and does not count towards a longer wait', wide.entry.fixes, undefined);
+eq('  the wait stands', wide.entry.ms, grid.entry.ms);
+eq('  both rows are now covered', !!vd.vdRuleFor(wide.entry, R1, '/video/search') && !!vd.vdRuleFor(wide.entry, R2, '/video/search'), true);
+eq('  the same card on another path is not', !!vd.vdRuleFor(wide.entry, R2, '/photo/search'), false);
+eq('a different structure is still another area', vd.vdLearn(wide.entry, 330, SIDE, '/video/search').change, 'sampled');
 let zero = vd.vdLearn(vd.vdLearn(vd.vdLearn({ ms: 0, rules: [{ dom: 'img>a.thumb', path: '/' }] }, 700, C1, '/x').entry, 700, C1, '/x').entry, 700, C1, '/x');
 eq('a learned wait the user set to 0 is still adjusted', zero.entry.ms, 900);
 

@@ -22,77 +22,26 @@ Seven versions in one day, v0.106.0 → v0.112.0, all on this one feature. The s
   "Wait for the page's own video preview on these sites" at the bottom of Advanced; the number
   on a learned row is click-to-edit and stays learned.
 - **Pure arithmetic** — `vdLearn`, `vdRuleFor`, `chainPrefix`, `pathPrefix`, `vdNorm` — is
-  sliced into `test-resolver.js` (312 assertions pass). Browser-verified on
+  sliced into `test-resolver.js` (325 assertions pass). Browser-verified on
   `test-pages/late-player.html` in all four modes (default, `?slow`, `?instant`, `?swap`).
 
-## The open issue
+## The open issue — closed in v0.114.0
 
-The user's site: **one page of videos in a 4×9 grid — one area, from the user's point of view.**
-The panel says the site has **learned 2 areas**; previews **still flash** there; and the row is
-**not** showing `· another area, n of 3` — so the flashes are neither being sampled as a new area
-nor, apparently, as an update.
+The user's site: one page of videos in a 4×9 grid. Learned rows as separate areas; a rule did not
+cover the next row and its flashes evicted the samples (panel 2 of 3 → 1 of 3). Diagnosed from
+one v0.113.0 log: the card's `<a>` carried scroll-in state (`fade` / `fadeUp`), so level 1 of the
+chain differed between rows and `chainPrefix` found only `img` in common. Fix in `GATES.md` `E62`:
+levels compare by tag + shared classes, and a near-miss narrows the rule instead of starting
+another area.
 
-The user deleted and relearned the entry several times under earlier versions, so the stored
-entry may hold rules learned under the v0.106.0–v0.111.0 key (converted by `vdNorm()` into rules
-on `/`; their `dom` strings were built without digit normalisation and with a 4-class cap, so they
-may or may not prefix-match v0.112.0 chains). **First step: have the user delete the entry and
-relearn under v0.112.0 before diagnosing anything.**
+**Not yet confirmed on the site.** What to check after the user deletes the entry and relearns:
 
-### Hypotheses, in the order to test them
+- three flashes → one rule whose `dom` is `img>a.<classes>>div.phimage>div.flexibleHeight.wrap`;
+- a card in another row: either covered (`lateWait: applies here`) or `late player: widened`,
+  never `another area`;
+- a flash on a covered card with the wait in place → `resampled` / `updating, n of 3`.
 
-1. **The flashes are covered by a rule and are going to `fixes`, not to a new area.** Then the
-   row reads `· updating, n of 3` and the `late player:` debug line says `resampled`. If so the
-   only problem is that `ms` is too short, and three flashes fix it. Check the row first.
-2. **The flashes are not being recorded at all.** Debug on; hover; a flash must print
-   `the page took the preview away — <why>`. If a flash prints nothing:
-   - the close went through a path that is **not a `selfClosed` call site**. The strongest
-     candidate is the **`scroll` listener** (window capture, `if (!placed && !panelOwns(e)) cancel()`):
-     a site whose player insertion shifts layout fires `scroll` on some ancestor, and that cancel
-     records nothing. Second: `verifyMedia`'s size-mismatch cancel (`E45`). Third: `blur`.
-     Diagnose by adding a `dbg()` inside `cancel()` printing `new Error().stack.split('\n')[2]`.
-   - the pointer is judged **outside `activeRect`**: the card scales on hover (CSS transform), or
-     the grid reflows when the player loads, so the picture's hover-time rectangle no longer holds
-     the pointer. `selfClosed` uses the rect from hover time on purpose; if this is the cause, the
-     test should tolerate growth (compare against the element's *current* rect too, when it is
-     still connected).
-   - `lastUserAct` is under 2.5 s: the user is clicking or scrolling with keys between hovers.
-     The debug line for that case is `closed on its own, but after a press or key — not counted`.
-3. **The flashes are recorded but every sample is dropped as "another area".** `vdLearn` keeps
-   only samples sharing ≥ `RULE_MIN` (2) chain levels with the newest. Level 0 is always `img`, so
-   if **level 1 varies between cards** — `a.thumb` vs `a.thumb.hd`, or a class that carries
-   non-digit state (`new`, `watched`, `loaded`) — every pair shares exactly 1 level, each new
-   sample evicts the last, and the count never reaches 3. The row would show
-   `· another area, 1 of 3` forever, or flicker. The `late player: sampled` debug line prints the
-   chain; compare two cards' chains. Fixes, in order of preference: normalise more than digits at
-   level 1 (Forum Stumbler's `signature()` keeps only the first two classes); or let `RULE_MIN`
-   be 1 when level 1 differs only by class and the tags agree; or compute the prefix ignoring one
-   differing level.
-4. **The two learned areas are both the grid**, learned under two different keys (one old, one
-   new, or two class variants of the same card), and the flashes are on a third variant. Same
-   root cause as 3, seen from the other side. The stored rules' `dom` strings show it.
-
-### Observed 2026-09-18, relearned clean under v0.112.0
-
-- ~30 % of hovers paint a preview; the first flash starts learning, three flashes make a rule.
-- **Cards in one row learn as one area; a card in another row is "another area".** So the chain
-  differs between rows at a level inside the rule's prefix — the `hover` line's `lateWait` now
-  prints the picture's chain next to every stored rule's `dom` when none covers it (v0.113.0).
-- **With a rule in place, previews still paint and the flash is neither `updating` nor
-  `another area`.** So either `vdHoldFor` found no rule for that hover (chain drift), or the
-  close never reached `vdRecord`. v0.113.0 makes every silent `selfClosed` return print why
-  (`closing, not counted — …` / `closing with the pointer outside …`), and `cancel()` prints
-  `a painted preview is closing` with its caller when a painted preview goes down.
-
-### What to collect from the user, verbatim
-
-Debug on (settings → Diagnostics, or `document.dispatchEvent(new CustomEvent('hover-zoom:debug',
-{detail: true}))` in the console for this page only), then one flash:
-
-- the `hover` line's `lateWait` field — says whether a rule applies to this picture and which;
-- the `preview withdrawn` / `the page took the preview away` line, or its **absence**;
-- the `late player: <change>` line — its `chain` and `path`;
-- the stored entry — the `loaded` line prints a summary; the panel row prints the rest;
-- the `chain` of a **second** card in the same grid, for comparison.
+Delete this file once that is seen.
 
 ## Do not redo
 

@@ -383,6 +383,17 @@ arithmetic on that object and is asserted in `test-resolver.js`:
   path starts with `path`, by segment. Deeper per-row variation cannot break it; the photo page of
   the same site, with the same card markup, is a different `path` and is not covered. The user's
   framing: *"it is really only dedicated video pages where I expect this to be a problem."*
+- **A level is a tag plus the classes ALL samples carry, and a chain matches a level when it has
+  the tag and at least those classes** (`sharedHead`, `chainMatches`; v0.114.0). A level where one
+  side has classes and nothing is shared ends the head — `img>a` is every linked picture, not an
+  area. Before v0.114.0 a level was compared as a string, and a card's `<a>` carrying scroll-in
+  state (`fade` / `fadeUp`) made every row its own area: two samples shared only `img`, each
+  new one evicted the last, and the panel went 2 of 3 → 1 of 3. Seen 2026-09-18 on a 4×9 grid.
+- **A rule is narrowed, not duplicated.** A flash no rule covers, whose chain has a rule's tags
+  at every level on a matching path, replaces that rule's `dom` with what the two share
+  (`vdNearRule`, change `widened`) and is NOT a `fixes` sample — it was measured against the
+  grace, not the wait, so it says nothing about `ms`. Three same-row samples that all carried a
+  state class are thus corrected by the first flash in the next row.
 - **Nothing is ever site-wide.** A flash no rule covers is a sample for *another area*; samples
   that share no head with the newest are dropped (another area, or noise); three of one area add
   a rule (up to `RULE_MAX`, 6) and raise `ms` to the new area's figure if it is higher. v0.106.0–

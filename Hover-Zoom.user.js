@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.113.0
+// @version     0.114.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -4249,12 +4249,40 @@
         return n;
     }
 
+    // 'tag.a.b' -> {tag, cls: ['a','b']}
+    function levelOf(s) {
+        const p = s.split('.');
+        return { tag: p[0], cls: p.slice(1) };
+    }
+
+    // The head several chains share, level by level: the tag must agree, and the level keeps only
+    // the classes ALL of them carry. A level where one has classes and nothing is shared ends it —
+    // a bare `a` under every picture is not an area.
+    function sharedHead(chains) {
+        const split = chains.map(function (c) { return c.split('>').map(levelOf); });
+        const out = [];
+        for (let n = 0; n < split[0].length; n++) {
+            const first = split[0][n];
+            let cls = first.cls.slice(), any = first.cls.length > 0;
+            let ok = true;
+            for (let i = 1; i < split.length && ok; i++) {
+                const lv = split[i][n];
+                if (!lv || lv.tag !== first.tag) { ok = false; break; }
+                any = any || lv.cls.length > 0;
+                cls = cls.filter(function (c) { return lv.cls.indexOf(c) !== -1; });
+            }
+            if (!ok || (any && !cls.length)) break;
+            out.push(first.tag + (cls.length ? '.' + cls.join('.') : ''));
+        }
+        return out;
+    }
+
     // The area several chains share: their common head, at least RULE_MIN and at most RULE_DEPTH
     // levels. '' when they share too little to be one area.
     function chainPrefix(chains) {
-        const n = sharedLevels(chains, '>');
-        if (n < RULE_MIN) return '';
-        return chains[0].split('>').slice(0, Math.min(n, RULE_DEPTH)).join('>');
+        const head = sharedHead(chains);
+        if (head.length < RULE_MIN) return '';
+        return head.slice(0, RULE_DEPTH).join('>');
     }
 
     // The page-path head several paths share; '/' when none.
@@ -4264,8 +4292,31 @@
         return '/' + paths[0].replace(/^\//, '').split('/').slice(0, n).join('/');
     }
 
+    // A chain matches a rule when, level for level, the tag agrees and it carries every class the
+    // rule names — extra classes on the picture's side (state, animation) do not matter.
     function chainMatches(chain, prefix) {
-        return !prefix || chain === prefix || chain.indexOf(prefix + '>') === 0;
+        if (!prefix) return true;
+        const want = prefix.split('>').map(levelOf);
+        const have = chain.split('>').map(levelOf);
+        if (have.length < want.length) return false;
+        for (let n = 0; n < want.length; n++) {
+            if (have[n].tag !== want[n].tag) return false;
+            for (let i = 0; i < want[n].cls.length; i++) if (have[n].cls.indexOf(want[n].cls[i]) === -1) return false;
+        }
+        return true;
+    }
+
+    // A rule this chain does not match but has the same tags all the way down, on this path: the
+    // difference is classes only, so the rule is narrowed to what they share instead of the chain
+    // becoming another area. null when none.
+    function vdNearRule(e, chain, path) {
+        const rules = (e && e.rules) || [];
+        for (let i = 0; i < rules.length; i++) {
+            if (!rules[i].dom || !pathMatches(path, rules[i].path)) continue;
+            const head = sharedHead([rules[i].dom, chain]);
+            if (head.length === rules[i].dom.split('>').length) return rules[i];
+        }
+        return null;
     }
 
     function pathMatches(path, prefix) {
@@ -4298,6 +4349,11 @@
     function vdLearn(entry, elapsed, chain, path) {
         const e = entry ? JSON.parse(JSON.stringify(vdNorm(entry))) : {};
         if (e.user) return { entry: e, change: null };
+        if (!vdRuleFor(e, chain, path)) {
+            // This flash was measured against the grace, not the wait, so it says nothing about ms.
+            const near = vdNearRule(e, chain, path);
+            if (near) { near.dom = sharedHead([near.dom, chain]).join('>'); return { entry: e, change: 'widened' }; }
+        }
         if (vdRuleFor(e, chain, path)) {
             e.fixes = (e.fixes || []).concat([{ ms: elapsed }]);
             if (e.fixes.length < VDELAY_SAMPLES) return { entry: e, change: 'resampled' };
@@ -4851,8 +4907,8 @@
         if (x <= activeRect.left + 1 || x >= activeRect.right - 1 ||
             y <= activeRect.top + 1 || y >= activeRect.bottom - 1) {
             const now = active.isConnected ? active.getBoundingClientRect() : null;
-            dbg('closing with the pointer outside the picture\'s hover-time rectangle — ' + why,
-                { x: x, y: y, hoverRect: rectStr(activeRect), nowRect: now ? rectStr(now) : 'gone' });
+            if (now && holds(now, x, y)) dbg('the picture moved under the pointer — closing, not counted — ' + why,
+                { x: x, y: y, hoverRect: rectStr(activeRect), nowRect: rectStr(now) });
             return;
         }
         // A captcha tile swaps its picture because it was CLICKED: a page change the user caused.
