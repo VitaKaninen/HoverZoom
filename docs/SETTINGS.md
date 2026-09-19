@@ -220,9 +220,10 @@ as the referrer and what `pageHost()` returns.
   host covers (`entryCovers`), so a user's `example.com` retires the script's `www.example.com`
   and the script never re-learns under it (`vdEntryFor` answers with the user's). Adding a host
   that is already there replaces it — that is how the number is changed.
-- **Each row says where it came from:** `1250 ms — learned, one area` / `whole site`, with
-  `· updating, 2 of 3` appended while a correction is being sampled; `learning, 2 of 3` before a
-  rule exists; `0 ms — yours`.
+- **Each row says where it came from:** `1250 ms — learned, one area on /videos` (or `2 areas`,
+  `on any page`), with `· updating, 2 of 3` appended while a correction is being sampled and
+  `· another area, 1 of 3` while a second area is; `learning, 2 of 3` before a rule exists;
+  `0 ms — yours`.
 - **The number is clickable** (`msField`): a number input in place, Enter or blur commits, and the
   entry keeps whatever it was — a learned one stays learned and goes on being adjusted from the new
   value. Only the ✕ and re-adding change an entry's kind. The ✕ removes it; a learned one comes back after three
@@ -280,6 +281,15 @@ design, `E22`).
 `panelOwns(e)` is the arbiter, and `onPinKey` / `onPinWheel` / the `scroll` cancel all defer to
 it: it owns whatever `composedPath()` says is inside it, and nothing else. Escape is the
 exception described above.
+
+**And the wheel stops at the panel's edge** (v0.112.0). Reported: scrolling the panel to its end
+and carrying on scrolled the page underneath. Two layers: `overscroll-behavior: contain` on
+`.body`, which stops the browser chaining the scroll out of that container, and a `wheel` listener
+on `.panel` (`passive: false`) that walks from the target up to the panel looking for anything
+that can still scroll in that direction — the body, the `.entries` list, a textarea — and calls
+`preventDefault()` when nothing can. The walk is what keeps a nested list scrollable when the body
+itself is at its end. The Browser pane's `scroll` action delivers no `wheel` events to the page at
+all, so this was verified by dispatching `WheelEvent`s and reading `defaultPrevented`.
 
 ### The whole background is the handle
 

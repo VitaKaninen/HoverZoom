@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.111.0
+// @version     0.112.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -4031,7 +4031,8 @@
     let suppressedCovered = false;
     let hoverAt = 0;            // when the current hover began
     let activeRect = null;      // where the picture was then; a player landing inside it is a late one
-    let activeRegion = '';      // regionKey() taken then — a player landing later changes the answer
+    let activeChain = '';       // domChain() taken then — a player landing later changes the answer
+    let activePath = '/';
     let holdMs = 0;             // the wait this hover is under: the site's learned one, or the grace
     let ruleMs = 0;             // the learned part alone; 0 when no rule applied to this hover
     let holding = false;        // still inside that wait
@@ -4221,95 +4222,165 @@
 
     // ---- the learned wait for a player that lands late. See E62.
 
-    const VDELAY_SAMPLES = 3;       // withdrawals measured before a site gets a wait
+    const VDELAY_SAMPLES = 3;       // flashes measured before an area gets a wait, or a wait grows
     const VDELAY_MARGIN = 1.25;     // the wait, as a multiple of the slowest arrival seen
     const VDELAY_STEP = 250;        // ms added when the wait turns out short
     const VDELAY_MAX = 10000;
     const VDELAY_POLL_MS = 100;     // how often the picture is checked for a player under it
     const PLAYER_GRACE_MS = 150;    // no preview before this, on any site: a player that lands at
                                     // once is seen by the poll first and never flashes
-    const VDELAY_ANY = '*';         // a region meaning the whole site
+    const CHAIN_DEPTH = 8;          // ancestors read into a picture's chain
+    const RULE_DEPTH = 4;           // levels a rule may pin; deeper is per-row noise
+    const RULE_MIN = 2;             // fewer shared levels is not the same area
+    const RULE_MAX = 6;             // areas one site may hold
+    const SAMPLE_MAX = 12;
 
     function vdRound(ms) {
         return Math.min(VDELAY_MAX, Math.max(VDELAY_STEP, Math.ceil(ms / 50) * 50));
     }
 
-    // One flash, folded into a site's entry. Three samples learn a wait; three more after a wait
-    // that applied make it longer; one where it did not apply widens it to the whole site.
-    function vdLearn(entry, elapsed, region) {
-        const e = entry ? JSON.parse(JSON.stringify(entry)) : { samples: [] };
-        if (e.user) return { entry: e, change: null };
-        const applied = e.ms != null && (e.region === VDELAY_ANY || e.region === region);
-        if (e.ms != null && !applied) {
-            e.region = VDELAY_ANY;
-            return { entry: e, change: 'widened' };
+    // The shared head of several '>'- or '/'-joined chains, as a count of levels.
+    function sharedLevels(list, sep) {
+        const split = list.map(function (c) { return c.split(sep); });
+        let n = 0;
+        outer: for (; n < split[0].length; n++) {
+            for (let i = 1; i < split.length; i++) if (split[i][n] !== split[0][n]) break outer;
         }
-        e.samples = (e.samples || []).concat([{ ms: elapsed, region: region }]);
-        if (e.samples.length < VDELAY_SAMPLES) return { entry: e, change: applied ? 'resampled' : 'sampled' };
-        const slowest = Math.max.apply(null, e.samples.map(function (x) { return x.ms; }));
-        const same = e.samples.every(function (x) { return x.region === region; });
-        delete e.samples;
-        if (applied) {
+        return n;
+    }
+
+    // The area several chains share: their common head, at least RULE_MIN and at most RULE_DEPTH
+    // levels. '' when they share too little to be one area.
+    function chainPrefix(chains) {
+        const n = sharedLevels(chains, '>');
+        if (n < RULE_MIN) return '';
+        return chains[0].split('>').slice(0, Math.min(n, RULE_DEPTH)).join('>');
+    }
+
+    // The page-path head several paths share; '/' when none.
+    function pathPrefix(paths) {
+        const n = sharedLevels(paths.map(function (p) { return p.replace(/^\//, ''); }), '/');
+        if (!n) return '/';
+        return '/' + paths[0].replace(/^\//, '').split('/').slice(0, n).join('/');
+    }
+
+    function chainMatches(chain, prefix) {
+        return !prefix || chain === prefix || chain.indexOf(prefix + '>') === 0;
+    }
+
+    function pathMatches(path, prefix) {
+        return !prefix || prefix === '/' || path === prefix || path.indexOf(prefix + '/') === 0;
+    }
+
+    // Entries written before v0.112.0 held one `region`; it becomes the one rule.
+    function vdNorm(e) {
+        if (!e || e.region === undefined) return e;
+        const n = Object.assign({}, e);
+        if (!n.user) n.rules = [{ dom: e.region === '*' ? '' : e.region, path: '/' }];
+        delete n.region;
+        return n;
+    }
+
+    // The rule of an entry that covers this hover, or null. A user's entry covers the whole site.
+    function vdRuleFor(e, chain, path) {
+        if (!e) return null;
+        if (e.user) return e;
+        const rules = e.rules || [];
+        for (let i = 0; i < rules.length; i++) {
+            if (chainMatches(chain, rules[i].dom) && pathMatches(path, rules[i].path)) return rules[i];
+        }
+        return null;
+    }
+
+    // One flash, folded into a site's entry. Under a rule that covers it: three make the wait
+    // longer. Under none: three from one area make that area a rule — the head its chains share,
+    // on the page-path they share — and a site may hold several. Nothing is ever site-wide.
+    function vdLearn(entry, elapsed, chain, path) {
+        const e = entry ? JSON.parse(JSON.stringify(vdNorm(entry))) : {};
+        if (e.user) return { entry: e, change: null };
+        if (vdRuleFor(e, chain, path)) {
+            e.fixes = (e.fixes || []).concat([{ ms: elapsed }]);
+            if (e.fixes.length < VDELAY_SAMPLES) return { entry: e, change: 'resampled' };
+            const slowest = Math.max.apply(null, e.fixes.map(function (x) { return x.ms; }));
+            delete e.fixes;
             e.ms = Math.min(VDELAY_MAX, Math.max(e.ms + VDELAY_STEP, vdRound(slowest * VDELAY_MARGIN)));
             return { entry: e, change: 'longer' };
         }
-        e.ms = vdRound(slowest * VDELAY_MARGIN);
-        e.region = same ? region : VDELAY_ANY;
-        return { entry: e, change: 'learned' };
+        // Samples that share no area with the newest belong to another area, or were noise.
+        const samples = (e.samples || []).concat([{ ms: elapsed, chain: chain, path: path }])
+            .filter(function (x) { return chainPrefix([x.chain, chain]) !== ''; })
+            .slice(-SAMPLE_MAX);
+        e.samples = samples;
+        if (samples.length < VDELAY_SAMPLES) return { entry: e, change: 'sampled' };
+        const slowest = Math.max.apply(null, samples.map(function (x) { return x.ms; }));
+        const rule = { dom: chainPrefix(samples.map(function (x) { return x.chain; })),
+                       path: pathPrefix(samples.map(function (x) { return x.path; })) };
+        delete e.samples;
+        e.rules = (e.rules || []).concat([rule]).slice(-RULE_MAX);
+        const ms = vdRound(slowest * VDELAY_MARGIN);
+        e.ms = e.ms == null ? ms : Math.max(e.ms, ms);
+        return { entry: e, change: e.rules.length === 1 ? 'learned' : 'another area' };
     }
 
     // The entry for a host: its own, else the most specific user entry covering it.
     function vdEntryFor(host) {
         const all = cfg.videoDelays || {};
-        if (all[host]) return all[host];
+        if (all[host]) return vdNorm(all[host]);
         let best = null, bestLen = 0;
         Object.keys(all).forEach(function (k) {
             if (all[k].user && entryCovers(k, host) && k.length > bestLen) { best = all[k]; bestLen = k.length; }
         });
-        return best;
+        return vdNorm(best);
     }
 
-    function nodeSig(n) {
+    // tag + every class, digits normalised to '#' and sorted: item-12 and item-13 are one shape.
+    function nodeSig(n, classes) {
+        let sig = n.tagName.toLowerCase();
+        if (!classes) return sig;
         const cls = [];
         for (let i = 0; n.classList && i < n.classList.length; i++) {
-            if (!/\d/.test(n.classList[i])) cls.push(n.classList[i]);
+            cls.push(n.classList[i].replace(/\d+/g, '#'));
         }
-        cls.sort();
-        return n.tagName.toLowerCase() + (cls.length ? '.' + cls.slice(0, 4).join('.') : '');
+        if (cls.length) sig += '.' + cls.sort().join('.');
+        return sig;
     }
 
-    // The shape of the card around a picture, up to the grid that holds its siblings.
-    function regionKey(el) {
+    // The picture's chain, outward: its own tag alone (its classes are load state), then ancestors.
+    function domChain(el) {
         const parts = [];
         let n = el;
-        for (let up = 0; n && n.nodeType === 1 && up < 8; up++, n = n.parentElement) {
-            parts.push(nodeSig(n));
-            if (up > 0 && n.querySelectorAll('img, video').length > 1) break;
+        for (let up = 0; n && n.nodeType === 1 && up < CHAIN_DEPTH && !/^(BODY|HTML)$/.test(n.tagName);
+             up++, n = n.parentElement) {
+            parts.push(nodeSig(n, up > 0));
         }
         return parts.join('>');
     }
 
+    // This frame's page path, normalised: no query, no trailing slash.
+    function pagePath() {
+        return '/' + String(location.pathname || '').split('/').filter(Boolean).join('/');
+    }
+
     // How long this hover waits for the page's own player before previewing. 0 = no wait.
-    function vdHoldFor(region) {
+    function vdHoldFor(chain, path) {
         const e = vdEntryFor(pageHost());
         if (!e || e.ms == null || !(e.ms > 0)) return 0;
-        if (e.region !== VDELAY_ANY && e.region !== region) return 0;
-        return e.ms;
+        return vdRuleFor(e, chain, path) ? e.ms : 0;
     }
 
     // Read-modify-write against storage, as saveAudio() does.
-    function vdRecord(region, elapsed) {
+    function vdRecord(chain, path, elapsed) {
         const host = pageHost();
         if (!host) return;
         reloadSettings();
-        const r = vdLearn(vdEntryFor(host), elapsed, region);
+        const r = vdLearn(vdEntryFor(host), elapsed, chain, path);
         if (!r.change) return;
         const all = Object.assign({}, cfg.videoDelays);
         all[host] = r.entry;
         cfg.videoDelays = all;
         saveSettings();
         refreshPanel();
-        dbg('late player: ' + r.change, { host: host, after: elapsed + ' ms', region: region, entry: r.entry });
+        dbg('late player: ' + r.change, { host: host, after: elapsed + ' ms', chain: chain, path: path, entry: r.entry });
     }
 
     const BAND_WIDTH = 0.98;    // of the viewport — a full-bleed band reaches both edges
@@ -4536,9 +4607,10 @@
                 const w = vdEntryFor(pageHost());
                 if (!w) return 'none — no entry for this site';
                 if (w.user) return (w.ms || 0) + ' ms, set by the user';
-                if (w.ms == null) return 'learning — ' + w.samples.length + ' of ' + VDELAY_SAMPLES + ' samples';
-                return w.ms + ' ms, learned, for ' + (w.region === VDELAY_ANY ? 'the whole site'
-                    : (el && w.region === regionKey(el) ? 'this area — applies' : 'another area — does not apply'));
+                if (w.ms == null) return 'learning — ' + (w.samples || []).length + ' of ' + VDELAY_SAMPLES + ' samples';
+                const r = el && vdRuleFor(w, domChain(el), pagePath());
+                return w.ms + ' ms, learned, ' + (w.rules || []).length + ' area(s) — ' +
+                    (r ? 'applies here (' + r.dom + ' on ' + r.path + ')' : 'none covers this picture on ' + pagePath());
             })(),
             backgroundGate: t.tagName === 'IMG' || t.tagName === 'VIDEO'
                 ? (pinnedWallpaperReason(t) || 'n/a — not a background')
@@ -4571,7 +4643,7 @@
         holdMs = 0;
         ruleMs = 0;
         activeRect = null;
-        activeRegion = '';
+        activeChain = '';
         if (token) token.cancelled = true;
         token = null;
         active = null;
@@ -4678,7 +4750,8 @@
 
         if (active) selfClosed('something else took its place: ' + el.tagName, e.clientX, e.clientY);
         cancel();
-        const region = regionKey(el);
+        const chain = domChain(el);
+        const path = pagePath();
         const displayed = sizeOf(el);
         if (displayed.w < cfg.minDisplayed && displayed.h < cfg.minDisplayed) return;
 
@@ -4687,8 +4760,9 @@
         activeShown = shownUrl(el);
         hoverAt = Date.now();
         activeRect = el.getBoundingClientRect();
-        activeRegion = region;
-        ruleMs = vdHoldFor(activeRegion);
+        activeChain = chain;
+        activePath = path;
+        ruleMs = vdHoldFor(chain, path);
         holdMs = Math.max(ruleMs, PLAYER_GRACE_MS);
         holding = true;
         // A player landing under a still pointer raises no mouse event worth waiting for. See E61.
@@ -4771,7 +4845,7 @@
         const elapsed = Date.now() - hoverAt;
         dbg('the page took the preview away — ' + why,
             { after: elapsed + ' ms', waited: ruleMs ? ruleMs + ' ms, learned' : 'the grace only' });
-        vdRecord(activeRegion, elapsed);
+        vdRecord(activeChain, activePath, elapsed);
     }
 
     // The picture itself went, and a player is where it was: the same withdrawal, seen from the
@@ -5904,7 +5978,7 @@
             'color:' + C.text + ';border:1px solid ' + C.surface2 + ';',
             'border-radius:10px;box-shadow:0 18px 60px rgba(0,0,0,.75);font-size:13px;',
             'pointer-events:auto}',
-            '.body{flex:1 1 auto;min-height:0;overflow:auto;padding:14px 20px 16px}',
+            '.body{flex:1 1 auto;min-height:0;overflow:auto;padding:14px 20px 16px;overscroll-behavior:contain}',
             // The title bar is OUTSIDE the scroller, or it is gone the moment you scroll.
             '.head{flex:none;margin:0;display:flex;align-items:baseline;gap:8px;cursor:move;',
             'padding:10px 20px 9px;font-size:15px;font-weight:600;color:' + C.text + ';',
@@ -6072,6 +6146,16 @@
 
         const body = document.createElement('div');
         body.className = 'body';
+        // The wheel stops at the panel's edge: when nothing inside can scroll further that way,
+        // the page underneath must not take it.
+        panel.addEventListener('wheel', function (e) {
+            const down = e.deltaY > 0;
+            for (let n = e.target; n && n !== panel; n = n.parentElement) {
+                if (n.scrollHeight > n.clientHeight + 1 &&
+                    (down ? n.scrollTop + n.clientHeight < n.scrollHeight - 1 : n.scrollTop > 0)) return;
+            }
+            e.preventDefault();
+        }, { passive: false });
         panel.appendChild(body);
 
         // What Undo goes back to: the whole object as it stood when the panel was OPENED — which
@@ -6220,8 +6304,14 @@
             function describe(e) {
                 if (e.user) return ' — yours';
                 if (e.ms == null) return 'learning, ' + (e.samples || []).length + ' of ' + VDELAY_SAMPLES;
-                return ' — learned, ' + (e.region === VDELAY_ANY ? 'whole site' : 'one area') +
-                    (e.samples ? ' · updating, ' + e.samples.length + ' of ' + VDELAY_SAMPLES : '');
+                const rules = e.rules || [];
+                const paths = [];
+                rules.forEach(function (r) { if (paths.indexOf(r.path) === -1) paths.push(r.path); });
+                const where = paths.length === 1 && paths[0] === '/' ? 'any page'
+                    : paths.slice(0, 2).join(', ') + (paths.length > 2 ? ', …' : '');
+                return ' — learned, ' + (rules.length === 1 ? 'one area' : rules.length + ' areas') + ' on ' + where +
+                    (e.fixes ? ' · updating, ' + e.fixes.length + ' of ' + VDELAY_SAMPLES : '') +
+                    (e.samples && e.samples.length ? ' · another area, ' + e.samples.length + ' of ' + VDELAY_SAMPLES : '');
             }
 
             // Click the number to change it. A learned entry stays learned: the script goes on
@@ -6248,7 +6338,7 @@
                         if (!isNaN(v) && v !== e.ms) {
                             const all = Object.assign({}, cfg.videoDelays);
                             const ne = Object.assign({}, e, { ms: Math.max(0, Math.min(VDELAY_MAX, v)) });
-                            delete ne.samples;
+                            delete ne.fixes;
                             all[host] = ne;
                             cfg.videoDelays = all;
                             persist();
@@ -6315,7 +6405,7 @@
                 Object.keys(cfg.videoDelays || {}).forEach(function (k) {
                     if (!(!cfg.videoDelays[k].user && entryCovers(host, k))) all[k] = cfg.videoDelays[k];
                 });
-                all[host] = { ms: Math.max(0, Math.min(VDELAY_MAX, v)), region: VDELAY_ANY, user: true };
+                all[host] = { ms: Math.max(0, Math.min(VDELAY_MAX, v)), user: true };
                 cfg.videoDelays = all;
                 persist();
                 input.value = '';
@@ -6751,9 +6841,9 @@
             heading: 'Wait for the page’s own video preview on these sites',
             description: 'Some sites play their own video over a thumbnail a moment after the ' +
                 'pointer lands on it, which closes a preview that had already opened. After a ' +
-                'few of those the site is added here with the delay measured, and previews there ' +
-                'wait that long. Add a site yourself to set the wait by hand; 0 ms stops the ' +
-                'script learning anything for it.',
+                'few of those the site is added here with the delay measured, and previews in ' +
+                'that area of those pages wait that long. Add a site yourself to set a wait for ' +
+                'the whole site by hand; 0 ms stops the script learning anything for it.',
             examples: 'example.com also covers www.example.com. Adding a site again replaces its entry.',
         });
 

@@ -845,49 +845,69 @@ eq('pageNumOf reads a /pN path', pageNumOf(new URL('https://ex.com/g/p7')), 7);
 eq('pageNumOf refuses a bare filename number',
     pageNumOf(new URL('https://ex.com/g/pager-2.html')), 0);
 
-// ---- the learned wait for a late player (E62). vdLearn() is arithmetic on a stored entry and
-// reads no DOM, so every transition the panel can show is asserted here.
+// ---- the learned wait for a late player (E62). Everything up to `vdEntryFor` is arithmetic on a
+// stored entry and reads no DOM, so every transition the panel can show is asserted here.
 const vdStart = src.indexOf('    const VDELAY_SAMPLES');
 const vdEnd = src.indexOf('    // The entry for a host');
 if (vdStart < 0 || vdEnd < 0) { console.error('vdLearn markers not found'); process.exit(1); }
 const vd = new Function(src.slice(vdStart, vdEnd) +
-    NL + 'return {vdLearn, vdRound, VDELAY_SAMPLES, VDELAY_ANY};')();
+    NL + 'return {vdLearn, vdRound, vdRuleFor, vdNorm, chainPrefix, pathPrefix, chainMatches, pathMatches, VDELAY_SAMPLES};')();
 
 eq('vdRound rounds up to 50 ms', vd.vdRound(1001), 1050);
 eq('vdRound never goes under one step', vd.vdRound(10), 250);
 eq('vdRound is capped', vd.vdRound(99999), 10000);
 
-let e = vd.vdLearn(null, 800, 'r1');
+// Chains as domChain() writes them: the picture's tag alone, then tag.classes outward.
+const C1 = 'img>a.thumb>div.card.item-#>div.grid>main>div.page';
+const C2 = 'img>a.thumb>div.card.item-#.watched>div.grid>main>div.page';   // a row with a state class
+const C3 = 'img>a.thumb>div.card.item-#>div.grid>main.narrow>div.page';    // deeper variation
+const SIDE = 'img>a>li.related>ul.sidebar>aside>div.page';
+eq('the shared head of one area, capped at 4 levels', vd.chainPrefix([C1, C3]), 'img>a.thumb>div.card.item-#>div.grid');
+eq('a state class on the card stops the prefix there', vd.chainPrefix([C1, C2]), 'img>a.thumb');
+eq('too little in common is no area', vd.chainPrefix([C1, SIDE]), '');
+eq('a prefix matches a chain that starts with it', vd.chainMatches(C3, 'img>a.thumb>div.card.item-#>div.grid'), true);
+eq('  and not one that merely shares a tag', vd.chainMatches(SIDE, 'img>a.thumb'), false);
+eq('  an empty prefix matches anything', vd.chainMatches(SIDE, ''), true);
+eq('paths share their head', vd.pathPrefix(['/videos/page/2', '/videos/page/3', '/videos']), '/videos');
+eq('  nothing in common is the root', vd.pathPrefix(['/videos', '/photos']), '/');
+eq('a path prefix matches by segment', vd.pathMatches('/videos/page/7', '/videos'), true);
+eq('  not by string', vd.pathMatches('/videos-of-cats', '/videos'), false);
+eq('  the root matches everything', vd.pathMatches('/photos', '/'), true);
+
+let e = vd.vdLearn(null, 800, C1, '/videos');
 eq('first flash starts sampling', e.change, 'sampled');
-eq('  and stores it', e.entry, { samples: [{ ms: 800, region: 'r1' }] });
-e = vd.vdLearn(e.entry, 1000, 'r1');
-eq('second flash is still sampling', e.change, 'sampled');
-e = vd.vdLearn(e.entry, 900, 'r1');
+e = vd.vdLearn(e.entry, 1000, C2, '/videos/page/2');
+eq('second flash, same area, other row', e.change, 'sampled');
+e = vd.vdLearn(e.entry, 900, C3, '/videos/page/3');
 eq('third flash writes the rule', e.change, 'learned');
-eq('  slowest arrival × 1.25, for the one region', e.entry, { ms: 1250, region: 'r1' });
+eq('  the shared head of the three, on the shared path, slowest × 1.25', e.entry,
+    { rules: [{ dom: 'img>a.thumb', path: '/videos' }], ms: 1250 });
+eq('  a fourth row on page 9 is covered', !!vd.vdRuleFor(e.entry, C1, '/videos/page/9'), true);
+eq('  the same markup on the photos page is NOT', !!vd.vdRuleFor(e.entry, C1, '/photos'), false);
 
-let mixed = vd.vdLearn(vd.vdLearn(vd.vdLearn(null, 800, 'r1').entry, 1000, 'r2').entry, 900, 'r1');
-eq('samples from different regions learn a whole-site wait', mixed.entry, { ms: 1250, region: vd.VDELAY_ANY });
+let side = vd.vdLearn(vd.vdLearn(vd.vdLearn(e.entry, 600, SIDE, '/watch/1').entry, 650, SIDE, '/watch/2').entry, 700, SIDE, '/watch/3');
+eq('three flashes elsewhere are another area, never the whole site', side.change, 'another area');
+eq('  the site now holds two rules and the longer wait', side.entry,
+    { rules: [{ dom: 'img>a.thumb', path: '/videos' }, { dom: 'img>a>li.related>ul.sidebar', path: '/watch' }], ms: 1250 });
 
-let late = vd.vdLearn({ ms: 1250, region: 'r1' }, 1400, 'r1');
-eq('a flash after the wait starts an update', late.change, 'resampled');
-eq('  the wait stands while it samples', late.entry, { ms: 1250, region: 'r1', samples: [{ ms: 1400, region: 'r1' }] });
-late = vd.vdLearn(vd.vdLearn(late.entry, 1300, 'r1').entry, 1350, 'r1');
+let noise = vd.vdLearn(vd.vdLearn(null, 800, C1, '/v').entry, 700, SIDE, '/v');
+eq('a sample from a different area drops the earlier one', noise.entry.samples.length, 1);
+
+let late = vd.vdLearn(e.entry, 1400, C1, '/videos/page/4');
+eq('a flash under a rule starts an update', late.change, 'resampled');
+eq('  the wait stands while it samples', late.entry.fixes, [{ ms: 1400 }]);
+late = vd.vdLearn(vd.vdLearn(late.entry, 1300, C2, '/videos').entry, 1350, C3, '/videos');
 eq('the third makes it longer', late.change, 'longer');
-eq('  by a step, or to the slowest × 1.25, whichever is more', late.entry, { ms: 1750, region: 'r1' });
-let small = vd.vdLearn(vd.vdLearn(vd.vdLearn({ ms: 1250, region: 'r1' }, 1100, 'r1').entry, 1050, 'r1').entry, 1000, 'r1');
-eq('a small overrun still adds a whole step', small.entry.ms, 1500);
-let zero = vd.vdLearn(vd.vdLearn(vd.vdLearn({ ms: 0, region: 'r1' }, 700, 'r1').entry, 700, 'r1').entry, 700, 'r1');
-eq('a learned wait the user set to 0 is still adjusted', zero.entry, { ms: 900, region: 'r1' });
+eq('  by a step, or to the slowest × 1.25, whichever is more', late.entry, { rules: [{ dom: 'img>a.thumb', path: '/videos' }], ms: 1750 });
+let zero = vd.vdLearn(vd.vdLearn(vd.vdLearn({ ms: 0, rules: [{ dom: 'img>a.thumb', path: '/' }] }, 700, C1, '/x').entry, 700, C1, '/x').entry, 700, C1, '/x');
+eq('a learned wait the user set to 0 is still adjusted', zero.entry.ms, 900);
 
-let wide = vd.vdLearn({ ms: 1250, region: 'r1' }, 700, 'r2');
-eq('a flash the region did not cover widens it to the site at once', wide.change, 'widened');
-eq('  the wait is unchanged', wide.entry, { ms: 1250, region: vd.VDELAY_ANY });
-eq('a whole-site rule applies everywhere, so it resamples instead',
-    vd.vdLearn({ ms: 1250, region: vd.VDELAY_ANY }, 700, 'r2').change, 'resampled');
+eq('an old one-region entry becomes one rule', vd.vdNorm({ ms: 900, region: 'img>div.card' }), { ms: 900, rules: [{ dom: 'img>div.card', path: '/' }] });
+eq('  an old whole-site one covers everything', !!vd.vdRuleFor(vd.vdNorm({ ms: 900, region: '*' }), SIDE, '/anything'), true);
 
-eq('a user entry is never touched', vd.vdLearn({ ms: 0, region: vd.VDELAY_ANY, user: true }, 700, 'r2').change, null);
-eq('  whatever its wait', vd.vdLearn({ ms: 2000, region: vd.VDELAY_ANY, user: true }, 3000, 'r2').change, null);
+eq('a user entry covers the whole site', !!vd.vdRuleFor({ ms: 500, user: true }, SIDE, '/anything'), true);
+eq('a user entry is never touched', vd.vdLearn({ ms: 0, user: true }, 700, C1, '/v').change, null);
+eq('  whatever its wait', vd.vdLearn({ ms: 2000, user: true }, 3000, C1, '/v').change, null);
 
 // ---- the captcha gate reads only the frame's own URL and whether it is the top frame.
 const cStart = src.indexOf('    const CAPTCHA_HERE');

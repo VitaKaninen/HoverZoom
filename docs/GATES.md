@@ -365,44 +365,47 @@ appears within 100 ms of a hover, even when it is supposed to, so adding this de
 doesn't really cost anything."* v0.108.0 instead *remembered* areas whose player beat the preview;
 the grace makes that state unnecessary and it was removed.
 
-**The record.** `cfg.videoDelays` is `host → {ms, region, user, samples}`; `vdLearn()` is the whole
-arithmetic and is asserted in `test-resolver.js`:
+**The record** (v0.112.0, the shape borrowed from Forum Stumbler's `sigDeep` /
+`derivePositionPrefixes` / site `prefixes`). `cfg.videoDelays` is
+`host → {ms, rules: [{dom, path}], samples, fixes, user}`; everything up to `vdEntryFor` is
+arithmetic on that object and is asserted in `test-resolver.js`:
 
-- **Learning.** Each trigger not covered by a learned wait appends `{ms, region}` to `samples`. At
-  `VDELAY_SAMPLES` (3) the entry becomes `{ms: slowest × 1.25 rounded up to 50, region}` — the
-  region if all three agree, `'*'` (the whole site) if they do not. Samples persist, because three
-  hovers on one page is not a given.
-- **Applying.** `vdHoldFor(region)` gives the learned wait when the entry's region is `'*'` or equal
-  to this hover's; `holdMs` is that or the grace, whichever is longer, and `ruleMs` is the learned
-  part alone. During the wait nothing appears — no ring either — but the resolve runs, its best hit
-  is kept in `heldHit`, and the wait's timer paints it (or shows the ring if still resolving, or the
-  failure display) the moment it ends. A close inside the wait is the wait working: logged, not
-  recorded.
-- **Correcting.** A trigger on a thumbnail the rule's region covers is a timing miss: it is
-  sampled like the first three (`samples` alongside `ms`, the panel says `updating, n of 3`, and
-  the wait stands meanwhile), and the third makes `ms` `max(ms + 250, slowest × 1.25)`. A trigger
-  on a thumbnail the region did **not** cover is a shape miss: the region becomes `'*'` at once.
-  Whether the region matched decides — not the wait's length, so a learned wait the user has set
-  to 0 is still adjusted. v0.109.0 lengthened on the first miss, with nothing in the panel to say
-  it was happening; the user watched 750 climb to 2650 without knowing whether it was working.
+- **A picture's chain** (`domChain()`): its own tag alone — its classes are load state — then up
+  to 7 ancestors as `tag.class.class`, every class kept, **digits normalised to `#`** and sorted,
+  stopping at `<body>`. `item-12` and `item-13` are one shape; the 4-class cap and the "stop at
+  the grid" heuristic of v0.106.0 are gone — the latter stopped one level early whenever a card
+  still held the site's player from an earlier hover, which is how a same-layout page 2 failed to
+  match page 1 and the rule went site-wide.
+- **A rule is a prefix, not a key.** Three flashes whose chains share at least `RULE_MIN` (2)
+  levels become a rule: `dom` = their common head capped at `RULE_DEPTH` (4) levels, `path` = the
+  common head of the pages' paths (`/videos/page/2`, `/videos/page/3`, `/videos` → `/videos`; `/`
+  when nothing is shared). A hover is covered when its chain **starts with** `dom` and the page
+  path starts with `path`, by segment. Deeper per-row variation cannot break it; the photo page of
+  the same site, with the same card markup, is a different `path` and is not covered. The user's
+  framing: *"it is really only dedicated video pages where I expect this to be a problem."*
+- **Nothing is ever site-wide.** A flash no rule covers is a sample for *another area*; samples
+  that share no head with the newest are dropped (another area, or noise); three of one area add
+  a rule (up to `RULE_MAX`, 6) and raise `ms` to the new area's figure if it is higher. v0.106.0–
+  v0.111.0 widened to the whole site on the first uncovered flash, which on a site with a photo
+  section is exactly wrong; only a user's own entry covers a whole site now.
+- **Correcting.** A flash on a covered picture is sampled (`fixes`, the panel says
+  `updating, n of 3`, the wait stands meanwhile); the third makes `ms`
+  `max(ms + 250, slowest × 1.25)`. One `ms` per site, shared by its areas — the slowest wins.
 - **A flash within 2.5 s of a press or key is the user's doing** (`lastUserAct`, `USER_QUIET_MS`)
   and never counts. Found on Google's captcha interstitial: a clicked tile swaps its picture under
   the pointer, which is a page-driven close in every respect except cause, and `google.com` had a
   learning entry before Google Images was ever hovered.
-- **The user's entries** (`user: true`, from the panel) are never written by the script; adding
-  one removes every learned entry it covers; **0 ms** turns learning off for the site. Lookup
-  (`vdEntryFor`) is the host's own key, else the most specific user entry that covers it. The
-  number on a *learned* row can be clicked and changed in place; that keeps it learned, so the
-  script goes on adjusting from the new value — the way to try a lower wait without giving up the
-  corrections.
+- **The user's entries** (`user: true`, from the panel) cover the whole site, are never written
+  by the script, and adding one removes every learned entry it covers; **0 ms** turns learning off
+  for the site. Lookup (`vdEntryFor`) is the host's own key, else the most specific user entry that
+  covers it. The number on a *learned* row can be clicked and changed in place; that keeps it
+  learned, so the script goes on adjusting from the new value.
+- **Old entries** (`{ms, region}`, v0.106.0–v0.111.0) are read through `vdNorm()`: the region
+  becomes one rule on `/`; `'*'` becomes a rule with an empty `dom`, which matches everything.
 
-**The region** (`regionKey()`) is structural — tag plus digit-free class names, from the picture
-up to the first ancestor holding more than one `img`/`video`, at most 8 levels. Pixel rectangles
-would not survive a scroll, let alone a reload; digit-bearing classes are usually build hashes.
-When the key is the wrong shape the site-wide fallback is the safety net, so it need not be
-clever. **It is taken once, at hover time (`activeRegion`).** Computed at close it stops at the
-card — the card now contains the `<video>` — and never equals the hover-time key, so every site
-"widens" on its fourth hover. Found in the first browser run.
+**The chain is taken once, at hover time (`activeChain`, `activePath`).** Computed at close it is
+a different chain — the card now contains the `<video>` — and the rule never matches. Found in the
+first browser run of v0.106.0.
 
 **The poll** (`watchTimer`, 100 ms, only while a hover is pending or open) is what makes the
 timings honest under a still pointer — the normal case. Without it the first sample measured
@@ -411,7 +414,8 @@ moved. It asks two things: is the picture still in the document, and is a player
 
 `test-pages/late-player.html` is the fixture: grid A lands a player at 600 ms (`?slow`: 1200;
 `?instant`: 0; `?swap`: the thumbnail is *replaced* by a muted looping clip), grid B never does.
-Measured there: three samples at ~700 ms learn 900 ms for `img>div.card.video>div.grid`; A4 then
+Measured there: three samples at ~700 ms learn 900 ms for
+`{dom: img>div.card.video>div.grid, path: /test-pages/late-player.html}`; A4 then
 waits 900, the player lands at 714, nothing opens; B1 opens at once; on `?slow` A1 opens at 900
 and is withdrawn at 1302 → 1650 ms; on `?instant` A1 is withdrawn at 123 ms inside the grace and
 nothing is stored; on `?swap` the same three samples arrive by the re-target and `isConnected`
