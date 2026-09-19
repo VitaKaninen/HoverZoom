@@ -103,7 +103,9 @@ ancestor-link candidate ever comes back missing on a shadow-DOM site.
   `window`** — the hover-then-arrow path (`T29`) is a `document` listener and an event dispatched
   at `window` never reaches it, which reads as "→ does not pin". Cost one round.
 - **`test-pages/late-player.html` is the learned-wait fixture** (`E62`, v0.106.0): grid A lands a
-  player on every card 600 ms in (`?slow`: 1200), grid B never does, and the page prints the
+  player on every card 600 ms in (`?slow`: 1200; `?instant`: 0, which the grace must swallow with
+  nothing stored; `?swap`: the thumbnail is replaced by a looping clip, which no player gate sees
+  and the trigger must still catch), grid B never does, and the page prints the
   stored entry for `localhost` with a "Forget this site" button. The expected numbers are in
   [`GATES.md`](GATES.md) under `E62`. Hover with the pointer **still** — that is the user's
   case, and the poll is what makes the timing right there. The Browser pane maps hover

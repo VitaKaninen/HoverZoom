@@ -220,8 +220,8 @@ as the referrer and what `pageHost()` returns.
   host covers (`entryCovers`), so a user's `example.com` retires the script's `www.example.com`
   and the script never re-learns under it (`vdEntryFor` answers with the user's). Adding a host
   that is already there replaces it — that is how the number is changed.
-- **Each row says where it came from:** `one area excluded · 1250 ms wait, one area — learned`
-  (either half alone is common), `learning a wait, 2 of 3 — learned`, or `0 ms — yours`. The ✕ removes it; a learned one comes back after three
+- **Each row says where it came from:** `1250 ms — learned, one area` / `whole site`,
+  `learning, 2 of 3`, or `0 ms — yours`. The ✕ removes it; a learned one comes back after three
   more withdrawals, which is the point of adding a 0 ms entry instead.
 - The script's own writes go through `vdRecord()` → `refreshPanel()`, so an open panel shows a
   sample landing. `RESET_KEEPS` includes it; Undo restores it with everything else.

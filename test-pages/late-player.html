@@ -14,8 +14,12 @@
   ?slow — grid A's player lands at 1200 ms instead. On a page that has already learned 750 ms,
   the preview opens after the wait and is then withdrawn; that withdrawal makes the wait longer.
 
-  ?instant — grid A's player lands at 0 ms, before any preview could open. The first hover on
-  grid A excludes its area: no sampling, no wait, and no later hover there opens anything.
+  ?instant — grid A's player lands at 0 ms. The grace (nothing paints before 150 ms) sees it
+  first: no preview, no ring, and NOTHING is recorded — a flash that never happened teaches nothing.
+
+  ?swap — grid A REPLACES the thumbnail with a muted looping clip at 600 ms (an animated
+  picture, not a player, so no player gate sees it). The preview still closes on its own with the
+  pointer where the picture was, and that is the trigger: it teaches the wait like any other.
 
   "Forget this site" removes the learned entry for localhost and reloads.
   The page sets debug in localStorage on load, for the page copy of the script.
@@ -54,14 +58,23 @@
 <script>
   var landAt = location.search.indexOf('slow') >= 0 ? 1200
              : location.search.indexOf('instant') >= 0 ? 0 : 600;
+  var swap = location.search.indexOf('swap') >= 0;
   document.getElementById('expect').textContent =
     'Grid A lands a player ' + landAt + ' ms after the pointer arrives. Hover A1–A3: each opens and is ' +
     'withdrawn. From then on grid A waits before previewing; grid B never waits.';
 
   document.querySelectorAll('#a .card').forEach(function (card) {
-    var timer = 0, cv = null, v = null;
+    var timer = 0, cv = null, v = null, img = card.querySelector('img');
     card.addEventListener('mouseenter', function () {
       timer = setTimeout(function () {
+        if (swap) {
+          v = document.createElement('video');
+          v.muted = true; v.loop = true; v.autoplay = true;
+          v.src = '/test-images/clip-2s.mp4';
+          v.style.cssText = 'display:block;width:200px;height:150px;background:#000';
+          card.replaceChild(v, img);
+          return;
+        }
         cv = document.createElement('div');
         cv.className = 'cover';
         v = document.createElement('video');
@@ -74,6 +87,7 @@
     });
     card.addEventListener('mouseleave', function () {
       clearTimeout(timer);
+      if (swap && v) { card.replaceChild(img, v); v = null; return; }
       if (v) { v.pause(); v = null; }
       if (cv) { cv.remove(); cv = null; }
     });

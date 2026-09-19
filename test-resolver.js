@@ -851,7 +851,7 @@ const vdStart = src.indexOf('    const VDELAY_SAMPLES');
 const vdEnd = src.indexOf('    // The entry for a host');
 if (vdStart < 0 || vdEnd < 0) { console.error('vdLearn markers not found'); process.exit(1); }
 const vd = new Function(src.slice(vdStart, vdEnd) +
-    NL + 'return {vdLearn, vdSkip, vdRound, VDELAY_SAMPLES, VDELAY_ANY, VDELAY_SKIPS};')();
+    NL + 'return {vdLearn, vdRound, VDELAY_SAMPLES, VDELAY_ANY};')();
 
 eq('vdRound rounds up to 50 ms', vd.vdRound(1001), 1050);
 eq('vdRound never goes under one step', vd.vdRound(10), 250);
@@ -880,19 +880,6 @@ eq('a withdrawal the region did not cover widens it to the site', wide.change, '
 eq('  the wait is unchanged', wide.entry, { ms: 1250, region: vd.VDELAY_ANY });
 eq('a whole-site rule not in force cannot widen further',
     vd.vdLearn({ ms: 1250, region: vd.VDELAY_ANY }, 700, 'r2', false).change, null);
-
-let sk = vd.vdSkip(null, 'r1');
-eq('a player that beat the preview excludes the area at once', sk, { entry: { skip: ['r1'] }, change: 'excluded' });
-eq('  the same area again changes nothing', vd.vdSkip(sk.entry, 'r1').change, null);
-eq('  a second area joins it', vd.vdSkip(sk.entry, 'r2').entry.skip, ['r1', 'r2']);
-let both = vd.vdLearn(vd.vdLearn(vd.vdLearn(sk.entry, 800, 'r3', false).entry, 900, 'r3', false).entry, 900, 'r3', false);
-eq('a wait learned on the same site keeps the excluded areas', both.entry, { skip: ['r1'], ms: 1150, region: 'r3' });
-eq('  and an exclusion added after keeps the wait', vd.vdSkip(both.entry, 'r4').entry, { skip: ['r1', 'r4'], ms: 1150, region: 'r3' });
-let many = null;
-for (let i = 0; i < vd.VDELAY_SKIPS + 3; i++) many = vd.vdSkip(many, 'r' + i).entry;
-eq('excluded areas are capped, oldest dropped', many.skip.length, vd.VDELAY_SKIPS);
-eq('  keeping the newest', many.skip[many.skip.length - 1], 'r' + (vd.VDELAY_SKIPS + 2));
-eq('a user entry is never excluded from', vd.vdSkip({ ms: 0, region: vd.VDELAY_ANY, user: true }, 'r1').change, null);
 
 eq('a user entry is never touched', vd.vdLearn({ ms: 0, region: vd.VDELAY_ANY, user: true }, 700, 'r2', false).change, null);
 eq('  whatever its wait', vd.vdLearn({ ms: 2000, region: vd.VDELAY_ANY, user: true }, 3000, 'r2', true).change, null);

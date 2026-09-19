@@ -335,41 +335,52 @@ exception. `test-pages/inline-player.html` holds both shapes: dormant (nothing o
 Case 30 is the negative bound (two pictures under one cover → no preview); case 31 puts text over a
 background and must not reach through to it.
 
-### A site that lands players late is learned, and waited for · `E62` · v0.106.0
+### A site that lands players late is learned, and waited for · `E62` · v0.106.0–v0.109.0
 
-Asked for after a site whose thumbnails start a muted clip about a second into the hover: every
-hover opened a preview that the withdrawal above closed a second later — correct, and useless.
-The user's design, built as stated: notice the withdrawal, sample a few, then wait that long on
-that site before showing anything.
+Asked for after a site whose thumbnails start a clip about a second into the hover: every hover
+opened a preview that then closed a second later — correct, and useless. The design is the user's,
+and it took four versions to build it as stated, because the first three keyed learning to *how*
+the preview closed instead of *what the user saw*. The rule that survived:
 
-**The record.** `cfg.videoDelays` is `host → {skip, ms, region, user, samples}`. `vdSkip()` and
-`vdLearn()` are the whole arithmetic and are asserted in `test-resolver.js`. Which one a
-withdrawal feeds is decided by when the player came, relative to the preview (`withdrawn()`):
+**The trigger is a preview that was on screen closing with the pointer still on the picture.**
+`selfClosed(why, x, y)`: `box` has `on`, the hover is not placed, not inside a wait, and (x, y) is
+strictly inside `activeRect` — the rectangle the picture had when the hover began. That is "the
+script created a preview and removed it on its own"; the user never left. It is called from every
+page-driven close: the picture no longer under the pointer (`onOver`'s ineligible branch), something
+else eligible in its place (`onOver`'s re-target — a muted looping clip swapped in for the
+thumbnail lands here, and no player gate would ever see it), a mouseout that left the pointer
+where it was (`onOut`), the picture removed from the document (the poll, `isConnected`), and the
+three player-detection paths (`withdrawn()`). Never from Escape, a right-click, a scroll, a blur,
+the modifier's keyup or `verifyMedia`'s size mismatch — those are not call sites. Keying on the
+visible event is what closes the loop: **a rule that is wrong is corrected by the flash it failed
+to prevent**, whatever path closed it. v0.106.0–v0.108.0 recorded only the three player paths, so
+on a site that closed the preview another way the rule sat at a wrong number "and keeps showing
+the preview flashes" (the user, on v0.106.0).
 
-- **It beat the preview → the area is excluded** (`skip`, v0.108.0). The hit callback's
-  `playerArrived()` check, the poll, or a mouse event saw a player before anything painted, so the
-  answer was known at hover time and there is nothing a wait could add: `regionKey()` joins the
-  site's `skip` list on the first sighting (capped at `VDELAY_SKIPS`, oldest dropped), and
-  `onOver` returns before the resolve for any hover whose key is in it — no probes, no ring, no
-  poll. v0.106.0 counted these as wait samples and v0.107.0 ignored them; the user's objection to
-  both was the same: *"if we already know, can't we just have images such as that excluded to
-  begin with?"* The cost, once: an area mixing image cards with video cards loses the image
-  previews too. The ✕ in the panel is the answer to that.
-- **It landed on an open preview → a sample for the wait.** Each such withdrawal not caught by a
-  wait appends `{ms, region}` to `samples`. At
+**The grace.** No preview paints before `PLAYER_GRACE_MS` (150 ms, the ring's own delay) after the
+hover, on any site, with the poll checking underneath. A player that lands at once is seen first
+and never flashes — and so never teaches, which is right: nothing was seen. Costs at most ~30 ms
+on a cached hit (the resolve starts at `hoverDelay` = 120). The user's call: *"our preview never
+appears within 100 ms of a hover, even when it is supposed to, so adding this delay seems like it
+doesn't really cost anything."* v0.108.0 instead *remembered* areas whose player beat the preview;
+the grace makes that state unnecessary and it was removed.
+
+**The record.** `cfg.videoDelays` is `host → {ms, region, user, samples}`; `vdLearn()` is the whole
+arithmetic and is asserted in `test-resolver.js`:
+
+- **Learning.** Each trigger not covered by a learned wait appends `{ms, region}` to `samples`. At
   `VDELAY_SAMPLES` (3) the entry becomes `{ms: slowest × 1.25 rounded up to 50, region}` — the
-  region if all three agree, `'*'` (the whole site) if they do not. The samples persist, because
-  three hovers on one page is not a given.
-- **Applying.** `vdHoldFor(region)` gives the wait when the entry's region is `'*'` or equal to
-  this hover's. During it nothing appears — no ring either, since a ring that spins and vanishes
-  on every thumbnail is the noise this removes — but the resolve runs, its best hit is kept in
-  `heldHit`, and the wait's timer paints it (or shows the ring if still resolving, or the failure
-  display) the moment it ends. A player landing inside the wait is `withdrawn()` "during the
-  wait": logged, not recorded — that is the wait working.
-- **Correcting.** Same rule — only a shown preview's withdrawal corrects. One *after* a wait that applied is a timing miss: `ms` becomes
-  `max(ms + 250, elapsed × 1.25)`. A withdrawal on a thumbnail the region did **not** cover is a
-  shape miss: the region becomes `'*'`. Which of the two is decided by whether `holdMs` was set
-  for that hover, nothing else.
+  region if all three agree, `'*'` (the whole site) if they do not. Samples persist, because three
+  hovers on one page is not a given.
+- **Applying.** `vdHoldFor(region)` gives the learned wait when the entry's region is `'*'` or equal
+  to this hover's; `holdMs` is that or the grace, whichever is longer, and `ruleMs` is the learned
+  part alone. During the wait nothing appears — no ring either — but the resolve runs, its best hit
+  is kept in `heldHit`, and the wait's timer paints it (or shows the ring if still resolving, or the
+  failure display) the moment it ends. A close inside the wait is the wait working: logged, not
+  recorded.
+- **Correcting.** A trigger after a wait that applied (`ruleMs > 0`) is a timing miss: `ms` becomes
+  `max(ms + 250, elapsed × 1.25)`. A trigger on a thumbnail the region did **not** cover is a shape
+  miss: the region becomes `'*'`. Which of the two is decided by `ruleMs`, nothing else.
 - **The user's entries** (`user: true`, from the panel) are never written by the script; adding
   one removes every learned entry it covers; **0 ms** turns learning off for the site. Lookup
   (`vdEntryFor`) is the host's own key, else the most specific user entry that covers it.
@@ -378,14 +389,22 @@ withdrawal feeds is decided by when the player came, relative to the preview (`w
 up to the first ancestor holding more than one `img`/`video`, at most 8 levels. Pixel rectangles
 would not survive a scroll, let alone a reload; digit-bearing classes are usually build hashes.
 When the key is the wrong shape the site-wide fallback is the safety net, so it need not be
-clever. **It is taken once, at hover time (`activeRegion`).** Computed at withdrawal it stops at
-the card — the card now contains the `<video>` — and never equals the hover-time key, so every
-site "widens" on its fourth hover. Found in the first browser run.
+clever. **It is taken once, at hover time (`activeRegion`).** Computed at close it stops at the
+card — the card now contains the `<video>` — and never equals the hover-time key, so every site
+"widens" on its fourth hover. Found in the first browser run.
 
-`test-pages/late-player.html` is the fixture: grid A lands a player at 600 ms (`?slow`: 1200),
-grid B never does. Measured there: three samples at ~700 ms learn 900 ms for
-`img>div.card.video>div.grid`; A4 then waits 900, the player lands at 714, nothing opens; B1 opens
-at once; on `?slow` A1 opens at 900 and is withdrawn at 1302 → 1650 ms.
+**The poll** (`watchTimer`, 100 ms, only while a hover is pending or open) is what makes the
+timings honest under a still pointer — the normal case. Without it the first sample measured
+1399 ms for a player that landed at 600, because Chromium raised no mouse event until the pointer
+moved. It asks two things: is the picture still in the document, and is a player rectangle over it.
+
+`test-pages/late-player.html` is the fixture: grid A lands a player at 600 ms (`?slow`: 1200;
+`?instant`: 0; `?swap`: the thumbnail is *replaced* by a muted looping clip), grid B never does.
+Measured there: three samples at ~700 ms learn 900 ms for `img>div.card.video>div.grid`; A4 then
+waits 900, the player lands at 714, nothing opens; B1 opens at once; on `?slow` A1 opens at 900
+and is withdrawn at 1302 → 1650 ms; on `?instant` A1 is withdrawn at 123 ms inside the grace and
+nothing is stored; on `?swap` the same three samples arrive by the re-target and `isConnected`
+paths and A4 is held the same way.
 
 ## The preview is a completely different picture · `E19`
 

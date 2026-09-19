@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.108.0
+// @version     0.109.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -84,8 +84,8 @@
         smoothing: 'auto',          // 'auto' | 'pixelated' | 'crisp-edges' — image-rendering
         spinnerTheme: 'auto',       // 'auto' (follows the browser) | 'dark' | 'light'
         referrerSites: [],          // sites to load previews from WITHOUT a referrer
-        videoDelays: {},            // host -> {ms, region, user, samples, skip}: wait for the page's
-                                    // own player before previewing, or skip an area of it outright
+        videoDelays: {},            // host -> {ms, region, user, samples}: wait for the page's own
+                                    // player before previewing; learned, or set by the user
         siteAudio: {},              // host -> {muted, volume}; absent means muted, which is the
                                     // only default a first visit may have — see AUDIO_DEFAULT
 
@@ -4023,7 +4023,8 @@
     let hoverAt = 0;            // when the current hover began
     let activeRect = null;      // where the picture was then; a player landing inside it is a late one
     let activeRegion = '';      // regionKey() taken then — a player landing later changes the answer
-    let holdMs = 0;             // the wait this hover is under, 0 for none
+    let holdMs = 0;             // the wait this hover is under: the site's learned one, or the grace
+    let ruleMs = 0;             // the learned part alone; 0 when no rule applied to this hover
     let holding = false;        // still inside that wait
     let holdTimer = null;
     let watchTimer = null;      // the poll for a player under the picture
@@ -4214,6 +4215,8 @@
     const VDELAY_STEP = 250;        // ms added when the wait turns out short
     const VDELAY_MAX = 10000;
     const VDELAY_POLL_MS = 100;     // how often the picture is checked for a player under it
+    const PLAYER_GRACE_MS = 150;    // no preview before this, on any site: a player that lands at
+                                    // once is seen by the poll first and never flashes
     const VDELAY_ANY = '*';         // a region meaning the whole site
 
     function vdRound(ms) {
@@ -4229,7 +4232,7 @@
             if (e.samples.length < VDELAY_SAMPLES) return { entry: e, change: 'sampled' };
             const slowest = Math.max.apply(null, e.samples.map(function (x) { return x.ms; }));
             const same = e.samples.every(function (x) { return x.region === region; });
-            delete e.samples;       // the excluded areas, if any, stay
+            delete e.samples;
             e.ms = vdRound(slowest * VDELAY_MARGIN);
             e.region = same ? region : VDELAY_ANY;
             return { entry: e, change: 'learned' };
@@ -4241,24 +4244,6 @@
         if (e.region === VDELAY_ANY) return { entry: e, change: null };
         e.region = VDELAY_ANY;  // the wait did not apply here, so the region was the wrong shape
         return { entry: e, change: 'widened' };
-    }
-
-    const VDELAY_SKIPS = 8;         // areas one site may have excluded
-
-    // One area of a site whose player beats the preview: excluded outright, on the first sighting.
-    function vdSkip(entry, region) {
-        const e = entry ? JSON.parse(JSON.stringify(entry)) : {};
-        if (e.user) return { entry: e, change: null };
-        const skip = (e.skip || []).slice();
-        if (skip.indexOf(region) !== -1) return { entry: e, change: null };
-        skip.push(region);
-        e.skip = skip.slice(-VDELAY_SKIPS);
-        return { entry: e, change: 'excluded' };
-    }
-
-    function vdSkipped(region) {
-        const e = vdEntryFor(pageHost());
-        return !!e && !e.user && !!e.skip && e.skip.indexOf(region) !== -1;
     }
 
     // The entry for a host: its own, else the most specific user entry covering it.
@@ -4305,8 +4290,7 @@
         const host = pageHost();
         if (!host) return;
         reloadSettings();
-        const r = covered === 'skip' ? vdSkip(vdEntryFor(host), region)
-                                     : vdLearn(vdEntryFor(host), elapsed, region, covered);
+        const r = vdLearn(vdEntryFor(host), elapsed, region, covered);
         if (!r.change) return;
         const all = Object.assign({}, cfg.videoDelays);
         all[host] = r.entry;
@@ -4540,10 +4524,8 @@
                 const w = vdEntryFor(pageHost());
                 if (!w) return 'none — no entry for this site';
                 if (w.user) return (w.ms || 0) + ' ms, set by the user';
-                const skips = w.skip ? w.skip.length + ' area(s) excluded' +
-                    (el && w.skip.indexOf(regionKey(el)) !== -1 ? ', THIS one' : ', not this one') + '; ' : '';
-                if (w.ms == null) return skips + (w.samples ? 'learning — ' + w.samples.length + ' of ' + VDELAY_SAMPLES + ' samples' : 'no wait');
-                return skips + w.ms + ' ms, learned, for ' + (w.region === VDELAY_ANY ? 'the whole site'
+                if (w.ms == null) return 'learning — ' + w.samples.length + ' of ' + VDELAY_SAMPLES + ' samples';
+                return w.ms + ' ms, learned, for ' + (w.region === VDELAY_ANY ? 'the whole site'
                     : (el && w.region === regionKey(el) ? 'this area — applies' : 'another area — does not apply'));
             })(),
             backgroundGate: t.tagName === 'IMG' || t.tagName === 'VIDEO'
@@ -4575,6 +4557,7 @@
         clearInterval(watchTimer);
         holding = false;
         holdMs = 0;
+        ruleMs = 0;
         activeRect = null;
         activeRegion = '';
         if (token) token.cancelled = true;
@@ -4674,18 +4657,16 @@
             if (activeCovered && stillUnderPointer(active, e.clientX, e.clientY)) return;
             if (lateCover(e.target, e.clientX, e.clientY)) return;
             if (playerReplaced(e.clientX, e.clientY)) return;
+            selfClosed('the picture is no longer under the pointer', e.clientX, e.clientY);
             cancel();
             return;
         }
         if (el === suppressed) return;      // dismissed; stays down until the pointer leaves
         if (el === active) return;
 
+        if (active) selfClosed('something else took its place: ' + el.tagName, e.clientX, e.clientY);
         cancel();
         const region = regionKey(el);
-        if (vdSkipped(region)) {        // this area of the site puts its own player on the picture
-            if (debugOn()) dbg('skipped — an excluded area of this site', region);
-            return;
-        }
         const displayed = sizeOf(el);
         if (displayed.w < cfg.minDisplayed && displayed.h < cfg.minDisplayed) return;
 
@@ -4695,11 +4676,18 @@
         hoverAt = Date.now();
         activeRect = el.getBoundingClientRect();
         activeRegion = region;
-        holdMs = vdHoldFor(activeRegion);
-        holding = holdMs > 0;
+        ruleMs = vdHoldFor(activeRegion);
+        holdMs = Math.max(ruleMs, PLAYER_GRACE_MS);
+        holding = true;
         // A player landing under a still pointer raises no mouse event worth waiting for. See E61.
         watchTimer = setInterval(function () {
-            if (active === el && !placed) playerArrived(el);
+            if (active !== el || placed) return;
+            if (!el.isConnected) {      // swapped out under a still pointer; no mouse event says so
+                selfClosed('the picture was removed from the page', pointer.x, pointer.y);
+                cancel();
+                return;
+            }
+            playerArrived(el);
         }, VDELAY_POLL_MS);
         // A hover is a user gesture, and a gesture always retries a cached miss. See TOUR.md §7.
         const myToken = token = { cancelled: false, fresh: true };
@@ -4709,7 +4697,7 @@
             else { showViewer(hit, pointer); dockSpinner(); }
         }
         if (holding) {
-            dbg('waiting ' + holdMs + ' ms for the page\'s own player before previewing');
+            if (ruleMs) dbg('waiting ' + holdMs + ' ms for the page\'s own player before previewing');
             holdTimer = setTimeout(async function () {
                 holding = false;
                 if (myToken.cancelled || active !== el || playerArrived(el)) return;
@@ -4747,20 +4735,26 @@
         return true;
     }
 
-    // The page put a player over the picture after the hover: the preview is withdrawn, and the
-    // site learns from it. A player that beat the preview excludes the area — the answer was known
-    // at hover time; one that landed on an open preview teaches the wait. See E62.
+    // The page put a player over the picture after the hover: the preview is withdrawn.
     function withdrawn(why) {
-        const elapsed = Date.now() - hoverAt;
-        const shown = !!view && !!box && box.classList.contains('on');
-        const verdict = holding ? 'the wait caught it'
-            : holdMs > 0 ? 'after the wait — it gets longer'
-            : shown ? 'the preview was up — a sample for the wait'
-            : 'it beat the preview — this area is excluded';
-        dbg('a player arrived over the picture — preview withdrawn',
-            { after: elapsed + ' ms', why: why, waited: holdMs + ' ms', verdict: verdict });
-        if (!holding) vdRecord(activeRegion, elapsed, holdMs > 0 ? true : shown ? false : 'skip');
+        dbg('a player arrived over the picture — preview withdrawn' + (holding ? ' before it opened' : ''),
+            { after: (Date.now() - hoverAt) + ' ms', why: why });
+        selfClosed(why, pointer.x, pointer.y);
         cancel();
+    }
+
+    // A preview that was ON SCREEN is closing with the pointer still on the picture: the page took
+    // it away, not the user. Whatever the path, this is the one event the wait learns from — a
+    // rule that is wrong keeps being corrected by the flash it failed to prevent. See E62.
+    function selfClosed(why, x, y) {
+        if (!active || placed || holding || !activeRect) return;
+        if (!(view && box && box.classList.contains('on'))) return;
+        if (x <= activeRect.left + 1 || x >= activeRect.right - 1 ||
+            y <= activeRect.top + 1 || y >= activeRect.bottom - 1) return;
+        const elapsed = Date.now() - hoverAt;
+        dbg('the page took the preview away — ' + why,
+            { after: elapsed + ' ms', waited: ruleMs ? ruleMs + ' ms, learned' : 'the grace only' });
+        vdRecord(activeRegion, elapsed, ruleMs > 0);
     }
 
     // The picture itself went, and a player is where it was: the same withdrawal, seen from the
@@ -4830,6 +4824,7 @@
         // mouseout precedes the mouseover that onOver decides on; same test, same answer.
         if (lateCover(to, e.clientX, e.clientY)) return;
         if (playerReplaced(e.clientX, e.clientY)) return;
+        selfClosed('the pointer is still on it', e.clientX, e.clientY);
         cancel();
     }
 
@@ -6174,11 +6169,8 @@
 
             function describe(e) {
                 if (e.user) return (e.ms | 0) + ' ms — yours';
-                const parts = [];
-                if (e.skip && e.skip.length) parts.push(e.skip.length === 1 ? 'one area excluded' : e.skip.length + ' areas excluded');
-                if (e.ms != null) parts.push(e.ms + ' ms wait, ' + (e.region === VDELAY_ANY ? 'whole site' : 'one area'));
-                else if (e.samples) parts.push('learning a wait, ' + e.samples.length + ' of ' + VDELAY_SAMPLES);
-                return parts.join(' · ') + ' — learned';
+                if (e.ms == null) return 'learning, ' + (e.samples || []).length + ' of ' + VDELAY_SAMPLES;
+                return e.ms + ' ms — learned, ' + (e.region === VDELAY_ANY ? 'whole site' : 'one area');
             }
 
             function hosts() {
@@ -6665,12 +6657,12 @@
             currentValue: function () { return pageHost(); },
         });
         delayList({
-            heading: 'Sites that play their own video preview on hover',
-            description: 'Some sites play their own video over a thumbnail once the pointer is ' +
-                'on it. An area of a site that does so before a preview could open is excluded ' +
-                'outright; one that does so after a preview has opened is measured over a few ' +
-                'hovers, and previews there then wait that long. Add a site yourself to set the ' +
-                'wait by hand; 0 ms stops the script learning anything for it.',
+            heading: 'Wait for the page’s own video preview on these sites',
+            description: 'Some sites play their own video over a thumbnail a moment after the ' +
+                'pointer lands on it, which closes a preview that had already opened. After a ' +
+                'few of those the site is added here with the delay measured, and previews there ' +
+                'wait that long. Add a site yourself to set the wait by hand; 0 ms stops the ' +
+                'script learning anything for it.',
             examples: 'example.com also covers www.example.com. Adding a site again replaces its entry.',
         });
 
@@ -6753,7 +6745,7 @@
         playVideos: playVideos,
         skipFurniture: cfg.skipFurniture,
         blockList: cfg.blockList.length,
-        lateWait: (function () { const w = vdEntryFor(pageHost()); return w ? ((w.skip ? w.skip.length + ' excluded; ' : '') + (w.ms == null ? (w.samples ? 'learning' : 'no wait') : w.ms + ' ms')) : 'none'; })(),
+        lateWait: (function () { const w = vdEntryFor(pageHost()); return w ? (w.ms == null ? 'learning' : w.ms + ' ms') : 'none'; })(),
         minRatio: cfg.minRatio,
         minDisplayed: cfg.minDisplayed,
     });

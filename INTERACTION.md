@@ -162,9 +162,9 @@ been requested yet.
 - **On screen:** nothing.
 - **Held by:** the pointer being on the element.
 - **Ends on:** leaving the element — silently, with no trace and no network cost.
-- **On a site with a learned wait (`E62`):** `S03`/`S04` still start on time, but nothing — not
-  even the ring — appears until the wait is over; a hit that arrives inside it is kept back and
-  painted the moment it ends.
+- **Nothing paints before 150 ms (`E62`)**, and on a site with a learned wait not before that:
+  `S03`/`S04` still start on time, but nothing — not even the ring — appears until the wait is
+  over; a hit that arrives inside it is kept back and painted the moment it ends.
 
 ### Working
 
@@ -582,7 +582,7 @@ this table is a table.
 | `E59` | Which link is forward is decided by three rungs — a declared `rel=next`, the hole in a numbered pager's range, then a forward word — and **ambiguity is refused, never guessed**. A harvested entry is a detached element carrying the page it came from, so its relative URLs resolve against that page and not against this one | [`docs/TOUR.md`](docs/TOUR.md) |
 | `E60` | The tour is stricter than a hover, and the picture it started on is the example: a floor on the longer side as drawn (`tourMinDisplayed`, lowered to the start picture's own size when that is smaller), and a **scope** — the outermost ancestor holding the same pictures as the smallest one that holds two, climbed past every wrapper (under 8 elements of chrome and 200 characters of text). `{`/`}` move it a level; the next page is only fetched from the whole page | [`docs/TOUR.md`](docs/TOUR.md) §1a |
 | `E61` | A player that arrives AFTER the hover — YouTube's inline preview landing on the thumbnail — is withdrawn from under, by geometry, polled every 100 ms rather than waited for as a mouse event; and a page holding a dormant `<video>` refuses its video-link thumbnails under `all` up front, because its own player is coming. A late cover that is not a player only makes the hover a covered one | [`docs/GATES.md`](docs/GATES.md) |
-| `E62` | A site that lands its own player on a thumbnail is **learned**, two ways. A player that lands **before** a preview could open excludes that area of the site outright, on the first sighting — later hovers there run nothing at all. A player that lands **on an open preview** is timed: after three, a hover in that area of the page (or, if the area was the wrong shape, anywhere on the site) waits 1.25× the slowest before showing anything — the resolve runs during the wait, and a player landing inside it closes nothing because nothing opened. A player that still comes after the wait makes it longer; one on a thumbnail the area did not cover widens it to the site. A user's own entry in the panel is never touched, and 0 ms turns learning off for that site | [`docs/GATES.md`](docs/GATES.md) |
+| `E62` | **No preview paints before 150 ms**, on any site, so a player that lands at once never flashes. A site whose player lands later is **learned** from the one event that matters: a preview that was on screen closing with the pointer still on the picture, by any path. After three, a hover in that area of the page (or, if the area was the wrong shape, anywhere on the site) waits 1.25× the slowest before showing anything — the resolve runs during the wait, and a close inside it is the wait working. A flash after the wait makes it longer; one on a thumbnail the area did not cover widens it to the site — so a wrong rule is corrected by the flash it failed to prevent. A user's own entry in the panel is never touched, and 0 ms turns learning off for that site | [`docs/GATES.md`](docs/GATES.md) |
 
 `E3` is retired with the detached state (v0.28.0); `E4` and `E5` are retired as dangling.
 
@@ -593,7 +593,7 @@ this table is a table.
 | Area | Functions |
 |---|---|
 | Eligibility (`P1`–`P6`, `P11`, `P12`) | `eligible`, `playerSurfaceReason`, `videoLinkReason`, `overVideoSurface`, `videoPreviewsOn`, `siteEnabled` |
-| A late player, and the learned wait (`E61`, `E62`) | `playerArrived`, `lateCover`, `playerReplaced`, `withdrawn`, `watchTimer`/`VDELAY_POLL_MS`, `holdMs`/`holding`/`holdTimer`, `regionKey`, `vdLearn`, `vdHoldFor`, `vdRecord`, `vdEntryFor`, the panel's `delayList` |
+| A late player, and the learned wait (`E61`, `E62`) | `selfClosed` (the trigger), `playerArrived`, `lateCover`, `playerReplaced`, `withdrawn`, `watchTimer`/`VDELAY_POLL_MS`, `PLAYER_GRACE_MS`, `holdMs`/`ruleMs`/`holding`/`holdTimer`, `regionKey`, `vdLearn`, `vdHoldFor`, `vdRecord`, `vdEntryFor`, the panel's `delayList` |
 | Hover state machine (`R1`, `R2`, `S01`–`S06`, `S16`, `E44`) | `onOver`, `onOut`, `cancel`, `dismiss`, `stillUnderPointer`, `suppressed`/`suppressedCovered` |
 | Press / click ownership (`E1`) | `pointInPreview`, `onBoxDown`, `onBoxClick`, the document `mousedown` and `click` listeners |
 | Press regions and dragging (`S13`, `S14`, `S19`, `E21`, `E23`, `E25`) | `hitRegion`, `regionCursor`, `onBoxDown`, `onMove`, `resizeBy` |
