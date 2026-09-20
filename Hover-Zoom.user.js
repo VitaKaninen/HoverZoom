@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.117.0
+// @version     0.118.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -4602,27 +4602,34 @@
     }
 
     function eligibleDirect(el) {
-        if (!el) return null;
+        return !el || refusal(el) ? null : el;
+    }
+
+    // The first gate that refuses this element, named with the setting behind it; null when none does.
+    function refusal(el) {
+        let why;
         if (el.tagName === 'VIDEO') {
-            if (!videoPreviewsOn() || !gifLike(el)) return null;
-            if (playerSurfaceReason(el)) return null;
-            if (videoLinkRefused(el)) return null;
-            return blocked(shownUrl(el)) ? null : el;
+            if (!videoPreviewsOn()) return 'a <video>, and video previews are off (videoMode: ' + cfg.videoMode + ')';
+            if (!gifLike(el)) return 'a <video> that is not a clip — ' + notGifBecause(el);
+            if ((why = playerSurfaceReason(el))) return 'playerGate: ' + why;
+            if ((why = videoLinkRefused(el))) return 'videoLinkGate: ' + why;
+            return blocked(shownUrl(el)) ? 'its URL matches the block list' : null;
         }
-        if (NEVER[el.tagName]) return null;
-        if (playerSurfaceReason(el)) return null;
-        if (videoLinkRefused(el)) return null;
-        if (cfg.skipFurniture && decorativeReason(el)) return null;
+        if (NEVER[el.tagName]) return 'a <' + el.tagName.toLowerCase() + '> is never previewed';
+        if ((why = playerSurfaceReason(el))) return 'playerGate: ' + why;
+        if ((why = videoLinkRefused(el))) return 'videoLinkGate: ' + why;
+        if (cfg.skipFurniture && (why = decorativeReason(el))) return 'decorativeGate (skipFurniture is on): ' + why;
         // Before the <img> branch, because these are the furniture rules that apply to one.
-        if (cfg.skipFurniture && bannerReason(el)) return null;
-        if (cfg.skipFurniture && pinnedWallpaperReason(el)) return null;
-        if (el.tagName === 'IMG') return blocked(shownUrl(el)) ? null : el;
+        if (cfg.skipFurniture && (why = bannerReason(el))) return 'bannerGate (skipFurniture is on): ' + why;
+        if (cfg.skipFurniture && (why = pinnedWallpaperReason(el))) return 'backgroundGate (skipFurniture is on): ' + why;
+        if (el.tagName === 'IMG') return blocked(shownUrl(el)) ? 'its URL matches the block list' : null;
         // element with a background image and no img of its own
-        if (el.querySelector && el.querySelector('img')) return null;
+        if (el.querySelector && el.querySelector('img')) return 'not an <img>, and it holds one — that <img> is the target, not this';
         const bg = backgroundUrl(el);
-        if (!bg || blocked(bg)) return null;
-        if (cfg.skipFurniture && wallpaperReason(el)) return null;
-        return el;
+        if (!bg) return 'not an <img> and has no background image';
+        if (blocked(bg)) return 'its background URL matches the block list';
+        if (cfg.skipFurniture && (why = wallpaperReason(el))) return 'backgroundGate (skipFurniture is on): ' + why;
+        return null;
     }
 
     // One console line per hover, when `debug` is on.
@@ -4638,16 +4645,30 @@
                         : ' [does not contain it]');
         });
         const cls = typeof t.className === 'string' ? t.className.trim() : '';
+        const shown = sizeOf(el || t);
+        const tooSmall = shown.w < cfg.minDisplayed && shown.h < cfg.minDisplayed;
         return {
             target: t.tagName + (t.id ? '#' + t.id : '') +
                 (cls ? '.' + cls.split(/\s+/).slice(0, 2).join('.') : ''),
             targetRect: rectStr(rect),
             showing: (shownUrl(t) || '(nothing)').slice(0, 160),
-            eligible: !!el,
+            eligible: !!el && !tooSmall,
+            refusedBy: el ? (tooSmall ? 'sizeGate' : 'nothing — eligible')
+                : (function () {
+                    let why = refusal(t);
+                    const under = e && coveredMedia(t, e.clientX, e.clientY);
+                    if (under) why += ' — and under the cover, ' + under.tagName + ': ' + refusal(under);
+                    return why;
+                })(),
             resolvedFrom: !el ? '(nothing)'
                 : el === t ? 'the hover target itself'
                     : 'looked through the cover to ' + el.tagName +
                       (el.id ? '#' + el.id : '') + ' — ' + (shownUrl(el) || '').slice(0, 120),
+            sizeGate: shown.w + '×' + shown.h + ' displayed, minDisplayed ' + cfg.minDisplayed +
+                (tooSmall ? ' — REFUSED, both sides under it' : ' — passes'),
+            blockList: !cfg.blockList || !cfg.blockList.length ? 'empty'
+                : cfg.blockList.length + ' entries — ' + (blocked(shownUrl(el || t)) ? 'MATCHES the shown URL' : 'no match'),
+            skipFurniture: cfg.skipFurniture,
             videoMode: cfg.videoMode + (playVideos ? '' : ' (turned off in this tab)'),
             playerGate: playerSurfaceReason(t) || 'none — no player on this page covers it',
             videoLinkGate: videoLinkReason(t) || 'none — does not lead to a video page',
