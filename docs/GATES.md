@@ -46,8 +46,8 @@ Measured: gifwow's grid is `<picture>`/`<img>` webp with `/go/…` links and **n
 its item page is one `<video autoplay muted>` mp4 with a poster and no controls — a gif by this
 rule, which is right, because the 90×90 thumbnails beside it are ordinary images.
 
-Test cases 21 and 22 are the same card twice, differing **only** in the `controls` attribute — 21
-must preview, 22 must not. The fixture is a real 2-second silent mp4 because the gate reads
+Test cases 21 and 22 are the same card twice, differing **only** in the `controls` attribute —
+hovering the clip in 21 must preview it, hovering the one in 22 must not. The fixture is a real 2-second silent mp4 because the gate reads
 `duration`, and an empty `<video>` reports `NaN`.
 
 ## Three questions, not one · `E31`
@@ -135,8 +135,18 @@ CSS background they carry. **Except**: `eligible()` takes a `VIDEO` branch *befo
 
 ### 2 · Structure
 
-A `<video>` in the element or up to three ancestors. Exact when it fires, but late on a card whose
+A **dormant** `<video>` — a player the page holds but has not laid out (rect under 2 px) — in the
+element or up to three ancestors: the shape of an inline preview player parked in a card between
+hovers, which geometry cannot see until it lands. Exact when it fires, but late on a card whose
 inline player has not been injected yet, which is why (3) exists.
+
+**A laid-out player beside the picture is NOT a signal about the picture** (v0.119.0; until then
+any non-gif `<video>` in the walk refused). If it covered the picture, gate 0 would have said so —
+the player box exists for the cases where its rect lies; if it does not, it is beside it. A forum
+post is a card holding whatever its author attached, images and videos interleaved, and reading a
+sibling player as "this card is a video, so the image is its poster" refused every image in every
+mixed post. Test case 22 is that shape: the image beside the `controls` player previews, the player
+itself does not.
 
 **The ancestor walk must stop at the first ancestor holding more than one `<img>`.** Without that
 bound the walk reaches a grid, finds a single 1×1 `<video>` fixture, and disables every case on the

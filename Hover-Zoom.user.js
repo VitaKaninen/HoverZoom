@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.118.0
+// @version     0.119.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -4118,10 +4118,15 @@
     }
 
     // The first non-gif <video> inside `n`, or null.
+    // A player the page holds but has not laid out; a laid-out one is beside the picture or over it, and geometry says which.
     function playerIn(n) {
         if (!n || !n.querySelectorAll) return null;
         const vs = n.querySelectorAll('video');
-        for (let i = 0; i < vs.length; i++) if (!gifLike(vs[i])) return vs[i];
+        for (let i = 0; i < vs.length; i++) {
+            if (gifLike(vs[i])) continue;
+            const r = vs[i].getBoundingClientRect();
+            if (r.width < 2 || r.height < 2) return vs[i];
+        }
         return null;
     }
 
@@ -4193,7 +4198,7 @@
         let n = el;
         for (let up = 0; n && up < 4; up++, n = n.parentElement) {
             if (up > 0 && n.querySelectorAll && n.querySelectorAll('img').length > 1) break;
-            if (playerIn(n)) return '<video> in ancestor #' + up;
+            if (playerIn(n)) return 'dormant <video> in ancestor #' + up;
         }
         return null;
     }
