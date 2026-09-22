@@ -6,6 +6,27 @@ departed from the plan the section says so, and §15 lists what is still only a 
 
 The live account of what the code does is `INTERACTION.md` `S25`, `S26`, `T29`-`T37`, `E54`-`E60`.
 
+## PLANNED REWORK (decided 2026-09-22, not built) — supersedes §2 anchored corner, §3, §4 nav group
+
+Root cause being removed: ◀ ▶ live inside a frame whose size changes per picture, so every step
+moves them (hence relocation, anchored corner, two-press entry, nav-driven size floors).
+
+- **Tour widget**: ◀ counter ▶ in its own fixed box outside `.box`, shown faintly at all times on
+  pages with ≥2 tour pictures, full opacity when the pointer nears it.
+- **Starting from the widget begins at the FIRST picture**, always (user's call: no guessing a start;
+  press ▶ a few times instead). Starting from a specific picture = pin it, then →/▶, as now.
+- **A tour shows the picture centred and as large as settings allow.** The widget floats ON TOP of
+  it; no space is reserved (user's call: the corner rarely matters, and the pointer leaving fades it).
+  Hover placement keeps using `cfg.position`; the tour ignores it.
+- **Delete when built**: `tourRelocate()`, `tour.relocated`, anchored-corner arithmetic, the first
+  press that only enters, the nav group in `vctlEl`, the nav height floor and `barMinW()` nav width.
+- **Position memory: per site.** A page element that covers the widget is solved by dragging it.
+- **Shared with Forum Stumbler and RNFP**: one position model and one corner-stacking contract
+  across all three scripts — design in progress, see the session of 2026-09-22.
+- **Arrow keys**: the page's forum navigation owns ←/→ unless a preview or tour of ours is up.
+  After a tour/preview closes, arrows must reach the page again (reported broken; cause unknown —
+  HZ's handlers are inert once the window is down and its buttons are non-focusable spans).
+
 A *tour* is next/previous navigation through every picture on the page, driven from a pinned
 preview window. The window stays put; the page does not move; each step swaps a different picture
 into the same frame.
