@@ -21,11 +21,9 @@ moves them (hence relocation, anchored corner, two-press entry, nav-driven size 
 - **Delete when built**: `tourRelocate()`, `tour.relocated`, anchored-corner arithmetic, the first
   press that only enters, the nav group in `vctlEl`, the nav height floor and `barMinW()` nav width.
 - **Position memory: per site.** A page element that covers the widget is solved by dragging it.
-- **Shared with Forum Stumbler and RNFP**: one position model and one corner-stacking contract
-  across all three scripts — design in progress, see the session of 2026-09-22.
-- **Arrow keys**: the page's forum navigation owns ←/→ unless a preview or tour of ours is up.
-  After a tour/preview closes, arrows must reach the page again (reported broken; cause unknown —
-  HZ's handlers are inert once the window is down and its buttons are non-focusable spans).
+- **Shared with Forum Stumbler and RNFP**: one position model — see [`WIDGET-DOCK.md`](WIDGET-DOCK.md).
+- **Arrow keys**: ours only while a preview or tour is up; otherwise the page's. Forum Stumbler has
+  no arrow keys (checked 2026-09-22), so there is nothing to arbitrate with.
 
 A *tour* is next/previous navigation through every picture on the page, driven from a pinned
 preview window. The window stays put; the page does not move; each step swaps a different picture
