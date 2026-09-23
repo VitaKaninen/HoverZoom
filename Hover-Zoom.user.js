@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.119.0
+// @version     0.120.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -51,7 +51,7 @@
         blockList: [],              // image URLs never to preview; '*' matches anything
 
         // the tour — next/previous through every picture on the page, from a pinned window
-        tourButtons: true,          // ◀ ▶ and the counter in the floating strip
+        tourButtons: true,          // the tour widget: ◀ ▶ and the counter, in its own box
         tourKeys: true,             // arrows navigate when the picture cannot pan sideways
         tourMinDisplayed: 128,      // the tour's own floor: longer side as drawn, px; emoji and badges fall under it
         tourWindow: 12,             // entries kept buffered ahead
@@ -1452,7 +1452,6 @@
     let vctlEl = null, vgrpEl = null, vplayEl = null, vtimeEl = null, vseekEl = null,
         vrateEl = null, vmuteEl = null, vsoundEl = null, vvolEl = null, vvolInEl = null,
         ratePopEl = null, rateInEl = null;
-    let navEl = null, navPrevEl = null, navNextEl = null, navCountEl = null;
     let retryEl = null;         // in the bar, and only on a failed picture during a tour
     let seekDrag = false;       // the scrubber is being held; timeupdate must not fight it
     let volDrag = false;        // ditto for the volume column against syncVideoCtl()
@@ -1592,9 +1591,6 @@
             'background:#1e1e2e;box-sizing:content-box;overflow:hidden}',
             '.box.on{opacity:1}',
             '.box.hot{pointer-events:auto}',
-            // The one-time slide to the corner when a tour starts. Nothing else animates position.
-            '.box.moving{transition:opacity var(--fade) ease,left ' + TOUR_MOVE_MS + 'ms ease,',
-            'top ' + TOUR_MOVE_MS + 'ms ease}',
             '.box.placed:not(.pan){cursor:move}',
             '.box.pan{cursor:grab}',
             '.box.pan.drag{cursor:grabbing}',
@@ -1671,22 +1667,9 @@
             '-webkit-backdrop-filter:blur(7px) saturate(1.4);border:1px solid rgba(205,214,244,.12);',
             'font:11px/16px system-ui,sans-serif;color:#cdd6f4;',
             'text-shadow:0 1px 2px rgba(0,0,0,.6)}',
-            '.box.hot.tall.hasvid .vctl,.box.hot.tall.hasnav .vctl{display:flex}',
-            // Two groups: the video controls, and next/previous. Either may be absent, and the
-            // strip shrinks to whichever is there. See TOUR.md §4.
+            '.box.hot.tall.hasvid .vctl{display:flex}',
             '.vctl .vgrp{flex:1;min-width:0;display:flex;align-items:center;gap:8px}',
-            '.vctl .ngrp{flex:none;display:flex;align-items:center;gap:' + NAV_GAP + 'px}',
-            '.vctl .vgrp.off,.vctl .ngrp.off{display:none}',
-            '.vctl .ncount{flex:none;padding:0 4px;font-variant-numeric:tabular-nums;',
-            'letter-spacing:.02em;color:#bac2de;white-space:nowrap}',
-            // Bare .vbtn, not .vctl .vbtn: a restyle of these buttons is one place.
-            '.vbtn{flex:none;display:flex;align-items:center;justify-content:center;',
-            'width:' + VBTN_W + 'px;height:' + VBTN_W + 'px;border-radius:4px;cursor:pointer;color:#cdd6f4}',
-            '.vbtn svg{display:block;width:14px;height:14px;fill:currentColor}',
-            '.vbtn:hover{background:rgba(205,214,244,.18)}',
-            // `faint`, not `dim`: .dim is the page overlay, position:fixed, and a button wearing it leaves the row
-            '.vbtn.faint{opacity:.3;cursor:default}',
-            '.vbtn.faint:hover{background:none}',
+            ...vbtnCss(),
             '.vctl .vtime{flex:none;min-width:62px;font-variant-numeric:tabular-nums;',
             'letter-spacing:.02em;color:#bac2de;white-space:nowrap}',
             '.vctl .vseek{flex:1;min-width:0;height:14px;margin:0;padding:0;',
@@ -1900,6 +1883,8 @@
         const parent = document.body || document.documentElement;
         if (panelHost && panelHost.parentNode === parent) parent.insertBefore(host, panelHost);
         else parent.appendChild(host);
+        // The tour widget floats over the preview, so it has to come after it.
+        if (tw && tw.host.parentNode === parent) parent.appendChild(tw.host);
     }
 
     // ----------------------------------------------------------------- geometry
@@ -2024,8 +2009,7 @@
     const MAX_MULTIPLE_ABS = 4;
 
     // How far the frame may grow. Deliberately bigger than the window — see the setting.
-    // A tour is the exception: anchored bottom-right, an oversized frame runs off the top-left
-    // and stays clipped there for the whole tour, so a tour is a lightbox. See TOUR.md §2.
+    // A tour is the exception: it is a lightbox, centred and capped at the viewport. See TOUR.md.
     function growBox() {
         const m = tourActive() ? 1 : Math.max(1, Math.min(cfg.maxSizeMultiple || 1, MAX_MULTIPLE_ABS));
         const b = viewportBox();
@@ -2051,11 +2035,7 @@
         return Math.min(MIN_MEDIA / Math.max(w, h), fitScaleFor(w, h));
     }
 
-    // The strip is the only mouse route to next/prev, so a window carrying nav buttons may not
-    // shrink below the height that shows them — a short picture letterboxes instead. See TOUR.md §2.
-    function minFrameH() {
-        return navShown() ? VCTL_MIN_H : MIN_FRAME;
-    }
+    function minFrameH() { return MIN_FRAME; }
 
     // The frame follows the picture, up to the growth ceiling.
     function reflow() {
@@ -2528,6 +2508,19 @@
     const RATE_MIN = 0.0625, RATE_MAX = 16;
     const RATE_POP_W = 96;                      // matches .spop's min-width
 
+    // The round-cornered strip buttons, shared by the preview's shadow root and the tour widget's.
+    function vbtnCss() {
+        return [
+            '.vbtn{flex:none;display:flex;align-items:center;justify-content:center;',
+            'width:' + VBTN_W + 'px;height:' + VBTN_W + 'px;border-radius:4px;cursor:pointer;color:#cdd6f4}',
+            '.vbtn svg{display:block;width:14px;height:14px;fill:currentColor}',
+            '.vbtn:hover{background:rgba(205,214,244,.18)}',
+            // `faint`, not `dim`: .dim is the page overlay, position:fixed, and a button wearing it leaves the row
+            '.vbtn.faint{opacity:.3;cursor:default}',
+            '.vbtn.faint:hover{background:none}',
+        ];
+    }
+
     function mkVBtn(icon, tip, onClick) {
         const b = document.createElement('span');
         b.className = 'vbtn';
@@ -2629,10 +2622,7 @@
         vgrpEl.appendChild(vrateEl);
         vgrpEl.appendChild(vsoundEl);
 
-        buildNavControls();
-
         vctlEl.appendChild(vgrpEl);
-        vctlEl.appendChild(navEl);
         // A child of the strip, not of either group: `.spop` positions against the strip, and
         // toggleRateMenu() measures vrateEl.offsetLeft in the same box.
         vctlEl.appendChild(ratePopEl);
@@ -2642,22 +2632,6 @@
         vidEl.addEventListener('play', syncVideoCtl);
         vidEl.addEventListener('pause', syncVideoCtl);
         vidEl.addEventListener('volumechange', syncVideoCtl);
-    }
-
-    // ◀ 124 / 294 ▶ — the same strip as the video controls, so it inherits their box, hover
-    // wash, tooltips and mousedown swallowing, and isBoxControl()'s exemption with them.
-    function buildNavControls() {
-        navEl = document.createElement('div');
-        navEl.className = 'ngrp';
-        navPrevEl = mkVBtn(ICON_PREV, 'Previous picture', function () { tourNav(-1, false); });
-        navCountEl = document.createElement('span');
-        navCountEl.className = 'ncount';
-        navCountEl.textContent = '0 / 0';
-        setTip(navCountEl, 'Where you are among this page\'s pictures');
-        navNextEl = mkVBtn(ICON_NEXT, 'Next picture', function () { tourNav(1, false); });
-        navEl.appendChild(navPrevEl);
-        navEl.appendChild(navCountEl);
-        navEl.appendChild(navNextEl);
     }
 
     let volTimer = 0;
@@ -2873,31 +2847,12 @@
     const VCTL_MIN_H = 110;
     const VCTL_PAD = 8;         // .vctl's own left/right padding, matching the rule
     const VBTN_W = 20;          // one strip button's box
-    const NAV_GAP = 2;          // between ◀, the counter and ▶
-
-    // Is the nav group up? It is the only mouse route to next/prev, so several floors read this.
-    function navShown() { return !!tour && !!cfg.tourButtons; }
+    const NAV_GAP = 2;          // between ◀, the counter and ▶ in the tour widget
 
     // Is the floating strip actually on screen? Exactly what the CSS rule above asks.
     function stripUp() {
         return !!box && box.classList.contains('hot') && box.classList.contains('tall') &&
-            (box.classList.contains('hasvid') || box.classList.contains('hasnav'));
-    }
-
-    let navFor = '', navTextW = 0;
-
-    // The strip's width when it holds nothing but the nav group. Explicit, never shrink-to-fit:
-    // an abspos box sizes differently in Firefox, which the Browser pane cannot see. The counter
-    // is measured once per text, not per layout — a rect read forces a synchronous reflow and
-    // layout() runs on every frame of a drag.
-    function navW() {
-        if (!navCountEl) return 0;
-        const t = navCountEl.textContent;
-        if (t !== navFor) {
-            const w = Math.ceil(navCountEl.getBoundingClientRect().width);
-            if (w) { navFor = t; navTextW = w; }
-        }
-        return VCTL_PAD * 2 + 2 + VBTN_W * 2 + NAV_GAP * 2 + (navTextW || t.length * 7);
+            box.classList.contains('hasvid');
     }
 
     // ---- clearing the grab bands
@@ -2947,11 +2902,7 @@
     // The narrowest frame that still shows the whole cluster clear of the buttons. Filename and
     // metadata are allowed to be clipped away entirely, so they claim nothing here.
     function barMinW() {
-        const bar = grabInset() + BAR_SLIDER_W + BAR_ZOOM_GAP + BAR_ZOOM_W + btnGutter();
-        // The strip floats and normally reserves nothing — that is the point of floating it.
-        // Once it carries the only mouse route to next/prev, a narrower frame clips the buttons
-        // off, so that one decision reverses. See TOUR.md §2.
-        return Math.max(bar, navShown() ? grabInset() * 2 + navW() : 0);
+        return grabInset() + BAR_SLIDER_W + BAR_ZOOM_GAP + BAR_ZOOM_W + btnGutter();
     }
 
     let barTimer = 0;
@@ -3117,12 +3068,8 @@
     function layoutChrome() {
         const px = function (n) { return n + 'px'; };
         const hasVid = mediaEl === vidEl;
-        const hasNav = navShown();
         capEl.classList.toggle('hasvid', hasVid);
         box.classList.toggle('hasvid', hasVid);
-        box.classList.toggle('hasnav', hasNav);
-        vgrpEl.classList.toggle('off', !hasVid);
-        navEl.classList.toggle('off', !hasNav);
         // The strip would cover the picture rather than sit on it once the frame is this short.
         box.classList.toggle('tall', view.frameH >= VCTL_MIN_H);
         // Right to left, skipping the ▶ when the frame is not holding a clip; the gutter has to
@@ -3138,16 +3085,8 @@
         zctlEl.style.width = px(zctlW());
         zctlEl.style.right = px(btnGutter());
         // The strip clears the side bands too; it sits above the corners, so those do not apply.
-        // With no video group it shrinks to the nav group and sits right: `left:auto` plus an
-        // explicit width, never shrink-to-fit. See TOUR.md §4.
         vctlEl.style.right = px(grabInset());
-        if (hasVid) {
-            vctlEl.style.left = px(grabInset());
-            vctlEl.style.width = '';
-        } else {
-            vctlEl.style.left = 'auto';
-            vctlEl.style.width = px(Math.max(0, Math.min(navW(), view.frameW - grabInset() * 2)));
-        }
+        vctlEl.style.left = px(grabInset());
         // The two paddings TOGETHER may not exceed the frame. `box-sizing:border-box` treats
         // padding as a minimum, not a share: overflow it and the bar's border box grows past the
         // frame, taking every `right:`-anchored control with it — the buttons stop clearing the
@@ -3364,7 +3303,7 @@
 
         const ow = outerW();
         const oh = outerH();
-        if (cfg.position === 'center') {
+        if (cfg.position === 'center' || tourActive()) {
             view.left = (m.vw - ow) / 2;
             view.top = (m.vh - oh) / 2;
         } else {
@@ -3423,13 +3362,10 @@
         deferredCaption(res.url);
     }
 
-    // A DIFFERENT picture into the same window. Position and a hand-set size stay; zoom and pan
-    // reset, because a pan offset means nothing carried into another picture. See TOUR.md §2.
+    // A DIFFERENT picture into the same window, centred. A hand-set size stays; zoom and pan
+    // reset, because a pan offset means nothing carried into another picture. See TOUR.md.
     function swapViewer(res) {
         if (!view) return;
-        // The bottom-right corner does not move: the nav buttons live there.
-        const right = view.left + outerW();
-        const bottom = view.top + outerH();
 
         view.url = res.url;
         view.natW = res.w;
@@ -3444,8 +3380,8 @@
         resetCaption();
 
         reflow();
-        view.left = right - outerW();
-        view.top = bottom - outerH();
+        view.left = (vpW() - outerW()) / 2;
+        view.top = (vpH() - outerH()) / 2;
 
         setMedia(res);
         layout();
@@ -3472,7 +3408,7 @@
         seekDrag = false;
         volDrag = false;
         closeVol();
-        box.classList.remove('on', 'hot', 'pan', 'drag', 'full', 'hasnav', 'moving');
+        box.classList.remove('on', 'hot', 'pan', 'drag', 'full');
         box.style.cursor = '';      // onMove writes this inline over the bands; see hitRegion
         if (gripEl) { gripEl.classList.remove('hot'); gripEl.style.cursor = ''; }
         clearTimeout(hideTimer);
@@ -3532,7 +3468,7 @@
         CAP_TARGET.addEventListener('keydown', onPinKey, true);
         // The wheel becomes the window's only now — see enableWheelZoom.
         enableWheelZoom();
-        tourStart();    // before reflow(): the nav group is a control, and the floors read it
+        if (!tour) tourStart();     // a tour begun from the widget brings its own
         reflow();       // the controls appear with `placed`, and minFrameW() grows with them
         layout();
         tourChrome();
@@ -3610,10 +3546,9 @@
 
     function enterFull() {
         // Captured before anything moves: this is the only moment the pre-fullscreen state exists.
-        // The URL and the bottom-right corner are for the tour: a step taken while fullscreen
-        // means the picture coming back is not the one that went in. See E57.
-        fullPrev = { left: view.left, top: view.top, scale: view.scale, url: view.url,
-            right: view.left + outerW(), bottom: view.top + outerH() };
+        // The URL is for the tour: a step taken while fullscreen means the picture coming back
+        // is not the one that went in. See E57.
+        fullPrev = { left: view.left, top: view.top, scale: view.scale, url: view.url };
         fullApi = false;
         lockScroll();
         dimEl.classList.add('full');
@@ -3692,15 +3627,15 @@
         view.fixedW = null;
         view.fixedH = null;
         // A tour may have stepped while we were fullscreen. A zoom and a top-left corner belong
-        // to the picture they were taken on: on a different one, fit it and hold the bottom-right
-        // corner instead — the same rule a swap follows. See E57.
+        // to the picture they were taken on: on a different one, fit it and centre it — the same
+        // rule a swap follows. See E57.
         const swapped = view.url !== p.url;
         view.fitScale = fitScaleFor(view.natW, view.natH);
         view.scale = swapped ? view.fitScale
             : Math.max(p.scale, minScaleFor(view.natW, view.natH));
         reflow();
-        view.left = swapped ? p.right - outerW() : p.left;
-        view.top = swapped ? p.bottom - outerH() : p.top;
+        view.left = swapped ? (vpW() - outerW()) / 2 : p.left;
+        view.top = swapped ? (vpH() - outerH()) / 2 : p.top;
         layout();
     }
 
@@ -4067,6 +4002,7 @@
     function ours(node) {
         if (panelHost && (node === panelHost ||
             (panelHost.contains && panelHost.contains(node)))) return true;
+        if (tw && node === tw.host) return true;
         return !!host && (node === host || (host.contains && host.contains(node)));
     }
 
@@ -4779,6 +4715,7 @@
     function onMove(e) {
         pointer.x = e.clientX;
         pointer.y = e.clientY;
+        twNear(e.clientX, e.clientY);
         if (active && !placed && playerArrived(active)) return;
         if (spinEl && spinEl.classList.contains('on')) moveSpinner();
         const over = !!view && !!box && box.classList.contains('on') &&
@@ -4812,7 +4749,7 @@
 
     function onOver(e) {
         if (placed) return;
-        if (drag) return;
+        if (drag || twBusy()) return;
         if (ours(e.target)) return;         // on our own overlay
         if (!siteEnabled() || CAPTCHA_HERE) return;
         if (mouseDown) return;
@@ -5121,7 +5058,8 @@
         if (e.key === 'Escape') {
             cancel();                           // onPinKey has already handled the placed case
         }
-        if (cfg.activation === 'modifier' && modifierHeld(e) && !modifierDown) {
+        // Ctrl during a widget drag turns off snapping; it must not also start a hover.
+        if (cfg.activation === 'modifier' && modifierHeld(e) && !modifierDown && !twBusy()) {
             modifierDown = true;
             hoverAtPointer();
         }
@@ -5139,6 +5077,442 @@
         onOver({ target: el, clientX: pointer.x, clientY: pointer.y });
     }
 
+    // ==== us-dock begin ====
+    // Shared verbatim by Hover Zoom, Forum Stumbler and RNFP. Edit HoverZoom/dock/us-dock.js, then run
+    // `node dock/sync-dock.js` from HoverZoom. The design is HoverZoom/docs/WIDGET-DOCK.md.
+    const usDock = (function () {
+        const SNAP = 8;                 // px: window edges, the window's centre, other widgets
+        const TOUCH = 1;                // px: how close two edges must be to count as attached at a drop
+        const PASSES = 4;               // overlap sweeps; three widgets settle in two
+        const A_ID = 'data-us-dock', A_SPEC = 'data-us-dock-a', A_SIZE = 'data-us-dock-s',
+            A_GREW = 'data-us-dock-t', A_DRAG = 'data-us-dock-d', A_STRETCH = 'data-us-dock-st';
+        const WATCHED = [A_ID, A_SPEC, A_SIZE, A_GREW, A_DRAG, A_STRETCH, 'hidden'];
+        const AXES = ['x', 'y'];
+        const LEN = { x: 'w', y: 'h' };
+
+        const mine = [];                // this script's widgets
+        let queued = false;
+        let watching = false;
+        const attrObs = new MutationObserver(schedule);
+        const listObs = new MutationObserver(function (recs) {
+            for (const r of recs) {
+                for (const n of r.addedNodes) if (isDock(n)) { observeDocks(); schedule(); return; }
+                for (const n of r.removedNodes) if (isDock(n)) { schedule(); return; }
+            }
+        });
+
+        function isDock(n) { return n.nodeType === 1 && n.hasAttribute(A_ID); }
+
+        // The layout viewport, scrollbars excluded; <body> answers for it on a quirks-mode page.
+        function viewport() {
+            const el = (document.compatMode === 'BackCompat' && document.body) || document.documentElement;
+            return { w: el.clientWidth || window.innerWidth, h: el.clientHeight || window.innerHeight };
+        }
+
+        function pt(lo, len, k) { return k === 's' ? lo : k === 'e' ? lo + len : lo + len / 2; }
+
+        // Which third the widget is in, measured from the point its current anchor holds. See WIDGET-DOCK.md.
+        function zone(prev, lo, len, V) {
+            const p = pt(lo, len, prev || 'c');
+            return p < V / 3 ? 's' : p > V * 2 / 3 ? 'e' : 'c';
+        }
+
+        function winAxis(k, lo, len, V) { return { r: 'win', m: k, t: k, o: pt(lo, len, k) - pt(0, V, k) }; }
+
+        function parse(s) { try { return JSON.parse(s); } catch (_) { return null; } }
+
+        function nums(s, n) {
+            if (!s) return null;
+            const a = s.split(' ').map(Number);
+            return a.length === n && a.every(isFinite) ? a : null;
+        }
+
+        function cleanAxis(a) {
+            const k = /^[sce]$/;
+            if (!a || typeof a !== 'object' || typeof a.r !== 'string' || !k.test(a.m) || !k.test(a.t) ||
+                typeof a.o !== 'number' || !isFinite(a.o)) return null;
+            return { r: a.r, m: a.m, t: a.t, o: a.o };
+        }
+
+        function cleanSpec(s) {
+            if (!s || typeof s !== 'object') return null;
+            const x = cleanAxis(s.x), y = cleanAxis(s.y), fx = cleanAxis(s.fx), fy = cleanAxis(s.fy);
+            if (!x || !y || !fx || !fy || fx.r !== 'win' || fy.r !== 'win') return null;
+            const ov = Array.isArray(s.ov) ? s.ov.filter(function (v) { return typeof v === 'string'; }) : [];
+            return { x: x, y: y, fx: fx, fy: fy, ov: ov };
+        }
+
+        // Every widget on the page, read from what each one publishes — never from where it is drawn,
+        // except the live position of one being dragged. See WIDGET-DOCK.md "Mechanism".
+        function readDocks() {
+            const out = [], seen = {};
+            const els = document.querySelectorAll('[' + A_ID + ']');
+            for (const el of els) {
+                const id = el.getAttribute(A_ID);
+                if (seen[id] || el.hidden || !el.getClientRects().length) continue;
+                const spec = cleanSpec(parse(el.getAttribute(A_SPEC)));
+                const size = nums(el.getAttribute(A_SIZE), 2);
+                if (!spec || !size || size[0] < 1 || size[1] < 1) continue;
+                seen[id] = true;
+                const drag = nums(el.getAttribute(A_DRAG), 2);
+                const st = nums(el.getAttribute(A_STRETCH), 1);
+                out.push({ id: id, el: el, spec: spec, w: size[0], h: size[1],
+                    grew: Number(el.getAttribute(A_GREW)) || 0,
+                    drag: drag ? { x: drag[0], y: drag[1] } : null,
+                    minH: st ? st[0] : null });
+            }
+            out.sort(function (a, b) { return a.id < b.id ? -1 : a.id > b.id ? 1 : 0; });
+            return out;
+        }
+
+        // The one layout. Same inputs give the same answer in every script, so none of them reacts
+        // to another's result and nothing can oscillate.
+        function solve(docks, V) {
+            const by = {};
+            const S = { x: V.w, y: V.h };
+            docks.forEach(function (d) { by[d.id] = d; d.a = {}; d.pos = {}; d.root = {}; });
+            AXES.forEach(function (ax) {
+                docks.forEach(function (d) {
+                    const a = d.spec[ax];
+                    d.a[ax] = a.r !== 'win' && (!by[a.r] || a.r === d.id) ? d.spec['f' + ax] : a;
+                });
+                // A loop of attachments cannot be placed; the first widget in it falls back to the window.
+                docks.forEach(function (d) {
+                    const seen = {};
+                    seen[d.id] = true;
+                    let c = d.a[ax];
+                    while (c.r !== 'win') {
+                        if (seen[c.r]) { d.a[ax] = d.spec['f' + ax]; break; }
+                        seen[c.r] = true;
+                        c = by[c.r].a[ax];
+                    }
+                });
+            });
+            function place(d, ax) {
+                if (d.pos[ax] != null) return d.pos[ax];
+                const len = d[LEN[ax]];
+                if (d.drag) { d.root[ax] = d.id; return (d.pos[ax] = d.drag[ax]); }
+                const a = d.a[ax];
+                if (a.r === 'win') {
+                    d.root[ax] = d.id;
+                    return (d.pos[ax] = pt(0, S[ax], a.t) + a.o - pt(0, len, a.m));
+                }
+                const p = by[a.r];
+                const plo = place(p, ax);
+                d.root[ax] = p.root[ax];
+                return (d.pos[ax] = pt(plo, p[LEN[ax]], a.t) + a.o - pt(0, len, a.m));
+            }
+            AXES.forEach(function (ax) { docks.forEach(function (d) { place(d, ax); }); });
+
+            function group(d, ax) { return docks.filter(function (k) { return k.root[ax] === d.root[ax]; }); }
+            function span(g, ax) {
+                let lo = Infinity, hi = -Infinity;
+                g.forEach(function (k) { lo = Math.min(lo, k.pos[ax]); hi = Math.max(hi, k.pos[ax] + k[LEN[ax]]); });
+                return { lo: lo, hi: hi };
+            }
+            function shift(g, ax, dv) { g.forEach(function (k) { k.pos[ax] += dv; }); }
+
+            // A panel that stretches keeps its top and gives up its bottom to the window first.
+            docks.forEach(function (d) {
+                if (d.minH == null) return;
+                const give = Math.min(d.pos.y + d.h - S.y, d.h - d.minH);
+                if (give > 0) d.h -= give;
+            });
+            // Attached widgets are one unit on that axis, and the unit is kept on screen as a whole.
+            AXES.forEach(function (ax) {
+                const done = {};
+                docks.forEach(function (d) {
+                    if (done[d.root[ax]]) return;
+                    done[d.root[ax]] = true;
+                    const g = group(d, ax), s = span(g, ax);
+                    const dv = s.hi - s.lo > S[ax] ? -s.lo : Math.max(-s.lo, Math.min(0, S[ax] - s.hi));
+                    if (dv) shift(g, ax, dv);
+                });
+            });
+
+            function over(a, b, ax) {
+                return Math.min(a.pos[ax] + a[LEN[ax]], b.pos[ax] + b[LEN[ax]]) - Math.max(a.pos[ax], b.pos[ax]);
+            }
+            function dragged(d) { return (by[d.root.x] && by[d.root.x].drag) || (by[d.root.y] && by[d.root.y].drag); }
+            // Move g toward `dir` (-1 start, +1 end) by up to `need`, never off screen. Returns the distance moved.
+            function push(g, ax, dir, need) {
+                const s = span(g, ax);
+                const room = dir < 0 ? Math.max(0, s.lo) : Math.max(0, S[ax] - s.hi);
+                const dv = Math.min(need, room);
+                if (dv > 0) shift(g, ax, dir * dv);
+                return dv;
+            }
+            function separate(a, b, ax, need) {
+                if (a.root[ax] === b.root[ax]) return false;
+                const ca = a.pos[ax] + a[LEN[ax]] / 2, cb = b.pos[ax] + b[LEN[ax]] / 2;
+                const first = ca < cb || (ca === cb && a.id < b.id) ? a : b;
+                const second = first === a ? b : a;
+                let left = need;
+                // A panel that stretches gives up its bottom before anything is moved.
+                if (ax === 'y' && first.minH != null) {
+                    const give = Math.min(left, Math.max(0, first.h - first.minH));
+                    first.h -= give;
+                    left -= give;
+                }
+                if (left <= 0) return true;
+                // The widget that changed size most recently is the one pushing; the other one moves.
+                const grower = a.grew !== b.grew ? (a.grew > b.grew ? a : b) : a;
+                const mover = grower === a ? b : a;
+                const dirOf = function (k) { return k === first ? -1 : 1; };
+                left -= push(group(mover, ax), ax, dirOf(mover), left);
+                if (left > 0) left -= push(group(grower, ax), ax, dirOf(grower), left);
+                return left < need;
+            }
+            for (let pass = 0; pass < PASSES; pass++) {
+                let moved = false;
+                for (let i = 0; i < docks.length; i++) {
+                    for (let j = i + 1; j < docks.length; j++) {
+                        const a = docks[i], b = docks[j];
+                        if (dragged(a) || dragged(b)) continue;
+                        if (a.spec.ov.indexOf(b.id) >= 0 || b.spec.ov.indexOf(a.id) >= 0) continue;
+                        const px = over(a, b, 'x'), py = over(a, b, 'y');
+                        if (px <= 0.5 || py <= 0.5) continue;
+                        const order = py <= px ? ['y', 'x'] : ['x', 'y'];
+                        for (const ax of order) {
+                            if (separate(a, b, ax, ax === 'y' ? py : px)) { moved = true; break; }
+                        }
+                    }
+                }
+                if (!moved) break;
+            }
+            docks.forEach(function (d) {
+                d.out = { x: Math.round(d.pos.x), y: Math.round(d.pos.y), w: d.w, h: Math.round(d.h) };
+            });
+            return docks;
+        }
+
+        function schedule() {
+            if (queued) return;
+            queued = true;
+            Promise.resolve().then(relayout);
+        }
+
+        function setPx(el, p, v) {
+            const s = v + 'px';
+            if (el.style[p] !== s) el.style[p] = s;
+        }
+
+        function relayout() {
+            queued = false;
+            if (!mine.length) return;
+            const docks = solve(readDocks(), viewport());
+            mine.forEach(function (w) {
+                const d = docks.find(function (k) { return k.el === w.el; });
+                if (!d) return;
+                if (w.o.apply) { w.o.apply(d.out); return; }
+                setPx(w.el, 'left', d.out.x);
+                setPx(w.el, 'top', d.out.y);
+                if (w.el.style.right !== 'auto') w.el.style.right = 'auto';
+                if (w.el.style.bottom !== 'auto') w.el.style.bottom = 'auto';
+            });
+        }
+
+        function observeDocks() {
+            for (const el of document.querySelectorAll('[' + A_ID + ']')) {
+                attrObs.observe(el, { attributes: true, attributeFilter: WATCHED });
+            }
+        }
+
+        function watch() {
+            if (watching) return;
+            watching = true;
+            listObs.observe(document.documentElement, { childList: true });
+            if (document.body) listObs.observe(document.body, { childList: true });
+            else document.addEventListener('DOMContentLoaded', function () {
+                if (document.body) listObs.observe(document.body, { childList: true });
+                observeDocks();
+                schedule();
+            });
+            window.addEventListener('resize', schedule);
+            document.addEventListener('fullscreenchange', schedule);
+            // A scrollbar appearing changes the viewport and fires no `resize`.
+            if (window.ResizeObserver) new ResizeObserver(schedule).observe(document.documentElement);
+        }
+
+        // The ids attached to `id`, directly or through another widget: they travel with it.
+        function carried(id, docks) {
+            const set = {};
+            set[id] = true;
+            let grew = true;
+            while (grew) {
+                grew = false;
+                docks.forEach(function (d) {
+                    if (!set[d.id] && (set[d.spec.x.r] || set[d.spec.y.r])) { set[d.id] = true; grew = true; }
+                });
+            }
+            return set;
+        }
+
+        function rectOf(d) {
+            const r = d.el.getBoundingClientRect();
+            return { id: d.id, left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height };
+        }
+
+        // Snap a dragged rect to the window's edges and centre, and to other widgets' edges.
+        function snap(x, y, w, h, V, others) {
+            let bx = null, by = null;
+            function tx(v) { const d = Math.abs(v - x); if (d <= SNAP && (!bx || d < bx.d)) bx = { d: d, v: v }; }
+            function ty(v) { const d = Math.abs(v - y); if (d <= SNAP && (!by || d < by.d)) by = { d: d, v: v }; }
+            tx(0); tx(V.w - w); tx((V.w - w) / 2);
+            ty(0); ty(V.h - h); ty((V.h - h) / 2);
+            others.forEach(function (r) {
+                const nearY = y < r.bottom + SNAP && y + h > r.top - SNAP;
+                const nearX = x < r.right + SNAP && x + w > r.left - SNAP;
+                if (nearY) { tx(r.left - w); tx(r.right); }
+                if (nearX) { ty(r.top - h); ty(r.bottom); }
+                const touchY = nearX && (Math.abs(y + h - r.top) <= SNAP || Math.abs(y - r.bottom) <= SNAP);
+                const touchX = nearY && (Math.abs(x + w - r.left) <= SNAP || Math.abs(x - r.right) <= SNAP);
+                if (touchY) { tx(r.left); tx(r.right - w); tx(r.left + (r.width - w) / 2); }
+                if (touchX) { ty(r.top); ty(r.bottom - h); ty(r.top + (r.height - h) / 2); }
+            });
+            return { x: bx ? bx.v : x, y: by ? by.v : y };
+        }
+
+        // The anchor a drop makes: attached to a widget it touches, else to the window's thirds.
+        function makeSpec(rc, zones, others, V) {
+            const fx = winAxis(zones.x, rc.x, rc.w, V.w), fy = winAxis(zones.y, rc.y, rc.h, V.h);
+            let x = fx, y = fy;
+            const winX = rc.x <= TOUCH ? winAxis('s', rc.x, rc.w, V.w)
+                : rc.x + rc.w >= V.w - TOUCH ? winAxis('e', rc.x, rc.w, V.w) : null;
+            const winY = rc.y <= TOUCH ? winAxis('s', rc.y, rc.h, V.h)
+                : rc.y + rc.h >= V.h - TOUCH ? winAxis('e', rc.y, rc.h, V.h) : null;
+            function align(r, lo, len, rlo, rlen) {
+                let best = null;
+                ['s', 'c', 'e'].forEach(function (k) {
+                    const o = pt(lo, len, k) - pt(rlo, rlen, k);
+                    if (!best || Math.abs(o) < Math.abs(best.o)) best = { r: r.id, m: k, t: k, o: o };
+                });
+                return best;
+            }
+            for (const r of others) {
+                const xo = rc.x < r.right - TOUCH && rc.x + rc.w > r.left + TOUCH;
+                const yo = rc.y < r.bottom - TOUCH && rc.y + rc.h > r.top + TOUCH;
+                if (xo && Math.abs(rc.y + rc.h - r.top) <= TOUCH) y = { r: r.id, m: 'e', t: 's', o: rc.y + rc.h - r.top };
+                else if (xo && Math.abs(rc.y - r.bottom) <= TOUCH) y = { r: r.id, m: 's', t: 'e', o: rc.y - r.bottom };
+                else if (yo && Math.abs(rc.x + rc.w - r.left) <= TOUCH) x = { r: r.id, m: 'e', t: 's', o: rc.x + rc.w - r.left };
+                else if (yo && Math.abs(rc.x - r.right) <= TOUCH) x = { r: r.id, m: 's', t: 'e', o: rc.x - r.right };
+                else continue;
+                if (y.r === r.id) x = winX || align(r, rc.x, rc.w, r.left, r.width);
+                else y = winY || align(r, rc.y, rc.h, r.top, r.height);
+                break;
+            }
+            const ov = others.filter(function (r) {
+                return Math.min(rc.x + rc.w, r.right) - Math.max(rc.x, r.left) > 0.5 &&
+                    Math.min(rc.y + rc.h, r.bottom) - Math.max(rc.y, r.top) > 0.5;
+            }).map(function (r) { return r.id; });
+            return { x: x, y: y, fx: fx, fy: fy, ov: ov };
+        }
+
+        // o: { id, el, load() -> spec|null, save(spec), initial() -> spec, size() -> [w, h] natural,
+        //      stretchMin() -> px|null, apply(rect), handle(target) -> may a press here drag, onDrag(on) }
+        function create(o) {
+            const el = o.el;
+            const w = { o: o, el: el, spec: null, dragging: false, size: null };
+            mine.push(w);
+
+            function setSpec(spec) {
+                w.spec = cleanSpec(spec) || cleanSpec(o.initial());
+                el.setAttribute(A_SPEC, JSON.stringify(w.spec));
+            }
+
+            // Rounded UP: a fractional width rounded down leaves the widget hanging off a window edge.
+            function measure() {
+                if (o.size) { const s = o.size(); return [Math.ceil(s[0]), Math.ceil(s[1])]; }
+                const r = el.getBoundingClientRect();
+                return [Math.ceil(r.width - 0.01), Math.ceil(r.height - 0.01)];
+            }
+
+            // Only the NATURAL size is published; a clamp or a stretch is an output and must not feed back.
+            function sizeChanged() {
+                const s = measure();
+                if (w.size && s[0] === w.size[0] && s[1] === w.size[1]) return;
+                w.size = s;
+                el.setAttribute(A_SIZE, s[0] + ' ' + s[1]);
+                el.setAttribute(A_GREW, String(Date.now()));
+                const min = o.stretchMin ? o.stretchMin() : null;
+                if (min != null) el.setAttribute(A_STRETCH, String(Math.round(min)));
+                else el.removeAttribute(A_STRETCH);
+            }
+
+            el.setAttribute(A_ID, o.id);
+            setSpec(o.load());
+            sizeChanged();
+            if (window.ResizeObserver) new ResizeObserver(sizeChanged).observe(el);
+
+            el.addEventListener('mousedown', function (e) {
+                if (e.button !== 0 || (o.handle && !o.handle(e.target))) return;
+                e.preventDefault();
+                const docks = readDocks();
+                const self = docks.find(function (d) { return d.el === el; });
+                if (!self) return;
+                const skip = carried(o.id, docks);
+                const others = docks.filter(function (d) { return !skip[d.id]; }).map(rectOf);
+                const r0 = el.getBoundingClientRect();
+                const sx = e.clientX, sy = e.clientY;
+                const zones = { x: w.spec.fx.m, y: w.spec.fy.m };
+                let last = null;
+                w.dragging = true;
+                if (o.onDrag) o.onDrag(true);
+                function move(ev) {
+                    const V = viewport();
+                    const W = self.w, H = self.h;
+                    let x = Math.max(0, Math.min(r0.left + ev.clientX - sx, V.w - W));
+                    let y = Math.max(0, Math.min(r0.top + ev.clientY - sy, V.h - H));
+                    if (!ev.ctrlKey) {
+                        const s = snap(x, y, W, H, V, others);
+                        x = Math.max(0, Math.min(s.x, V.w - W));
+                        y = Math.max(0, Math.min(s.y, V.h - H));
+                    }
+                    zones.x = zone(zones.x, x, W, V.w);
+                    zones.y = zone(zones.y, y, H, V.h);
+                    last = { x: x, y: y, w: W, h: H };
+                    el.setAttribute(A_DRAG, Math.round(x) + ' ' + Math.round(y));
+                    relayout();
+                }
+                function up() {
+                    window.removeEventListener('mousemove', move, true);
+                    window.removeEventListener('mouseup', up, true);
+                    w.dragging = false;
+                    if (last) {
+                        setSpec(makeSpec(last, zones, others, viewport()));
+                        o.save(w.spec);
+                    }
+                    el.removeAttribute(A_DRAG);
+                    relayout();
+                    if (o.onDrag) o.onDrag(false);
+                }
+                window.addEventListener('mousemove', move, true);
+                window.addEventListener('mouseup', up, true);
+            });
+
+            watch();
+            observeDocks();
+            schedule();
+
+            return {
+                relayout: schedule,
+                sizeChanged: sizeChanged,
+                dragging: function () { return w.dragging; },
+                spec: function () { return w.spec; },
+                // Hidden widgets drop out of everyone's layout; widgets attached to them fall back.
+                show: function (on) {
+                    el.hidden = !on;
+                    if (on) { w.size = null; sizeChanged(); }
+                    schedule();
+                },
+                reload: function () { setSpec(o.load()); schedule(); },
+            };
+        }
+
+        return { create: create, solve: solve, makeSpec: makeSpec, snap: snap, zone: zone, SNAP: SNAP };
+    })();
+    // ==== us-dock end ====
+
     // -------------------------------------------------------------------- tour
 
     // Next/previous through every picture on the page, from the pinned window. The window stays
@@ -5149,7 +5523,6 @@
 
     const TOUR_ROW = 0.5;       // share of the shorter item's height that puts two in one row
     const TOUR_SETTLE_MS = 150; // an arrow must be still this long before a scrub resolves
-    const TOUR_MOVE_MS = 100;   // the one-time slide to the corner
 
     // Is a tour under way — as opposed to a window merely pinned? Geometry reads this.
     function tourActive() { return !!tour && tour.on; }
@@ -5375,22 +5748,17 @@
         return list;
     }
 
-    // The counter and the two buttons, from whatever the last derivation found. `–` means the
+    // The widget's counter and buttons, from whatever the last derivation found. `–` means the
     // pinned picture is not itself in the list — a background image, or one just blocked.
     function tourChrome() {
-        if (!navCountEl || !tour) return;
-        const at = tour.index, n = tour.total;
-        navCountEl.textContent = (at >= 0 ? at + 1 : '–') + ' / ' + n;
-        navPrevEl.classList.toggle('faint', at === 0 || !n);
-        navNextEl.classList.toggle('faint', !n || (at >= 0 && at >= n - 1));
-        if (view && placed) layout();       // the counter's width feeds barMinW()
+        twSync();
     }
 
     // The picture the window was pinned on sets the tour's area and its size floor: it is the
     // user's example of what they want to see. A tour begun on a 100px thumbnail admits 100px.
     function tourStart() {
         tour = { el: active || null, start: active || null, url: activeShown || (view ? view.url : ''),
-            x: 0, y: 0, index: -1, total: 0, relocated: false, on: false,
+            x: 0, y: 0, index: -1, total: 0, on: false,
             scope: null, level: -1, floor: Math.max(0, cfg.tourMinDisplayed | 0) };
         if (tour.el) {
             const r = tour.el.getBoundingClientRect();
@@ -5410,20 +5778,218 @@
         plReset();
         crossReset();
         excSpent = false;       // a fresh tour asks the page again; it may have grown since
+        twRefresh();
     }
 
-    // Once per pinned window, on the first nav press: the anchored corner goes to the bottom
-    // right, where the nav buttons then sit under the pointer for every later step. After this
-    // the window is the user's — a drag or a resize is never undone. See TOUR.md §3.
-    function tourRelocate() {
-        tour.relocated = true;
-        if (fullActive()) return;       // the frame already IS the screen
-        reflow();                       // a tour is capped at the viewport; this may shrink it
-        view.left = vpW() - EDGE_GAP - outerW();
-        view.top = vpH() - EDGE_GAP - outerH();
-        box.classList.add('moving');
-        setTimeout(function () { if (box) box.classList.remove('moving'); }, TOUR_MOVE_MS + 60);
-        layout();
+    // ---- the tour widget: ◀ n / N ▶ in its own fixed box, placed by the shared dock. See TOUR.md.
+
+    const DOCK_KEY = 'hoverZoomDock';   // GM: { sites: { host: spec }, last: spec }
+    const TW_NEAR = 60;                 // px: the pointer this close lights the widget up
+    const TW_RECOUNT_MS = 300;          // after scrolling stops, the page is counted again
+
+    let tw = null;              // { host, box, prev, count, next, dock, rect, near }
+    let twPics = 0;             // pictures on the page by the cheap count, capped at 2
+    let twTotal = -1;           // the real count, taken when the pointer nears the widget
+    let twStarting = null;      // the token of a tour being opened from the widget
+    let twRecountTimer = 0;
+
+    function dockStore() {
+        try {
+            const v = JSON.parse(GM_getValue(DOCK_KEY, 'null'));
+            if (v && typeof v === 'object') return v;
+        } catch (e) { console.warn('[Hover Zoom] tour widget position unreadable; using the default', e); }
+        return { sites: {}, last: null };
+    }
+
+    // This site's position, else the last one saved anywhere, else the default.
+    function dockLoad() {
+        const st = dockStore();
+        return (st.sites && st.sites[pageHost()]) || st.last || null;
+    }
+
+    function dockSave(spec) {
+        const st = dockStore();
+        st.sites = st.sites || {};
+        st.sites[pageHost()] = spec;
+        st.last = spec;
+        GM_setValue(DOCK_KEY, JSON.stringify(st));
+    }
+
+    // First run: on top of Forum Stumbler's bar when it is on the page, the window's corner when not.
+    function dockInitial() {
+        const win = { r: 'win', m: 'e', t: 'e', o: 0 };
+        return { x: { r: 'forum-stumbler', m: 'e', t: 'e', o: 0 }, y: { r: 'forum-stumbler', m: 'e', t: 's', o: 0 },
+            fx: win, fy: win, ov: [] };
+    }
+
+    function buildTourWidget() {
+        if (tw || !isTopFrame || !document.body) return;
+        const host = document.createElement('div');
+        host.id = 'hover-zoom-tour';
+        // `all:initial` would out-rank [hidden], so visibility is `display`, set by twShow().
+        host.style.cssText = 'all:initial;position:fixed;right:0;bottom:0;z-index:2147483647;' +
+            'width:max-content;display:none';
+        const sr = host.attachShadow({ mode: 'open' });
+        const style = document.createElement('style');
+        style.textContent = [
+            ':host{all:initial}',
+            '.tw{display:flex;align-items:center;gap:' + NAV_GAP + 'px;box-sizing:border-box;',
+            'height:' + VCTL_H + 'px;padding:0 ' + VCTL_PAD + 'px;border-radius:7px;',
+            'background:rgba(17,17,27,.72);backdrop-filter:blur(7px) saturate(1.4);',
+            '-webkit-backdrop-filter:blur(7px) saturate(1.4);border:1px solid rgba(205,214,244,.14);',
+            'font:11px/16px system-ui,sans-serif;color:#cdd6f4;white-space:nowrap;cursor:move;',
+            'user-select:none;opacity:.35;transition:opacity .15s ease}',
+            '.tw.near{opacity:1}',
+            '.count{flex:none;padding:0 4px;font-variant-numeric:tabular-nums;letter-spacing:.02em;color:#bac2de}',
+        ].concat(vbtnCss()).join('');
+        sr.appendChild(style);
+        const box = document.createElement('div');
+        box.className = 'tw';
+        const prev = mkVBtn(ICON_PREV, 'Previous picture', function () { twPress(-1); });
+        const count = document.createElement('span');
+        count.className = 'count';
+        setTip(count, 'Where you are among this page\'s pictures. Drag to move; hold Ctrl to place it without snapping.');
+        const next = mkVBtn(ICON_NEXT, 'Next picture — with nothing open, starts at the first picture', function () { twPress(1); });
+        box.appendChild(prev);
+        box.appendChild(count);
+        box.appendChild(next);
+        sr.appendChild(box);
+        tw = { host: host, box: box, prev: prev, count: count, next: next, dock: null, rect: null, near: false };
+        document.body.appendChild(host);
+        tw.dock = usDock.create({ id: 'hover-zoom', el: host, load: dockLoad, save: dockSave, initial: dockInitial,
+            apply: function (r) {
+                tw.rect = r;
+                host.style.left = r.x + 'px';
+                host.style.top = r.y + 'px';
+                host.style.right = 'auto';
+                host.style.bottom = 'auto';
+            },
+            onDrag: function (on) { if (on) { hideTip(); cancel(); } } });
+        if (typeof GM_addValueChangeListener === 'function') {
+            try {
+                GM_addValueChangeListener(DOCK_KEY, function (name, o, n, remote) { if (remote && tw) tw.dock.reload(); });
+            } catch (e) { /* not all managers implement it */ }
+        }
+    }
+
+    // Two drawn pictures at the tour's floor are enough to show the widget; stop counting there.
+    function twCount() {
+        const floor = Math.max(1, cfg.tourMinDisplayed | 0);
+        const all = document.querySelectorAll('img,video');
+        let n = 0;
+        for (let i = 0; i < all.length && n < 2; i++) {
+            const r = all[i].getBoundingClientRect();
+            if (Math.max(r.width, r.height) >= floor) n++;
+        }
+        return n;
+    }
+
+    function twWanted() {
+        return !!cfg.tourButtons && isTopFrame && siteEnabled() && !CAPTCHA_HERE && (!!tour || twPics >= 2);
+    }
+
+    function twRefresh() {
+        if (!isTopFrame || !document.body) return;
+        if (!tw) {
+            if (!cfg.tourButtons || !siteEnabled() || CAPTCHA_HERE) return;
+            buildTourWidget();
+        }
+        twPics = twCount();
+        const on = twWanted();
+        const shown = tw.host.style.display !== 'none';
+        if (on !== shown) {
+            tw.host.style.display = on ? 'block' : 'none';
+            tw.dock.show(on);
+        }
+        twSync();
+    }
+
+    function twRecount() {
+        clearTimeout(twRecountTimer);
+        twRecountTimer = setTimeout(twRefresh, TW_RECOUNT_MS);
+    }
+
+    // Counter and buttons: the tour's position when one is running, the page's total when not.
+    function twSync() {
+        if (!tw) return;
+        const on = !!tour && tour.on;
+        const at = on ? tour.index : -1, n = on ? tour.total : twTotal;
+        tw.count.textContent = (at >= 0 ? at + 1 : '–') + ' / ' + (n >= 0 ? n : '–');
+        tw.prev.classList.toggle('faint', !placed || at <= 0 || !n);
+        tw.next.classList.toggle('faint', !placed ? n === 0 : (!n || (at >= 0 && at >= n - 1)));
+        if (tw.host.style.display !== 'none') tw.dock.sizeChanged();     // the counter's width
+    }
+
+    // The pointer near the widget lights it up; arriving is also when the page is counted properly.
+    function twNear(x, y) {
+        if (!tw || !tw.rect || tw.host.style.display === 'none') return;
+        const r = tw.rect;
+        const near = x >= r.x - TW_NEAR && x <= r.x + r.w + TW_NEAR && y >= r.y - TW_NEAR && y <= r.y + r.h + TW_NEAR;
+        if (near === tw.near) return;
+        tw.near = near;
+        tw.box.classList.toggle('near', near);
+        if (near && !tour) {
+            twTotal = tourPics(Math.max(0, cfg.tourMinDisplayed | 0)).length;
+            twSync();
+        }
+    }
+
+    function twBusy() { return !!twStarting || (!!tw && !!tw.dock && tw.dock.dragging()); }
+
+    function twPress(dir) {
+        if (placed && view) {
+            if (!tour) tourStart();
+            tourNav(dir, false);
+            return;
+        }
+        if (dir > 0) tourFromStart();
+    }
+
+    // ▶ with nothing pinned: the whole page's first picture, opened centred and pinned.
+    async function tourFromStart() {
+        if (placed || twStarting || !siteEnabled() || CAPTCHA_HERE) return;
+        cancel();
+        tour = { el: null, start: null, url: '', x: 0, y: 0, index: -1, total: 0, on: true,
+            scope: document.documentElement, level: -1, floor: Math.max(0, cfg.tourMinDisplayed | 0) };
+        const list = tourEntries();
+        if (!list.length) { tourEnd(); return; }
+        tourRemember(list[0]);
+        tour.index = 0;
+        tour.total = list.length;
+        twSync();
+        const el = list[0].el;
+        const displayed = sizeOf(el);
+        active = el;
+        activeShown = shownUrl(el);
+        const myToken = twStarting = token = { cancelled: false, fresh: true };
+        showSpinner();
+        let res = null;
+        try {
+            res = await resolve(el, displayed, myToken, null);
+            if (!res && !myToken.cancelled) res = await tourFallbackRes(el, displayed, myToken.failure);
+        } finally {
+            twStarting = null;
+            hideSpinner();
+        }
+        if (!res || myToken.cancelled || !tour || tour.el !== el || placed) {
+            if (!placed) { active = null; activeShown = null; tourEnd(); }
+            return;
+        }
+        plDone.set(el, { res: res, displayed: displayed });
+        dbg('tour started from the widget', { pictures: list.length, first: (res.url || '').slice(-60) });
+        showViewer(res, pointer);
+        place();
+        tourChrome();
+        plFill(tourEntries(), 0, 1);
+    }
+
+    if (isTopFrame) {
+        if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', twRefresh);
+        else twRefresh();
+        window.addEventListener('load', twRecount);
+        window.addEventListener('scroll', twRecount, { passive: true });
+        window.addEventListener('popstate', twRecount);
+        if (window.navigation) window.navigation.addEventListener('navigatesuccess', twRecount);
     }
 
     // Left/Right navigate when the picture cannot pan sideways, and pan when it can. Per axis,
@@ -5446,16 +6012,8 @@
         scrubAt = Date.now();
         scrubDir = dir;
         if (!tour.on) {
-            // The first press only enters the tour: the picture stays, the window goes to its
-            // corner, the counter and the buffer come up. The next press is the first step.
             tour.on = true;
-            if (!tour.relocated) tourRelocate();
-            const list = tourSync();
-            tourChrome();
-            dbg('tour entered: ' + describeEl(tour.scope), { pictures: list.length,
-                at: tour.index >= 0 ? tour.index + 1 : '–', floor: tour.floor + 'px' });
-            if (tour.index >= 0) plFill(list, tour.index, dir);
-            return;
+            dbg('tour entered: ' + describeEl(tourScopeNow(tourPics(tourFloor()))), { floor: tour.floor + 'px' });
         }
         const list = tourEntries();
         const to = tourTarget(list, dir);
@@ -5532,8 +6090,15 @@
     // for a candidate merely rejected as too small as well — inside a tour the entry has to
     // exist. See TOUR.md §8.
     async function tourFallback(el, displayed, why) {
+        const res = await tourFallbackRes(el, displayed, why);
+        if (!res || !tour || tour.el !== el || !view) return;
+        swapViewer(res);
+    }
+
+    // The page's own picture with the reason, as something the window can show; null if even that fails.
+    async function tourFallbackRes(el, displayed, why) {
         const url = shownUrl(el);
-        if (!url || blocked(url)) return;
+        if (!url || blocked(url)) return null;
         const n = nativeSize(el);
         let w = (n && n.w) || displayed.w;
         let h = (n && n.h) || displayed.h;
@@ -5541,13 +6106,13 @@
             // An entry harvested from a fetched page has no layout and nothing decoded, so its
             // own size is not known until something measures it. See TOUR.md §10.
             const dim = await probe(url, false);
-            if (!dim || !tour || tour.el !== el || !view) return;
+            if (!dim) return null;
             w = dim.w;
             h = dim.h;
         }
         const reason = why || 'no larger version found';
         dbg('tour: showing the page\'s own picture — ' + reason, url);
-        swapViewer({ url: url, w: w, h: h, reason: reason });
+        return { url: url, w: w, h: h, reason: reason };
     }
 
     // ---- making a lazy page load more, without moving what the user is looking at
@@ -6032,6 +6597,7 @@
         if (panelFlush) { panelFlush(); panelFlush = null; }
         if (panelHost) { panelHost.remove(); panelHost = null; }
         savePanelState();
+        twRefresh();                // tourButtons may have changed
     }
 
     // Anything writing cfg from OUTSIDE the panel re-renders it, or it shows stale values.
@@ -6820,8 +7386,10 @@
             1, 4, 0.25);
 
         section('Next and previous');
-        check('tourButtons', 'Show ◀ ▶ on a pinned preview',
-            'With a counter saying where you are among the page’s pictures.');
+        check('tourButtons', 'Show the tour widget',
+            '◀ ▶ and a counter in a small box of their own, faint until the pointer comes near. ' +
+            '▶ with nothing open starts at the page’s first picture. Drag it anywhere; hold Ctrl to ' +
+            'place it without snapping. It remembers where it was put on each site.');
         check('tourKeys', 'Arrow keys step through the page',
             'Left and right move to the next picture unless the one you are looking at is ' +
             'zoomed in far enough to pan sideways. [ and ] always move; { and } narrow and ' +

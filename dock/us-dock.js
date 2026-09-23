@@ -341,9 +341,11 @@ const usDock = (function () {
             el.setAttribute(A_SPEC, JSON.stringify(w.spec));
         }
 
+        // Rounded UP: a fractional width rounded down leaves the widget hanging off a window edge.
         function measure() {
-            const s = o.size ? o.size() : [el.offsetWidth, el.offsetHeight];
-            return [Math.round(s[0]), Math.round(s[1])];
+            if (o.size) { const s = o.size(); return [Math.ceil(s[0]), Math.ceil(s[1])]; }
+            const r = el.getBoundingClientRect();
+            return [Math.ceil(r.width - 0.01), Math.ceil(r.height - 0.01)];
         }
 
         // Only the NATURAL size is published; a clamp or a stretch is an output and must not feed back.
@@ -420,7 +422,6 @@ const usDock = (function () {
             spec: function () { return w.spec; },
             // Hidden widgets drop out of everyone's layout; widgets attached to them fall back.
             show: function (on) {
-                if (el.hidden === !on) return;
                 el.hidden = !on;
                 if (on) { w.size = null; sizeChanged(); }
                 schedule();

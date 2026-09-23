@@ -4,26 +4,34 @@
 is now code. It is kept as the reasoning behind the shape, not as a to-do list; where the build
 departed from the plan the section says so, and §15 lists what is still only a guess.
 
-The live account of what the code does is `INTERACTION.md` `S25`, `S26`, `T29`-`T37`, `E54`-`E60`.
+The live account of what the code does is `INTERACTION.md` `S25`, `S26`, `T29`-`T39`, `E54`-`E60`, `E63`.
 
-## PLANNED REWORK (decided 2026-09-22, not built) — supersedes §2 anchored corner, §3, §4 nav group
+## The tour widget — BUILT, v0.120.0. Supersedes §2's anchored corner, §3 and §4's nav group
 
-Root cause being removed: ◀ ▶ live inside a frame whose size changes per picture, so every step
-moves them (hence relocation, anchored corner, two-press entry, nav-driven size floors).
+◀ ▶ used to live inside the frame, whose size changes per picture, so every step moved them; the
+relocation, the anchored corner, the two-press entry and the nav-driven size floors all existed to
+fight that. They are deleted. Do not put nav controls back on the frame.
 
-- **Tour widget**: ◀ counter ▶ in its own fixed box outside `.box`, shown faintly at all times on
-  pages with ≥2 tour pictures, full opacity when the pointer nears it.
-- **Starting from the widget begins at the FIRST picture**, always (user's call: no guessing a start;
-  press ▶ a few times instead). Starting from a specific picture = pin it, then →/▶, as now.
-- **A tour shows the picture centred and as large as settings allow.** The widget floats ON TOP of
-  it; no space is reserved (user's call: the corner rarely matters, and the pointer leaving fades it).
-  Hover placement keeps using `cfg.position`; the tour ignores it.
-- **Delete when built**: `tourRelocate()`, `tour.relocated`, anchored-corner arithmetic, the first
-  press that only enters, the nav group in `vctlEl`, the nav height floor and `barMinW()` nav width.
-- **Position memory: per site.** A page element that covers the widget is solved by dragging it.
-- **Shared with Forum Stumbler and RNFP**: one position model — see [`WIDGET-DOCK.md`](WIDGET-DOCK.md).
-- **Arrow keys**: ours only while a preview or tour is up; otherwise the page's. Forum Stumbler has
-  no arrow keys (checked 2026-09-22), so there is nothing to arbitrate with.
+- **The widget** (`buildTourWidget`): ◀ `n / N` ▶ in its own fixed host outside the preview's, with
+  its own shadow root (button CSS shared via `vbtnCss()`). Positioned by the shared dock —
+  [`WIDGET-DOCK.md`](WIDGET-DOCK.md). Its host must come AFTER the preview host in the DOM, or the
+  preview covers it (`buildViewer` re-appends it).
+- **Visibility is `style.display`, not `[hidden]`**: the host's inline `all:initial` out-ranks the UA
+  `[hidden]` rule. `twRefresh` sets both, and `dock.show()` tells the other scripts.
+- **Shown** on pages with two drawn pictures at `tourMinDisplayed` (`twCount`, stops at 2), or while a
+  tour runs; re-counted after scrolling stops, on load and on SPA navigation. Faint until the pointer
+  is within `TW_NEAR`; arriving also takes the real count (`tourPics`) for the `– / N` label.
+- **▶ with nothing open starts at the FIRST picture of the whole page**, always (user's call: no
+  guessing a start; press ▶ a few times instead) — `tourFromStart`, scope = the whole document.
+  Starting from a chosen picture = hover or pin it, then →/▶.
+- **Every tour picture is centred**, as large as settings allow; the widget floats over it and no
+  space is reserved (user's call). Hover placement still follows `cfg.position`.
+- **The entering press advances.** Measured sizes: re-publish after every counter change
+  (`twSync` → `sizeChanged`), since the Browser pane never fires `ResizeObserver`.
+- **Arrow keys** are ours only while a preview or tour is up; otherwise the page's. Forum Stumbler has
+  no arrow keys (checked 2026-09-22).
+- **Position memory** (`DOCK_KEY`): per site, falling back to the last drop anywhere; first run
+  attaches on top of Forum Stumbler's bar, or the window's bottom-right when it is absent.
 
 A *tour* is next/previous navigation through every picture on the page, driven from a pinned
 preview window. The window stays put; the page does not move; each step swaps a different picture
