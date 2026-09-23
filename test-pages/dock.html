@@ -1,0 +1,87 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>us-dock — three widgets, three separate copies</title>
+<style>
+  body { font: 14px system-ui, sans-serif; margin: 20px; background: #f4f4f4; }
+  .w { position: fixed; right: 0; bottom: 0; box-sizing: border-box; padding: 6px 8px; border-radius: 8px;
+       color: #fff; font: 13px system-ui; user-select: none; cursor: move; width: max-content; }
+  .w[hidden] { display: none; }
+  .w button { font: inherit; margin-left: 4px; }
+  #fs { background: #1e66f5; }
+  #hz { background: #40a02b; }
+  #rn { background: #d20f39; overflow: hidden; }
+  .grow { display: block; }
+  pre { background: #fff; padding: 8px; }
+</style>
+</head>
+<body>
+<h1>us-dock test page</h1>
+<p>Each widget runs its OWN copy of <code>dock/us-dock.js</code>, as three userscripts would. Drag them;
+hold Ctrl to drag without snapping. Positions are stored per widget in localStorage.</p>
+<p><button id="reset">Forget all positions and reload</button></p>
+<pre id="log"></pre>
+
+<div class="w" id="fs">Forum Stumbler <button data-g="fs">grow</button><button data-s="fs">shrink</button><div class="grow"></div></div>
+<div class="w" id="hz">Hover Zoom <button data-g="hz">grow</button><button data-s="hz">shrink</button><button data-h="hz">hide</button><div class="grow"></div></div>
+<div class="w" id="rn">RNFP (stretches) <button data-g="rn">grow</button></div>
+
+<script>
+(async function () {
+  const src = await (await fetch('../dock/us-dock.js')).text();
+  const copy = () => new Function(src + '\nreturn usDock;')();
+  const win = (m, o) => ({ r: 'win', m: m, t: m, o: o || 0 });
+  const store = {
+    load: k => { try { return JSON.parse(localStorage.getItem('dock-' + k)); } catch (_) { return null; } },
+    save: (k, v) => localStorage.setItem('dock-' + k, JSON.stringify(v)),
+  };
+  const noBtn = t => t.tagName !== 'BUTTON';
+  const docks = {};
+
+  docks.fs = copy().create({ id: 'forum-stumbler', el: document.getElementById('fs'), handle: noBtn,
+    load: () => store.load('fs'), save: s => store.save('fs', s),
+    initial: () => ({ x: win('e'), y: win('e'), fx: win('e'), fy: win('e'), ov: [] }) });
+
+  docks.hz = copy().create({ id: 'hover-zoom', el: document.getElementById('hz'), handle: noBtn,
+    load: () => store.load('hz'), save: s => store.save('hz', s),
+    initial: () => ({ x: { r: 'forum-stumbler', m: 'e', t: 'e', o: 0 }, y: { r: 'forum-stumbler', m: 'e', t: 's', o: 0 },
+      fx: win('e'), fy: win('e'), ov: [] }) });
+
+  // RNFP stand-in: a 300x360 panel whose height is an output (it stretches), top-anchored.
+  const rn = document.getElementById('rn');
+  let rnH = 360;
+  rn.style.width = '300px';
+  rn.style.height = rnH + 'px';
+  docks.rn = copy().create({ id: 'rnfp', el: rn, handle: noBtn,
+    load: () => store.load('rn'), save: s => store.save('rn', s),
+    initial: () => ({ x: win('e'), y: win('s', 60), fx: win('e'), fy: win('s', 60), ov: [] }),
+    size: () => [300, rnH], stretchMin: () => 120,
+    apply: r => { rn.style.left = r.x + 'px'; rn.style.top = r.y + 'px'; rn.style.right = 'auto';
+      rn.style.bottom = 'auto'; rn.style.height = r.h + 'px'; } });
+
+  document.addEventListener('click', e => {
+    const g = e.target.dataset.g, s = e.target.dataset.s, h = e.target.dataset.h;
+    if (g === 'rn') { rnH += 60; docks.rn.sizeChanged(); docks.rn.relayout(); return; }
+    const k = g || s;
+    if (k) {
+      const box = document.querySelector('#' + k + ' .grow');
+      box.style.height = Math.max(0, (parseInt(box.style.height) || 0) + (g ? 60 : -60)) + 'px';
+      docks[k].sizeChanged();
+    }
+    if (h) { const w = document.getElementById(h); docks[h].show(w.hidden); }
+  });
+  document.getElementById('reset').onclick = () => { ['fs', 'hz', 'rn'].forEach(k => localStorage.removeItem('dock-' + k)); location.reload(); };
+
+  const log = document.getElementById('log');
+  setInterval(() => {
+    log.textContent = ['fs', 'hz', 'rn'].map(k => {
+      const el = document.getElementById(k), r = el.getBoundingClientRect();
+      return k + '  ' + [r.left, r.top, r.width, r.height].map(Math.round).join(',') + '  ' + el.getAttribute('data-us-dock-a');
+    }).join('\n');
+  }, 300);
+  window.__docks = docks;
+})();
+</script>
+</body>
+</html>
