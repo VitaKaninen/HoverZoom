@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.131.0
+// @version     0.132.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -1635,12 +1635,11 @@
             // The corner one sits inside the corner's resize square, which answers round it.
             '.cx{position:absolute;top:' + CX_INSET + 'px;right:' + CX_INSET + 'px;width:' + CX_SIZE + 'px;',
             'height:' + CX_SIZE + 'px;box-sizing:border-box;display:none;align-items:center;justify-content:center;',
-            'color:#cdd6f4;cursor:pointer;user-select:none;z-index:3;',
-            'filter:drop-shadow(0 0 1.5px rgba(0,0,0,.9)) drop-shadow(0 1px 3px rgba(0,0,0,.6));',
+            'color:#cdd6f4;cursor:pointer;user-select:none;z-index:3;opacity:.6;',
             'transition:opacity var(--barfade) ease}',
             '.cx svg{display:block;width:100%;height:100%;fill:none;stroke:currentColor;',
-            'stroke-width:2.4;stroke-linecap:round}',
-            '.cx:hover{color:#f38ba8}',
+            'stroke-width:1.6;stroke-linecap:round}',
+            '.cx:hover{color:#f38ba8;opacity:1}',
             // Rides the bar's fade; with the bar off it shows only while the pointer is on the window.
             '.box.placed.hot .cx{display:flex}',
             '.box.baridle .cx{opacity:0;pointer-events:none}',
@@ -6992,8 +6991,29 @@
     // Scroll first, then the next page: a page that will load more in place is cheaper, and it
     // keeps everything in one document where the layout gates still apply.
     async function tourMore(force) {
-        if (await tourExcursion(force)) return true;
+        const had = new Set(tourPics(tourFloor()));
+        if (await tourExcursion(force)) { tourAdopt(had); return true; }
         return await tourCross();
+    }
+
+    // A feed that appends each batch as a sibling block lands it outside the section the tour
+    // picked. Widen to the nearest ancestor holding new pictures, if it holds nothing else.
+    function tourAdopt(had) {
+        if (!tour || !tour.scope || tour.scope === document.documentElement || !tour.scope.isConnected) return;
+        const pics = tourPics(tourFloor());
+        const fresh = pics.filter(function (p) { return !had.has(p); });
+        if (!fresh.length || fresh.some(function (p) { return tour.scope.contains(p); })) return;
+        let a = tour.scope.parentElement;
+        while (a && !fresh.some(function (p) { return a.contains(p); })) a = a.parentElement;
+        if (!a) return;
+        const old = tour.scope;
+        const stray = pics.filter(function (p) { return a.contains(p) && !old.contains(p) && had.has(p); });
+        if (stray.length) {
+            dbg('new pictures arrived outside the tour section, which is left as it is', { stray: stray.length });
+            return;
+        }
+        tour.scope = a;
+        dbg('tour scope widened to take in the new pictures: ' + describeEl(a), { fresh: fresh.length });
     }
 
     // One request for more at a time; a press at the wall waits on the refill already running.

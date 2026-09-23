@@ -736,7 +736,15 @@ scroll-event loader has fired by then, and its fetch lands wherever the viewport
 2 s stay at the bottom was visible and read as a jarring jump. A hop that loads nothing is
 followed once per page by the old stay (`excLong`), for a loader that reads the position after a
 debounce; if that grows the page, `excLong` sticks for it; if not, `excSpent`. So a finite page
-still shows one stay at the very end.
+still shows one stay at the very end. Measured on Google Images in real Chrome: away 30–34 ms,
+100 → 200 → 300 results.
+
+**A feed appends each batch as a SIBLING block** (Google Images: 100 per block under one parent).
+The tour's scope is the first block, so the batch landed outside it: counter stuck at /100, the
+wall found `tourExhausted()` (scoped ⇒ no cross-page) and quit, while the idle widget, counting
+the whole page, said 100+. `tourAdopt()` fixes it: after an excursion grows the page, if no new
+picture is inside the scope, widen to the nearest ancestor holding new ones — only when that
+ancestor holds nothing else that was already on the page (so a sidebar is never pulled in).
 
 ### Fullscreen
 
