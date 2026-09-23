@@ -34,3 +34,14 @@ edges, clamped while dragging and on resize, left edge anchored to Reddit's side
 - **RNFP**: keeps its sidebar left edge and window-top anchor; its BOTTOM follows the window bottom or
   a widget below it (it stretches rather than moves).
 - **No arrow keys in FS** for now.
+
+## Mechanism
+
+- **Every script runs the same layout over ALL widgets and positions only its own.** Inputs are
+  published on each widget's element: its anchor, its NATURAL size (not the displayed, stretched or
+  clamped one — RNFP's pushed height is an output), and when that size last changed.
+- **Never read another widget's displayed position as an input** (the one exception: the live
+  position of a widget being dragged, which only its own script writes). Inputs never change as a
+  result of outputs, so the scripts cannot fight — two different versions of the layout code give a
+  wrong-looking layout until both are updated, never a loop. No version handshake (sole user,
+  updates together; decided 2026-09-22).
