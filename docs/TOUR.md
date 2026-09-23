@@ -628,6 +628,12 @@ if the fixed floor misfires.
 Never blank, never skipped. Show the page's own thumbnail as a placeholder, plus a reason in the
 status bar.
 
+**Except when the page's own picture is itself a placeholder (v0.133.0):** `placeholder()` — decoded
+at ≤ 2×2, or an undecoded `data:` URL under 300 chars. Google Images gives every result below the
+fold a 1×1 GIF until it is scrolled to, and a result whose link is not an image (an Instagram
+`lookaside` page) then showed as a black square. Neither fallback shows one; the tour moves on
+(`tourFallback` → `tourNav`), and a start from the widget walks up to `TOUR_START_TRIES` entries.
+
 **Built, with the condition narrowed: only a genuine failure shows it, not a candidate merely
 rejected for being too small.** On an ordinary hover the wider rule would pop a blurry
 thumbnail over every un-upgradable picture on the page. The wider rule is still right *inside a
@@ -712,7 +718,8 @@ are fully reachable.
 
 ### The excursion
 
-Fires **automatically when fewer than 10 entries remain ahead**, so the refill overlaps with
+Fires **automatically on landing within 10 of the end, in either direction, including a start from
+the widget with ←** (v0.133.0: ← from nothing, Esc, ← again loads a batch each time), so the refill overlaps with
 pictures the user is still looking at rather than stalling them at the wall.
 
 1. Record scroll position.

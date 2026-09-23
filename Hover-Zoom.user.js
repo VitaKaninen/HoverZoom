@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.132.0
+// @version     0.133.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -873,6 +873,16 @@
         if (el.tagName === 'VIDEO' && el.videoWidth > 0)
             return { w: el.videoWidth, h: el.videoHeight };
         return null;    // a background image, or nothing decoded yet — nothing to check
+    }
+
+    const PLACEHOLDER_PX = 2;
+    const PLACEHOLDER_DATA_LEN = 300;
+
+    // A lazy page's stand-in (Google's 1x1 GIF): never shown as the page's own picture.
+    function placeholder(el, url) {
+        const n = nativeSize(el);
+        if (n) return n.w <= PLACEHOLDER_PX && n.h <= PLACEHOLDER_PX;
+        return !!url && url.indexOf('data:') === 0 && url.length < PLACEHOLDER_DATA_LEN;
     }
 
     // ------------------------------------------------------------------ probing
@@ -5202,7 +5212,7 @@
     // and verifyMedia() closes the window on the real one. See E45.
     async function showFallback(el, token, why) {
         const url = shownUrl(el);
-        if (!url || blocked(url)) return;
+        if (!url || blocked(url) || placeholder(el, url)) return;
         const dim = await probe(url);       // resolve() already tried the displayed src; cached
         if (!dim || token.cancelled || active !== el || playerArrived(el)) return;
         dbg('showing the page\'s own picture instead — ' + why, url);
@@ -6513,23 +6523,27 @@
             scope: tourCommon(mainPics(tourPics(floor))), mainOnly: true, level: -1, floor: floor };
         const list = tourEntries();
         if (!list.length) { tourEnd(); return; }
-        const at = dir > 0 ? 0 : list.length - 1;
-        tourRemember(list[at]);
-        tour.index = at;
-        tour.total = list.length;
-        twSync();
-        const el = list[at].el;
-        const displayed = sizeOf(el);
-        active = el;
-        activeShown = shownUrl(el);
+        let at = dir > 0 ? 0 : list.length - 1;
         const myToken = twStarting = token = { cancelled: false, fresh: true };
         showSpinner();
-        let res = null;
+        let res = null, el = null, displayed = null;
         try {
-            const warm = twWarm && twWarm.el === el && twWarm.res && sameDisplayed(twWarm.displayed, displayed) ? twWarm.res : null;
-            primeLink(el);
-            res = warm || await resolve(el, displayed, myToken, null);
-            if (!res && !myToken.cancelled) res = await tourFallbackRes(el, displayed, myToken.failure);
+            for (let tries = 0; tries < TOUR_START_TRIES && at >= 0 && at < list.length; tries++, at += dir) {
+                tourRemember(list[at]);
+                tour.index = at;
+                tour.total = list.length;
+                twSync();
+                el = list[at].el;
+                displayed = sizeOf(el);
+                active = el;
+                activeShown = shownUrl(el);
+                const warm = twWarm && twWarm.el === el && twWarm.res && sameDisplayed(twWarm.displayed, displayed) ? twWarm.res : null;
+                primeLink(el);
+                res = warm || await resolve(el, displayed, myToken, null);
+                if (!res && !myToken.cancelled) res = await tourFallbackRes(el, displayed, myToken.failure);
+                if (res || myToken.cancelled || !tour) break;
+                dbg('tour: nothing to show for this one — trying the next', { at: at + 1 });
+            }
         } finally {
             twStarting = null;
             hideSpinner();
@@ -6544,7 +6558,9 @@
         showViewer(res, pointer);
         place();
         tourChrome();
-        plFill(tourEntries(), tour.index, dir);
+        const now = tourEntries();
+        plFill(now, tour.index, dir);
+        if (now.length - 1 - tour.index < TOUR_AHEAD) tourGrow(dir, false);
     }
 
     if (isTopFrame) {
@@ -6600,7 +6616,7 @@
         tourChrome();
         plFill(list, to, dir);
         // Refill BEFORE the wall, so the page loads more while there are still pictures to look at.
-        if (dir > 0 && list.length - 1 - to < TOUR_AHEAD) tourGrow(dir, false);
+        if (list.length - 1 - to < TOUR_AHEAD) tourGrow(dir, false);
         clearTimeout(scrubTimer);
         if (repeat) scrubTimer = setTimeout(tourShow, TOUR_SETTLE_MS);
         else tourShow();
@@ -6695,14 +6711,16 @@
     // exist. See TOUR.md §8.
     async function tourFallback(el, displayed, why) {
         const res = await tourFallbackRes(el, displayed, why);
-        if (!res || !tour || tour.el !== el || !view) return;
-        swapViewer(res);
+        if (!tour || tour.el !== el || !view) return;
+        if (res) { swapViewer(res); return; }
+        dbg('tour: nothing to show for this one — moving on', { why: why || '(none)' });
+        tourNav(scrubDir, false);
     }
 
     // The page's own picture with the reason, as something the window can show; null if even that fails.
     async function tourFallbackRes(el, displayed, why) {
         const url = shownUrl(el);
-        if (!url || blocked(url)) return null;
+        if (!url || blocked(url) || placeholder(el, url)) return null;
         const n = nativeSize(el);
         let w = (n && n.w) || displayed.w;
         let h = (n && n.h) || displayed.h;
@@ -6726,7 +6744,8 @@
     // event does not help, because the handler reads the real `scrollY` and correctly concludes
     // nothing moved. So the viewport goes to the bottom and comes straight back. See TOUR.md §9.
 
-    const TOUR_AHEAD = 10;          // entries left ahead of the anchor that trigger a refill
+    const TOUR_AHEAD = 10;          // landing this close to the end, either way, triggers a refill
+    const TOUR_START_TRIES = 5;     // unshowable entries a start from the widget walks past
     const EXC_POLL_MS = 150;
     const EXC_MAX_MS = 2000;
     const EXC_COOL_MS = 3000;
