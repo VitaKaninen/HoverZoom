@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.133.0
+// @version     0.134.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -5350,7 +5350,7 @@
         releaseSliders();
     }, true);
     window.addEventListener('scroll', function (e) {
-        if (!placed && !panelOwns(e)) cancel();
+        if (!placed && !twStarting && !panelOwns(e)) cancel();     // twStarting: tourFollow() scrolls
     }, true);
     // No keyup ever comes for a modifier held through Alt+Tab or Ctrl+Tab, so blur forgets it.
     window.addEventListener('blur', function () {
@@ -6236,6 +6236,15 @@
         tour.url = entry.url;
         tour.x = entry.x;
         tour.y = entry.y;
+        tourFollow(entry.el);
+    }
+
+    // The page scrolls behind the preview to keep the anchor on screen, so a feed that empties
+    // what is far from the viewport (Google in Firefox) mounts the next section as the tour walks.
+    function tourFollow(el) {
+        if (!el || el.__hzBase || !el.isConnected || onScreen(el)) return;
+        try { el.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' }); }
+        catch (e) { dbg('tour: could not bring the picture on screen', String(e)); }
     }
 
     // Re-derive and report where the anchor is. The index and total are the only things kept
@@ -6792,14 +6801,13 @@
         const long = excLong;
         let got = null;
         try {
-            // Explicitly 'auto': a page with scroll-behavior:smooth in its own CSS would
-            // otherwise turn every excursion into a visible animation.
-            window.scrollTo({ left: sx, top: docHeight(), behavior: 'auto' });
+            // 'instant', not 'auto': 'auto' obeys the page's own scroll-behavior:smooth.
+            window.scrollTo({ left: sx, top: docHeight(), behavior: 'instant' });
             // A hop is back within a frame or two, and the loading it set off is watched from home.
             if (long) got = await excWatch(before);
             else await twoFrames();
         } finally {
-            window.scrollTo({ left: sx, top: sy, behavior: 'auto' });
+            window.scrollTo({ left: sx, top: sy, behavior: 'instant' });
             if (long) excBusy = false;
         }
         if (!long) {

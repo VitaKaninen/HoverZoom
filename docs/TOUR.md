@@ -695,8 +695,15 @@ is `tourFromStart(-1)`: the last picture loaded now, and ▶ from there loads mo
 
 ## 9a. Why it has to be a real scroll
 
-Confirmed with the user: during ordinary navigation **the page never scrolls**. The tour shows
-off-screen pictures in the preview and leaves the document where it is.
+**Reversed v0.134.0 (user's call): the page follows the tour.** `tourFollow()` (from
+`tourRemember`) scrolls the anchor to the centre, `behavior:'instant'`, only when it is off screen;
+the page stays where the tour ended. Was: "the page never scrolls". Why it changed: Google Images
+in Firefox/LibreWolf **empties every 50-result batch far from the viewport** (measured: 300
+results, batches 2–5 were empty `div`s of ~2,300 px each, only the first and last populated), so
+a still page can never list them — the counter sat at 100/100 on picture #300. Following keeps the
+anchor's neighbourhood mounted, which also answers the virtualised-feed limit below.
+`twStarting` guards the page-scroll `cancel()`, since a start from the widget is not yet placed.
+Scrolls use `'instant'`: `'auto'` obeys the page's own `scroll-behavior:smooth`.
 
 The list already handles this — `querySelectorAll` sees the whole document regardless of viewport,
 and `collectCandidates` reads `data-src`/`data-srcset`, so below-the-fold lazy images
