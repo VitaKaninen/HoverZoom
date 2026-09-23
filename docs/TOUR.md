@@ -490,6 +490,11 @@ jobs that scrolled away. The hover's own `resolve()` then hits `probeCache`. Off
   candidates have changed since** — the preload shows at once, then `upgradeViewer` if the full one
   beats it (docked ring meanwhile). Before v0.126.0 a cut preload was final, so the slideshow showed
   smaller pictures than a hover of the same one.
+- **The ring belongs to the token.** A resolve hides it in its `finally` only if not cancelled, so
+  whatever cancels the token must hide it: `cancel()` does, and `tourShow()` does first thing.
+  Before v0.138.0 a step that took the preload branch cancelled a pending live resolve and never
+  hid its ring. With a fast key the ring then spun for ever over preloaded pictures (measured in
+  Chrome: `from the preload buffer` logged, ring still on).
 - **Prime links the page fills on hover** (`primeLink`). An `<a>` with no `href` around a live
   picture gets a synthetic `mouseover` before every tour resolve; Google Images writes
   `/imgres?imgurl=…` synchronously on it, and `linkParamCandidates` does the rest. Measured in real

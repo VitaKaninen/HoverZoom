@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.137.0
+// @version     0.138.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -6644,6 +6644,7 @@
         active = el;
         activeShown = shownUrl(el);
         if (token) token.cancelled = true;
+        hideSpinner();              // the cancelled resolve owned it and will not hide it now
         const myToken = token = { cancelled: false, fresh: true };
         // A settled preload goes straight in: the point of preloading is not only the latency but
         // the flashing, and the live path emits every improvement as it lands. A cut budget that
