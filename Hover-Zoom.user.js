@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.136.0
+// @version     0.137.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -6180,7 +6180,9 @@
     // sorted in DOCUMENT coordinates, or the order changes as the page scrolls.
     function tourEntries() {
         let pics = tourPics(tourFloor());
-        if (tour && tour.mainOnly) pics = mainPics(pics);
+        // Started from the widget: the area is re-derived like the widget's own count, so batches
+        // the page mounts as it follows the tour join it.
+        if (tour && tour.mainOnly) { pics = mainPics(pics); tour.scope = tourCommon(pics); }
         return tourEntriesIn(pics, tourScopeNow(pics));
     }
 
@@ -6267,6 +6269,7 @@
         tour = { el: active || null, start: active || null, url: activeShown || (view ? view.url : ''),
             x: 0, y: 0, index: -1, total: 0, on: false,
             scope: null, level: -1, floor: Math.max(0, cfg.tourMinDisplayed | 0) };
+        tour.had = new Set(tourPics(tour.floor));
         if (tour.el) {
             const r = tour.el.getBoundingClientRect();
             tour.x = r.left + (window.scrollX || 0);
@@ -6527,7 +6530,7 @@
         cancel();
         const floor = Math.max(0, cfg.tourMinDisplayed | 0);
         tour = { el: null, start: null, url: '', x: 0, y: 0, index: -1, total: 0, on: true,
-            scope: tourCommon(mainPics(tourPics(floor))), mainOnly: true, level: -1, floor: floor };
+            scope: null, mainOnly: true, level: -1, floor: floor, had: new Set(tourPics(floor)) };
         const list = tourEntries();
         if (!list.length) { tourEnd(); return; }
         let at = dir > 0 ? 0 : list.length - 1;
@@ -7019,9 +7022,7 @@
     // Scroll first, then the next page: a page that will load more in place is cheaper, and it
     // keeps everything in one document where the layout gates still apply.
     async function tourMore(force) {
-        const had = new Set(tourPics(tourFloor()));
-        if (tour && !tour.had) tour.had = had;
-        if (await tourExcursion(force)) { tourAdopt(had); return true; }
+        if (await tourExcursion(force)) { if (tour && tour.had) tourAdopt(tour.had); return true; }
         return await tourCross();
     }
 
@@ -7087,6 +7088,12 @@
     // Fire and forget: the refill overlaps with pictures the user is still looking at rather
     // than stalling them at the wall.
     function tourGrow(dir, stepAfter) {
+        // Pictures the page mounted as it followed the tour, with no excursion involved.
+        if (tour && tour.had && !stepAfter) {
+            const was = tour.scope;
+            tourAdopt(tour.had);
+            if (tour.scope !== was) { tourSync(); tourChrome(); }
+        }
         tourMoreOnce(false).then(function (grew) {
             if (!grew || !tour || !placed) return;
             const list = tourSync();

@@ -766,6 +766,14 @@ the whole page, said 100+. `tourAdopt()` fixes it: after an excursion grows the 
 picture is inside the scope, widen to the nearest ancestor holding new ones — only when that
 ancestor holds nothing else that was already on the page (so a sidebar is never pulled in).
 
+**A tour started from the widget (`mainOnly`) re-derives its scope on every press** as
+`tourCommon(mainPics(...))` — the same derivation the idle widget counts — so it never needs
+adopting. Fixing it at start was the LibreWolf bug: batches arrive there because the page
+*follows* the tour, not from an excursion, so they were already in any snapshot taken at the
+excursion, counted as stray, and the tour ended at 50 while the widget (after close) said 150.
+`{`/`}` clear `mainOnly` and fix the scope. For a tour pinned from a hover, `tour.had` is taken at
+`tourStart`, and `tourGrow` runs `tourAdopt` near the end without waiting for an excursion.
+
 **The return goes to the tour, not to the saved position.** The tour keeps stepping during the
 2 s stay; returning to the pre-excursion `scrollY` put the page back where the tour *was*, and the
 next step's `tourFollow` scrolled down again (user saw it as up-then-down). So the `finally`
@@ -774,8 +782,8 @@ restores the position and then `tourFollow(tour.el)` in the same task (no paint 
 
 **The wall looks once more before quitting.** In LibreWolf a batch can land seconds after the stay
 stopped watching; the excursion then marks the page spent and ▶ at the end quit while 100 more
-pictures sat there. `tourWall()` now runs `tourAdopt(tour.had)` (the page's pictures before the
-tour's first request) and steps if the list got longer.
+pictures sat there. `tourWall()` now runs `tourAdopt(tour.had)` (the page's pictures when the
+tour started) and steps if the list got longer.
 
 ### Fullscreen
 
