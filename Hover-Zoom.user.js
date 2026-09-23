@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.121.0
+// @version     0.122.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -52,7 +52,10 @@
 
         // the tour — next/previous through every picture on the page, from a pinned window
         tourButtons: true,          // the tour widget: ◀ ▶ and the counter, in its own box
+        tourFade: true,             // the widget is faint until the pointer comes near
+        tourFadeTo: 35,             // ...at this opacity, %
         tourKeys: true,             // arrows navigate when the picture cannot pan sideways
+        tourKeyStart: true,         // → with nothing open starts the tour at the first picture
         tourMinDisplayed: 128,      // the tour's own floor: longer side as drawn, px; emoji and badges fall under it
         tourWindow: 12,             // entries kept buffered ahead
         tourWorkers: 6,             // concurrent speculative resolves
@@ -5068,6 +5071,22 @@
         if (cfg.activation === 'modifier' && !modifierHeld(e)) { modifierDown = false; cancel(); }
     }, true);
 
+    // → with nothing open is ▶ on the widget. Bubble phase on window, so a page that handles the key
+    // itself — preventDefault or stopPropagation — keeps it.
+    const KEY_START_BUSY = /^(INPUT|SELECT|TEXTAREA|VIDEO|AUDIO|IFRAME)$/;
+    window.addEventListener('keydown', function (e) {
+        if (e.key !== 'ArrowRight' || e.defaultPrevented || !cfg.tourKeyStart || !isTopFrame) return;
+        if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey || placed || panelHost || twBusy()) return;
+        if (view && box && box.classList.contains('on')) return;
+        if (typingIn(e) || !siteEnabled() || CAPTCHA_HERE) return;
+        const ae = document.activeElement;
+        if (ae && (KEY_START_BUSY.test(ae.tagName) || ae.isContentEditable ||
+            /^(slider|tab|listbox|menu|menuitem|grid|radiogroup|spinbutton)$/.test(ae.getAttribute('role') || ''))) return;
+        if (twCount() < 2) return;
+        e.preventDefault();
+        tourFromStart();
+    });
+
     // The pointer is not moving, so onOver is synthesised from where it already is.
     function hoverAtPointer() {
         if (placed || drag || active) return;
@@ -5870,8 +5889,7 @@
             'background:rgba(17,17,27,.72);backdrop-filter:blur(7px) saturate(1.4);',
             '-webkit-backdrop-filter:blur(7px) saturate(1.4);border:1px solid rgba(205,214,244,.14);',
             'font:11px/16px system-ui,sans-serif;color:#cdd6f4;white-space:nowrap;cursor:move;',
-            'user-select:none;opacity:.35;transition:opacity .15s ease}',
-            '.tw.near{opacity:1}',
+            'user-select:none;transition:opacity .15s ease}',
             '.count{flex:none;padding:0 4px;font-variant-numeric:tabular-nums;letter-spacing:.02em;color:#bac2de}',
         ].concat(vbtnCss()).join('');
         sr.appendChild(style);
@@ -5881,12 +5899,14 @@
         const count = document.createElement('span');
         count.className = 'count';
         setTip(count, 'Where you are among this page\'s pictures. Drag to move; hold Ctrl to place it without snapping.');
-        const next = mkVBtn(ICON_NEXT, 'Next picture — with nothing open, starts at the first picture', function () { twPress(1); });
+        const next = mkVBtn(ICON_NEXT, 'Next picture — with nothing open, starts at the first picture (so does →)', function () { twPress(1); });
         box.appendChild(prev);
         box.appendChild(count);
         box.appendChild(next);
         sr.appendChild(box);
         tw = { host: host, box: box, prev: prev, count: count, next: next, dock: null, rect: null, near: false };
+        // A pointer already resting where the widget appears sends no mousemove, only this.
+        host.addEventListener('mouseover', function (e) { twNear(e.clientX, e.clientY); });
         document.body.appendChild(host);
         tw.dock = usDock.create({ id: 'hover-zoom', el: host, load: dockLoad, save: dockSave, initial: dockInitial,
             apply: function (r) {
@@ -5928,6 +5948,7 @@
         }
         twPics = twCount();
         const on = twWanted();
+        if (on && !tour) twTotal = tourPics(Math.max(0, cfg.tourMinDisplayed | 0)).length;
         const shown = tw.host.style.display !== 'none';
         if (on !== shown) {
             tw.host.style.display = on ? 'block' : 'none';
@@ -5949,21 +5970,21 @@
         tw.count.textContent = (at >= 0 ? at + 1 : '–') + ' / ' + (n >= 0 ? n : '–');
         tw.prev.classList.toggle('faint', !placed || at <= 0 || !n);
         tw.next.classList.toggle('faint', !placed ? n === 0 : (!n || (at >= 0 && at >= n - 1)));
+        const fade = Math.max(0, Math.min(100, +cfg.tourFadeTo || 0)) / 100;
+        tw.box.style.opacity = cfg.tourFade && !tw.near ? String(fade) : '1';
         if (tw.host.style.display !== 'none') tw.dock.sizeChanged();     // the counter's width
     }
 
-    // The pointer near the widget lights it up; arriving is also when the page is counted properly.
+    // The pointer near the widget lights it up.
     function twNear(x, y) {
         if (!tw || !tw.rect || tw.host.style.display === 'none') return;
         const r = tw.rect;
         const near = x >= r.x - TW_NEAR && x <= r.x + r.w + TW_NEAR && y >= r.y - TW_NEAR && y <= r.y + r.h + TW_NEAR;
         if (near === tw.near) return;
         tw.near = near;
-        tw.box.classList.toggle('near', near);
-        if (near && !tour) {
-            twTotal = tourPics(Math.max(0, cfg.tourMinDisplayed | 0)).length;
-            twSync();
-        }
+        // Counted at load and after scrolling; a page that changed without either is caught here.
+        if (near && !tour) twTotal = tourPics(Math.max(0, cfg.tourMinDisplayed | 0)).length;
+        twSync();
     }
 
     function twBusy() { return !!twStarting || (!!tw && !!tw.dock && tw.dock.dragging()); }
@@ -5977,12 +5998,24 @@
         if (dir > 0) tourFromStart();
     }
 
-    // ▶ with nothing pinned: the whole page's first picture, opened centred and pinned.
+    // The smallest element holding every picture the widget counted: the article, not the page
+    // around it. <body> is the whole page, and only the whole page carries on onto the next one.
+    function tourCommon(pics) {
+        const root = document.documentElement;
+        let node = pics[0] || null;
+        while (node && !pics.every(function (p) { return node.contains(p); })) {
+            node = node.parentElement || (node.getRootNode && node.getRootNode().host) || null;
+        }
+        return !node || node === document.body ? root : node;
+    }
+
+    // ▶ with nothing pinned: the first picture of the area the page's pictures are in, opened and pinned.
     async function tourFromStart() {
         if (placed || twStarting || !siteEnabled() || CAPTCHA_HERE) return;
         cancel();
+        const floor = Math.max(0, cfg.tourMinDisplayed | 0);
         tour = { el: null, start: null, url: '', x: 0, y: 0, index: -1, total: 0, on: true,
-            scope: document.documentElement, level: -1, floor: Math.max(0, cfg.tourMinDisplayed | 0) };
+            scope: tourCommon(tourPics(floor)), level: -1, floor: floor };
         const list = tourEntries();
         if (!list.length) { tourEnd(); return; }
         tourRemember(list[0]);
@@ -6862,6 +6895,7 @@
             refreshSiteMenu();
             applyLook();                    // a preview that is already up follows along
             if (view && box && box.classList.contains('on')) { reflow(); layout(); showBar(); }
+            twSync();
         }
 
         let mount = body;
@@ -7419,13 +7453,39 @@
 
         section('Next and previous');
         check('tourButtons', 'Show the tour widget',
-            '◀ ▶ and a counter in a small box of their own, faint until the pointer comes near. ' +
+            '◀ ▶ and a counter in a small box of their own. ' +
             '▶ with nothing open starts at the page’s first picture. Drag it anywhere; hold Ctrl to ' +
             'place it without snapping. It remembers where it was put on each site.');
+        (function () {
+            const cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.checked = !!cfg.tourFade;
+            const pct = document.createElement('input');
+            pct.type = 'number';
+            pct.min = 0; pct.max = 100; pct.step = 5;
+            pct.value = cfg.tourFadeTo;
+            setTip(pct, 'Opacity while faded, in %. (default: 35)');
+            const pair = document.createElement('span');
+            pair.style.cssText = 'display:flex;align-items:center;gap:8px';
+            pair.appendChild(pct);
+            pair.appendChild(cb);
+            function sync() { pct.disabled = !cb.checked; }
+            cb.addEventListener('change', function () { cfg.tourFade = cb.checked; sync(); persist(); });
+            pct.addEventListener('change', function () {
+                const v = parseFloat(pct.value);
+                if (!isNaN(v)) { cfg.tourFadeTo = Math.max(0, Math.min(100, v)); persist(); }
+                pct.value = cfg.tourFadeTo;
+            });
+            pct.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); pct.blur(); } });
+            sync();
+            row('Fade the widget', 'Until the pointer comes near it; the number is how faint, in %. (default: on, 35)', pair);
+        })();
         check('tourKeys', 'Arrow keys step through the page',
             'Left and right move to the next picture unless the one you are looking at is ' +
             'zoomed in far enough to pan sideways. [ and ] always move; { and } narrow and ' +
             'widen the part of the page the tour covers.');
+        check('tourKeyStart', '→ with nothing open starts the tour',
+            'At the first picture, the same as ▶ on the widget. A page that uses → for itself keeps it.');
         num('tourMinDisplayed', 'Leave out pictures smaller than',
             'Longer side as drawn, in px. Starting on a smaller one lowers it. (default: 128)',
             0, 1000, 8);

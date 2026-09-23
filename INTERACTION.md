@@ -377,11 +377,12 @@ Hover the sound button and a vertical column appears above it; clicking the butt
 #### S25 · touring
 A placed window stepping through every picture on the page. The window stays put, the page does
 not move, and each step swaps a different picture into the same frame.
-- **Entered from:** ▶ on the tour widget with nothing open, which starts at the **first** picture
-  of the whole page (`T38`); or ◀ / ▶ or a navigating arrow on a hovered or placed window, which
+- **Entered from:** ▶ on the tour widget or → with nothing open, which starts at the **first**
+  picture of the area holding all the page's pictures — the article, not the sidebar (`T38`); or ◀ / ▶ or a navigating arrow on a hovered or placed window, which
   steps from that picture (`T29`, `T30`). The entering press advances.
 - **The tour widget** (`E63`) is ◀ `n / N` ▶ in a box of its own, placed by the shared dock that
-  Forum Stumbler and RNFP also use. Faint until the pointer is within 60 px; shown on pages with
+  Forum Stumbler and RNFP also use. Faint until the pointer is within 60 px (a setting, with its
+  opacity); shown on pages with
   two pictures at the tour's floor, or while a tour runs. It floats over the picture.
 - **The list is derived on every press and kept nowhere** (`E54`). Lazy-loaded and newly appended
   images are picked up for free, and a virtualised feed deleting the picture under you is
@@ -470,7 +471,7 @@ inert.
 | `T34` | `S25` fullscreen | `f`, or the button, after stepping | `S25` windowed, fitted to the picture now in the frame and centred — not the zoom and top-left of the picture that went in (`E57`) |
 | `T35` | `S25` | Get within 10 of the end of the list, or press ▶ at the end | The page is scrolled to the bottom and straight back, so a lazy feed loads its next batch; the counter grows and the tour carries on. You never see it move. Once an excursion returns nothing, it stops trying (`E58`) |
 | `T36` | `S25` | Reach the end of a page that will not load any more | The **next page** is fetched and parsed in the background and its pictures join the list — the document is never navigated, so the window and the script survive. It stops when nothing on the page says which way is forward (`E59`). Only from a scope that is the whole page: a tour confined to one post stays on this page until `}` widens it (`E60`) |
-| `T38` | `S01` | ▶ on the tour widget | `S25` on the **first** picture of the whole page, opened centred and pinned. Nothing on the page is hovered on the way (`E63`) |
+| `T38` | `S01` | ▶ on the tour widget, or → | `S25` on the **first** picture of the smallest area holding them all, opened centred and pinned. Nothing on the page is hovered on the way (`E63`) |
 | `T39` | any | Drag the tour widget (Ctrl held: no snapping) | It moves, snapping 8 px to window edges, the window's centre and other scripts' widgets; widgets attached to it move with it. The drop is remembered for this site and as the default for new ones (`E63`) |
 | `T37` | `S10`/`S25` | `{` or `}` | The scope narrows or widens by one level of the page — the counter's total changes to say so. Never below two pictures, never past the whole page. An anchor left outside a narrowed scope shows as `– / n` and the next step goes by position (`E60`) |
 | `T25` | — | *Retired in v0.34.0.* Moving the window used to freeze its size as a ceiling; it no longer touches the size at all (`E22`) |

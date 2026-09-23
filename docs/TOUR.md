@@ -19,17 +19,25 @@ fight that. They are deleted. Do not put nav controls back on the frame.
 - **Visibility is `style.display`, not `[hidden]`**: the host's inline `all:initial` out-ranks the UA
   `[hidden]` rule. `twRefresh` sets both, and `dock.show()` tells the other scripts.
 - **Shown** on pages with two drawn pictures at `tourMinDisplayed` (`twCount`, stops at 2), or while a
-  tour runs; re-counted after scrolling stops, on load and on SPA navigation. Faint until the pointer
-  is within `TW_NEAR`; arriving also takes the real count (`tourPics`) for the `– / N` label.
-- **▶ with nothing open starts at the FIRST picture of the whole page**, always (user's call: no
-  guessing a start; press ▶ a few times instead) — `tourFromStart`, scope = the whole document.
-  Starting from a chosen picture = hover or pin it, then →/▶.
+  tour runs. The `– / N` total (`tourPics`) is taken with every recount — load, scroll stopping, SPA
+  navigation — and again when the pointer comes near, which catches a page that changed without
+  scrolling (no MutationObserver: design invariant). Faint (`tourFade`, at `tourFadeTo` %) until the
+  pointer is within `TW_NEAR`; a `mouseover` on the host covers a pointer resting where it appears.
+- **▶ with nothing open starts at the FIRST picture**, always (user's call: no guessing a start;
+  press ▶ a few times instead) — `tourFromStart`. **→ does the same** (`tourKeyStart`, default on):
+  window bubble phase, so a page that preventDefaults or stops → keeps it; not while focus is in a
+  form control, media, or a slider/tab/menu role. Starting from a chosen picture = hover or pin it.
+- **Its scope is `tourCommon()`: the smallest element holding every picture counted**, `<body>`
+  counting as the whole page. Not the whole document: hackaday's article links `rel=next` to the
+  NEXT ARTICLE, and a whole-page scope carried the tour onto it, harvesting its icons and sidebar
+  thumbnails (a fetched page has no layout, so the size gates cannot drop them). Only a whole-page
+  scope crosses pages (`tourCross`), so an article never does.
 - **Every tour picture is centred**, as large as settings allow; the widget floats over it and no
   space is reserved (user's call). Hover placement still follows `cfg.position`.
 - **The entering press advances.** Measured sizes: re-publish after every counter change
   (`twSync` → `sizeChanged`), since the Browser pane never fires `ResizeObserver`.
-- **Arrow keys** are ours only while a preview or tour is up; otherwise the page's. Forum Stumbler has
-  no arrow keys (checked 2026-09-22).
+- **Arrow keys** are ours while a preview or tour is up, plus → from idle (above). Forum Stumbler has
+  no key handler of its own (checked twice, 2026-09-22).
 - **Position memory** (`DOCK_KEY`): per site, falling back to the last drop anywhere; first run
   attaches on top of Forum Stumbler's bar, or the window's bottom-right when it is absent.
 
@@ -784,7 +792,9 @@ Proposed keys, added to `DEFAULTS`. Remember the hoisting trap in `../CLAUDE.md`
 
 | Key | Default | What |
 |---|---|---|
-| `tourButtons` | `true` | show ◀ ▶ in the strip |
+| `tourButtons` | `true` | show the tour widget |
+| `tourFade`, `tourFadeTo` | `true`, `35` | the widget faint until the pointer nears, at this opacity % |
+| `tourKeyStart` | `true` | → with nothing open starts at the first picture |
 | `tourKeys` | `true` | arrows navigate when the picture cannot pan horizontally |
 | `tourMinDisplayed` | `128` | the tour's floor on the longer side as drawn, px (§1a) |
 | `tourWindow` | `12` | how many entries to keep buffered ahead |
