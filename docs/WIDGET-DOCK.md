@@ -1,12 +1,14 @@
 # Shared widget positioning — Hover Zoom, Forum Stumbler, RNFP
 
-**Status: built in Hover Zoom v0.120.0; Forum Stumbler and RNFP in progress.** Once all three carry
-it, this belongs in `../CLAUDE.md` (it spans three scripts); move it there and leave a pointer.
+**Status: built in all three** — Hover Zoom v0.121.0, Forum Stumbler v0.76.0, RNFP v6.16.0. Each
+script's own `CLAUDE.md` points here.
 
 **The code is `dock/us-dock.js`, and it is the only copy to edit.** `node dock/sync-dock.js` writes it
 between the `// ==== us-dock begin/end ====` markers of all three scripts (re-indented; RNFP uses
 2 spaces); `--check` fails if any copy differs. `node dock/test-dock.js` tests the layout and drops;
-`test-pages/dock.html` runs three stand-in widgets from three separate copies, as three scripts would.
+`test-pages/dock.html` runs three stand-in widgets from three separate copies, as three scripts would;
+`test-pages/dock-live.html` runs the real RNFP and Hover Zoom together (serve the Monkey Scripts
+folder: the `monkey-root` launch entry, `python -m http.server 8740 --directory ..`).
 
 ## Behaviour (all decided by the user, 2026-09-22)
 
@@ -43,11 +45,16 @@ between the `// ==== us-dock begin/end ====` markers of all three scripts (re-in
   only its own script writes it). Inputs never change as a result of outputs, so the scripts cannot
   fight; two different versions give a wrong-looking layout until both update, never a loop.
 - **Publish the NATURAL size only.** RNFP's squeezed height is an output; publishing it would feed
-  back. Sizes are rounded UP, or a fractional width hangs off the window edge.
+  back. Sizes and positions are kept to 0.01 px: whole pixels leave a fractional widget up to 1 px
+  short of a window edge, or hanging off it.
 - **The widget's size must not depend on its position**: `width:max-content` or `nowrap` content.
   A fixed box with only `left` set shrinks as it nears the right edge, which would loop.
-- **Call `sizeChanged()` after re-rendering the widget.** `ResizeObserver` also calls it, but the
-  Browser pane never fires `ResizeObserver`, so a test there sees stale sizes without it.
+- **Size changes are caught two ways**: `ResizeObserver`, and a `MutationObserver` on the widget's
+  own subtree (the Browser pane never fires `ResizeObserver`). Content inside a SHADOW root is
+  invisible to the second, so Hover Zoom calls `sizeChanged()` itself after each counter change.
 - **A scrollbar appearing fires no `resize`**; the root element is watched with `ResizeObserver`.
 - Other docks are noticed through a `MutationObserver` on the direct children of `<body>` and
   `<html>` (so a widget must be one) plus attribute observers on each widget.
+- **A script with its own geometry (RNFP)** passes `handle: () => false`, publishes its rect through
+  `load`/`size` and `reload()`, and runs its own drag with `snap()`, `dragAt()` and `dragEnd()`.
+- **A widget that is thrown away calls `destroy()`** (FS rebuilds its bar; RNFP closes its panel).

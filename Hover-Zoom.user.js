@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.120.0
+// @version     0.121.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -5109,6 +5109,9 @@
             return { w: el.clientWidth || window.innerWidth, h: el.clientHeight || window.innerHeight };
         }
 
+        // To 0.01 px: whole pixels leave a fractional widget up to 1 px short of a window edge.
+        function cent(v) { return Math.round(v * 100) / 100; }
+
         function pt(lo, len, k) { return k === 's' ? lo : k === 'e' ? lo + len : lo + len / 2; }
 
         // Which third the widget is in, measured from the point its current anchor holds. See WIDGET-DOCK.md.
@@ -5117,7 +5120,7 @@
             return p < V / 3 ? 's' : p > V * 2 / 3 ? 'e' : 'c';
         }
 
-        function winAxis(k, lo, len, V) { return { r: 'win', m: k, t: k, o: pt(lo, len, k) - pt(0, V, k) }; }
+        function winAxis(k, lo, len, V) { return { r: 'win', m: k, t: k, o: cent(pt(lo, len, k) - pt(0, V, k)) }; }
 
         function parse(s) { try { return JSON.parse(s); } catch (_) { return null; } }
 
@@ -5281,7 +5284,7 @@
                 if (!moved) break;
             }
             docks.forEach(function (d) {
-                d.out = { x: Math.round(d.pos.x), y: Math.round(d.pos.y), w: d.w, h: Math.round(d.h) };
+                d.out = { x: cent(d.pos.x), y: cent(d.pos.y), w: d.w, h: cent(d.h) };
             });
             return docks;
         }
@@ -5384,7 +5387,7 @@
             function align(r, lo, len, rlo, rlen) {
                 let best = null;
                 ['s', 'c', 'e'].forEach(function (k) {
-                    const o = pt(lo, len, k) - pt(rlo, rlen, k);
+                    const o = cent(pt(lo, len, k) - pt(rlo, rlen, k));
                     if (!best || Math.abs(o) < Math.abs(best.o)) best = { r: r.id, m: k, t: k, o: o };
                 });
                 return best;
@@ -5392,10 +5395,10 @@
             for (const r of others) {
                 const xo = rc.x < r.right - TOUCH && rc.x + rc.w > r.left + TOUCH;
                 const yo = rc.y < r.bottom - TOUCH && rc.y + rc.h > r.top + TOUCH;
-                if (xo && Math.abs(rc.y + rc.h - r.top) <= TOUCH) y = { r: r.id, m: 'e', t: 's', o: rc.y + rc.h - r.top };
-                else if (xo && Math.abs(rc.y - r.bottom) <= TOUCH) y = { r: r.id, m: 's', t: 'e', o: rc.y - r.bottom };
-                else if (yo && Math.abs(rc.x + rc.w - r.left) <= TOUCH) x = { r: r.id, m: 'e', t: 's', o: rc.x + rc.w - r.left };
-                else if (yo && Math.abs(rc.x - r.right) <= TOUCH) x = { r: r.id, m: 's', t: 'e', o: rc.x - r.right };
+                if (xo && Math.abs(rc.y + rc.h - r.top) <= TOUCH) y = { r: r.id, m: 'e', t: 's', o: cent(rc.y + rc.h - r.top) };
+                else if (xo && Math.abs(rc.y - r.bottom) <= TOUCH) y = { r: r.id, m: 's', t: 'e', o: cent(rc.y - r.bottom) };
+                else if (yo && Math.abs(rc.x + rc.w - r.left) <= TOUCH) x = { r: r.id, m: 'e', t: 's', o: cent(rc.x + rc.w - r.left) };
+                else if (yo && Math.abs(rc.x - r.right) <= TOUCH) x = { r: r.id, m: 's', t: 'e', o: cent(rc.x - r.right) };
                 else continue;
                 if (y.r === r.id) x = winX || align(r, rc.x, rc.w, r.left, r.width);
                 else y = winY || align(r, rc.y, rc.h, r.top, r.height);
@@ -5420,11 +5423,9 @@
                 el.setAttribute(A_SPEC, JSON.stringify(w.spec));
             }
 
-            // Rounded UP: a fractional width rounded down leaves the widget hanging off a window edge.
             function measure() {
-                if (o.size) { const s = o.size(); return [Math.ceil(s[0]), Math.ceil(s[1])]; }
-                const r = el.getBoundingClientRect();
-                return [Math.ceil(r.width - 0.01), Math.ceil(r.height - 0.01)];
+                const s = o.size ? o.size() : (function (r) { return [r.width, r.height]; })(el.getBoundingClientRect());
+                return [cent(s[0]), cent(s[1])];
             }
 
             // Only the NATURAL size is published; a clamp or a stretch is an output and must not feed back.
@@ -5442,7 +5443,12 @@
             el.setAttribute(A_ID, o.id);
             setSpec(o.load());
             sizeChanged();
-            if (window.ResizeObserver) new ResizeObserver(sizeChanged).observe(el);
+            const ro = window.ResizeObserver ? new ResizeObserver(sizeChanged) : null;
+            if (ro) ro.observe(el);
+            // Content changes too: not every engine delivers ResizeObserver (the Browser pane never does).
+            const mo = new MutationObserver(sizeChanged);
+            mo.observe(el, { childList: true, subtree: true, characterData: true, attributes: true,
+                attributeFilter: ['style', 'class'] });
 
             el.addEventListener('mousedown', function (e) {
                 if (e.button !== 0 || (o.handle && !o.handle(e.target))) return;
@@ -5471,7 +5477,7 @@
                     zones.x = zone(zones.x, x, W, V.w);
                     zones.y = zone(zones.y, y, H, V.h);
                     last = { x: x, y: y, w: W, h: H };
-                    el.setAttribute(A_DRAG, Math.round(x) + ' ' + Math.round(y));
+                    el.setAttribute(A_DRAG, cent(x) + ' ' + cent(y));
                     relayout();
                 }
                 function up() {
@@ -5505,7 +5511,33 @@
                     if (on) { w.size = null; sizeChanged(); }
                     schedule();
                 },
-                reload: function () { setSpec(o.load()); schedule(); },
+                // Re-read the anchor and the size: for a script that keeps its own geometry (RNFP).
+                reload: function () { setSpec(o.load()); sizeChanged(); schedule(); },
+                // For a script that runs its own drag: snap a rect as a dock drag would...
+                snap: function (x, y, W, H) {
+                    const docks = readDocks();
+                    const skip = carried(o.id, docks);
+                    return snap(x, y, W, H, viewport(), docks.filter(function (d) { return !skip[d.id]; }).map(rectOf));
+                },
+                // ...and publish where it is, so widgets attached to it travel with it.
+                dragAt: function (x, y) {
+                    w.dragging = true;
+                    el.setAttribute(A_DRAG, cent(x) + ' ' + cent(y));
+                    relayout();
+                },
+                dragEnd: function () {
+                    w.dragging = false;
+                    el.removeAttribute(A_DRAG);
+                    schedule();
+                },
+                // For a widget being thrown away: it leaves everyone's layout at once.
+                destroy: function () {
+                    const i = mine.indexOf(w);
+                    if (i >= 0) mine.splice(i, 1);
+                    if (ro) ro.disconnect();
+                    mo.disconnect();
+                    [A_ID, A_SPEC, A_SIZE, A_GREW, A_DRAG, A_STRETCH].forEach(function (a) { el.removeAttribute(a); });
+                },
             };
         }
 

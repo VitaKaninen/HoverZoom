@@ -1,0 +1,39 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>us-dock live — real RNFP + real Hover Zoom</title>
+<style>
+  body { font: 14px system-ui, sans-serif; margin: 20px; background: #f4f4f4; min-height: 150vh; }
+  img { display: inline-block; margin: 8px; }
+</style>
+</head>
+<body>
+<h1>us-dock live test</h1>
+<p>Served from the Monkey Scripts folder (<code>python -m http.server 8740 --directory ..</code> from
+HoverZoom). Runs the real RNFP (panel opened through a harness-only export) and the real Hover Zoom
+behind GM_* stubs on localStorage. <code>window.__rnfp</code> has openPanel / closePanel / toggleMinimized.</p>
+<img src="/HoverZoom/test-images/jpg-lowercase-2400x1800.jpg" width="300" height="200">
+<img src="/HoverZoom/test-images/letterbox.jpg" width="300" height="200">
+<script>
+  var GM_getValue = function (k, d) { var v = localStorage.getItem('gm:' + k); return v === null ? d : JSON.parse(v); };
+  var GM_setValue = function (k, v) { localStorage.setItem('gm:' + k, JSON.stringify(v)); };
+  var GM_openInTab = function () {};
+  var GM_xmlhttpRequest = function (o) { setTimeout(function () { if (o.onerror) o.onerror({}); }, 0); };
+  var GM_registerMenuCommand = function () { return 0; };
+  var GM_unregisterMenuCommand = function () {};
+  var GM_addValueChangeListener = function () {};
+  (async function () {
+    const bust = '?b=' + Date.now();
+    let rn = await (await fetch('/Reddit-Notifications-Floating-Panel/Reddit-Notifications-Floating-Panel.user.js' + bust)).text();
+    const boot = '  // Boot\n';
+    if (rn.indexOf(boot) < 0) throw new Error('RNFP boot marker not found');
+    rn = rn.replace(boot, boot + '  window.__rnfp = { openPanel, closePanel, toggleMinimized, geometry: () => geometry };\n');
+    (0, eval)(rn);
+    const s = document.createElement('script');
+    s.src = '/HoverZoom/Hover-Zoom.user.js' + bust;
+    document.body.appendChild(s);
+  })();
+</script>
+</body>
+</html>
