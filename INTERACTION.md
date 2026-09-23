@@ -3,7 +3,7 @@
 What the preview **window** does, as a state machine. Menus, buttons, the status bar contents and
 the loading ring are out of scope except where they change what the window itself accepts.
 
-Describes `Hover-Zoom.user.js` **v0.141.0**.
+Describes `Hover-Zoom.user.js` **v0.142.0**.
 
 **Two words the user uses:** *the widget* is the floating ◀ `n / N` ▶ box; *the slideshow* is the pinned
 preview stepping through a queue of the page's pictures. The code and `docs/` say `tour` for the slideshow.
@@ -480,7 +480,7 @@ inert.
 | `T32` | `S25` | ⊘ on the picture | `S25` on the next one — mid-slideshow, blocking means "not this one", not "close the window" |
 | `T33` | `S25` | Reach a picture that will not resolve | `S25` showing the page's own thumbnail with the reason in the bar, and ↻ to ask again (`E56`) |
 | `T34` | `S25` fullscreen | `f`, or the button, after stepping | `S25` windowed, fitted to the picture now in the frame and at the slideshow's spot — not the zoom and top-left of the picture that went in (`E57`) |
-| `T35` | `S25` | Land within 10 of the end of the list either way (← from nothing lands on the last), or press ▶ at the end. (Every landing also scrolls the page to the picture if it is off screen, `tourFollow`) | The page hops to the bottom and straight back (a frame or two), so a lazy feed loads its next batch; the counter grows and the slideshow carries on. If the hop loads nothing, one stay at the bottom is tried, once per page (`excStayTried`); a page that a stay grew stays every time (`excLong`). The return lands on the current picture, not the old position. Once an excursion returns nothing, it stops trying for that slideshow (`E58`), but ▶ at the end still takes in anything that arrived late before closing |
+| `T35` | `S25` | Land within 10 of the end of the list either way (← from nothing lands on the last), or press ▶ at the end. (On a learned site, `E58`, every landing also scrolls the page to the picture if it is off screen, `tourFollow`; elsewhere the page never moves) | The page hops to the bottom and straight back (a frame or two), so a lazy feed loads its next batch; the counter grows and the slideshow carries on. If the hop loads nothing, one stay at the bottom is tried, once per page (`excStayTried`); a page that a stay grew stays every time (`excLong`). The return lands on the current picture, not the old position. Once an excursion returns nothing, it stops trying for that slideshow (`E58`), but ▶ at the end still takes in anything that arrived late before closing |
 | `T36` | `S25` | Reach the end of a page that will not load any more | The **next page** is fetched and parsed in the background and its pictures join the list — the document is never navigated, so the window and the script survive. It stops when nothing on the page says which way is forward (`E59`). Only from a scope that is the whole page: a slideshow confined to one post stays on this page until `}` widens it (`E60`) |
 | `T37` | `S10`/`S25` | `{` or `}` | The scope narrows or widens by one level of the page — the counter's total changes to say so. Never below two pictures, never past the whole page. An anchor left outside a narrowed scope shows as `– / n` and the next step goes by position (`E60`) |
 | `T38` | `S01` | ▶ on the widget, or → (◀ or ← for the last) | `S25` on the **first** picture of the smallest area holding them all, sidebars left out, opened at the slideshow's spot and pinned. Nothing on the page is hovered on the way (`E63`) |

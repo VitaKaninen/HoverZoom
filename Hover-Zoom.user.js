@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.141.0
+// @version     0.142.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -6240,7 +6240,7 @@
     // The page scrolls behind the preview to keep the anchor on screen, so a feed that empties
     // what is far from the viewport (Google in Firefox) mounts the next section as the tour walks.
     function tourFollow(el) {
-        if (!el || el.__hzBase || !el.isConnected || excAway || onScreen(el)) return;
+        if (!el || el.__hzBase || !el.isConnected || excAway || onScreen(el) || !growsHere()) return;
         try { el.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' }); }
         catch (e) { dbg('tour: could not bring the picture on screen', String(e)); }
     }

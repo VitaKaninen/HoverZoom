@@ -606,7 +606,10 @@ is `tourFromStart(-1)`: the last picture loaded now, and ▶ from there loads mo
 
 ## 9a. Why it has to be a real scroll
 
-**Reversed v0.134.0 (user's call): the page follows the tour.** `tourFollow()` (from
+**Since v0.142.0 only on a learned host (`growsHere()`, §9 "Off until the site has earned it")** —
+elsewhere the page never scrolls, which is the pre-v0.134.0 rule; following existed only to mount
+lazy batches, so a page that loads at once gains nothing from it (user: "disable both until we
+need them"). **Reversed v0.134.0 (user's call): the page follows the tour.** `tourFollow()` (from
 `tourRemember`) scrolls the anchor to the centre, `behavior:'instant'`, only when it is off screen;
 the page stays where the tour ended. Was: "the page never scrolls". Why it changed: Google Images
 in Firefox/LibreWolf **mounts each 50-result batch only when the viewport comes near it** (measured
