@@ -132,6 +132,10 @@ has already been misdiagnosed once. (The shared ones — `innerHTML` on Trusted-
   at boot** — anything it calls runs before every `let` declared below that point (TDZ throw, whole
   script dead: no previews, no settings). The test pages load the script while still `loading`, so
   that path is deferred there and passes. Defer new work out of boot paths (`setTimeout`). Cost v0.127.0.
+- **A scroll WE make fires `mouseout`/`mouseover` under a still pointer** (measured in Chrome), so
+  anything that scrolls while a resolve is pending must be guarded in `onOut`/`onOver` and the
+  page-scroll `cancel()`. `tourFollow()` scrolling during a ← start cancelled it: page moved, no
+  preview, intermittent by where the pointer rested (v0.135.0, `twStarting` guard).
 - **Never pass `view: window` to an event constructor.** Under Tampermonkey `window` is a proxy, the
   constructor throws, and a `try` around it makes the dispatch silently never happen — the test
   pages (no sandbox) pass. Found on `primeLink`, v0.126.0.
