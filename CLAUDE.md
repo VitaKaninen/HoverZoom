@@ -128,6 +128,9 @@ has already been misdiagnosed once. (The shared ones — `innerHTML` on Trusted-
 - **The event target at a document listener is the shadow HOST**, never the element inside a shadow
   root; `composedPath()[0]` is the real one. A diagnostic that reads `e.target.getRootNode()` can
   never say "in a shadow root".
+- **Never pass `view: window` to an event constructor.** Under Tampermonkey `window` is a proxy, the
+  constructor throws, and a `try` around it makes the dispatch silently never happen — the test
+  pages (no sandbox) pass. Found on `primeLink`, v0.126.0.
 - **The Browser pane is Chromium; a Firefox-only layout fault is invisible to every check made
   here.** Give any absolutely positioned box holding a form control an explicit width — shrink-to-fit
   diverges between engines. See [`docs/TESTING.md`](docs/TESTING.md).
