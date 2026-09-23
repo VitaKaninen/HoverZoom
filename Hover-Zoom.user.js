@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.129.0
+// @version     0.130.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -1633,11 +1633,11 @@
             '.cap .xb:hover{background:#f38ba8;border-color:#f38ba8;color:#1e1e2e}',
             // The corner one sits inside the corner's resize square, which answers round it.
             '.cx{position:absolute;top:' + CX_INSET + 'px;right:' + CX_INSET + 'px;width:' + CX_SIZE + 'px;',
-            'height:' + CX_SIZE + 'px;box-sizing:border-box;display:none;border-radius:3px;cursor:pointer;',
-            'background:rgba(30,30,46,.8);border:1px solid #45475a;color:#cdd6f4;z-index:3}',
-            '.cx svg{display:block;width:10px;height:10px;margin:2px auto;fill:currentColor}',
+            'height:' + CX_SIZE + 'px;box-sizing:border-box;display:none;align-items:center;justify-content:center;',
+            'border-radius:50%;border:1px solid #45475a;background:rgba(30,30,46,.88);color:#cdd6f4;',
+            'font:14px/1 system-ui,sans-serif;cursor:pointer;user-select:none;z-index:3}',
             '.cx:hover{background:#f38ba8;border-color:#f38ba8;color:#1e1e2e}',
-            '.box.placed.hot:hover .cx{display:block}',
+            '.box.placed.hot:hover .cx{display:flex}',
             '.box.hot .cap.hasvid .vidoff{display:block}',
             '.box.hot .cap .retry.on{display:block}',
             '.cap .retry svg{display:block;width:12px;height:12px;margin:3px auto;fill:currentColor}',
@@ -1849,7 +1849,7 @@
 
         cornerXEl = document.createElement('span');
         cornerXEl.className = 'cx';
-        cornerXEl.appendChild(mkIcon(ICON_CLOSE));
+        cornerXEl.textContent = '×';
         setTip(cornerXEl, 'Close');
         cornerXEl.addEventListener('mousedown', function (e) { e.preventDefault(); e.stopPropagation(); }, true);
         cornerXEl.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); closeByButton(); }, true);
@@ -2133,7 +2133,7 @@
     const RESIZE_OUT = 6;     // px outside the window edge that still resizes
     const RESIZE_IN = 6;      // px inside it — together, a 12px strip centred on the edge
     const CX_INSET = 4;       // the corner ✕: this far in from the top and right edges
-    const CX_SIZE = 16;
+    const CX_SIZE = 20;
     const CORNER_REACH = 24;  // px from a corner where a drag resizes both axes at once
 
     function hitRegion(x, y) {
@@ -5054,7 +5054,6 @@
         activeCovered = (el !== e.target);
         activeShown = shownUrl(el);
         hoverAt = Date.now();
-        twHovered(el);
         activeRect = el.getBoundingClientRect();
         activeChain = domChain(el);     // taken now: at close the card holds the player too
         activePath = pagePath();
@@ -5436,7 +5435,7 @@
         const ae = document.activeElement;
         if (ae && (KEY_START_BUSY.test(ae.tagName) || ae.isContentEditable ||
             /^(slider|tab|listbox|menu|menuitem|grid|radiogroup|spinbutton)$/.test(ae.getAttribute('role') || ''))) return;
-        if (twCount() < 2 || twIdleTotal() < 1) return;
+        if (twCount() < 2) return;
         e.preventDefault();
         tourFromStart(dir);
     });
@@ -6146,12 +6145,12 @@
         let min = 0;
         while (min < levels.length - 1 && levels[min].n < 2) min++;
         let cur = levels.length - 1;
-        if (tour.scope && !tour.section) for (let i = 0; i < levels.length; i++) if (levels[i].el.contains(tour.scope)) { cur = i; break; }
+        if (tour.scope) for (let i = 0; i < levels.length; i++) if (levels[i].el.contains(tour.scope)) { cur = i; break; }
         const to = Math.max(min, Math.min(levels.length - 1, cur + dir));
         if (to === cur) { dbg('tour scope: already ' + (dir > 0 ? 'the whole page' : 'as narrow as it goes')); return; }
         tour.level = to;
         tour.scope = levels[to].el;
-        tour.section = null;
+        tour.mainOnly = false;
         const list = tourSync();
         tourChrome();
         dbg('tour scope: ' + describeEl(tour.scope), { level: to + 1 + ' of ' + levels.length, pictures: list.length });
@@ -6161,16 +6160,9 @@
     // Everything in the scope a hover would preview, in reading order. Derived on every press;
     // sorted in DOCUMENT coordinates, or the order changes as the page scrolls.
     function tourEntries() {
-        const pics = tourPics(tourFloor());
-        if (tour && tour.section) return tourEntriesIn(inSection(pics, tour.section), document.documentElement);
+        let pics = tourPics(tourFloor());
+        if (tour && tour.mainOnly) pics = mainPics(pics);
         return tourEntriesIn(pics, tourScopeNow(pics));
-    }
-
-    // Kept to part of the page: no next page is fetched.
-    function tourConfined() {
-        if (!tour) return false;
-        if (tour.section) return tour.section !== 'all';
-        return !!tour.scope && tour.scope !== document.documentElement;
     }
 
     function tourEntriesIn(pics, scope) {
@@ -6187,7 +6179,7 @@
         const live = tourOrder(items);
         // Pages fetched from the pager come after everything this document holds, in the order
         // they were harvested — they have no document coordinates to be sorted by. See §10.
-        return harvest.length && scope === root && !tourConfined() ? live.concat(harvest) : live;
+        return harvest.length && scope === root ? live.concat(harvest) : live;
     }
 
     // Where the anchor sits in a freshly derived list: element identity, then URL. Never an
@@ -6246,8 +6238,7 @@
     function tourStart() {
         tour = { el: active || null, start: active || null, url: activeShown || (view ? view.url : ''),
             x: 0, y: 0, index: -1, total: 0, on: false,
-            scope: null, section: active ? sectionOf(active) : null, level: -1,
-            floor: Math.max(0, cfg.tourMinDisplayed | 0) };
+            scope: null, level: -1, floor: Math.max(0, cfg.tourMinDisplayed | 0) };
         if (tour.el) {
             const r = tour.el.getBoundingClientRect();
             tour.x = r.left + (window.scrollX || 0);
@@ -6276,6 +6267,7 @@
     const TW_RECOUNT_MS = 300;          // after scrolling stops, the page is counted again
 
     let tw = null;              // { host, box, prev, count, next, dock, rect, near }
+    let twPics = 0;             // pictures on the page by the cheap count, capped at 2
     let twTotal = -1;           // the real count, taken when the pointer nears the widget
     let twStarting = null;      // the token of a tour being opened from the widget
     let twRecountTimer = 0;
@@ -6320,25 +6312,12 @@
         const style = document.createElement('style');
         style.textContent = [
             ':host{all:initial}',
-            '.tw{display:flex;flex-direction:column;box-sizing:border-box;',
-            'padding:3px ' + VCTL_PAD + 'px 0;border-radius:8px;position:relative;',
+            '.tw{display:flex;align-items:center;gap:' + NAV_GAP + 'px;box-sizing:border-box;',
+            'height:' + VCTL_H + 'px;padding:0 ' + VCTL_PAD + 'px;border-radius:8px;',
             'background:var(--bg);border:1px solid var(--border);box-shadow:var(--shadow);',
             'font:13px/16px ' + usDock.FONT + ';color:var(--text);white-space:nowrap;cursor:move;',
             'user-select:none;transition:opacity .15s ease}',
-            '.row{display:flex;align-items:center;gap:' + NAV_GAP + 'px;height:' + (VCTL_H - 3) + 'px}',
-            '.lbl{font-size:10px;line-height:11px;text-align:center;opacity:.7}',
-            '.count{flex:1;text-align:center;padding:0 4px;font-variant-numeric:tabular-nums;color:var(--text);',
-            'cursor:pointer;border-radius:4px}',
-            '.count:hover{background:var(--bg3)}',
-            '.menu{position:absolute;right:0;min-width:100%;box-sizing:border-box;padding:4px;border-radius:8px;',
-            'background:var(--bg);border:1px solid var(--border);box-shadow:var(--shadow);display:none;cursor:default}',
-            '.menu.open{display:block}',
-            '.menu.up{bottom:calc(100% + 6px)}',
-            '.menu.down{top:calc(100% + 6px)}',
-            '.menu div{padding:3px 8px;border-radius:4px;cursor:pointer;display:flex;gap:12px;justify-content:space-between}',
-            '.menu div:hover{background:var(--bg3)}',
-            '.menu div.cur{font-weight:600}',
-            '.menu span{opacity:.7;font-variant-numeric:tabular-nums}',
+            '.count{flex:none;padding:0 4px;font-variant-numeric:tabular-nums;color:var(--text)}',
         ].concat(vbtnCss(), [
             '.tw .vbtn{color:var(--text)}',
             '.tw .vbtn:hover{background:var(--bg3)}',
@@ -6350,38 +6329,13 @@
         const prev = mkVBtn(ICON_PREV, 'Previous picture — with nothing open, starts at the last picture (so does ←); on the first, ends the slideshow', function () { twPress(-1); });
         const count = document.createElement('span');
         count.className = 'count';
-        setTip(count, 'Where you are in this section\'s pictures. Click for the next section; right-click to ' +
-            'pick one. Drag the widget to move it; hold Ctrl to place it without snapping.');
-        const label = document.createElement('div');
-        label.className = 'lbl';
-        const row = document.createElement('div');
-        row.className = 'row';
-        const menu = document.createElement('div');
-        menu.className = 'menu';
-        let downAt = null;
-        count.addEventListener('mousedown', function (e) { downAt = { x: e.clientX, y: e.clientY }; });
-        count.addEventListener('click', function (e) {
-            const moved = !downAt || Math.abs(e.clientX - downAt.x) > 4 || Math.abs(e.clientY - downAt.y) > 4;
-            downAt = null;
-            if (e.button !== 0 || moved) return;
-            twCycle();
-        });
-        host.addEventListener('contextmenu', function (e) {
-            e.preventDefault();
-            e.stopPropagation();
-            twMenu(true);
-        });
-        menu.addEventListener('mousedown', function (e) { e.stopPropagation(); });
+        setTip(count, 'Where you are among this page\'s pictures. Drag to move; hold Ctrl to place it without snapping.');
         const next = mkVBtn(ICON_NEXT, 'Next picture — with nothing open, starts at the first picture (so does →); on the last, ends the slideshow', function () { twPress(1); });
-        row.appendChild(prev);
-        row.appendChild(count);
-        row.appendChild(next);
-        box.appendChild(label);
-        box.appendChild(row);
-        box.appendChild(menu);
+        box.appendChild(prev);
+        box.appendChild(count);
+        box.appendChild(next);
         sr.appendChild(box);
-        tw = { host: host, box: box, prev: prev, count: count, next: next, label: label, menu: menu,
-            dock: null, rect: null, near: false };
+        tw = { host: host, box: box, prev: prev, count: count, next: next, dock: null, rect: null, near: false };
         // A pointer already resting where the widget appears sends no mousemove, only this.
         host.addEventListener('mouseover', function (e) { twNear(e.clientX, e.clientY); });
         document.body.appendChild(host);
@@ -6414,12 +6368,7 @@
     }
 
     function twWanted() {
-        return !!cfg.tourButtons && isTopFrame && siteEnabled() && !CAPTCHA_HERE && (!!tour || twTotal >= 2);
-    }
-
-    // Pictures in the section ▶ would start in.
-    function twIdleTotal() {
-        return inSection(tourPics(Math.max(0, cfg.tourMinDisplayed | 0)), idleSection()).length;
+        return !!cfg.tourButtons && isTopFrame && siteEnabled() && !CAPTCHA_HERE && (!!tour || (twPics >= 2 && twTotal >= 2));
     }
 
     function twRefresh() {
@@ -6428,7 +6377,8 @@
             if (!cfg.tourButtons || !siteEnabled() || CAPTCHA_HERE) return;
             buildTourWidget();
         }
-        if (!tour) twTotal = twCount() < 2 ? 0 : twIdleTotal();
+        twPics = twCount();
+        if (!tour) twTotal = twPics >= 2 ? mainPics(tourPics(Math.max(0, cfg.tourMinDisplayed | 0))).length : 0;
         const on = twWanted();
         if (on) twTheme();
         if (on) setTimeout(twWarmFirst, 0);     // never during boot: it reads `let`s declared further down
@@ -6458,8 +6408,6 @@
         const on = !!tour && tour.on;
         const at = on ? tour.index : -1, n = on ? tour.total : twTotal;
         tw.count.textContent = (at >= 0 ? at + 1 : '–') + ' / ' + (n >= 0 ? n : '–');
-        const sec = tour ? (tour.section || (tour.scope ? 'custom' : 'all')) : idleSection();
-        tw.label.textContent = sec === 'custom' ? 'Narrowed with { }' : SECTION_NAMES[sec] || sec;
         tw.prev.classList.toggle('faint', !n);      // at either end a press ends the slideshow
         tw.next.classList.toggle('faint', !n);
         const fade = Math.max(0, Math.min(100, +cfg.tourFadeTo || 0)) / 100;
@@ -6475,7 +6423,7 @@
         if (near === tw.near) return;
         tw.near = near;
         // Counted at load and after scrolling; a page that changed without either is caught here.
-        if (near && !tour) twTotal = twIdleTotal();
+        if (near && !tour) twTotal = mainPics(tourPics(Math.max(0, cfg.tourMinDisplayed | 0))).length;
         twSync();
     }
 
@@ -6490,57 +6438,8 @@
         tourFromStart(dir);
     }
 
-    // ---- sections: the page's compartments, which a slideshow keeps to. See TOUR.md §1b.
-    const SECTION_ORDER = ['main', 'replies', 'comments', 'left', 'right', 'header', 'footer'];
-    const SECTION_NAMES = { main: 'Main', replies: 'Replies', comments: 'Comments', left: 'Left sidebar',
-        right: 'Right sidebar', header: 'Header', footer: 'Footer', all: 'All sections' };
-    const POST_SEL = '.post, .message, .postbit, .postcontainer, [id^="post-"], [id^="post_"], ' +
-        '[data-post-id], [itemtype*="DiscussionForumPosting"], [itemtype*="Comment"]';
-    const COMMENTS_SEL = '#comments, .comments, .comment-list, #disqus_thread';
-    const CONTENT_SEL = 'main, [role="main"], article';
-    const LAND_SEL = 'main, [role="main"], article, aside, [role="complementary"], header, [role="banner"], ' +
-        'footer, [role="contentinfo"], nav, [role="navigation"]';
-
-    let twSection = 'main';     // the section ▶ starts in with nothing open: Main, or the last one hovered
-    let twSectionAt = '';       // the page it was chosen on; a new page starts at Main again
-
-    // Which section a picture is in: comments, then a thread's posts, then the page's landmarks, then layout.
-    function sectionOf(el) {
-        if (el.closest(COMMENTS_SEL)) return 'comments';
-        const post = threadPost(el);
-        if (post) return post;
-        const land = el.closest(LAND_SEL);
-        if (land) {
-            const t = land.tagName, role = land.getAttribute('role') || '';
-            if (t === 'MAIN' || t === 'ARTICLE' || role === 'main') return 'main';
-            // Anything landmark-shaped inside the content belongs to it: a pull quote, the article's header.
-            if (land.parentElement && land.parentElement.closest(CONTENT_SEL)) return 'main';
-            if (t === 'ASIDE' || role === 'complementary') return sideOf(land);
-            return t === 'FOOTER' || role === 'contentinfo' ? 'footer' : 'header';
-        }
-        return columnOf(el);
-    }
-
-    // A post among sibling posts is a thread: the first is Main, the rest are Replies.
-    function threadPost(el) {
-        let post = el.closest(POST_SEL);
-        while (post) {
-            const parent = post.parentElement;
-            if (!parent) return null;
-            const sibs = [].filter.call(parent.children, function (c) { return c.matches(POST_SEL); });
-            if (sibs.length >= 2) return sibs[0] === post ? 'main' : 'replies';
-            post = parent.closest(POST_SEL);
-        }
-        return null;
-    }
-
-    function sideOf(node) {
-        const r = node.getBoundingClientRect();
-        return r.left + r.width / 2 < vpW() / 2 ? 'left' : 'right';
-    }
-
-    // No landmarks: a tall, narrow column standing beside a wider one is a sidebar.
-    function columnOf(el) {
+    // A tall, narrow column standing beside a wider one: a sidebar, by width alone. See TOUR.md §1b.
+    function sideColumn(el) {
         const vw = vpW();
         let node = el, narrow = null;
         while (node && node !== document.body && node !== document.documentElement) {
@@ -6548,102 +6447,30 @@
             narrow = node;
             node = node.parentElement;
         }
-        if (!narrow || !node) return 'main';
+        if (!narrow || !node) return false;
         const nr = narrow.getBoundingClientRect();
-        if (nr.height < Math.min(600, vpH() * 0.6)) return 'main';     // a floated figure, not a column
+        if (nr.height < Math.min(600, vpH() * 0.6)) return false;     // a floated figure, not a column
         for (let i = 0; i < node.children.length; i++) {
             const c = node.children[i];
             if (c === narrow) continue;
             const r = c.getBoundingClientRect();
-            if (r.width > nr.width * 1.5 && r.top < nr.bottom && r.bottom > nr.top) return sideOf(narrow);
+            if (r.width > nr.width * 1.5 && r.top < nr.bottom && r.bottom > nr.top) return true;
         }
-        return 'main';
+        return false;
     }
 
-    // The pictures of one section ('all': every one).
-    function inSection(pics, key) {
-        if (!key || key === 'all') return pics;
-        return pics.filter(function (p) { return sectionOf(p) === key; });
-    }
+    // What a slideshow started from idle may show: everything but the sidebars.
+    function mainPics(pics) { return pics.filter(function (p) { return !sideColumn(p); }); }
 
-    // Each section that has pictures, in order, with its count.
-    function sectionCounts() {
-        const pics = tourPics(Math.max(0, cfg.tourMinDisplayed | 0));
-        const n = {};
-        pics.forEach(function (p) { const k = sectionOf(p); n[k] = (n[k] || 0) + 1; });
-        const out = SECTION_ORDER.filter(function (k) { return n[k]; }).map(function (k) { return { key: k, n: n[k] }; });
-        out.push({ key: 'all', n: pics.length });
-        return out;
-    }
-
-    function idleSection() {
-        if (twSectionAt !== location.href) { twSection = 'main'; twSectionAt = location.href; }
-        return twSection;
-    }
-
-    // A hovered picture moves the widget to its section, so the sidebar's slideshow is one → away.
-    function twHovered(el) {
-        if (tour || !tw || !isTopFrame) return;
-        if (!tourWorthy(el, Math.max(0, cfg.tourMinDisplayed | 0))) return;
-        const k = sectionOf(el);
-        idleSection();
-        if (k === twSection) return;
-        twSection = k;
-        twRefresh();
-    }
-
-    // The widget's section changed by the user: idle, it is where ▶ starts; in a slideshow, it moves there.
-    function twChoose(key) {
-        idleSection();
-        twSection = key;
-        if (tour && placed) {
-            tour.section = key;
-            tour.level = -1;
-            tour.scope = null;
-            const list = tourSync();
-            tourChrome();
-            if (!list || !list.length) return;
-            if (tour.index < 0) { tourRemember(list[0]); tour.index = 0; tourChrome(); tourShow(); }
-            else plFill(list, tour.index, scrubDir);
-            return;
+    // The smallest element holding every picture the widget counted: the article, not the page
+    // around it. <body> is the whole page, and only the whole page carries on onto the next one.
+    function tourCommon(pics) {
+        const root = document.documentElement;
+        let node = pics[0] || null;
+        while (node && !pics.every(function (p) { return node.contains(p); })) {
+            node = node.parentElement || (node.getRootNode && node.getRootNode().host) || null;
         }
-        twRefresh();
-    }
-
-    // The right-click list: every section with pictures, and All.
-    function twMenu(open) {
-        if (!tw) return;
-        const m = tw.menu;
-        if (!open) { m.classList.remove('open'); document.removeEventListener('mousedown', twMenuOff, true); return; }
-        while (m.firstChild) m.removeChild(m.firstChild);
-        const cur = tour && placed ? (tour.section || '') : idleSection();
-        sectionCounts().forEach(function (s) {
-            const it = document.createElement('div');
-            if (s.key === cur) it.className = 'cur';
-            it.appendChild(document.createTextNode(SECTION_NAMES[s.key]));
-            const n = document.createElement('span');
-            n.textContent = String(s.n);
-            it.appendChild(n);
-            it.addEventListener('click', function (e) { e.stopPropagation(); twMenu(false); twChoose(s.key); });
-            m.appendChild(it);
-        });
-        const low = tw.rect && tw.rect.y > vpH() / 2;
-        m.classList.toggle('up', !!low);
-        m.classList.toggle('down', !low);
-        m.classList.add('open');
-        document.addEventListener('mousedown', twMenuOff, true);
-    }
-
-    function twMenuOff(e) {
-        if (tw && e.composedPath && e.composedPath().indexOf(tw.menu) >= 0) return;
-        twMenu(false);
-    }
-
-    function twCycle() {
-        const secs = sectionCounts();
-        const cur = tour && placed ? (tour.section || 'all') : idleSection();
-        let i = secs.findIndex(function (s) { return s.key === cur; });
-        twChoose(secs[(i + 1) % secs.length].key);
+        return !node || node === document.body ? root : node;
     }
 
     // The picture ▶ would open, resolved ahead so a slideshow started from idle shows at once.
@@ -6652,7 +6479,8 @@
         if (tour || placed || !twWanted()) return;
         const floor = Math.max(0, cfg.tourMinDisplayed | 0);
         const pics = tourPics(floor);
-        const first = tourEntriesIn(inSection(pics, idleSection()), document.documentElement)[0];
+        const main = mainPics(pics);
+        const first = tourEntriesIn(main, tourCommon(main))[0];
         if (!first || (twWarm && twWarm.el === first.el)) return;
         const w = twWarm = { el: first.el, displayed: sizeOf(first.el), res: undefined };
         primeLink(w.el);
@@ -6671,7 +6499,7 @@
         cancel();
         const floor = Math.max(0, cfg.tourMinDisplayed | 0);
         tour = { el: null, start: null, url: '', x: 0, y: 0, index: -1, total: 0, on: true,
-            scope: null, section: idleSection(), level: -1, floor: floor };
+            scope: tourCommon(mainPics(tourPics(floor))), mainOnly: true, level: -1, floor: floor };
         const list = tourEntries();
         if (!list.length) { tourEnd(); return; }
         const at = dir > 0 ? 0 : list.length - 1;
@@ -7088,8 +6916,8 @@
     async function tourCross() {
         if (crossBusy || crossSpent || !cfg.tourCrossPage) return false;
         // A tour confined to part of this page has no business on the next one. Not spent: } widens.
-        if (tourConfined()) {
-            dbg('no next page — the tour keeps to ' + (tour.section ? SECTION_NAMES[tour.section] : describeEl(tour.scope)));
+        if (tour && tour.scope && tour.scope !== document.documentElement) {
+            dbg('no next page — the tour is confined to ' + describeEl(tour.scope) + '; } widens it');
             return false;
         }
         crossBusy = true;
@@ -7139,7 +6967,7 @@
 
     // Nothing left to ask for: the page will not load more and there is no next page to fetch.
     function tourExhausted() {
-        const scoped = tourConfined();
+        const scoped = !!tour && !!tour.scope && tour.scope !== document.documentElement;
         return (excSpent || !cfg.tourLoadMore) && (crossSpent || !cfg.tourCrossPage || scoped);
     }
 
