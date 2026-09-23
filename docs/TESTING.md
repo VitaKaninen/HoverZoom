@@ -189,8 +189,11 @@ ancestor-link candidate ever comes back missing on a shadow-DOM site.
   as the blank-screenshot and zero-rAF problems. **Call `resize_window` to pin an emulated
   viewport before measuring any geometry**, and sanity-check `clientHeight` in the same call as
   the measurement rather than trusting it.
-- **The user's real Chrome (the `claude-in-chrome` tools) runs the manager's copy off the disk, and
-  the test page ALSO loads its own copy** — two hosts, two previews. Silence the page's copy first:
+- **The user's real Chrome (the `claude-in-chrome` tools) runs the manager's INSTALLED copy, not the
+  file on disk** — an edit is not live there until the manager updates it (checked 2026-09-23: disk
+  at v0.138.0, the log said v0.137.0). Read the version off the log before testing a fix: on any page,
+  `document.dispatchEvent(new CustomEvent('hover-zoom:debug',{detail:true}))` turns the log on and
+  prints it. **The test page ALSO loads its own copy** — two hosts, two previews. Silence the page's copy first:
   `localStorage.setItem('hoverZoomSettings', JSON.stringify({siteMode:'blacklist',
   siteList:['localhost']}))` and reload; the manager's copy reads GM storage and is unaffected.
   Real fullscreen, real playback and trusted key presses all work there, which is how `E47` and the
