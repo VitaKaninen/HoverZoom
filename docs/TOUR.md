@@ -31,11 +31,11 @@ fight that. They are deleted. Do not put nav controls back on the frame.
   is up and the first entry changed): `tourFromStart(1)` uses `twWarm.res` when it is for the same
   element at the same size, so ▶/→ from idle opens at once instead of after a silent resolve.
   Measured on the test page: 19 ms. One resolve per page (or per new first picture), at most 8 probes.
-- **Its scope is `tourCommon()`: the smallest element holding every picture counted**, `<body>`
-  counting as the whole page. Not the whole document: hackaday's article links `rel=next` to the
-  NEXT ARTICLE, and a whole-page scope carried the tour onto it, harvesting its icons and sidebar
-  thumbnails (a fetched page has no layout, so the size gates cannot drop them). Only a whole-page
-  scope crosses pages (`tourCross`), so an article never does.
+- **Its scope is a section (§1b)** — Main from idle, the hovered picture's section after a hover.
+  Only "All sections" crosses pages (`tourConfined()`): hackaday's article links `rel=next` to the
+  NEXT ARTICLE, and a whole-page tour carried onto it, harvesting its icons and sidebar thumbnails.
+  (v0.122.0–v0.128.0 used `tourCommon()`, the smallest element holding every picture; a sidebar made
+  that the whole page, which is what the user reported.)
 - **Every tour picture opens at the slideshow's remembered spot** (centre by default; drag one to
   move it — `E64`, [`VIEWER.md`](VIEWER.md)), as large as settings allow; the widget floats over it
   and no space is reserved (user's call). Hover placement follows `cfg.position`.
@@ -157,7 +157,37 @@ genuinely not a picture leaves the list.
 **Scope limit:** `img`/`video` only. Elements with a CSS background image stay hoverable but are
 not in the tour — enumerating them needs `getComputedStyle` on every node in the document.
 
+## 1b. Sections — v0.129.0
+
+Asked for 2026-09-23: a slideshow keeps to one compartment of the page, sidebar pictures never join
+it by themselves, and a forum's opening post and its replies are separate. First cut, built so the
+user has something to look at — **expect tuning**. `sectionOf(el)`, re-derived on every read:
+
+1. inside `COMMENTS_SEL` → **comments**;
+2. `threadPost()`: the nearest `POST_SEL` element with at least one `POST_SEL` sibling — the first
+   of them is **main**, the rest **replies** (nested posts walk outward). A blog index of `.post`s
+   reads as a thread too; known, left for tuning;
+3. the nearest landmark (`LAND_SEL`): `main`/`article`/`role=main` → **main**; any landmark INSIDE
+   content → main (an article's own `<header>` holds its lead picture); `aside`/complementary →
+   **left**/**right** by which half of the window its centre is in; header/nav → **header**; footer →
+   **footer**;
+4. no landmark, `columnOf()`: the widest ancestor still under 45% of the window, if it is at least
+   min(600, 60% of the window) tall and has a sibling 1.5× wider beside it, is a sidebar. The height
+   test is what keeps a floated figure and a grid card in main.
+
+**Widget:** `idleSection()` is Main on each new URL, and a hover of a picture above the tour floor
+moves it (`twHovered`); the count and `twWanted` (≥ 2) are that section's. A label line names it.
+Click the count → `twCycle()` through the sections that have pictures, then All; right-click →
+`twMenu()` lists them with counts. In a slideshow `twChoose()` keeps the current picture if it is in
+the new section, otherwise goes to its first. `{`/`}` drop the section for the old level walk (§1a;
+label "Narrowed with { }"). Pinning from a hover starts in the pinned picture's section.
+
+Measured: the forum test page gives Main 2 (the OP), Replies 1, Right sidebar 2, All 5 — every picture
+where its markup puts it; hackaday gives Main 5 (its sidebar pictures are under the 128 px floor).
+
 ## 1a. The scope and the floor — BUILT, v0.100.0
+
+*Since v0.129.0 this applies only after `{`/`}`; sections (§1b) decide the scope otherwise.*
 
 A hover may expand anything — an icon, an avatar, a sidebar picture. A tour must not: asked for
 2026-09-11 with the forum case — one post carrying ten pictures, dressed with an avatar, badges,
