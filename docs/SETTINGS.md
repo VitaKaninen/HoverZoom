@@ -577,6 +577,15 @@ turns that into a tap that switches previews off for the tab (`GM_getTab`, falli
 `sessionStorage`; a `toast()` says which). `modifier` gained "press again over the same picture
 pins" (`releasedOn` → `pinOnShow`, pinned in the hover's `paint()`), so pinning needs no click.
 
+**`modifier` has no latency (v0.127.0):** `keyed` in `onOver` zeroes `hoverDelay`, the grace and any
+learned wait, and `fadeNow()` zeroes the fade — the user is asking with the key, and 120 + 150 + fade
+read as lag. It is also what broke a quick double press: the first release cancelled a hover still
+in its delay, so there was nothing for the second press to recognise. The double press is now
+recognised by time (`hotLast`, `HOT_DOUBLE_MS` 450, pointer within 12 px) as well, and keyup leaves a
+pending `pinOnShow` alone. A press on a pinned window `unplace()`s (no suppression) and sets
+`hotQuiet` so that same press shows nothing; the next hold does. A right press with the key held pins
+(`place()` in the capture mousedown) and lets `contextmenu` through when it lands on the preview.
+
 - **A tap is the key alone.** `hotTap` is armed on its keydown and cleared by any other keydown,
   any mousedown and blur, so Ctrl+C / Ctrl+click never toggle.
 - **Any held button owns the key** (`pressHeld`, set on every mousedown incl. our own controls):

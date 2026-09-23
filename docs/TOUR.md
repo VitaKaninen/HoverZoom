@@ -27,6 +27,10 @@ fight that. They are deleted. Do not put nav controls back on the frame.
   start) — `tourFromStart(dir)`. **→ / ← do the same** (`tourKeyStart`, default on):
   window bubble phase, so a page that preventDefaults or stops → keeps it; not while focus is in a
   form control, media, or a slider/tab/menu role. Starting from a chosen picture = hover or pin it.
+- **The first picture is resolved on landing** (`twWarmFirst`, from `twRefresh` whenever the widget
+  is up and the first entry changed): `tourFromStart(1)` uses `twWarm.res` when it is for the same
+  element at the same size, so ▶/→ from idle opens at once instead of after a silent resolve.
+  Measured on the test page: 19 ms. One resolve per page (or per new first picture), at most 8 probes.
 - **Its scope is `tourCommon()`: the smallest element holding every picture counted**, `<body>`
   counting as the whole page. Not the whole document: hackaday's article links `rel=next` to the
   NEXT ARTICLE, and a whole-page scope carried the tour onto it, harvesting its icons and sidebar

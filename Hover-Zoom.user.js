@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.126.0
+// @version     0.127.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -1450,6 +1450,7 @@
 
     let host = null, root = null, box = null, imgEl = null, vidEl = null, mediaEl = null;
     let dimEl = null;
+    let xEl = null, cornerXEl = null;
     let capEl = null, capNameEl = null, capHintEl = null, capMetaEl = null, blockEl = null;
     let zctlEl = null, zsliderEl = null, zoomWrapEl = null, zvalEl = null, zinEl = null;
     let vidOffEl = null;        // "stop showing clips", only while the frame IS one
@@ -1499,6 +1500,7 @@
     const ICON_NOPLAY = ['M8 5.5v13l10-6.5z', 'M4.5 19.5l15-15'];
     const ICON_PREV = 'M15 5l-8 7 8 7V5z';
     const ICON_NEXT = 'M9 5l8 7-8 7V5z';
+    const ICON_CLOSE = 'M6.4 5L12 10.6 17.6 5 19 6.4 13.4 12 19 17.6 17.6 19 12 13.4 6.4 19 5 17.6 10.6 12 5 6.4z';
     const ICON_RETRY = 'M12 5V2L8 6l4 4V7a5 5 0 1 1-5 5H5a7 7 0 1 0 7-7z';
 
     // A filled glyph from one path, or a stroked one from several.
@@ -1626,7 +1628,16 @@
             'width:18px;height:18px;line-height:18px;text-align:center;border-radius:4px;',
             'border:1px solid #45475a;background:rgba(49,50,68,.9);color:#a6adc8;',
             'cursor:pointer;font-size:12px}',
-            '.box.hot .cap .block,.box.hot .cap .aa,.box.hot .cap .fs{display:block}',
+            '.box.hot .cap .block,.box.hot .cap .aa,.box.hot .cap .fs,.box.hot .cap .xb{display:block}',
+            '.cap .xb svg{display:block;width:12px;height:12px;margin:3px auto;fill:currentColor}',
+            '.cap .xb:hover{background:#f38ba8;border-color:#f38ba8;color:#1e1e2e}',
+            // The corner one sits inside the corner's resize square, which answers round it.
+            '.cx{position:absolute;top:' + CX_INSET + 'px;right:' + CX_INSET + 'px;width:' + CX_SIZE + 'px;',
+            'height:' + CX_SIZE + 'px;box-sizing:border-box;display:none;border-radius:3px;cursor:pointer;',
+            'background:rgba(30,30,46,.8);border:1px solid #45475a;color:#cdd6f4;z-index:3}',
+            '.cx svg{display:block;width:10px;height:10px;margin:2px auto;fill:currentColor}',
+            '.cx:hover{background:#f38ba8;border-color:#f38ba8;color:#1e1e2e}',
+            '.box.placed.hot:hover .cx{display:block}',
             '.box.hot .cap.hasvid .vidoff{display:block}',
             '.box.hot .cap .retry.on{display:block}',
             '.cap .retry svg{display:block;width:12px;height:12px;margin:3px auto;fill:currentColor}',
@@ -1829,6 +1840,21 @@
         fsEl.addEventListener('mousedown', function (e) { e.preventDefault(); e.stopPropagation(); }, true);
         fsEl.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); toggleFull(); }, true);
 
+        xEl = document.createElement('span');
+        xEl.className = 'btn xb';
+        xEl.appendChild(mkIcon(ICON_CLOSE));
+        setTip(xEl, 'Close');
+        xEl.addEventListener('mousedown', function (e) { e.preventDefault(); e.stopPropagation(); }, true);
+        xEl.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); closeByButton(); }, true);
+
+        cornerXEl = document.createElement('span');
+        cornerXEl.className = 'cx';
+        cornerXEl.appendChild(mkIcon(ICON_CLOSE));
+        setTip(cornerXEl, 'Close');
+        cornerXEl.addEventListener('mousedown', function (e) { e.preventDefault(); e.stopPropagation(); }, true);
+        cornerXEl.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); closeByButton(); }, true);
+        box.appendChild(cornerXEl);
+
         buildZoomControl();
         buildVideoControls();
 
@@ -1841,6 +1867,7 @@
         capEl.appendChild(retryEl);
         capEl.appendChild(aaEl);
         capEl.appendChild(fsEl);
+        capEl.appendChild(xEl);
 
         blockPopEl = buildPop();
         popHead(blockPopEl, 'Never preview this image again.',
@@ -2105,6 +2132,8 @@
 
     const RESIZE_OUT = 6;     // px outside the window edge that still resizes
     const RESIZE_IN = 6;      // px inside it — together, a 12px strip centred on the edge
+    const CX_INSET = 4;       // the corner ✕: this far in from the top and right edges
+    const CX_SIZE = 16;
     const CORNER_REACH = 24;  // px from a corner where a drag resizes both axes at once
 
     function hitRegion(x, y) {
@@ -2116,6 +2145,9 @@
         if (rx < -RESIZE_OUT || ry < -RESIZE_OUT ||
             rx > ow + RESIZE_OUT || ry > oh + RESIZE_OUT) return null;
         const dl = rx, dr = ow - rx, dt = ry, db = oh - ry;
+        if (placed && dr >= CX_INSET && dr <= CX_INSET + CX_SIZE && dt >= CX_INSET && dt <= CX_INSET + CX_SIZE)
+            return null;    // the corner ✕
+
         const corner = Math.min(CORNER_REACH, ow / 3, oh / 3);
         const rb = Math.min(RESIZE_IN, ow / 6, oh / 6);
         const cl = dl <= corner, cr = dr <= corner, ct = dt <= corner, cb = db <= corner;
@@ -2886,7 +2918,7 @@
     // the buttons once placed, and of nothing but the padding while hovering.
     function btnGutter() {
         if (!placed) return BAR_PAD;
-        const n = 3 + (mediaEl === vidEl ? 1 : 0) + (retryShown() ? 1 : 0);
+        const n = 4 + (mediaEl === vidEl ? 1 : 0) + (retryShown() ? 1 : 0);
         return grabInset() + BTN_STEP * n + 2;
     }
 
@@ -3085,6 +3117,7 @@
         // Right to left, skipping the ▶ when the frame is not holding a clip; the gutter has to
         // clear whatever is actually there or the filename runs under the buttons.
         let right = grabInset();
+        xEl.style.right = px(right); right += BTN_STEP;
         fsEl.style.right = px(right); right += BTN_STEP;
         blockEl.style.right = px(right); right += BTN_STEP;
         if (hasVid) { vidOffEl.style.right = px(right); right += BTN_STEP; }
@@ -3276,11 +3309,14 @@
             'rgba(0,0,0,' + a.toFixed(2) + ')';
     }
 
+    // A preview called up by the hotkey appears and goes at once: the key is the control.
+    function fadeNow() { return cfg.activation === 'modifier' ? 0 : cfg.fadeMs; }
+
     // Everything the appearance settings write to a window that is already up, so changing one
     // while a preview is open shows it (see the panel's live mode).
     function applyLook() {
         if (!host || !box) return;
-        host.style.setProperty('--fade', cfg.fadeMs + 'ms');
+        host.style.setProperty('--fade', fadeNow() + 'ms');
         host.style.setProperty('--barfade', barFadeMs() + 'ms');
         const bw = borderPx();
         box.style.border = bw > 0 ? bw + 'px solid ' + cfg.borderColor : 'none';
@@ -3432,7 +3468,7 @@
                 mediaEl = null;
                 view = null;
             }
-        }, cfg.fadeMs + 60);
+        }, fadeNow() + 60);
     }
 
     // ------------------------------------------------------------- placed mode
@@ -3467,6 +3503,12 @@
         if (!wheelZoomOn) return;
         wheelZoomOn = false;
         CAP_TARGET.removeEventListener('wheel', onPinWheel, WHEEL_OPTS);
+    }
+
+    // The ✕ buttons: gone, and a picture still under the pointer stays down until it is left.
+    function closeByButton() {
+        lastUserAct = Date.now();
+        dismiss();
     }
 
     // Hovering becomes placed, and there is nothing in between.
@@ -3780,7 +3822,8 @@
 
     function isBoxControl(t) {
         return blockEl.contains(t) || vidOffEl.contains(t) || aaEl.contains(t) ||
-            fsEl.contains(t) || retryEl.contains(t) || blockPopEl.contains(t) ||
+            fsEl.contains(t) || xEl.contains(t) || cornerXEl.contains(t) ||
+            retryEl.contains(t) || blockPopEl.contains(t) ||
             zctlEl.contains(t) || vctlEl.contains(t);
     }
 
@@ -4104,6 +4147,9 @@
     const USER_QUIET_MS = 2500;
     let modifierDown = false;
     let hotTap = false;         // the hotkey is down and nothing else has happened since: a tap if it comes up
+    let hotLast = { t: 0, x: 0, y: 0 };    // 'modifier': the last press, for a quick second one
+    let hotQuiet = false;       // 'modifier': this press closed a pinned window; it shows nothing until up
+    const HOT_DOUBLE_MS = 450;
     let releasedOn = null;      // 'modifier': the picture whose preview the hotkey's release closed
     let pinOnShow = null;       // ...pressed again over it: pinned the moment it paints
     let hzOff = false;          // toggled off by the hotkey, for this tab
@@ -4976,7 +5022,7 @@
     }
 
     function onOver(e) {
-        if (placed || priming) return;
+        if (placed || priming || hotQuiet) return;
         if (drag || twBusy()) return;
         if (ours(e.target)) return;         // on our own overlay
         if (!siteEnabled() || CAPTCHA_HERE) return;
@@ -5011,8 +5057,9 @@
         activeRect = el.getBoundingClientRect();
         activeChain = domChain(el);     // taken now: at close the card holds the player too
         activePath = pagePath();
-        ruleMs = vdHoldFor(activeChain, activePath);
-        holdMs = Math.max(ruleMs, PLAYER_GRACE_MS);
+        const keyed = cfg.activation === 'modifier';     // the user asked for it: no grace, no learned wait
+        ruleMs = keyed ? 0 : vdHoldFor(activeChain, activePath);
+        holdMs = keyed ? 0 : Math.max(ruleMs, PLAYER_GRACE_MS);
         holding = true;
         // A player landing under a still pointer raises no mouse event worth waiting for. See E61.
         watchTimer = setInterval(function () {
@@ -5062,7 +5109,7 @@
             } finally {
                 if (!myToken.cancelled && !holding) hideSpinner();
             }
-        }, cfg.hoverDelay);
+        }, keyed ? 0 : cfg.hoverDelay);
     }
 
     // A player now covers the picture we are previewing. Chromium's mouseover for a layout change
@@ -5219,6 +5266,15 @@
             return;
         }
         if (ours(e.target)) { claimClick(); return; }   // onBoxDown / the backdrop own this one
+        if (!placed && e.button === 2 && cfg.activation === 'modifier' && (modifierDown || modifierHeld(e)) &&
+            pressPinsPreview(e)) {
+            claimClick();
+            const onIt = pointInPreview(e.clientX, e.clientY);
+            place();
+            // On the preview, the browser's menu is for the picture: let it come. Off it, it is not.
+            if (!onIt) { e.preventDefault(); e.stopPropagation(); swallowMenuAt = Date.now(); }
+            return;
+        }
         if (!placed && (e.button === 0 || e.button === 2) && pressPinsPreview(e)) {
             claimClick();
             onBoxDown(e);
@@ -5276,7 +5332,10 @@
         if (!placed && !panelOwns(e)) cancel();
     }, true);
     // No keyup ever comes for a modifier held through Alt+Tab or Ctrl+Tab, so blur forgets it.
-    window.addEventListener('blur', function () { modifierDown = false; hotTap = false; if (!placed) cancel(); });
+    window.addEventListener('blur', function () {
+        modifierDown = false; hotTap = false; hotQuiet = false;
+        if (!placed) cancel();
+    });
     window.addEventListener('resize', function () {
         if (!placed) { cancel(); return; }
         if (!view) return;
@@ -5320,11 +5379,26 @@
         if (drag || twBusy() || pressHeld) return;
         modifierDown = true;
         if (cfg.activation === 'modifier') {
+            if (placed) {               // the third press: closed, and back on the next hold
+                lastUserAct = Date.now();
+                hotQuiet = true;
+                releasedOn = null;
+                hotLast.t = 0;
+                unplace();
+                return;
+            }
+            const now = Date.now();
+            const quick = now - hotLast.t < HOT_DOUBLE_MS &&
+                Math.abs(pointer.x - hotLast.x) < 12 && Math.abs(pointer.y - hotLast.y) < 12;
+            hotLast = { t: now, x: pointer.x, y: pointer.y };
             const up = !!view && !!box && box.classList.contains('on');
-            const again = releasedOn && !up && stillUnderPointer(releasedOn, pointer.x, pointer.y) ? releasedOn : null;
+            const again = quick || (!!releasedOn && !up && stillUnderPointer(releasedOn, pointer.x, pointer.y));
             releasedOn = null;
             hoverAtPointer();
-            if (again && active === again) pinOnShow = again;
+            if (!again || !active) return;
+            hotLast.t = 0;
+            if (view && box.classList.contains('on')) place();
+            else pinOnShow = active;
             return;
         }
         if (cfg.hotkeyToggle) { hotTap = true; return; }
@@ -5338,7 +5412,9 @@
         const wasDown = modifierDown;
         modifierDown = false;
         if (cfg.activation === 'modifier') {
+            hotQuiet = false;
             if (!wasDown) return;
+            if (pinOnShow && pinOnShow === active) return;      // pinned the moment it paints
             releasedOn = !placed && view && box && box.classList.contains('on') ? active : null;
             cancel();
             return;
@@ -6084,7 +6160,10 @@
     // sorted in DOCUMENT coordinates, or the order changes as the page scrolls.
     function tourEntries() {
         const pics = tourPics(tourFloor());
-        const scope = tourScopeNow(pics);
+        return tourEntriesIn(pics, tourScopeNow(pics));
+    }
+
+    function tourEntriesIn(pics, scope) {
         const root = document.documentElement;
         const sx = window.scrollX || 0, sy = window.scrollY || 0;
         const items = [];
@@ -6300,6 +6379,7 @@
         const on = twWanted();
         if (on) twTheme();
         if (on && !tour) twTotal = tourPics(Math.max(0, cfg.tourMinDisplayed | 0)).length;
+        if (on) twWarmFirst();
         const shown = tw.host.style.display !== 'none';
         if (on !== shown) {
             tw.host.style.display = on ? 'block' : 'none';
@@ -6367,6 +6447,24 @@
         return !node || node === document.body ? root : node;
     }
 
+    // The picture ▶ would open, resolved ahead so a slideshow started from idle shows at once.
+    let twWarm = null;          // { el, displayed, res } — res undefined while it resolves
+    function twWarmFirst() {
+        if (tour || placed || !twWanted()) return;
+        const floor = Math.max(0, cfg.tourMinDisplayed | 0);
+        const pics = tourPics(floor);
+        const first = tourEntriesIn(pics, tourCommon(pics))[0];
+        if (!first || (twWarm && twWarm.el === first.el)) return;
+        const w = twWarm = { el: first.el, displayed: sizeOf(first.el), res: undefined };
+        primeLink(w.el);
+        resolve(w.el, w.displayed, { cancelled: false, fresh: false }, null).then(function (res) {
+            if (twWarm !== w) return;
+            w.res = res || null;
+            if (res && !res.video) plKeepImage(res.url);
+            dbg('slideshow: first picture ready', res ? res.w + '×' + res.h + ' ' + res.url.slice(-48) : 'nothing found');
+        }, function () { if (twWarm === w) w.res = null; });
+    }
+
     // ▶ (◀) with nothing pinned: the first (last) picture of the area the page's pictures are in, opened and pinned.
     async function tourFromStart(dir) {
         dir = dir < 0 ? -1 : 1;
@@ -6390,8 +6488,9 @@
         showSpinner();
         let res = null;
         try {
+            const warm = twWarm && twWarm.el === el && twWarm.res && sameDisplayed(twWarm.displayed, displayed) ? twWarm.res : null;
             primeLink(el);
-            res = await resolve(el, displayed, myToken, null);
+            res = warm || await resolve(el, displayed, myToken, null);
             if (!res && !myToken.cancelled) res = await tourFallbackRes(el, displayed, myToken.failure);
         } finally {
             twStarting = null;
@@ -7857,8 +7956,9 @@
             const show = act.el.value === 'modifier';
             hotTog.row.hidden = show;
             actHint.textContent = show
-                ? 'Hold the hotkey and point at pictures; let go and the preview closes. Press it ' +
-                  'again over the same picture, or click the preview, to pin it.'
+                ? 'Hold the hotkey and point at pictures; let go and the preview closes. Press it twice ' +
+                  'to pin one (or right-click it while holding, which keeps the browser\'s menu); ' +
+                  'press it once more to close it.'
                 : 'Hold the hotkey to point without previews, or press it to close the one that is ' +
                   'open (while you drag something, the hotkey is the drag\'s).';
         }

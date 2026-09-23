@@ -793,9 +793,13 @@ time the flip with a `MutationObserver`, not a polling loop. See [`TESTING.md`](
   backdrop (`dimEl.catch`) closes it and eats the menu** — the page under a pinned window is covered
   by the backdrop, so the browser's menu there was for an empty page and useless (`E65`). Claimed in
   the window-capture `mousedown` by `composedPath()[0] === dimEl`, before `ours()`.
-- **There is no close button.** A placed window has two ways out that need no aim, and the X sat in
-  the corner the hand reaches for to resize. `closeEl`, its CSS, its `layoutChrome()` placement and
-  its `isBoxControl()` entry all went together; the ⊘ is the only control left inside the box.
+- **Two close buttons (v0.127.0, `E68`, user's call).** The old corner X (gone v0.30.0–v0.126.0)
+  sat in the corner the hand reaches for to resize. The new one is smaller and nearer the edge
+  (`CX_SIZE` 16, `CX_INSET` 4), shown only on `:hover`, and `hitRegion` returns null over it, so the
+  corner resizes from the 4 px inside it, the 6 px outside and the 24 px arms. The bar's `.xb` is the
+  rightmost button; `btnGutter()` counts it, which is what keeps the zoom cluster clear at the
+  minimum width (measured at 290 px: cluster ends 6 px before the first button). Both go through
+  `closeByButton()` and both are in `isBoxControl()`.
 - **The preview opens beside the pointer, then is nudged until the pointer is `REACH_INSET`
   (10 px) inside it** (`nudgeIntoReach`), on the axis that needs it. Centring it on the cursor
   solves reachability but moves it much further than needed. **This is why `cursorGap` was
