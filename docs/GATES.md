@@ -385,6 +385,22 @@ appears within 100 ms of a hover, even when it is supposed to, so adding this de
 doesn't really cost anything."* v0.108.0 instead *remembered* areas whose player beat the preview;
 the grace makes that state unnecessary and it was removed.
 
+**Evidence, and forgetting (v0.125.0).** Keying on *any* self-close taught Google Images a
+site-wide ~6 s wait: something there — most likely the result grid redrawing under a still pointer —
+closed previews with no video anywhere, and every result shares one chain, so three of them made
+one rule covering all of Images. (Google shows the pane a captcha, so the exact cause was not
+observed.) Two rules now, both about what the user saw:
+
+- **A close teaches only if a player is there.** `selfClosed(why, x, y, seen)`: the player paths
+  (`withdrawn`) pass `seen`; every other path waits `VDELAY_EVIDENCE_MS` (400 ms — players land a
+  beat after the close they cause) and asks `videoOver(activeRect)`: a video surface, or a
+  `<video>`/`<iframe>` at the picture's centre. The `?swap` clip case still counts (it is a video).
+- **A rule that waits for nothing is dropped.** A covered hover whose wait runs out with no player
+  is a strike (`vdForget`, `rule.idle`); `VDELAY_FORGET` (3) in a row remove that rule, and an entry
+  left with no rules and no samples is deleted. A player landing inside a wait (`vdWorked`, from
+  `withdrawn`) or a flash under the rule (`vdLearn`) clears the strikes. A wrong rule costs three
+  waits; a right one that is dropped comes back from three flashes. User entries are never touched.
+
 **The record** (v0.112.0, the shape borrowed from Forum Stumbler's `sigDeep` /
 `derivePositionPrefixes` / site `prefixes`). `cfg.videoDelays` is
 `host → {ms, rules: [{dom, path}], samples, fixes, user}`; everything up to `vdEntryFor` is

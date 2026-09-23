@@ -175,8 +175,8 @@ to be pinned is a different job from a slideshow parked at the bottom centre.
   leaving fullscreen onto a different picture. Default the centre.
 - **`hover`** — only under `position: 'last'` ("Where I last put it"). Beside-the-pointer and
   centred never read or write it.
-- **Written only by a drop** (`endDrag` → `posDropped`) of a placed window moved by a drag, and only
-  to the memory the window answers to (`posKind()`). Moving a beside-the-pointer preview out of the
+- **Written only by a drop** (`endDrag` → `posDropped`) of a placed window moved by a drag — see
+  the threshold below — and only to the memory the window answers to (`posKind()`). Moving a beside-the-pointer preview out of the
   way saves nothing. Resizes and zooms save nothing.
 - **Spec = the widgets' window anchor**: `{x:{m,o}, y:{m,o}}`, the window's start/centre/end point
   `o` px from the viewport's same point, so a different-sized picture grows away from the edge it
@@ -184,9 +184,15 @@ to be pinned is a different job from a slideshow parked at the bottom centre.
   never reach an outer third, so thirds alone would call a right-edge drop "centre"); otherwise the
   nearest third with the dock's hysteresis (`usDock.zone`). An axis the picture fills, or one the
   drag did not move, keeps the anchor it had — a sideways drag must not re-anchor the top.
-- **Snap** (`posSnap`): 8 px to each axis's start, centre and end — the corners, edge middles and
-  the middle — nearest wins, only on an axis the drag has moved, computed from the UNSNAPPED
-  position so a snap can be pulled out of. Ctrl places freely.
+- **Snap** (`boxSnap`): per axis to the start and end (`POS_SNAP_EDGE`, 16 px) and the middle
+  (`POS_SNAP_CENTRE`, 40 px — the centre is where most things go and was the hardest to find at
+  8), nearest wins, only on an axis the drag has moved, computed from the UNSNAPPED position so a
+  snap can be pulled out of. Ctrl places freely. **The settings panel's drag uses the same
+  function**, so the rules can be tried on it.
+- **A drop always stays where it was put, but only a deliberate one is remembered** (`posDropped`):
+  an axis is saved only when the drag moved it at least `POS_MOVE_MIN` (40 px) AND the window has
+  `POS_ROOM_MIN` (80 px, or 10% of the window) of spare room on it. A picture nearly the window's
+  size is janky to position, and nudging it must not overwrite the default (user's call).
 - `posApply` keeps the window whole on screen when it fits; `view.anchor` remembers the spec so an
   upgrade and a window resize re-place from it instead of keeping the centre. A hover preview still
   goes through `clampPosition()`, so at the bottom it sits `STATUS_TIP_H` higher than the pinned drop.
@@ -790,11 +796,13 @@ time the flip with a `MutationObserver`, not a polling loop. See [`TESTING.md`](
   (10 px) inside it** (`nudgeIntoReach`), on the axis that needs it. Centring it on the cursor
   solves reachability but moves it much further than needed. **This is why `cursorGap` was
   retired in v0.40.0** — the nudge overrode every value it could hold.
-- **With `position: center` there is no nudge, so the press that pins comes from the picture**
-  (`E30`). `pressPinsPreview()` claims a press inside the window's rectangle *or*, in centred
-  mode only, on the element the preview came from. Without it a centred hover preview cannot be
-  kept at all: it is pointer-transparent, the pointer is never over it, and leaving the picture
-  closes it.
+- **A preview that opened away from the pointer is pinned from the picture** (`E30`).
+  `pressPinsPreview()` claims a press inside the window's rectangle *or*, in any mode, on the
+  element the preview came from. Without it such a preview cannot be kept at all: it is
+  pointer-transparent, the pointer is never over it, and leaving the picture closes it. v0.124.0
+  keyed the second half on `position: 'center'`, so under `'last'` nothing could be pinned — the
+  user read it as "a preview that does not open under the pointer cannot be pinned". `'center'`
+  itself was retired in v0.125.0 (`migrate()` maps it to `'last'`, whose default is the centre).
 - **Key and wheel listeners live on `CAP_TARGET` (= window), in capture**, so arrows and `+`/`−` are
   ours while placed. Keys are added in `place()` and removed in `unplace()` against that one
   constant; `wheel` uses the shared `WHEEL_OPTS` object for add *and* remove, or the removal

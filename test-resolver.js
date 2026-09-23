@@ -851,7 +851,7 @@ const vdStart = src.indexOf('    const VDELAY_SAMPLES');
 const vdEnd = src.indexOf('    // The entry for a host');
 if (vdStart < 0 || vdEnd < 0) { console.error('vdLearn markers not found'); process.exit(1); }
 const vd = new Function(src.slice(vdStart, vdEnd) +
-    NL + 'return {vdLearn, vdRound, vdRuleFor, chainPrefix, pathPrefix, chainMatches, pathMatches, sharedHead, vdWaitOf, VDELAY_SAMPLES};')();
+    NL + 'return {vdLearn, vdRound, vdRuleFor, chainPrefix, pathPrefix, chainMatches, pathMatches, sharedHead, vdWaitOf, vdForget, vdWorked, VDELAY_SAMPLES, VDELAY_FORGET};')();
 
 eq('vdRound rounds up to 50 ms', vd.vdRound(1001), 1050);
 eq('vdRound never goes under one step', vd.vdRound(10), 250);
@@ -935,6 +935,24 @@ eq('a learned wait the user set to 0 is still adjusted', zero.entry.ms, 900);
 eq('a user entry covers the whole site', !!vd.vdRuleFor({ ms: 500, user: true }, SIDE, '/anything'), true);
 eq('a user entry is never touched', vd.vdLearn({ ms: 0, user: true }, 700, C1, '/v').change, null);
 eq('  whatever its wait', vd.vdLearn({ ms: 2000, user: true }, 3000, C1, '/v').change, null);
+
+// Forgetting: a covered wait that runs out with no player is a strike; three in a row drop the rule.
+const ONE = { ms: 900, rules: [{ dom: 'img>a.thumb>div.card.item-#>div.grid', path: '/videos' }] };
+let f = vd.vdForget(ONE, C1, '/videos');
+eq('a wait that ran out is one strike', f.change + ' ' + f.entry.rules[0].idle, 'waited for nothing 1');
+f = vd.vdForget(vd.vdForget(f.entry, C1, '/videos').entry, C1, '/videos');
+eq('the third drops the only rule, and the entry with it', f.change + ' ' + f.entry, 'forgot the site null');
+eq('  the stored entry is not modified in place', ONE.rules[0].idle, undefined);
+let w = vd.vdWorked(vd.vdForget(vd.vdForget(ONE, C1, '/videos').entry, C1, '/videos').entry, C1, '/videos');
+eq('a player inside the wait clears the strikes', w.change + ' ' + w.entry.rules[0].idle, 'a player came undefined');
+eq('  so two more strikes do not drop it', vd.vdForget(vd.vdForget(w.entry, C1, '/videos').entry, C1, '/videos').change, 'waited for nothing');
+let lf = vd.vdLearn(vd.vdForget(ONE, C1, '/videos').entry, 1200, C1, '/videos');
+eq('a flash under the rule clears the strikes too', lf.entry.rules[0].idle, undefined);
+const TWO = { ms: 900, rules: [ONE.rules[0], { dom: 'img>a>li.related>ul.sidebar', path: '/watch' }] };
+f = vd.vdForget(vd.vdForget(vd.vdForget(TWO, C1, '/videos').entry, C1, '/videos').entry, C1, '/videos');
+eq('with another area left, only that rule goes', f.change + ' ' + f.entry.rules.length, 'forgot an area 1');
+eq('an uncovered hover is no strike', vd.vdForget(ONE, SIDE, '/videos').change, null);
+eq('a user entry is never forgotten', vd.vdForget({ ms: 900, user: true }, C1, '/v').change, null);
 
 // ---- the captcha gate reads only the frame's own URL and whether it is the top frame.
 const cStart = src.indexOf('    const CAPTCHA_HERE');

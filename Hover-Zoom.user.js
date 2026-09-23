@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.124.0
+// @version     0.125.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -73,7 +73,7 @@
         // how to display
         maxSizeMultiple: 1.2,       // how far the frame may GROW, as a multiple of the window.
         zoomFactor: 2,              // ceiling on the opening scale; the window still fits it
-        position: 'cursor',         // 'cursor' | 'center' | 'last' (where a pinned one was last dropped)
+        position: 'cursor',         // 'cursor' | 'last' (where a pinned one was last dropped; the centre until then)
         posPerSite: true,           // remembered positions (slideshow, 'last') are kept per site
         fadeMs: 200,
         borderWidth: 1,
@@ -117,6 +117,8 @@
         if (o.skipFurniture === undefined && o.skipPageBackgrounds !== undefined) {
             o.skipFurniture = !!o.skipPageBackgrounds;
         }
+        // "Centred in the window" is "Where I last put it", whose default is the centre.
+        if (o.position === 'center') o.position = 'last';
         // "Preview images that are already full size" is a minRatio below 1 now.
         if (o.showEvenIfNotLarger && !(o.minRatio < 1)) o.minRatio = 0.9;
         // Two checkboxes became two three-way modes. `barFade` answered "may they fade" for the
@@ -3312,10 +3314,7 @@
         const oh = outerH();
         const kind = posKind();
         if (kind) posApply(posLoad(kind));
-        else if (cfg.position === 'center') {
-            view.left = (m.vw - ow) / 2;
-            view.top = (m.vh - oh) / 2;
-        } else {
+        else {
             // Beside the pointer, on whichever side has more room.
             const rightRoom = m.vw - pointer.x;
             view.left = rightRoom >= ow ? pointer.x : pointer.x - ow;
@@ -3565,30 +3564,45 @@
                  y: ax(view.top, outerH(), vpH(), prev && prev.y) };
     }
 
-    // 8 px to the window's edges and middle on each axis: the corners, the edge middles, the centre.
-    function posSnap(l, t) {
+    const POS_SNAP_EDGE = 16;       // px: a window edge pulls this far
+    const POS_SNAP_CENTRE = 40;     // px: the centre pulls further — it is where most things go
+    const POS_MOVE_MIN = 40;        // px: a drag shorter than this on an axis is not a new spot
+    const POS_ROOM_MIN = 80;        // px (or 10% of the window): less spare room than this is not a choice
+
+    // A box of w x h at (l, t), snapped per axis to the window's edges and its middle — the corners,
+    // the edge middles, the centre. Nearest wins. The preview and the settings panel share it.
+    function boxSnap(l, t, w, h) {
         const one = function (v, len, V) {
-            let best = v, gap = usDock.SNAP + 0.01;
-            [0, (V - len) / 2, V - len].forEach(function (c) {
-                if (Math.abs(v - c) < gap) { gap = Math.abs(v - c); best = c; }
+            let best = v, gap = Infinity;
+            [[0, POS_SNAP_EDGE], [(V - len) / 2, POS_SNAP_CENTRE], [V - len, POS_SNAP_EDGE]].forEach(function (c) {
+                const d = Math.abs(v - c[0]);
+                if (d <= c[1] && d < gap) { gap = d; best = c[0]; }
             });
             return best;
         };
-        return { x: one(l, outerW(), vpW()), y: one(t, outerH(), vpH()) };
+        return { x: one(l, w, vpW()), y: one(t, h, vpH()) };
     }
 
-    // A pinned window let go after a move: remembered if it answers to a memory. An axis the drag
-    // did not move keeps the anchor it had.
-    function posDropped(movedX, movedY) {
-        if (!vpW() || !vpH()) return;
-        const prev = view.anchor;
-        const spec = posSpec(prev);
-        if (prev && !movedX) spec.x = prev.x;
-        if (prev && !movedY) spec.y = prev.y;
-        view.anchor = spec;
+    function posSnap(l, t) { return boxSnap(l, t, outerW(), outerH()); }
+
+    // A pinned window let go after a move. It stays where it was put (view.anchor), but the memory
+    // takes an axis only when the drag was a clear choice on it: moved at least POS_MOVE_MIN, with
+    // real room to choose in. Nudging a picture nearly the window's size is not a new default.
+    function posDropped(dx, dy) {
+        const vw = vpW(), vh = vpH();
+        if (!vw || !vh) return;
+        const cur = posSpec(view.anchor);
+        view.anchor = cur;
         const kind = posKind();
-        if (kind) posSave(kind, view.anchor);
-        dbg('window dropped', { kind: kind || '(not remembered)', spec: JSON.stringify(view.anchor) });
+        const room = function (len, V) { return V - len >= Math.max(POS_ROOM_MIN, V * 0.1); };
+        const takeX = Math.abs(dx) >= POS_MOVE_MIN && room(outerW(), vw);
+        const takeY = Math.abs(dy) >= POS_MOVE_MIN && room(outerH(), vh);
+        if (kind && (takeX || takeY)) {
+            const saved = posLoad(kind);
+            posSave(kind, { x: takeX ? cur.x : saved.x, y: takeY ? cur.y : saved.y });
+        }
+        dbg('window dropped', { kind: kind || '(not remembered)', spec: JSON.stringify(cur),
+            remembered: kind ? (takeX ? 'x' : '') + (takeY ? 'y' : '') || 'nothing — too small a move, or no room' : '-' });
     }
 
     // ------------------------------------------------------------- fullscreen
@@ -4088,12 +4102,12 @@
     let modifierDown = false;
 
     // A hover preview cannot be hit-tested, so "is the pointer on it" is answered from `view` instead.
-    // A hover preview is pinned by pressing it — but with position:center the pointer is nowhere
-    // near it, so the press that pins it is the one on the picture that produced it.
+    // A hover preview is pinned by pressing it — and when it opened somewhere the pointer is not, by
+    // pressing the picture that produced it. Any mode: a remembered spot can be anywhere. See E30.
     function pressPinsPreview(e) {
         if (!view || !box || !box.classList.contains('on')) return false;
         if (pointInPreview(e.clientX, e.clientY)) return true;
-        if (cfg.position !== 'center' || !active) return false;
+        if (!active) return false;
         return e.target === active || (active.contains && active.contains(e.target));
     }
 
@@ -4384,7 +4398,9 @@
     function vdLearn(entry, elapsed, chain, path) {
         const e = entry ? JSON.parse(JSON.stringify(entry)) : {};
         if (e.user) return { entry: e, change: null };
-        if (vdRuleFor(e, chain, path)) {
+        const covering = vdRuleFor(e, chain, path);
+        if (covering) {
+            if (covering !== e) delete covering.idle;      // a flash is a player: no strike stands
             e.fixes = (e.fixes || []).concat([{ ms: elapsed }]);
             if (e.fixes.length < VDELAY_SAMPLES) return { entry: e, change: 'resampled' };
             const slowest = Math.max.apply(null, e.fixes.map(function (x) { return x.ms; }));
@@ -4410,6 +4426,32 @@
         const ms = vdRound(slowest * VDELAY_MARGIN);
         e.ms = e.ms == null ? ms : Math.max(e.ms, ms);
         return { entry: e, change: e.rules.length === 1 ? 'learned' : 'another area' };
+    }
+
+    const VDELAY_FORGET = 3;        // waits in a row that ran out with no player before a rule goes
+
+    // A covered hover's wait ran out and no player came: evidence against the rule. Three in a row
+    // drop it — if it was right, the flashes that made it make it again — and an entry left with
+    // no rules and no samples goes too. vdWorked() resets the count.
+    function vdForget(entry, chain, path) {
+        const e = entry ? JSON.parse(JSON.stringify(entry)) : null;
+        if (!e || e.user) return { entry: e, change: null };
+        const rule = vdRuleFor(e, chain, path);
+        if (!rule) return { entry: e, change: null };
+        rule.idle = (rule.idle || 0) + 1;
+        if (rule.idle < VDELAY_FORGET) return { entry: e, change: 'waited for nothing' };
+        e.rules = e.rules.filter(function (r) { return r !== rule; });
+        if (!e.rules.length && !(e.samples && e.samples.length)) return { entry: null, change: 'forgot the site' };
+        return { entry: e, change: 'forgot an area' };
+    }
+
+    // A player landed inside a covered hover's wait: the rule is doing its job.
+    function vdWorked(entry, chain, path) {
+        const e = entry ? JSON.parse(JSON.stringify(entry)) : null;
+        const rule = e && !e.user ? vdRuleFor(e, chain, path) : null;
+        if (!rule || !rule.idle) return { entry: e, change: null };
+        delete rule.idle;
+        return { entry: e, change: 'a player came' };
     }
 
     // The wait an entry gives this hover. While a correction is being sampled the wait is OFF, so
@@ -4463,19 +4505,37 @@
         return vdWaitOf(vdEntryFor(pageHost()), chain, path);
     }
 
-    // Read-modify-write against storage, as saveAudio() does.
-    function vdRecord(chain, path, elapsed) {
+    // Read-modify-write against storage, as saveAudio() does. `step` is vdLearn, vdForget or vdWorked.
+    function vdApply(step, chain, path, elapsed) {
         const host = pageHost();
         if (!host) return;
         reloadSettings();
-        const r = vdLearn(vdEntryFor(host), elapsed, chain, path);
+        const r = step === vdLearn ? vdLearn(vdEntryFor(host), elapsed, chain, path)
+            : step(vdEntryFor(host), chain, path);
         if (!r.change) return;
         const all = Object.assign({}, cfg.videoDelays);
-        all[host] = r.entry;
+        if (r.entry) all[host] = r.entry;
+        else delete all[host];
         cfg.videoDelays = all;
         saveSettings();
         refreshPanel();
-        dbg('late player: ' + r.change, { host: host, after: elapsed + ' ms', chain: chain, path: path, entry: r.entry });
+        dbg('late player: ' + r.change, { host: host, after: elapsed != null ? elapsed + ' ms' : '-',
+            chain: chain, path: path, entry: r.entry });
+    }
+
+    function vdRecord(chain, path, elapsed) { vdApply(vdLearn, chain, path, elapsed); }
+
+    const VDELAY_EVIDENCE_MS = 400;     // players land a beat after the close they cause
+
+    // Is a <video>, or a frame that could hold a player, where the picture was? The one proof that a
+    // close was a player's doing — without it, a page redrawing its grid teaches a wait (Google Images).
+    function videoOver(r) {
+        const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+        const surfaces = videoSurfaces();
+        for (let i = 0; i < surfaces.length; i++) if (holds(surfaces[i].rect, cx, cy)) return true;
+        const stack = document.elementsFromPoint ? document.elementsFromPoint(cx, cy) : [];
+        for (let i = 0; i < stack.length; i++) if (/^(VIDEO|IFRAME)$/.test(stack[i].tagName)) return true;
+        return false;
     }
 
     const BAND_WIDTH = 0.98;    // of the viewport — a full-bleed band reaches both edges
@@ -4817,7 +4877,7 @@
         if (box) box.classList.remove('drag');
         applyCursor();      // the release may land with no further movement to redraw it
         if (d.mode === 'move' && d.moved && view && placed && !fullActive()) {
-            posDropped(Math.abs(d.rl - d.sl) >= 1, Math.abs(d.rt - d.st) >= 1);
+            posDropped(view.left - d.sl, view.top - d.st);
         }
     }
 
@@ -4924,6 +4984,8 @@
         if (ruleMs) dbg('waiting ' + holdMs + ' ms for the page\'s own player before previewing');
         holdTimer = setTimeout(async function () {
             if (myToken.cancelled || active !== el || playerArrived(el)) return;
+            // A learned wait ran out and nothing came: one strike against the rule.
+            if (ruleMs) vdApply(vdForget, activeChain, activePath);
             holding = false;
             if (heldHit) { paint(heldHit); return; }
             if (!myToken.done) { if (resolving) showSpinner(); return; }   // hits paint directly from here
@@ -4964,14 +5026,15 @@
     function withdrawn(why) {
         dbg('a player arrived over the picture — preview withdrawn' + (holding ? ' before it opened' : ''),
             { after: (Date.now() - hoverAt) + ' ms', why: why });
-        selfClosed(why, pointer.x, pointer.y);
+        if (holding && ruleMs && active) vdApply(vdWorked, activeChain, activePath);
+        selfClosed(why, pointer.x, pointer.y, true);
         cancel();
     }
 
     // A preview that was ON SCREEN is closing with the pointer still on the picture: the page took
     // it away, not the user. Whatever the path, this is the one event the wait learns from — a
     // rule that is wrong keeps being corrected by the flash it failed to prevent. See E62.
-    function selfClosed(why, x, y) {
+    function selfClosed(why, x, y, seen) {
         const painted = !!(view && box && box.classList.contains('on'));
         if (!active || placed || holding || !activeRect || !painted) {
             if (painted || holding) dbg('closing, not counted — ' + why,
@@ -4991,9 +5054,18 @@
             return;
         }
         const elapsed = Date.now() - hoverAt;
-        dbg('the page took the preview away — ' + why,
-            { after: elapsed + ' ms', waited: ruleMs ? ruleMs + ' ms, learned' : 'the grace only' });
-        vdRecord(activeChain, activePath, elapsed);
+        const chain = activeChain, path = activePath, rect = activeRect, waited = ruleMs;
+        const record = function () {
+            dbg('the page took the preview away — ' + why,
+                { after: elapsed + ' ms', waited: waited ? waited + ' ms, learned' : 'the grace only' });
+            vdRecord(chain, path, elapsed);
+        };
+        // Only a close a player caused teaches a wait. The player paths saw one; the rest look.
+        if (seen) { record(); return; }
+        setTimeout(function () {
+            if (videoOver(rect)) record();
+            else dbg('the preview closed on its own, but no video appeared there — not counted', why);
+        }, VDELAY_EVIDENCE_MS);
     }
 
     // The picture itself went, and a <video> is where it was — a clip included, since it is never
@@ -7019,7 +7091,10 @@
             const r = panel.getBoundingClientRect();
             const ox = e.clientX - r.left, oy = e.clientY - r.top;
             const move = function (ev) {
-                panelPos = { left: ev.clientX - ox, top: ev.clientY - oy };
+                const l = ev.clientX - ox, t = ev.clientY - oy;
+                // The preview's snapping, so the rules can be tried out here; Ctrl places freely.
+                const p = ev.ctrlKey ? { x: l, y: t } : boxSnap(l, t, panel.offsetWidth, panel.offsetHeight);
+                panelPos = { left: p.x, top: p.y };
                 placePanel();
             };
             const up = function () {
@@ -7588,16 +7663,14 @@
         act.el.addEventListener('change', syncModKey);
         syncModKey();
         const pos = pick('position', 'Opens', ' ', [
-            ['cursor', 'Beside the pointer'], ['center', 'Centred in the window'],
-            ['last', 'Where I last put it']]);
+            ['cursor', 'Beside the pointer'], ['last', 'Where I last put it']]);
         const posHint = pos.row.querySelector('.hint');
         function syncPos() {
             posHint.textContent = pos.el.value === 'cursor'
                 ? 'Pin it by clicking the preview.'
-                : pos.el.value === 'last'
-                    ? 'Pin it by clicking the image under the pointer, then drag it where you want it; ' +
-                      'it opens there from then on. Hold Ctrl to place it without snapping.'
-                    : 'Pin it by clicking the image under the pointer.';
+                : 'In the centre until you move one. Pin it by clicking the picture on the page, then ' +
+                  'drag it where you want it; previews open there from then on. Hold Ctrl to place it ' +
+                  'without snapping.';
         }
         pos.el.addEventListener('change', syncPos);
         syncPos();
