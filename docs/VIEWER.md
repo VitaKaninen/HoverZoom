@@ -101,7 +101,10 @@ loses its right-hand buttons. Two cases, two answers, asked for by the user 2026
 - **Widget higher up** → `clearWidget()`, run at the end of both branches of `clampPosition()`,
   moves the window up or down by the smaller amount that clears the bar and keeps it whole on screen
   and out of the `bottomGap()` strip — a bump down into that strip loses to a bump up.
-  If neither fits it leaves it. Skipped during a drag (it would fight the pointer) and in fullscreen.
+  If neither fits, the window shrinks from the bottom to end above the widget: `view.capH` caps the
+  frame in `reflow()` and `fitScaleFor()`, and a picture at fit scale is refitted, so it shrinks
+  rather than crops (a zoomed one keeps its zoom and pans). `swapViewer()` clears the cap for the next
+  picture. Skipped during a drag (it would fight the pointer) and in fullscreen.
 
 ## The wheel grows a PLACED window, about the POINTER · `E22`
 

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.147.0
+// @version     0.148.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -1974,7 +1974,17 @@
         const best = [up, down].filter(fits).sort(function (a, b) {
             return Math.abs(a - view.top) - Math.abs(b - view.top);
         })[0];
-        if (best != null) view.top = best;
+        if (best != null) { view.top = best; return; }
+        // Neither fits: shrink from the bottom until the window ends above the widget.
+        const capH = Math.max(MIN_FRAME, r.y - EDGE_GAP * 2 - insetY() * 2 - barDock());
+        if (capH >= view.frameH) return;
+        view.capH = capH;
+        if (view.fixedH != null) view.fixedH = capH;
+        else if (Math.abs(view.scale - view.fitScale) < 1e-6) {
+            view.fitScale = view.scale = Math.max(minScaleFor(view.natW, view.natH), view.scale * capH / view.frameH);
+        }
+        reflow();
+        view.top = EDGE_GAP;
     }
 
     const MIN_FRAME = 48;
@@ -2111,7 +2121,8 @@
         if (!w || !h) return 1;
         if (view && view.fixedW != null) return Math.min(maxScale(), view.fixedW / w, view.fixedH / h);
         const m = viewportBox();
-        return Math.min(fromShown(cfg.zoomFactor), maxScale(), m.w / w, m.h / h);
+        const mh = view && view.capH ? Math.min(m.h, view.capH) : m.h;
+        return Math.min(fromShown(cfg.zoomFactor), maxScale(), m.w / w, mh / h);
     }
 
     const MIN_MEDIA = 32;
@@ -2125,6 +2136,7 @@
     function reflow() {
         if (!view) return;
         const g = growBox();
+        if (view.capH) g.h = Math.min(g.h, view.capH);
         view.imgW = view.natW * view.scale;
         view.imgH = view.natH * view.scale;
         const mw = Math.min(minFrameW(), g.w);
@@ -3393,6 +3405,7 @@
             imgW: 0, imgH: 0, frameW: 0, frameH: 0, ox: 0, oy: 0, left: 0, top: 0,
             // null until a hand resize pins the edges; resizeBy() is the only writer.
             fixedW: null, fixedH: null,
+            capH: null,             // frame height clearWidget() shrank it to, so it ends above the widget
             anchor: null,           // the remembered spot it was placed by; posApply() sets it
         };
         reflow();
@@ -3471,6 +3484,7 @@
         view.natW = res.w;
         view.natH = res.h;
         view.reason = res.reason || null;
+        view.capH = null;
         view.fitScale = fitScaleFor(res.w, res.h);
         view.scale = view.fitScale;
         view.ox = 0;
