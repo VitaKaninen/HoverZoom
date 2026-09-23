@@ -92,8 +92,7 @@ Three more settings went in v0.40.0, for the same reason as v0.39.0's seven:
 | `cursorGap` | **It never did anything.** The window opens at `pointer.x + gap` and `nudgeIntoReach()` then pulls it back until the pointer is 10 px inside the frame — which is unconditional, because a pointer-transparent preview is pinned by a press *inside its rectangle* (`E1`). The gap was overwritten on every path, at every value. |
 
 **The first section is ordered by what people change**, not by topic: *Show a preview* →
-*Opens* → *Hover delay* → the gates → *Pin with*. `position` and `pinButton` came up out of
-Advanced to sit there; `position` carries a hint that **changes with the value**, because the
+*Hotkey* → *Opens* → *Hover delay* → the gates. `position` came up out of Advanced to sit there; `position` carries a hint that **changes with the value**, because the
 centred answer needs one sentence the cursor answer does not (how to pin it — `E30`). Its label
 was *Opens* until v0.44.0 — a verb where every other label is a noun.
 
@@ -569,6 +568,23 @@ status bar and reset by a reload. Nothing writes it to storage.
 - **It closes the window through `dismiss()`**, so the clip you just refused does not immediately
   re-open under the stationary pointer — suppressing the source element when the pointer is
   standing on it (`E44`), and needing nothing when it is not.
+
+## The hotkey is always live (v0.126.0) · `E66`
+
+`activation` keeps its values; what changed is that `hover` gives the key a job too (user's call):
+held, it holds previews back and a press closes the open one, pinned included; `hotkeyToggle`
+turns that into a tap that switches previews off for the tab (`GM_getTab`, falling back to
+`sessionStorage`; a `toast()` says which). `modifier` gained "press again over the same picture
+pins" (`releasedOn` → `pinOnShow`, pinned in the hover's `paint()`), so pinning needs no click.
+
+- **A tap is the key alone.** `hotTap` is armed on its keydown and cleared by any other keydown,
+  any mousedown and blur, so Ctrl+C / Ctrl+click never toggle.
+- **Any held button owns the key** (`pressHeld`, set on every mousedown incl. our own controls):
+  Ctrl mid-drag means "no snapping" and must not close the window being dragged. `mouseDown` is
+  not enough — presses on our own UI return before setting it.
+- **The Ctrl+click-opens-a-tab report (modifier mode) did not reproduce** with synthetic events in
+  v0.126.0: the pin's mousedown and click were both `defaultPrevented`. If it recurs, get the
+  debug log for that click.
 
 ## The modifier key works in either order (v0.39.0)  · `E28`
 

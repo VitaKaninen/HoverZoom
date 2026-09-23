@@ -778,7 +778,8 @@ time the flip with a `MutationObserver`, not a polling loop. See [`TESTING.md`](
 
 ## Placed mode — the rest
 
-- **Left click pins, right click dismisses a HOVER preview**; `pinButton` swaps them. Dismiss is for
+- **Left click pins, right click dismisses a HOVER preview** (`E65`; `pinButton` retired in v0.126.0 —
+  the user never swapped them and it doubled every rule). Dismiss is for
   "the preview is in my way but my cursor is staying here": it takes the preview down and records
   the element in `suppressed`, which `onOver` skips until `onOut` sees the pointer leave. Without
   that, the next mousemove just re-shows it. The right press is claimed in the document `mousedown`
@@ -787,8 +788,11 @@ time the flip with a `MutationObserver`, not a polling loop. See [`TESTING.md`](
   menu. It is a timestamp with a `MENU_CLAIM_MS` (1.5 s) life, not a flag: a right press released
   outside the window fires no `contextmenu`, and a flag would have eaten the next menu anywhere on
   the page.
-- **While placed, the left button always drives the window**, whatever `pinButton` says. Do not wire
-  dismissal onto the button that resizes, moves and pans.
+- **While placed, the left button always drives the window.** Do not wire dismissal onto the button
+  that resizes, moves and pans. Right press on the window is our menu; **a right press on the
+  backdrop (`dimEl.catch`) closes it and eats the menu** — the page under a pinned window is covered
+  by the backdrop, so the browser's menu there was for an empty page and useless (`E65`). Claimed in
+  the window-capture `mousedown` by `composedPath()[0] === dimEl`, before `ours()`.
 - **There is no close button.** A placed window has two ways out that need no aim, and the X sat in
   the corner the hand reaches for to resize. `closeEl`, its CSS, its `layoutChrome()` placement and
   its `isBoxControl()` entry all went together; the ⊘ is the only control left inside the box.

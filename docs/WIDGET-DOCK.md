@@ -61,4 +61,9 @@ folder: the `monkey-root` launch entry, `python -m http.server 8740 --directory 
   `usDock.theme()` picks by `pageIsDark()` — `<body>`, `<html>`, then what paints the window's middle
   (apps paint a wrapper; our own widgets skipped), and a page that paints nothing is light unless it
   declares a dark `color-scheme`. Not the OS setting: a plain white page under a dark OS is light.
+- **A widget's shadow passes under the others** (`clipShadow`, every relayout): all widgets sit at
+  the top z-index, so DOM order decided whose shadow painted over whom. Each docked element gets an
+  evenodd `clip-path` — the viewport minus every other widget's rect within `SHADOW_REACH` (40 px) of
+  it. Rects come from the solver's `out`, identical in every script. Bodies overlapping mid-drag cut
+  nothing, or the body itself would be clipped. Don't set `clip-path` on a docked element elsewhere.
 - **A widget that is thrown away calls `destroy()`** (FS rebuilds its bar; RNFP closes its panel).

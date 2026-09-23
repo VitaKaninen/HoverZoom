@@ -23,8 +23,8 @@ fight that. They are deleted. Do not put nav controls back on the frame.
   navigation — and again when the pointer comes near, which catches a page that changed without
   scrolling (no MutationObserver: design invariant). Faint (`tourFade`, at `tourFadeTo` %) until the
   pointer is within `TW_NEAR`; a `mouseover` on the host covers a pointer resting where it appears.
-- **▶ with nothing open starts at the FIRST picture**, always (user's call: no guessing a start;
-  press ▶ a few times instead) — `tourFromStart`. **→ does the same** (`tourKeyStart`, default on):
+- **▶ with nothing open starts at the FIRST picture, ◀ at the LAST** (user's call: no guessing a
+  start) — `tourFromStart(dir)`. **→ / ← do the same** (`tourKeyStart`, default on):
   window bubble phase, so a page that preventDefaults or stops → keeps it; not while focus is in a
   form control, media, or a slider/tab/menu role. Starting from a chosen picture = hover or pin it.
 - **Its scope is `tourCommon()`: the smallest element holding every picture counted**, `<body>`
@@ -454,6 +454,16 @@ an order of magnitude too slow for 3/s — slot spacing replaces it.
 - **Cut the probe budget for speculative items.** `resolve()` always tries the `keep` candidates —
   the link and the displayed src — and spends the rest of the 8 on guesses. Keep plus one
   or two guesses is enough for a preload; the full search runs on arrival if it came up empty.
+  **It also runs on arrival when the preload was cut** (`candSig(el, PL_GUESSES)` is `''`) **or the
+  candidates have changed since** — the preload shows at once, then `upgradeViewer` if the full one
+  beats it (docked ring meanwhile). Before v0.126.0 a cut preload was final, so the slideshow showed
+  smaller pictures than a hover of the same one.
+- **Prime links the page fills on hover** (`primeLink`). An `<a>` with no `href` around a live
+  picture gets a synthetic `mouseover` before every tour resolve; Google Images writes
+  `/imgres?imgurl=…` synchronously on it, and `linkParamCandidates` does the rest. Measured in real
+  Chrome 2026-09-23: preloads went from 400–670 px thumbnails to the originals. `priming` keeps our
+  own `onOver` out of it. **No `view:` in the event init** — the manager's `window` is a proxy and the
+  constructor throws.
 - **Foreground jumps the queue.** A resolve the user is waiting on must never sit behind six
   speculative ones. Two priority tiers.
 - **Cancel on direction change.** Reversing with ◀ or blocking with ⊘ drops queued preloads that
@@ -641,8 +651,14 @@ fullscreen*. No unlock/relock dance is needed, and none was added.
 
 One departure: the plan wanted the ▶ "load more" affordance to surface separately. It did not need
 to. **▶ at the wall simply *is* the request** — `tourNav` finds nothing ahead, runs an excursion,
-and steps into what arrives — so there is no second control to explain, and the button goes dim
-only once the page is genuinely exhausted.
+and steps into what arrives — so there is no second control to explain.
+
+**The ends close the slideshow (v0.126.0, `E67`, user's call).** ◀ on the first picture and ▶ on the
+last `tourQuit()` (= `dismiss()`), so neither button is ever dim while pictures exist. ▶ goes through
+`tourWall()`: `tourMoreOnce(true)` (one shared request, so a press lands on a refill already running;
+`force` skips the excursion's cooldown), step if it grew, quit only if `tourExhausted()` — a `false`
+from a busy or cooling source is not an end. A held key (`repeat`) never quits. ← with nothing open
+is `tourFromStart(-1)`: the last picture loaded now, and ▶ from there loads more as usual.
 
 ## 9a. Why it has to be a real scroll
 
@@ -795,7 +811,7 @@ Proposed keys, added to `DEFAULTS`. Remember the hoisting trap in `../CLAUDE.md`
 |---|---|---|
 | `tourButtons` | `true` | show the tour widget |
 | `tourFade`, `tourFadeTo` | `true`, `35` | the widget faint until the pointer nears, at this opacity % |
-| `tourKeyStart` | `true` | → with nothing open starts at the first picture |
+| `tourKeyStart` | `true` | → / ← with nothing open start at the first / last picture |
 | `tourKeys` | `true` | arrows navigate when the picture cannot pan horizontally |
 | `tourMinDisplayed` | `128` | the tour's floor on the longer side as drawn, px (§1a) |
 | `tourWindow` | `12` | how many entries to keep buffered ahead |

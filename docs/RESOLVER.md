@@ -547,6 +547,11 @@ So: (a) do nothing and keep HZ+ for Google; (b) hover-time lookup, host-gated, a
 first-batch-only coverage and silent breakage; (c) (b) plus XHR hooking, which is the thing this
 project exists not to be. **Not decided — ask before building any of it.**
 
+**Update 2026-09-23:** a hover already gets the original, because Google writes the result's
+`<a href="/imgres?imgurl=…">` on `mouseover` (synchronously; a synthetic event does it too), which
+`linkParamCandidates` reads. The slideshow never hovers, so it now primes the link (TOUR.md §6,
+`primeLink`). The script-JSON options above are not needed.
+
 What was added for this and is still worth having, just not for Google: `linkParamCandidates()` (the
 generic `?imgurl=`-style rule) and the `/s0/` path-segment form of the googleusercontent size token.
 

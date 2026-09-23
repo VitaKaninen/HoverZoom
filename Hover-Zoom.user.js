@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.125.0
+// @version     0.126.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -11,6 +11,8 @@
 // @grant       GM_addValueChangeListener
 // @grant       GM_registerMenuCommand
 // @grant       GM_unregisterMenuCommand
+// @grant       GM_getTab
+// @grant       GM_saveTab
 // @connect     *
 // @run-at      document-idle
 // @downloadURL https://raw.githubusercontent.com/VitaKaninen/HoverZoom/master/Hover-Zoom.user.js
@@ -39,8 +41,9 @@
 
     const DEFAULTS = {
         // when to zoom
-        activation: 'hover',        // 'hover' | 'modifier' (hold key, then hover)
-        modifierKey: 'ctrl',        // 'ctrl' | 'alt' | 'shift'
+        activation: 'hover',        // 'hover' (the hotkey holds previews back) | 'modifier' (only while it is held)
+        modifierKey: 'ctrl',        // the hotkey: 'ctrl' | 'alt' | 'shift'
+        hotkeyToggle: false,        // 'hover': a lone tap turns previews off in this tab until the next
         hoverDelay: 120,            // ms before resolving
         minDisplayed: 16,           // ignore images displayed smaller than this — the only size gate
         minRatio: 1,                // full size must be this much bigger; below 1 previews anything
@@ -55,7 +58,7 @@
         tourFade: true,             // the widget is faint until the pointer comes near
         tourFadeTo: 35,             // ...at this opacity, %
         tourKeys: true,             // arrows navigate when the picture cannot pan sideways
-        tourKeyStart: true,         // → with nothing open starts the tour at the first picture
+        tourKeyStart: true,         // → (←) with nothing open starts the tour at the first (last) picture
         tourMinDisplayed: 128,      // the tour's own floor: longer side as drawn, px; emoji and badges fall under it
         tourWindow: 12,             // entries kept buffered ahead
         tourWorkers: 6,             // concurrent speculative resolves
@@ -64,7 +67,6 @@
         tourCrossPage: true,        // harvest the next page in the background
 
         // placed mode
-        pinButton: 'left',          // 'left' | 'right' — whichever pins, the other dismisses
         wheelZoomStep: 15,          // % per wheel notch
         panStep: 80,                // px per arrow-key press (Shift = 3x)
         maxZoom: 32,                // hard ceiling, multiples of natural size
@@ -103,7 +105,7 @@
         'skipWhileMouseDown', 'playVideos', 'skipVideos', 'skipPageBackgrounds',
         'skipBanners', 'skipDecorative', 'enabled', 'maxDisplayed', 'cursorGap', 'noReferrer',
         'showEvenIfNotLarger', 'previewVideos', 'previewOverPlayer', 'barFade', 'showStatusBar',
-        'frameMargin', 'borderMode'];
+        'frameMargin', 'borderMode', 'pinButton'];
 
     // The retirements that DO convert.
     function migrate(o) {
@@ -3913,7 +3915,7 @@
 
         if (placed) {
             if (e.button !== 0) return;
-        } else if (e.button !== (cfg.pinButton === 'right' ? 2 : 0)) {
+        } else if (e.button !== 0) {
             altButton(e);           // the other button dismisses a hover preview
             return;
         }
@@ -4007,6 +4009,7 @@
 
     function onPinKey(e) {
         if (!placed || !view) return;
+        if (!e.repeat && !/^(Shift|Control|Alt|Meta)$/.test(e.key)) lastUserAct = Date.now();
         if (panelOwns(e)) return;
         if (capOwns(e)) {
             // Escape and Enter never reach the field: onPinKey is capture on `window`, and the
@@ -4100,6 +4103,51 @@
     let lastUserAct = 0;            // the last press or key; a close soon after is the user's doing
     const USER_QUIET_MS = 2500;
     let modifierDown = false;
+    let hotTap = false;         // the hotkey is down and nothing else has happened since: a tap if it comes up
+    let releasedOn = null;      // 'modifier': the picture whose preview the hotkey's release closed
+    let pinOnShow = null;       // ...pressed again over it: pinned the moment it paints
+    let hzOff = false;          // toggled off by the hotkey, for this tab
+    let pressHeld = false;      // any button down, ours or the page's: the hotkey belongs to the drag
+
+    const OFF_KEY = 'hoverZoomOff';
+    try {
+        if (typeof GM_getTab === 'function') GM_getTab(function (t) { hzOff = !!(t && t[OFF_KEY]); });
+        else hzOff = sessionStorage.getItem(OFF_KEY) === '1';
+    } catch (e) { /* no tab storage: previews start on */ }
+
+    // A tap of the hotkey in toggle mode: previews off for this tab, or back on.
+    function setOff(on) {
+        hzOff = on;
+        try {
+            if (typeof GM_getTab === 'function') {
+                GM_getTab(function (t) { t = t || {}; t[OFF_KEY] = on; GM_saveTab(t); });
+            } else sessionStorage.setItem(OFF_KEY, on ? '1' : '0');
+        } catch (e) { /* the switch still holds for this page */ }
+        if (on && view) dismiss();
+        toast(on ? 'Previews off in this tab — tap ' + hotkeyName() + ' to turn them back on'
+                 : 'Previews on');
+        dbg('previews toggled by the hotkey', { off: on });
+    }
+
+    function hotkeyName() { return { ctrl: 'Ctrl', alt: 'Alt', shift: 'Shift' }[cfg.modifierKey] || 'the hotkey'; }
+
+    function isHotkey(e) {
+        return e.key === ({ ctrl: 'Control', alt: 'Alt', shift: 'Shift' }[cfg.modifierKey]);
+    }
+
+    // A short note by the pointer; gone by itself.
+    let toastTimer = 0;
+    function toast(text) {
+        hideTip();
+        const t = tipBox();
+        t.textContent = text;
+        document.documentElement.appendChild(t);
+        const b = t.getBoundingClientRect();
+        t.style.left = Math.max(4, Math.min(vpW() - 4 - b.width, pointer.x + 14)) + 'px';
+        t.style.top = Math.max(4, Math.min(vpH() - 4 - b.height, pointer.y + 18)) + 'px';
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(hideTip, 1800);
+    }
 
     // A hover preview cannot be hit-tested, so "is the pointer on it" is answered from `view` instead.
     // A hover preview is pinned by pressing it — and when it opened somewhere the pointer is not, by
@@ -4814,6 +4862,7 @@
 
     function cancel() {
         if (placed) return;         // a placed viewer outlives hover entirely
+        pinOnShow = null;
         if (active && view && box && box.classList.contains('on') && debugOn()) {
             const lines = String(new Error().stack || '').split('\n');
             let i = 0;
@@ -4927,12 +4976,14 @@
     }
 
     function onOver(e) {
-        if (placed) return;
+        if (placed || priming) return;
         if (drag || twBusy()) return;
         if (ours(e.target)) return;         // on our own overlay
         if (!siteEnabled() || CAPTCHA_HERE) return;
         if (mouseDown) return;
         if (cfg.activation === 'modifier' && !modifierHeld(e) && !modifierDown) return;
+        if (cfg.activation !== 'modifier' &&
+            (hzOff || (!cfg.hotkeyToggle && (modifierDown || modifierHeld(e))))) return;
 
         const el = eligible(e.target, e.clientX, e.clientY);
         if (debugOn()) dbg('hover', hoverReport(e.target, el, e));
@@ -4980,6 +5031,7 @@
         function paint(hit) {
             if (view && box.classList.contains('on')) upgradeViewer(hit);
             else { showViewer(hit, pointer); dockSpinner(); }
+            if (pinOnShow === el) { pinOnShow = null; place(); }
         }
         if (ruleMs) dbg('waiting ' + holdMs + ' ms for the page\'s own player before previewing');
         holdTimer = setTimeout(async function () {
@@ -5155,6 +5207,17 @@
 
     CAP_TARGET.addEventListener('mousedown', function (e) {
         swallowNextClick = false;
+        lastUserAct = Date.now();
+        hotTap = false;
+        pressHeld = true;
+        if (e.button === 2 && placed && dimEl && e.composedPath && e.composedPath()[0] === dimEl) {
+            e.preventDefault();
+            e.stopPropagation();
+            claimClick();
+            swallowMenuAt = Date.now();     // off the window, a right press closes it; no menu
+            dismiss();
+            return;
+        }
         if (ours(e.target)) { claimClick(); return; }   // onBoxDown / the backdrop own this one
         if (!placed && (e.button === 0 || e.button === 2) && pressPinsPreview(e)) {
             claimClick();
@@ -5164,7 +5227,6 @@
         if (e.button === 2 && overOurs(e) && altButton(e)) { claimClick(); return; }
         releaseClick();
         mouseDown = true;
-        lastUserAct = Date.now();
         cancel();
     }, true);
     CAP_TARGET.addEventListener('click', function (e) {
@@ -5206,6 +5268,7 @@
 
     document.addEventListener('mouseup', function () {
         mouseDown = false;
+        pressHeld = false;
         endDrag();
         releaseSliders();
     }, true);
@@ -5213,7 +5276,7 @@
         if (!placed && !panelOwns(e)) cancel();
     }, true);
     // No keyup ever comes for a modifier held through Alt+Tab or Ctrl+Tab, so blur forgets it.
-    window.addEventListener('blur', function () { modifierDown = false; if (!placed) cancel(); });
+    window.addEventListener('blur', function () { modifierDown = false; hotTap = false; if (!placed) cancel(); });
     window.addEventListener('resize', function () {
         if (!placed) { cancel(); return; }
         if (!view) return;
@@ -5233,6 +5296,7 @@
         const dir = TOUR_KEYS[e.key];
         if (dir && !placed && cfg.tourKeys && view && box && box.classList.contains('on') &&
             !e.ctrlKey && !e.metaKey && !e.altKey && !panelHost && !typingIn(e)) {
+            lastUserAct = Date.now();       // the close this causes is not a player's; see E62
             place();
             tourNav(dir, e.repeat);
             e.preventDefault();
@@ -5250,21 +5314,45 @@
         if (e.key === 'Escape') {
             cancel();                           // onPinKey has already handled the placed case
         }
-        // Ctrl during a widget drag turns off snapping; it must not also start a hover.
-        if (cfg.activation === 'modifier' && modifierHeld(e) && !modifierDown && !twBusy()) {
-            modifierDown = true;
+        if (!isHotkey(e)) { hotTap = false; return; }
+        if (e.repeat || modifierDown) return;
+        // Whatever is being dragged owns the hotkey: Ctrl there means "no snapping".
+        if (drag || twBusy() || pressHeld) return;
+        modifierDown = true;
+        if (cfg.activation === 'modifier') {
+            const up = !!view && !!box && box.classList.contains('on');
+            const again = releasedOn && !up && stillUnderPointer(releasedOn, pointer.x, pointer.y) ? releasedOn : null;
+            releasedOn = null;
             hoverAtPointer();
+            if (again && active === again) pinOnShow = again;
+            return;
+        }
+        if (cfg.hotkeyToggle) { hotTap = true; return; }
+        if (view && box && box.classList.contains('on')) {
+            lastUserAct = Date.now();
+            dismiss();
         }
     }, true);
     document.addEventListener('keyup', function (e) {
-        if (cfg.activation === 'modifier' && !modifierHeld(e)) { modifierDown = false; cancel(); }
+        if (!isHotkey(e)) return;
+        const wasDown = modifierDown;
+        modifierDown = false;
+        if (cfg.activation === 'modifier') {
+            if (!wasDown) return;
+            releasedOn = !placed && view && box && box.classList.contains('on') ? active : null;
+            cancel();
+            return;
+        }
+        if (hotTap && cfg.hotkeyToggle && isTopFrame) setOff(!hzOff);
+        hotTap = false;
     }, true);
 
-    // → with nothing open is ▶ on the widget. Bubble phase on window, so a page that handles the key
-    // itself — preventDefault or stopPropagation — keeps it.
+    // → / ← with nothing open is ▶ / ◀ on the widget. Bubble phase on window, so a page that handles
+    // the key itself — preventDefault or stopPropagation — keeps it.
     const KEY_START_BUSY = /^(INPUT|SELECT|TEXTAREA|VIDEO|AUDIO|IFRAME)$/;
     window.addEventListener('keydown', function (e) {
-        if (e.key !== 'ArrowRight' || e.defaultPrevented || !cfg.tourKeyStart || !isTopFrame) return;
+        const dir = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
+        if (!dir || e.defaultPrevented || !cfg.tourKeyStart || !isTopFrame) return;
         if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey || placed || panelHost || twBusy()) return;
         if (view && box && box.classList.contains('on')) return;
         if (typingIn(e) || !siteEnabled() || CAPTCHA_HERE) return;
@@ -5273,7 +5361,7 @@
             /^(slider|tab|listbox|menu|menuitem|grid|radiogroup|spinbutton)$/.test(ae.getAttribute('role') || ''))) return;
         if (twCount() < 2) return;
         e.preventDefault();
-        tourFromStart();
+        tourFromStart(dir);
     });
 
     // The pointer is not moving, so onOver is synthesised from where it already is.
@@ -5292,6 +5380,7 @@
         const SNAP = 8;                 // px: window edges, the window's centre, other widgets
         const TOUCH = 1;                // px: how close two edges must be to count as attached at a drop
         const PASSES = 4;               // overlap sweeps; three widgets settle in two
+        const SHADOW_REACH = 40;        // px: how far THEME.shadow spreads past a widget
         const A_ID = 'data-us-dock', A_SPEC = 'data-us-dock-a', A_SIZE = 'data-us-dock-s',
             A_GREW = 'data-us-dock-t', A_DRAG = 'data-us-dock-d', A_STRETCH = 'data-us-dock-st';
         const WATCHED = [A_ID, A_SPEC, A_SIZE, A_GREW, A_DRAG, A_STRETCH, 'hidden'];
@@ -5559,12 +5648,36 @@
             mine.forEach(function (w) {
                 const d = docks.find(function (k) { return k.el === w.el; });
                 if (!d) return;
+                clipShadow(w, d, docks, viewport());
                 if (w.o.apply) { w.o.apply(d.out); return; }
                 setPx(w.el, 'left', d.out.x);
                 setPx(w.el, 'top', d.out.y);
                 if (w.el.style.right !== 'auto') w.el.style.right = 'auto';
                 if (w.el.style.bottom !== 'auto') w.el.style.bottom = 'auto';
             });
+        }
+
+        // A widget's shadow is cut away where another widget sits, so it reads as passing under it.
+        function clipShadow(w, d, docks, V) {
+            const o = d.out;
+            const box = function (l, t, r, b) {
+                l = cent(l - o.x); t = cent(t - o.y); r = cent(r - o.x); b = cent(b - o.y);
+                return 'M' + l + ' ' + t + 'H' + r + 'V' + b + 'H' + l + 'Z';
+            };
+            const holes = [];
+            docks.forEach(function (k) {
+                if (k === d || !k.out) return;
+                const r = k.out;
+                // Bodies overlapping mid-drag: nothing is cut, or the body itself would be.
+                if (r.x < o.x + o.w && r.x + r.w > o.x && r.y < o.y + o.h && r.y + r.h > o.y) return;
+                const l = Math.max(r.x, o.x - SHADOW_REACH), t = Math.max(r.y, o.y - SHADOW_REACH);
+                const rr = Math.min(r.x + r.w, o.x + o.w + SHADOW_REACH), b = Math.min(r.y + r.h, o.y + o.h + SHADOW_REACH);
+                if (rr - l > 0.5 && b - t > 0.5) holes.push(box(l, t, rr, b));
+            });
+            const want = holes.length ? "path(evenodd, '" + box(0, 0, V.w, V.h) + holes.join('') + "')" : '';
+            if (w.clip === want) return;
+            w.clip = want;
+            w.el.style.clipPath = want;
         }
 
         function observeDocks() {
@@ -6132,11 +6245,11 @@
         sr.appendChild(style);
         const box = document.createElement('div');
         box.className = 'tw';
-        const prev = mkVBtn(ICON_PREV, 'Previous picture', function () { twPress(-1); });
+        const prev = mkVBtn(ICON_PREV, 'Previous picture — with nothing open, starts at the last picture (so does ←); on the first, ends the slideshow', function () { twPress(-1); });
         const count = document.createElement('span');
         count.className = 'count';
         setTip(count, 'Where you are among this page\'s pictures. Drag to move; hold Ctrl to place it without snapping.');
-        const next = mkVBtn(ICON_NEXT, 'Next picture — with nothing open, starts at the first picture (so does →)', function () { twPress(1); });
+        const next = mkVBtn(ICON_NEXT, 'Next picture — with nothing open, starts at the first picture (so does →); on the last, ends the slideshow', function () { twPress(1); });
         box.appendChild(prev);
         box.appendChild(count);
         box.appendChild(next);
@@ -6213,8 +6326,8 @@
         const on = !!tour && tour.on;
         const at = on ? tour.index : -1, n = on ? tour.total : twTotal;
         tw.count.textContent = (at >= 0 ? at + 1 : '–') + ' / ' + (n >= 0 ? n : '–');
-        tw.prev.classList.toggle('faint', !placed || at <= 0 || !n);
-        tw.next.classList.toggle('faint', !placed ? n === 0 : (!n || (at >= 0 && at >= n - 1)));
+        tw.prev.classList.toggle('faint', !n);      // at either end a press ends the slideshow
+        tw.next.classList.toggle('faint', !n);
         const fade = Math.max(0, Math.min(100, +cfg.tourFadeTo || 0)) / 100;
         tw.box.style.opacity = cfg.tourFade && !tw.near ? String(fade) : '1';
         if (tw.host.style.display !== 'none') tw.dock.sizeChanged();     // the counter's width
@@ -6240,7 +6353,7 @@
             tourNav(dir, false);
             return;
         }
-        if (dir > 0) tourFromStart();
+        tourFromStart(dir);
     }
 
     // The smallest element holding every picture the widget counted: the article, not the page
@@ -6254,8 +6367,9 @@
         return !node || node === document.body ? root : node;
     }
 
-    // ▶ with nothing pinned: the first picture of the area the page's pictures are in, opened and pinned.
-    async function tourFromStart() {
+    // ▶ (◀) with nothing pinned: the first (last) picture of the area the page's pictures are in, opened and pinned.
+    async function tourFromStart(dir) {
+        dir = dir < 0 ? -1 : 1;
         if (placed || twStarting || !siteEnabled() || CAPTCHA_HERE) return;
         cancel();
         const floor = Math.max(0, cfg.tourMinDisplayed | 0);
@@ -6263,11 +6377,12 @@
             scope: tourCommon(tourPics(floor)), level: -1, floor: floor };
         const list = tourEntries();
         if (!list.length) { tourEnd(); return; }
-        tourRemember(list[0]);
-        tour.index = 0;
+        const at = dir > 0 ? 0 : list.length - 1;
+        tourRemember(list[at]);
+        tour.index = at;
         tour.total = list.length;
         twSync();
-        const el = list[0].el;
+        const el = list[at].el;
         const displayed = sizeOf(el);
         active = el;
         activeShown = shownUrl(el);
@@ -6275,6 +6390,7 @@
         showSpinner();
         let res = null;
         try {
+            primeLink(el);
             res = await resolve(el, displayed, myToken, null);
             if (!res && !myToken.cancelled) res = await tourFallbackRes(el, displayed, myToken.failure);
         } finally {
@@ -6286,11 +6402,12 @@
             return;
         }
         plDone.set(el, { res: res, displayed: displayed });
-        dbg('tour started from the widget', { pictures: list.length, first: (res.url || '').slice(-60) });
+        dbg('tour started from the widget', { pictures: list.length, from: dir > 0 ? 'the first' : 'the last',
+            url: (res.url || '').slice(-60) });
         showViewer(res, pointer);
         place();
         tourChrome();
-        plFill(tourEntries(), 0, 1);
+        plFill(tourEntries(), tour.index, dir);
     }
 
     if (isTopFrame) {
@@ -6329,10 +6446,12 @@
         const to = tourTarget(list, dir);
         tour.total = list.length;
         if (to < 0) {
-            // At the wall going forward, ▶ is a request for more rather than a dead button.
             tour.index = tourAt(list);
             tourChrome();
-            if (dir > 0) tourGrow(dir, true);
+            if (repeat) { if (dir > 0) tourGrow(dir, true); return; }
+            // A press past either end ends the slideshow; forward asks the page for more first.
+            if (dir < 0) tourQuit();
+            else tourWall();
             return;
         }
         tourRemember(list[to]);
@@ -6366,10 +6485,24 @@
         // A settled preload goes straight in: the point of preloading is not only the latency but
         // the flashing, and the live path emits every improvement as it lands. A cut budget that
         // found nothing, or one measured against a different displayed size, is not usable.
+        primeLink(el);
         const pre = plDone.get(el);
         if (pre && pre.res && sameDisplayed(pre.displayed, displayed)) {
             dbg('tour: from the preload buffer', pre.res);
             swapViewer(pre.res);
+            if (pre.sig === undefined || pre.sig === candSig(el)) return;
+            // The preload spent one guess, or the page has offered more since (Google fills a
+            // result's link on hover): the full search runs now and upgrades in place.
+            plDone.set(el, { res: pre.res, displayed: displayed });
+            showSpinner();
+            dockSpinner();
+            let up = null;
+            try { up = await resolve(el, displayed, myToken, null); }
+            finally { if (!myToken.cancelled) hideSpinner(); }
+            if (myToken.cancelled || !tour || tour.el !== el || !view || !betterHit(pre.res, up)) return;
+            dbg('tour: the full search beat the preload', { was: pre.res, now: up });
+            plDone.set(el, { res: up, displayed: displayed });
+            upgradeViewer(up);
             return;
         }
         plPaused = true;            // a resolve the user is waiting on never queues behind six
@@ -6387,6 +6520,30 @@
         plDone.set(el, { res: hit, displayed: displayed });
         if (hit) swapViewer(hit);
         else await tourFallback(el, displayed, myToken.failure);
+    }
+
+    // A link with no address yet is one the page fills on hover (Google Images): a tour entry is
+    // never hovered, so it is given the mouseover the page is waiting for. See TOUR.md §6.
+    let priming = false;
+    function primeLink(el) {
+        if (!el || el.__hzBase || !el.isConnected) return;
+        const a = closestAcross(el, 'a');
+        if (!a || a.hasAttribute('href')) return;
+        const r = el.getBoundingClientRect();
+        priming = true;
+        try {
+            el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true, composed: true,
+                clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 }));    // no `view`: the manager's window is a proxy
+        } catch (e) { dbg('tour: the hover for the link failed', String(e)); }
+        finally { priming = false; }
+        dbg('tour: gave the page a hover to fill in its link', { now: a.getAttribute('href') ? 'filled' : 'still empty' });
+    }
+
+    // What a resolve of el would try; '' when a speculative one (guesses given) could not try it all.
+    function candSig(el, guesses) {
+        const all = collectCandidates(el);
+        if (guesses !== undefined && all.filter(function (c) { return !c.keep; }).length > guesses) return '';
+        return all.map(function (c) { return c.url; }).join('\n');
     }
 
     // A preload measured against a stale rect would have applied the size gate to the wrong
@@ -6446,9 +6603,9 @@
 
     function mediaCount() { return document.querySelectorAll('img,video').length; }
 
-    async function tourExcursion() {
+    async function tourExcursion(force) {
         if (excBusy || excSpent || !cfg.tourLoadMore) return false;
-        if (Date.now() - excAt < EXC_COOL_MS) return false;
+        if (!force && Date.now() - excAt < EXC_COOL_MS) return false;
         excBusy = true;
         excAt = Date.now();
         const sx = window.scrollX || 0, sy = window.scrollY || 0;
@@ -6670,15 +6827,46 @@
 
     // Scroll first, then the next page: a page that will load more in place is cheaper, and it
     // keeps everything in one document where the layout gates still apply.
-    async function tourMore() {
-        if (await tourExcursion()) return true;
+    async function tourMore(force) {
+        if (await tourExcursion(force)) return true;
         return await tourCross();
+    }
+
+    // One request for more at a time; a press at the wall waits on the refill already running.
+    let moreP = null;
+    function tourMoreOnce(force) {
+        if (!moreP) moreP = tourMore(force).finally(function () { moreP = null; });
+        return moreP;
+    }
+
+    // Nothing left to ask for: the page will not load more and there is no next page to fetch.
+    function tourExhausted() {
+        const scoped = !!tour && !!tour.scope && tour.scope !== document.documentElement;
+        return (excSpent || !cfg.tourLoadMore) && (crossSpent || !cfg.tourCrossPage || scoped);
+    }
+
+    // ▶ on the last picture: more if the page has any, otherwise the slideshow ends.
+    async function tourWall() {
+        showSpinner();
+        dockSpinner();
+        let grew = false;
+        try { grew = await tourMoreOnce(true); }
+        finally { hideSpinner(); }
+        if (!tour || !placed) return;
+        if (grew) { tourSync(); tourNav(1, false); return; }
+        if (tourExhausted()) tourQuit();
+    }
+
+    // The slideshow closed from one of its ends, as if it had never been started.
+    function tourQuit() {
+        dbg('tour ended at ' + (tour && tour.index > 0 ? 'the last picture' : 'the first picture'));
+        dismiss();
     }
 
     // Fire and forget: the refill overlaps with pictures the user is still looking at rather
     // than stalling them at the wall.
     function tourGrow(dir, stepAfter) {
-        tourMore().then(function (grew) {
+        tourMoreOnce(false).then(function (grew) {
             if (!grew || !tour || !placed) return;
             const list = tourSync();
             tourChrome();
@@ -6760,11 +6948,12 @@
         const token = { cancelled: false, fresh: false };
         plLive.push(token);
         let hit = null;
+        primeLink(job.el);
         try { hit = await resolve(job.el, job.displayed, token, null, PL_GUESSES); }
         catch (e) { hit = null; }
         plLive = plLive.filter(function (t) { return t !== token; });
         if (job.gen !== plGen || token.cancelled) return;
-        plDone.set(job.el, { res: hit, displayed: job.displayed });
+        plDone.set(job.el, { res: hit, displayed: job.displayed, sig: candSig(job.el, PL_GUESSES) });
         dbg('preloaded', { ahead: job.dist, buffered: plDone.size, queued: plQueue.length,
             workers: plWorkers(), got: hit ? hit.w + '×' + hit.h + ' ' + hit.url.slice(-48)
                                           : 'nothing (the full search runs on arrival)' });
@@ -7654,12 +7843,25 @@
         body.appendChild(guide);
 
         section('The preview');
-        const act = pick('activation', 'Show a preview', null, [
-                ['hover', 'On hover'],
-                ['modifier', 'On hover while the modifier key is held']]);
-        const modKey = pick('modifierKey', 'Modifier key', null, [
+        const act = pick('activation', 'Show a preview', ' ', [
+                ['hover', 'On hover — the hotkey holds them back'],
+                ['modifier', 'Only while the hotkey is held']]);
+        pick('modifierKey', 'Hotkey', null, [
             ['ctrl', 'Ctrl'], ['alt', 'Alt'], ['shift', 'Shift']]);
-        function syncModKey() { modKey.row.hidden = act.el.value !== 'modifier'; }
+        const hotTog = check('hotkeyToggle', 'Hotkey turns previews off until pressed again',
+            'A tap of the hotkey on its own turns previews off in this tab — the slideshow widget ' +
+            'still works — and another turns them back on. Off: previews are held back only while ' +
+            'it is held, and pressing it closes one that is open.');
+        const actHint = act.row.querySelector('.hint');
+        function syncModKey() {
+            const show = act.el.value === 'modifier';
+            hotTog.row.hidden = show;
+            actHint.textContent = show
+                ? 'Hold the hotkey and point at pictures; let go and the preview closes. Press it ' +
+                  'again over the same picture, or click the preview, to pin it.'
+                : 'Hold the hotkey to point without previews, or press it to close the one that is ' +
+                  'open (while you drag something, the hotkey is the drag\'s).';
+        }
         act.el.addEventListener('change', syncModKey);
         syncModKey();
         const pos = pick('position', 'Opens', ' ', [
@@ -7689,10 +7891,6 @@
         num('minDisplayed', 'Ignore images smaller than',
             'As drawn on the page, in px. Lower it for icons and avatars; a YouTube avatar is ' +
             'about 24. (default: 16)', 0, 2000, 1);
-        pick('pinButton', 'Pin with',
-            'The other button dismisses it without following the link underneath.', [
-                ['left', 'Left click (right dismisses)'],
-                ['right', 'Right click (left dismisses)']]);
         pick('videoMode', 'Play in a preview',
             'A clip is short, muted and looping; a video is anything a thumbnail links to.', [
                 ['clips', 'Looping clips only'],
@@ -7737,8 +7935,9 @@
             'Left and right move to the next picture unless the one you are looking at is ' +
             'zoomed in far enough to pan sideways. [ and ] always move; { and } narrow and ' +
             'widen the part of the page the tour covers.');
-        check('tourKeyStart', '→ with nothing open starts the tour',
-            'At the first picture, the same as ▶ on the widget. A page that uses → for itself keeps it.');
+        check('tourKeyStart', '→ or ← with nothing open starts the tour',
+            '→ at the first picture and ← at the last, the same as ▶ and ◀ on the widget. A page that ' +
+            'uses the arrows for itself keeps them.');
         num('tourMinDisplayed', 'Leave out pictures smaller than',
             'Longer side as drawn, in px. Starting on a smaller one lowers it. (default: 128)',
             0, 1000, 8);
