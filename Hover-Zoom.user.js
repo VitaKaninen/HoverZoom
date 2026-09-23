@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.140.0
+// @version     0.141.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -6799,8 +6799,64 @@
             docHeight() <= excDead.h && mediaCount() <= excDead.n;
     }
 
+    // ---- which sites load more when scrolled: learned from the user's own scrolling
+
+    const GROWS_KEY = 'hoverZoomGrowsOnScroll';
+    const GROWS_INPUT_MS = 1000;    // a scroll this soon after wheel/key/touch/press is the user's
+    const GROWS_SETTLE_MS = 600;
+    const GROWS_LATE_MS = 2000;     // a second look, for a batch that lands after scrolling stops
+    let growsSet = null, growsBase = null, growsNear = false, growsTimer = 0, userInputAt = 0;
+
+    function growsHosts() {
+        if (growsSet) return growsSet;
+        growsSet = new Set();
+        try {
+            const raw = GM_getValue(GROWS_KEY, '');
+            if (raw) JSON.parse(raw).forEach(function (h) { growsSet.add(h); });
+        } catch (e) { console.warn('[HoverZoom] could not read the learned scrolling sites', e); }
+        return growsSet;
+    }
+
+    function growsHere() { return growsHosts().has(pageHost()); }
+
+    function growsCount() { return mainPics(tourPics(Math.max(0, cfg.tourMinDisplayed | 0))).length; }
+
+    function growsLearn(from, to) {
+        growsHosts().add(pageHost());
+        try { GM_setValue(GROWS_KEY, JSON.stringify(Array.from(growsHosts()))); }
+        catch (e) { console.warn('[HoverZoom] could not save the learned scrolling site', e); }
+        dbg('this site loads more when scrolled — learned from your scrolling', { host: pageHost(), from: from, to: to });
+    }
+
+    // Pictures added after the user scrolled near the bottom: this site needs the excursion.
+    function growsCheck(late) {
+        if (growsBase === null || growsHere()) { growsBase = null; return; }
+        const n = growsCount();
+        if (n > growsBase && growsNear) { growsLearn(growsBase, n); growsBase = null; return; }
+        if (late) { growsBase = null; growsNear = false; return; }
+        growsTimer = setTimeout(function () { growsCheck(true); }, GROWS_LATE_MS);
+    }
+
+    function growsOnScroll() {
+        if (tour || twStarting || excBusy || Date.now() - userInputAt > GROWS_INPUT_MS) return;
+        if (!cfg.tourLoadMore || !siteEnabled() || growsHere()) return;
+        if (growsBase === null) { growsBase = growsCount(); growsNear = false; }
+        const h = vpH();
+        if (h > 0 && (window.scrollY || 0) + 2 * h >= docHeight()) growsNear = true;
+        clearTimeout(growsTimer);
+        growsTimer = setTimeout(function () { growsCheck(false); }, GROWS_SETTLE_MS);
+    }
+
+    if (isTopFrame) {
+        ['wheel', 'keydown', 'touchmove', 'mousedown'].forEach(function (t) {
+            window.addEventListener(t, function () { userInputAt = Date.now(); }, { capture: true, passive: true });
+        });
+        window.addEventListener('scroll', growsOnScroll, { passive: true });
+    }
+
     async function tourExcursion(force, stay) {
         if (excBusy || excSpent || !cfg.tourLoadMore) return false;
+        if (!growsHere()) { excSpent = true; dbg('excursion skipped: this site has not been seen to load more when scrolled'); return false; }
         if (!force && Date.now() - excAt < EXC_COOL_MS) return false;
         if (excStillDead()) { excSpent = true; dbg('excursion skipped: this page loaded nothing last time and has not grown'); return false; }
         excBusy = true;
@@ -8245,7 +8301,8 @@
             0, 1000, 8);
         check('tourLoadMore', 'Let a scrolling page load more',
             'Near the end, the page is scrolled to the bottom and straight back so it loads ' +
-            'the next batch — for a frame or two, on most pages.');
+            'the next batch. Only on sites where scrolling down by hand has been seen to add ' +
+            'pictures — learned the first time it happens.');
         check('tourCrossPage', 'Carry on onto the next page',
             'When the page runs out, the next one is fetched in the background and its ' +
             'pictures join the list. The page you are on is never left.');

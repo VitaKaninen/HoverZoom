@@ -650,6 +650,18 @@ pictures the user is still looking at rather than stalling them at the wall.
 - **Cooldown**, or it re-fires on every press while content loads.
 - **An exhausted flag** — if an excursion returns nothing new, stop trying. A finite page must not
   scroll-and-return on every press near the end.
+- **Off until the site has earned it (v0.141.0, user's design).** Most pages load everything at
+  once, so the excursion runs only on hosts in `hoverZoomGrowsOnScroll` (GM storage, never
+  expires). A host is learned when the **user** scrolls (a wheel/key/touch/press within 1 s before
+  the `scroll`), reaches within two viewports of the bottom, and the widget's count
+  (`growsCount()` = `twTotal`'s derivation) rises within 0.6 s or 2.6 s. The count, not
+  `mediaCount()`: ads and pixels change the raw count. The user-input test is what excludes our
+  own scrolls (hop, `tourFollow`) and scroll restoration on reload. Nothing unlearns a host yet —
+  the user accepted that; a false positive costs one hop per page. No built-in list of known
+  feeds, by design: the first slideshow on Google Images ends at 100 until the user scrolls once.
+  **Test note:** a hidden Browser pane delivers no `scroll` events; dispatch `new Event('scroll')`
+  by hand, and append whole posts (`#post-1` clones) to `forum-thread.html`, since single `<img>`s
+  added outside a post are not in the widget's count.
 - **Only scroll where it can matter (v0.140.0, user: "it does it on every page").** Bottom already
   on screen (`excBottomShown()`: short page, or already there) → no scroll, just `excWatch` — its
   loader has fired, and quitting without the watch would close the slideshow on a batch in flight.
