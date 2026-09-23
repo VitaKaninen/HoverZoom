@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.145.0
+// @version     0.146.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -1949,7 +1949,33 @@
     // viewport, and our status bar is the first thing it covers.
     const STATUS_TIP_H = 20;
 
-    function bottomGap() { return EDGE_GAP + STATUS_TIP_H; }
+    function bottomGap() { return Math.max(EDGE_GAP + STATUS_TIP_H, widgetFloor()); }
+
+    const TW_FLOOR_BAND = 16;   // px: a widget whose bottom is this close to the window's is docked at the bottom
+
+    function twShownRect() { return tw && tw.rect && tw.host.style.display !== 'none' ? tw.rect : null; }
+
+    // Room the ◀ ▶ widget takes off the bottom of the window when it is docked there. See VIEWER.md.
+    function widgetFloor() {
+        const r = twShownRect(), vh = vpH();
+        if (!r || !vh || r.y + r.h < vh - TW_FLOOR_BAND) return 0;
+        return Math.max(0, vh - r.y + EDGE_GAP);
+    }
+
+    // A status bar landing on the widget moves the window up or down, whichever is less.
+    function clearWidget() {
+        const r = twShownRect(), vh = vpH();
+        if (!r || !vh || drag || !barShown() || fullActive()) return;
+        const ow = outerW(), oh = outerH(), barH = BAR_MIN_H + insetY();
+        const barTop = view.top + oh - barH;
+        if (r.x >= view.left + ow || r.x + r.w <= view.left || r.y >= view.top + oh || r.y + r.h <= barTop) return;
+        const up = r.y - EDGE_GAP - oh, down = r.y + r.h + EDGE_GAP - (oh - barH);
+        const fits = function (t) { return t >= 0 && t + oh <= vh; };
+        const best = [up, down].filter(fits).sort(function (a, b) {
+            return Math.abs(a - view.top) - Math.abs(b - view.top);
+        })[0];
+        if (best != null) view.top = best;
+    }
 
     const MIN_FRAME = 48;
     // Only a PLACED window carries controls, so only a placed one owes them room.
@@ -2144,11 +2170,13 @@
                                    : Math.max(loX, Math.min(view.left, hiX));
             view.top = loY >= hiY ? Math.max(hiY, Math.min(view.top, loY))
                                   : Math.max(loY, Math.min(view.top, hiY));
+            clearWidget();
             return;
         }
         const keep = Math.min(KEEP_ON_SCREEN, ow, oh);
         view.left = Math.max(keep - ow, Math.min(view.left, vw - keep));
         view.top = Math.max(keep - oh, Math.min(view.top, vh - keep));
+        clearWidget();
     }
 
     const RESIZE_OUT = 6;     // px outside the window edge that still resizes
@@ -3781,12 +3809,12 @@
     function fitFull() {
         if (!view) return;
         view.fixedW = Math.max(MIN_FRAME, vpW() - insetX() * 2);
-        view.fixedH = Math.max(MIN_FRAME, usableHeight() - insetY() * 2 - barDock());
+        view.fixedH = Math.max(MIN_FRAME, usableHeight() - widgetFloor() - insetY() * 2 - barDock());
         view.fitScale = fitScaleFor(view.natW, view.natH);
         view.scale = view.fitScale;
         reflow();       // outerW()/outerH() read view.frameW/H, so they must be settled first
         view.left = Math.round((vpW() - outerW()) / 2);
-        view.top = Math.round((usableHeight() - outerH()) / 2);
+        view.top = Math.round((usableHeight() - widgetFloor() - outerH()) / 2);
         layout();
     }
 

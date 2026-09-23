@@ -90,6 +90,18 @@ The gap only binds a **hover** preview. `clampPosition()`'s placed branch is `KE
 lets a window sit wherever it was put, tip or no tip. The loading ring is nudged up by the same
 amount, since it is a hover-time thing too.
 
+### The status bar stays off the ◀ ▶ widget · `E69`
+
+The widget floats over the preview (it is re-appended after the preview host), so a bar under it
+loses its right-hand buttons. Two cases, two answers, asked for by the user 2026-09-23:
+
+- **Widget docked at the window's bottom** → `widgetFloor()` feeds `bottomGap()`, so the dead strip
+  at the bottom becomes the widget's height instead of `STATUS_TIP_H`. `fitFull()` subtracts it too.
+  Shrinking is the only answer here: a window filling the height has nowhere to move.
+- **Widget higher up** → `clearWidget()`, run at the end of both branches of `clampPosition()`,
+  moves the window up or down by the smaller amount that clears the bar and keeps it whole on screen.
+  If neither fits it leaves it. Skipped during a drag (it would fight the pointer) and in fullscreen.
+
 ## The wheel grows a PLACED window, about the POINTER · `E22`
 
 `view.fixedW` is the whole of the state:
