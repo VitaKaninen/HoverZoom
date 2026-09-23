@@ -841,13 +841,14 @@ of them wait.
 
 - **`setTip()` removes the `title` attribute.** Leave it on and the browser draws its own tooltip a
   second later, underneath ours.
-- **The tip is appended to the hovered element's OWN root**, found with `getRootNode()`. The viewer
-  and the settings panel are separate shadow roots with their own stacking; a tip drawn in the
-  viewer's root would sit behind the panel.
-- **It is styled inline**, so it needs no rule added to either root's stylesheet, and it carries
-  `pointer-events: none` so it cannot take the hover it is describing.
-- **It flips above the element when there is no room below**, and clamps to the viewport — the
-  Reset/Undo buttons sit on the panel's bottom edge, where a tip below would be off-screen.
+- **The tip is its own `popover="manual"` host on `<html>`, shown with `showPopover()`** (v0.145.0),
+  so it is in the browser's top layer, above every z-index including other userscripts' widgets at
+  2147483647 later in the DOM. A tip inside a host's shadow root is capped by that host's stacking —
+  Forum Stumbler's bar covered the ◀ ▶ widget's tip that way. Inline `all:initial` overrides the UA
+  popover box; `width:max-content` because a hidden Browser pane gives it a 0-wide containing block.
+- **Above the element by default, below only when there is no room**, clamped to the viewport; a tip
+  below sits under the pointer and over whatever widget is docked beneath.
+- **Tips stay terse**, and ◀ ▶ have none — asked by the user 2026-09-23.
 - **`hideTip()` is called from `hideViewer()` and the top of `onBoxDown`.** A capture listener on
   `.box` calls `stopPropagation()`, so a `mousedown` on a non-control child never reaches that
   child's own listener — the tip's self-teardown cannot be relied on there.

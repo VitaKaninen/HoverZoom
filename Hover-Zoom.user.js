@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.144.0
+// @version     0.145.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -1825,14 +1825,14 @@
         capMetaEl.className = 'meta';
         blockEl = document.createElement('span');
         blockEl.className = 'btn block';
-        setTip(blockEl, 'Never preview this image again');
+        setTip(blockEl, 'Never preview this image');
         blockEl.textContent = '⊘';
         blockEl.addEventListener('mousedown', function (e) { e.preventDefault(); e.stopPropagation(); }, true);
         blockEl.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); togglePop(blockPopEl); }, true);
 
         vidOffEl = document.createElement('span');
         vidOffEl.className = 'btn vidoff';
-        setTip(vidOffEl, 'Stop clips in this tab until reload');
+        setTip(vidOffEl, 'No clips in this tab');
         vidOffEl.appendChild(mkIcon(ICON_NOPLAY));
         vidOffEl.addEventListener('mousedown', function (e) { e.preventDefault(); e.stopPropagation(); }, true);
         vidOffEl.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); stopVideoPreviews(); }, true);
@@ -1846,7 +1846,7 @@
         retryEl = document.createElement('span');
         retryEl.className = 'btn retry';
         retryEl.appendChild(mkIcon(ICON_RETRY));
-        setTip(retryEl, 'Try this picture again');
+        setTip(retryEl, 'Retry');
         retryEl.addEventListener('mousedown', function (e) { e.preventDefault(); e.stopPropagation(); }, true);
         retryEl.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); tourShow(); }, true);
 
@@ -2013,38 +2013,41 @@
         clearTimeout(tipTimer);
         tipTimer = 0;
         tipFor = null;
-        if (tipEl && tipEl.parentNode) tipEl.parentNode.removeChild(tipEl);
+        if (!tipEl) return;
+        try { if (tipEl.matches(':popover-open')) tipEl.hidePopover(); } catch (e) { /* no popover API */ }
+        if (tipEl.parentNode) tipEl.parentNode.removeChild(tipEl);
     }
 
-    // Inline styles, so this needs no rule in either of the two shadow roots it can land in.
+    // Its own host in the browser's top layer, so no widget, preview or fullscreen can cover it.
     function tipBox() {
         if (tipEl) return tipEl;
         tipEl = document.createElement('div');
-        tipEl.style.cssText = 'position:fixed;left:0;top:0;z-index:2147483647;pointer-events:none;' +
-            'max-width:320px;padding:3px 6px;border-radius:4px;background:#1e1e2e;color:#cdd6f4;' +
+        tipEl.setAttribute('popover', 'manual');
+        const t = document.createElement('div');
+        t.style.cssText = 'max-width:320px;padding:3px 6px;border-radius:4px;background:#1e1e2e;color:#cdd6f4;' +
             'border:1px solid #45475a;font:11px/1.45 system-ui,sans-serif;white-space:pre-wrap;' +
             'overflow-wrap:anywhere;box-shadow:0 2px 8px rgba(0,0,0,.45)';
+        tipEl.attachShadow({ mode: 'open' }).appendChild(t);
+        tipEl.__text = t;
         return tipEl;
     }
 
+    // Above the control, below only when there is no room.
     function showTip(el) {
         const text = el.__tip;
         if (!text) return;
-        const home = el.getRootNode();
-        const t = tipBox();
-        t.textContent = text;
-        t.style.left = '0px';
-        t.style.top = '0px';
-        (home && home.nodeType === 11 ? home : document.body).appendChild(t);
-        const r = el.getBoundingClientRect(), b = t.getBoundingClientRect();
-        // The preview's own controls tip upward, clear of the pointer; everything else below.
-        const up = home === root;
-        let x = r.left, y = up ? r.top - 6 - b.height : r.bottom + 6;
+        const h = tipBox();
+        h.__text.textContent = text;
+        h.style.cssText = 'all:initial;display:block;position:fixed;left:0;top:0;width:max-content;max-width:320px;margin:0;padding:0;border:0;' +
+            'background:none;overflow:visible;z-index:2147483647;pointer-events:none';
+        document.documentElement.appendChild(h);
+        try { h.showPopover(); } catch (e) { /* no popover API: z-index and DOM order */ }
+        const r = el.getBoundingClientRect(), b = h.getBoundingClientRect();
+        let x = r.left, y = r.top - 6 - b.height;
         if (x + b.width > vpW() - 4) x = vpW() - 4 - b.width;
-        if (up && y < 4) y = r.bottom + 6;
-        else if (!up && y + b.height > vpH() - 4) y = r.top - 6 - b.height;
-        t.style.left = Math.max(4, Math.round(x)) + 'px';
-        t.style.top = Math.max(4, Math.round(y)) + 'px';
+        if (y < 4) y = r.bottom + 6;
+        h.style.left = Math.max(4, Math.round(x)) + 'px';
+        h.style.top = Math.max(4, Math.round(y)) + 'px';
     }
 
     // Replaces `el.title = text` everywhere; the attribute is removed or both would show.
@@ -2486,7 +2489,7 @@
         zoomWrapEl.className = 'zoom';
         zvalEl = document.createElement('span');
         zvalEl.className = 'zval';
-        setTip(zvalEl, 'Click to type a level');
+        setTip(zvalEl, 'Type a level');
         zinEl = document.createElement('input');
         zinEl.className = 'zin';
         zinEl.type = 'text';
@@ -2587,7 +2590,7 @@
         const b = document.createElement('span');
         b.className = 'vbtn';
         b.appendChild(mkIcon(icon));
-        setTip(b, tip);
+        if (tip) setTip(b, tip);
         b.addEventListener('mousedown', function (e) { e.preventDefault(); e.stopPropagation(); }, true);
         b.addEventListener('click', function (e) {
             e.preventDefault(); e.stopPropagation(); onClick(); showBar();
@@ -3900,7 +3903,7 @@
         if (!aaEl) return;
         const sharp = smoothingMode() === 'pixelated';
         aaEl.classList.toggle('sharp', sharp);
-        setTip(aaEl, sharp ? 'Sharp pixels; click for smooth' : 'Smooth; click for sharp pixels');
+        setTip(aaEl, sharp ? 'Sharp pixels' : 'Smooth pixels');
     }
 
     function toggleSmoothing() {
@@ -6357,11 +6360,11 @@
         sr.appendChild(style);
         const box = document.createElement('div');
         box.className = 'tw';
-        const prev = mkVBtn(ICON_PREV, 'Previous picture — with nothing open, starts at the last picture (so does ←); on the first, ends the slideshow', function () { twPress(-1); });
+        const prev = mkVBtn(ICON_PREV, null, function () { twPress(-1); });
         const count = document.createElement('span');
         count.className = 'count';
-        setTip(count, 'Where you are among this page\'s pictures. Drag to move; hold Ctrl to place it without snapping.');
-        const next = mkVBtn(ICON_NEXT, 'Next picture — with nothing open, starts at the first picture (so does →); on the last, ends the slideshow', function () { twPress(1); });
+        setTip(count, 'Drag to move; Ctrl skips snapping');
+        const next = mkVBtn(ICON_NEXT, null, function () { twPress(1); });
         box.appendChild(prev);
         box.appendChild(count);
         box.appendChild(next);
@@ -7674,7 +7677,7 @@
 
         const h = document.createElement('h2');
         h.className = 'head';
-        setTip(h, 'Drag anywhere that is not text to move this window');
+        setTip(h, 'Drag to move');
         h.textContent = 'Hover Zoom — settings';
         const ver = document.createElement('span');
         ver.className = 'ver';
@@ -7823,7 +7826,7 @@
             ms.type = 'number';
             ms.min = 0; ms.max = VDELAY_MAX; ms.step = 50;
             ms.placeholder = 'ms';
-            setTip(ms, 'Milliseconds to wait; 0 stops the script adding a wait for the site');
+            setTip(ms, 'Wait in ms; 0 never waits here');
             const addBtn = document.createElement('button');
             addBtn.className = 'primary';
             addBtn.textContent = 'Add';
@@ -7859,7 +7862,7 @@
                 const val = document.createElement('span');
                 val.className = 'msval';
                 val.textContent = (e.ms | 0) + ' ms';
-                setTip(val, 'Click to change the wait');
+                setTip(val, 'Click to change');
                 val.addEventListener('click', function () {
                     const inp = document.createElement('input');
                     inp.type = 'number';
@@ -8085,7 +8088,7 @@
             editBtn.className = 'edittext';
             editBtn.type = 'button';
             editBtn.textContent = 'Edit as text';
-            setTip(editBtn, 'One entry per line; paste in or copy out');
+            setTip(editBtn, 'Edit as text');
 
             function editing() { return !textarea.hidden; }
 
@@ -8225,19 +8228,14 @@
         pick('modifierKey', 'Hotkey', null, [
             ['ctrl', 'Ctrl'], ['alt', 'Alt'], ['shift', 'Shift']]);
         const hotTog = check('hotkeyToggle', 'Hotkey turns previews off until pressed again',
-            'A tap of the hotkey on its own turns previews off in this tab — the ◀ ▶ widget ' +
-            'still works — and another turns them back on. Off: previews are held back only while ' +
-            'it is held, and pressing it closes one that is open.');
+            'A tap turns previews off in this tab (the widget still works); another turns them on.');
         const actHint = act.row.querySelector('.hint');
         function syncModKey() {
             const show = act.el.value === 'modifier';
             hotTog.row.hidden = show;
             actHint.textContent = show
-                ? 'Hold the hotkey and point at pictures; let go and the preview closes. Press it twice ' +
-                  'to pin one (or right-click it while holding, which keeps the browser\'s menu); ' +
-                  'press it once more to close it.'
-                : 'Hold the hotkey to point without previews, or press it to close the one that is ' +
-                  'open (while you drag something, the hotkey is the drag\'s).';
+                ? 'Hold it and point; let go to close. Press twice to pin, once more to close.'
+                : 'Hold it to point without previews; press it to close one.';
         }
         act.el.addEventListener('change', syncModKey);
         syncModKey();
@@ -8246,22 +8244,18 @@
         const posHint = pos.row.querySelector('.hint');
         function syncPos() {
             posHint.textContent = pos.el.value === 'cursor'
-                ? 'Pin it by clicking the preview.'
-                : 'In the centre until you move one. Pin it by clicking the picture on the page, then ' +
-                  'drag it where you want it; previews open there from then on. Hold Ctrl to place it ' +
-                  'without snapping.';
+                ? 'Click the preview to pin it.'
+                : 'Centred until you move one. Click the picture to pin, then drag; later ones open there.';
         }
         pos.el.addEventListener('change', syncPos);
         syncPos();
         check('posPerSite', 'Remember positions per site',
-            'Where a slideshow picture — or, with “Where I last put it”, a preview — was dragged is ' +
-            'kept for that site; other sites use the last place you put one. Off: one place everywhere.');
+            'Each site keeps its own; others use the last one.');
         num('hoverDelay', 'Hover delay',
             'How long the pointer rests on an image before the preview loads, in ms. ' +
             '(default: 120)', 0, 3000, 10);
         check('hoverPreload', 'Load the pictures around the one you hover',
-            'Once a picture has been previewed, the others in the same part of the page start ' +
-            'loading in the background — only what is on screen, and more as you scroll.');
+            'After one preview, nearby pictures on screen load in the background.');
         num('zoomFactor', 'Opening zoom limit',
             'How far a small original is enlarged, in multiples of its size. 1 never enlarges; ' +
             'large originals always shrink to fit. (default: 2)', 0.1, 8, 0.1);
@@ -8284,9 +8278,7 @@
 
         section('The slideshow');
         check('tourButtons', 'Show the ◀ ▶ widget',
-            '◀ ▶ and a counter in a small box of their own. ' +
-            '▶ with nothing open starts the slideshow at the page’s first picture. Drag it anywhere; hold Ctrl to ' +
-            'place it without snapping. It remembers where it was put on each site.');
+            '▶ starts at the first picture. Drag to move; Ctrl skips snapping.');
         (function () {
             const cb = document.createElement('input');
             cb.type = 'checkbox';
@@ -8295,7 +8287,7 @@
             pct.type = 'number';
             pct.min = 0; pct.max = 100; pct.step = 5;
             pct.value = cfg.tourFadeTo;
-            setTip(pct, 'Opacity while faded, in %. (default: 35)');
+            setTip(pct, 'Faded opacity, % (default: 35)');
             const pair = document.createElement('span');
             pair.style.cssText = 'display:flex;align-items:center;gap:8px';
             pair.appendChild(pct);
@@ -8309,25 +8301,19 @@
             });
             pct.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); pct.blur(); } });
             sync();
-            row('Fade the widget', 'Until the pointer comes near it; the number is how faint, in %. (default: on, 35)', pair);
+            row('Fade the widget', 'Until the pointer nears it; the number is opacity, in %. (default: on, 35)', pair);
         })();
         check('tourKeys', 'Arrow keys step through the page',
-            'Left and right move to the next picture unless the one you are looking at is ' +
-            'zoomed in far enough to pan sideways. [ and ] always move; { and } narrow and ' +
-            'widen the part of the page the slideshow covers.');
+            'Unless zoomed in enough to pan. [ ] always step; { } narrow or widen the area.');
         check('tourKeyStart', '→ or ← with nothing open starts the slideshow',
-            '→ at the first picture and ← at the last, the same as ▶ and ◀ on the widget. A page that ' +
-            'uses the arrows for itself keeps them.');
+            'Like ▶ and ◀ on the widget, unless the page uses the arrows.');
         num('tourMinDisplayed', 'Leave out pictures smaller than',
-            'Longer side as drawn, in px. Starting on a smaller one lowers it. (default: 128)',
+            'Longer side, in px; starting on a smaller one lowers it. (default: 128)',
             0, 1000, 8);
         check('tourLoadMore', 'Let a scrolling page load more',
-            'The page scrolls along ahead of the slideshow, as you would scroll it, so it loads ' +
-            'the next batch before you reach the end. Only on the sites listed under Per-site ' +
-            'fixes, which are learned from your own scrolling.');
+            'Scrolls the page ahead of the slideshow. Only on sites listed under Per-site fixes.');
         check('tourCrossPage', 'Carry on onto the next page',
-            'When the page runs out, the next one is fetched in the background and its ' +
-            'pictures join the list. The page you are on is never left.');
+            'Fetches the next page in the background; you stay on this one.');
 
         section('Where it runs');
         pick('siteMode', 'Site list', null, [
@@ -8426,19 +8412,14 @@
         });
         delayList({
             heading: 'Wait for the page’s own video preview on these sites',
-            description: 'Some sites play their own video over a thumbnail a moment after the ' +
-                'pointer lands on it, which closes a preview that had already opened. After a ' +
-                'few of those the site is added here with the delay measured, and previews in ' +
-                'that area of those pages wait that long. Add a site yourself to set a wait for ' +
-                'the whole site by hand; 0 ms stops the script learning anything for it.',
+            description: 'For sites whose own video covers a preview. Learned and measured; add ' +
+                'one to set the wait by hand, 0 ms to stop learning it.',
             examples: 'example.com also covers www.example.com. Adding a site again replaces its entry.',
         });
         list('scrollSites', {
             heading: 'Scroll the page along with the slideshow on these sites',
-            description: 'For pages that load more pictures as you scroll down. A site is added ' +
-                'when scrolling down by hand makes the ◀ ▶ widget’s count go up, and drops off ' +
-                'by itself after ' + GROWS_FORGET + ' page loads in a row where scrolling loaded ' +
-                'nothing. Elsewhere the page never moves during a slideshow.',
+            description: 'Learned when your scrolling raises the widget’s count; dropped after ' +
+                GROWS_FORGET + ' loads that find nothing more.',
             examples: 'example.com also covers www.example.com',
             placeholder: 'e.g. example.com',
             addCurrentLabel: '+ This site',
@@ -8456,7 +8437,7 @@
         const reset = document.createElement('button');
         reset.className = 'danger';
         reset.textContent = 'Reset to defaults';
-        setTip(reset, 'Every option back to its default; the lists and per-site sound and waits are kept.');
+        setTip(reset, 'Every option to its default; lists kept');
         reset.addEventListener('click', function () {
             const kept = {};
             RESET_KEEPS.forEach(function (k) { kept[k] = cfg[k]; });
@@ -8470,7 +8451,7 @@
         // Back to the values this panel opened on, whatever has been saved since.
         const undo = document.createElement('button');
         undo.textContent = 'Undo changes';
-        setTip(undo, 'Everything back to how it was when this window opened, lists included.');
+        setTip(undo, 'Back to when this window opened');
         undo.addEventListener('click', function () {
             cfg = JSON.parse(JSON.stringify(panelOpened));
             saveSettings();
