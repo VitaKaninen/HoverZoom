@@ -136,9 +136,14 @@ list length changes under you.
 
 - Sort in **document coordinates** (`rect.top + scrollY`), never viewport coordinates, or the
   order changes as the page scrolls.
-- Reading order is a **row-band sort**: group items whose vertical extents overlap into a row,
-  then sort by `left` within the row. A plain `(top, left)` sort scrambles masonry and any ragged
-  grid where a neighbour sits a few px lower.
+- Reading order is a **row sort anchored on each row's first item**: an item joins the current row
+  if it overlaps that row's *first* (topmost) item by half the shorter height, then the row sorts
+  by `left`. A plain `(top, left)` sort scrambles a ragged grid where a neighbour sits a few px
+  lower. **Never let the row's extent grow as items join** (the v0.100–v0.135 band): on masonry
+  (Google Images' columns since 2026) overlaps chain into bands taller than the viewport, the tour
+  walks down one column then jumps back up to the next, and with the page following (§9a) the page
+  scrolls up and down. Measured on Google, 199 pictures: band 35 upward jumps >150 px (max 624),
+  anchored 3 (max 178).
 - Ties break on document order.
 
 ### Membership
@@ -698,10 +703,11 @@ is `tourFromStart(-1)`: the last picture loaded now, and ▶ from there loads mo
 **Reversed v0.134.0 (user's call): the page follows the tour.** `tourFollow()` (from
 `tourRemember`) scrolls the anchor to the centre, `behavior:'instant'`, only when it is off screen;
 the page stays where the tour ended. Was: "the page never scrolls". Why it changed: Google Images
-in Firefox/LibreWolf **empties every 50-result batch far from the viewport** (measured: 300
-results, batches 2–5 were empty `div`s of ~2,300 px each, only the first and last populated), so
-a still page can never list them — the counter sat at 100/100 on picture #300. Following keeps the
-anchor's neighbourhood mounted, which also answers the virtualised-feed limit below.
+in Firefox/LibreWolf **mounts each 50-result batch only when the viewport comes near it** (measured
+after an excursion: 300 results, batches 2–5 were empty `div`s of ~2,300 px each, because the jump
+to the bottom skipped them; once mounted they stay — the user scrolled the page and nothing ever
+unloaded). A still page never lists them — the counter sat at 100/100 on picture #300. Following
+mounts the anchor's neighbourhood, which also answers the virtualised-feed limit below.
 `twStarting` guards the page-scroll `cancel()`, since a start from the widget is not yet placed.
 Scrolls use `'instant'`: `'auto'` obeys the page's own `scroll-behavior:smooth`.
 
@@ -759,6 +765,17 @@ wall found `tourExhausted()` (scoped ⇒ no cross-page) and quit, while the idle
 the whole page, said 100+. `tourAdopt()` fixes it: after an excursion grows the page, if no new
 picture is inside the scope, widen to the nearest ancestor holding new ones — only when that
 ancestor holds nothing else that was already on the page (so a sidebar is never pulled in).
+
+**The return goes to the tour, not to the saved position.** The tour keeps stepping during the
+2 s stay; returning to the pre-excursion `scrollY` put the page back where the tour *was*, and the
+next step's `tourFollow` scrolled down again (user saw it as up-then-down). So the `finally`
+restores the position and then `tourFollow(tour.el)` in the same task (no paint between), and
+`tourFollow` does nothing while `excAway` (at the bottom), or it would pull the page off the loader.
+
+**The wall looks once more before quitting.** In LibreWolf a batch can land seconds after the stay
+stopped watching; the excursion then marks the page spent and ▶ at the end quit while 100 more
+pictures sat there. `tourWall()` now runs `tourAdopt(tour.had)` (the page's pictures before the
+tour's first request) and steps if the list got longer.
 
 ### Fullscreen
 
@@ -1034,7 +1051,7 @@ imgur mp4, four clips: **1.0–9.6 MB** (images on the same run were 40 KB–1.3
   `playerSurfaceReason()`'s ancestor walk, which does a `querySelectorAll('img')` per level — it
   breaks at the first ancestor holding more than one image, so on a grid it stops after one or two
   levels rather than scanning the grid per item.
-- **The row-band sort is doing real work**, and the log proves it: `doc: 341,1606` → `652,1606` →
+- **The row sort is doing real work**, and the log proves it: `doc: 341,1606` → `652,1606` →
   `962,1606` → `31,1835`, i.e. left-to-right along a row and then a wrap, not a `(top, left)`
   scramble. `dbg('tour step', …)` prints the document position for exactly this reason.
 - **The strip's two-group layout measures as designed**: 1094 px full-width over a clip with the

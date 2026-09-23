@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.135.0
+// @version     0.136.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -6033,18 +6033,16 @@
         return (w || h) ? { w: w, h: h } : null;
     }
 
-    // Reading order: items whose vertical extents overlap are one row, sorted left to right
-    // inside it. A plain (top, left) sort scrambles masonry and any ragged grid.
+    // Reading order: items overlapping a row's FIRST item join that row, sorted left to right
+    // inside it. A plain (top, left) sort scrambles ragged grids; a growing band walks masonry by column.
     function tourOrder(items) {
         items.sort(function (a, b) { return a.y - b.y || a.x - b.x || a.n - b.n; });
         const rows = [];
         items.forEach(function (it) {
             const row = rows[rows.length - 1];
-            const over = row ? Math.min(row.bot, it.y + it.h) - Math.max(row.top, it.y) : -1;
-            if (row && over >= Math.min(row.bot - row.top, it.h) * TOUR_ROW) {
-                row.items.push(it);
-                row.bot = Math.max(row.bot, it.y + it.h);
-            } else rows.push({ top: it.y, bot: it.y + it.h, items: [it] });
+            const over = row ? Math.min(row.top + row.h, it.y + it.h) - Math.max(row.top, it.y) : -1;
+            if (row && over >= Math.min(row.h, it.h) * TOUR_ROW) row.items.push(it);
+            else rows.push({ top: it.y, h: it.h, items: [it] });
         });
         const out = [];
         rows.forEach(function (row) {
@@ -6242,7 +6240,7 @@
     // The page scrolls behind the preview to keep the anchor on screen, so a feed that empties
     // what is far from the viewport (Google in Firefox) mounts the next section as the tour walks.
     function tourFollow(el) {
-        if (!el || el.__hzBase || !el.isConnected || onScreen(el)) return;
+        if (!el || el.__hzBase || !el.isConnected || excAway || onScreen(el)) return;
         try { el.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' }); }
         catch (e) { dbg('tour: could not bring the picture on screen', String(e)); }
     }
@@ -6761,7 +6759,7 @@
 
     const EXC_HOP_MS = 120;         // the hop's ceiling where animation frames never come
 
-    let excBusy = false, excAt = 0, excSpent = false;
+    let excBusy = false, excAt = 0, excSpent = false, excAway = false;
     let excLong = false;            // this page needs the viewport to STAY at the bottom
 
     // Two rendering steps: the page's IntersectionObserver and scroll handlers have run by then.
@@ -6802,12 +6800,15 @@
         let got = null;
         try {
             // 'instant', not 'auto': 'auto' obeys the page's own scroll-behavior:smooth.
+            excAway = true;
             window.scrollTo({ left: sx, top: docHeight(), behavior: 'instant' });
             // A hop is back within a frame or two, and the loading it set off is watched from home.
             if (long) got = await excWatch(before);
             else await twoFrames();
         } finally {
+            excAway = false;
             window.scrollTo({ left: sx, top: sy, behavior: 'instant' });
+            if (tour && placed) tourFollow(tour.el);    // the tour may have moved on while we were away
             if (long) excBusy = false;
         }
         if (!long) {
@@ -7019,6 +7020,7 @@
     // keeps everything in one document where the layout gates still apply.
     async function tourMore(force) {
         const had = new Set(tourPics(tourFloor()));
+        if (tour && !tour.had) tour.had = had;
         if (await tourExcursion(force)) { tourAdopt(had); return true; }
         return await tourCross();
     }
@@ -7065,6 +7067,14 @@
         finally { hideSpinner(); }
         if (!tour || !placed) return;
         if (grew) { tourSync(); tourNav(1, false); return; }
+        // A batch that landed after the excursion stopped watching (LibreWolf: seconds later).
+        if (tour.had) tourAdopt(tour.had);
+        const list = tourSync();
+        if (list && tour.index >= 0 && tour.index < list.length - 1) {
+            dbg('tour: more pictures arrived after the page was asked', { now: list.length });
+            tourNav(1, false);
+            return;
+        }
         if (tourExhausted()) tourQuit();
     }
 
