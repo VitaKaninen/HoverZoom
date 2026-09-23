@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.148.0
+// @version     0.149.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -1754,11 +1754,11 @@
             'border:1px solid #45475a;border-radius:4px;outline:none}',
             '.spop .custom input:focus{border-color:#89b4fa}',
             '.spop .custom span{color:#7f849c}',
-            '.pop{position:absolute;right:8px;bottom:' + (BAR_MIN_H + 4) + 'px;display:none;',
+            '.pop{position:fixed;left:0;top:0;display:none;',
             'z-index:4;width:250px;background:rgba(30,30,46,.98);border:1px solid #45475a;',
             'border-radius:6px;overflow:hidden;box-shadow:0 6px 20px rgba(0,0,0,.55);',
             'font:11px/1.4 system-ui,sans-serif;color:#cdd6f4;text-align:left}',
-            '.box.hot .pop.open{display:block}',
+            '.pop.open{display:block}',
             '.pop .head{padding:8px 10px;color:#bac2de;border-bottom:1px solid #45475a}',
             '.pop .head b{color:#cdd6f4}',
             '.pop .acts{display:flex;gap:6px;justify-content:flex-end;padding:8px}',
@@ -1911,10 +1911,10 @@
         box.appendChild(vidEl);
         box.appendChild(vctlEl);
         box.appendChild(capEl);
-        box.appendChild(blockPopEl);
         box.addEventListener('mousedown', onBoxDown, true);
         box.addEventListener('click', onBoxClick, true);
         root.appendChild(box);
+        root.appendChild(blockPopEl);       // outside the box, whose overflow would clip it
 
         document.addEventListener('fullscreenchange', onFullChange);
         document.addEventListener('webkitfullscreenchange', onFullChange);
@@ -3224,6 +3224,7 @@
         box.classList.toggle('hot', placed);
         box.classList.toggle('pan', placed && pannable());
         if (spinDocked) moveSpinner();      // the dock rides with the frame
+        placePop();
     }
 
     function clampScale(s) {
@@ -3924,8 +3925,19 @@
     function togglePop(pop) {
         const wasOpen = pop.classList.contains('open');
         closePops();
-        if (!wasOpen) pop.classList.add('open');
+        if (!wasOpen) { pop.classList.add('open'); placePop(); }
         showBar();
+    }
+
+    // Above the bar at the window's right end, free to spill past the window, whole on screen.
+    function placePop() {
+        if (!blockPopEl || !blockPopEl.classList.contains('open')) return;
+        const b = box.getBoundingClientRect(), c = capEl.getBoundingClientRect(), p = blockPopEl.getBoundingClientRect();
+        const x = Math.max(4, Math.min(b.right - 8 - p.width, vpW() - 4 - p.width));
+        let y = c.top - 4 - p.height;
+        if (y < 4) y = Math.min(c.bottom + 4, vpH() - 4 - p.height);
+        blockPopEl.style.left = Math.round(x) + 'px';
+        blockPopEl.style.top = Math.round(Math.max(4, y)) + 'px';
     }
 
     // ---- smoothing: a stored setting, toggled from the frame instead of the panel

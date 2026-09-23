@@ -1236,6 +1236,12 @@ preview opens with.
   `pointerOverBar()` counts them too or the bar fades out from under the pointer reaching for them.
   Both are clipped by `.box{overflow:hidden}` on a frame too short to hold them; accepted.
 
+**The ⊘ popover (`blockPopEl`, `.pop`) lives in the shadow root, OUTSIDE `.box`** (v0.149.0):
+`.box{overflow:hidden}` clipped it on a short window. It is `position:fixed`, placed by `placePop()`
+on open and on every `layout()` — above the bar at the window's right end, clamped to the viewport,
+free to spill past the window. Off-box is safe for clicks: dismissal fires only when
+`composedPath()[0] === dimEl`, and `isBoxControl()` still lists it.
+
 **The speed menu is a `.spop`, not a `.pop`.** It anchors to the rate button rather than the bar's
 right edge, clamped so a narrow frame cannot push it off the left edge, and it joins `closePops()`
 and `popOpen()` so one press closes it and the bar waits on it. Its custom field is a text box, so
