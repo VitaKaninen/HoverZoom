@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.130.0
+// @version     0.131.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -45,6 +45,7 @@
         modifierKey: 'ctrl',        // the hotkey: 'ctrl' | 'alt' | 'shift'
         hotkeyToggle: false,        // 'hover': a lone tap turns previews off in this tab until the next
         hoverDelay: 120,            // ms before resolving
+        hoverPreload: true,         // a preview loads the rest of its section, as far as is on screen
         minDisplayed: 16,           // ignore images displayed smaller than this — the only size gate
         minRatio: 1,                // full size must be this much bigger; below 1 previews anything
         videoMode: 'clips',         // 'none' | 'clips' (animated clips) | 'all' (+ links to a video page)
@@ -1634,10 +1635,16 @@
             // The corner one sits inside the corner's resize square, which answers round it.
             '.cx{position:absolute;top:' + CX_INSET + 'px;right:' + CX_INSET + 'px;width:' + CX_SIZE + 'px;',
             'height:' + CX_SIZE + 'px;box-sizing:border-box;display:none;align-items:center;justify-content:center;',
-            'border-radius:50%;border:1px solid #45475a;background:rgba(30,30,46,.88);color:#cdd6f4;',
-            'font:14px/1 system-ui,sans-serif;cursor:pointer;user-select:none;z-index:3}',
-            '.cx:hover{background:#f38ba8;border-color:#f38ba8;color:#1e1e2e}',
-            '.box.placed.hot:hover .cx{display:flex}',
+            'color:#cdd6f4;cursor:pointer;user-select:none;z-index:3;',
+            'filter:drop-shadow(0 0 1.5px rgba(0,0,0,.9)) drop-shadow(0 1px 3px rgba(0,0,0,.6));',
+            'transition:opacity var(--barfade) ease}',
+            '.cx svg{display:block;width:100%;height:100%;fill:none;stroke:currentColor;',
+            'stroke-width:2.4;stroke-linecap:round}',
+            '.cx:hover{color:#f38ba8}',
+            // Rides the bar's fade; with the bar off it shows only while the pointer is on the window.
+            '.box.placed.hot .cx{display:flex}',
+            '.box.baridle .cx{opacity:0;pointer-events:none}',
+            '.box.nobar:not(:hover) .cx{display:none}',
             '.box.hot .cap.hasvid .vidoff{display:block}',
             '.box.hot .cap .retry.on{display:block}',
             '.cap .retry svg{display:block;width:12px;height:12px;margin:3px auto;fill:currentColor}',
@@ -1849,7 +1856,7 @@
 
         cornerXEl = document.createElement('span');
         cornerXEl.className = 'cx';
-        cornerXEl.textContent = '×';
+        cornerXEl.appendChild(mkIcon(['M12 1.8a10.2 10.2 0 1 1 0 20.4a10.2 10.2 0 1 1 0-20.4z', 'M8.2 8.2l7.6 7.6M15.8 8.2l-7.6 7.6']));
         setTip(cornerXEl, 'Close');
         cornerXEl.addEventListener('mousedown', function (e) { e.preventDefault(); e.stopPropagation(); }, true);
         cornerXEl.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); closeByButton(); }, true);
@@ -2013,16 +2020,19 @@
     function showTip(el) {
         const text = el.__tip;
         if (!text) return;
-        const root = el.getRootNode();
+        const home = el.getRootNode();
         const t = tipBox();
         t.textContent = text;
         t.style.left = '0px';
         t.style.top = '0px';
-        (root && root.nodeType === 11 ? root : document.body).appendChild(t);
+        (home && home.nodeType === 11 ? home : document.body).appendChild(t);
         const r = el.getBoundingClientRect(), b = t.getBoundingClientRect();
-        let x = r.left, y = r.bottom + 6;
+        // The preview's own controls tip upward, clear of the pointer; everything else below.
+        const up = home === root;
+        let x = r.left, y = up ? r.top - 6 - b.height : r.bottom + 6;
         if (x + b.width > vpW() - 4) x = vpW() - 4 - b.width;
-        if (y + b.height > vpH() - 4) y = r.top - 6 - b.height;
+        if (up && y < 4) y = r.bottom + 6;
+        else if (!up && y + b.height > vpH() - 4) y = r.top - 6 - b.height;
         t.style.left = Math.max(4, Math.round(x)) + 'px';
         t.style.top = Math.max(4, Math.round(y)) + 'px';
     }
@@ -2132,8 +2142,8 @@
 
     const RESIZE_OUT = 6;     // px outside the window edge that still resizes
     const RESIZE_IN = 6;      // px inside it — together, a 12px strip centred on the edge
-    const CX_INSET = 4;       // the corner ✕: this far in from the top and right edges
-    const CX_SIZE = 20;
+    const CX_INSET = 10;      // the corner ✕: this far in from the top and right edges
+    const CX_SIZE = 26;
     const CORNER_REACH = 24;  // px from a corner where a drag resizes both axes at once
 
     function hitRegion(x, y) {
@@ -2145,7 +2155,8 @@
         if (rx < -RESIZE_OUT || ry < -RESIZE_OUT ||
             rx > ow + RESIZE_OUT || ry > oh + RESIZE_OUT) return null;
         const dl = rx, dr = ow - rx, dt = ry, db = oh - ry;
-        if (placed && dr >= CX_INSET && dr <= CX_INSET + CX_SIZE && dt >= CX_INSET && dt <= CX_INSET + CX_SIZE)
+        const cxIn = CX_INSET + borderPx();
+        if (placed && dr >= cxIn && dr <= cxIn + CX_SIZE && dt >= cxIn && dt <= cxIn + CX_SIZE)
             return null;    // the corner ✕
 
         const corner = Math.min(CORNER_REACH, ow / 3, oh / 3);
@@ -2247,6 +2258,7 @@
     // Everything but the zoom changes only with the URL or the measured size, and layout() calls
     // this on every frame of a drag — fileInfo() and transferBytes() are not frame work.
     function caption() {
+        box.classList.toggle('nobar', !barShown());
         if (!barShown()) {
             capEl.style.display = 'none';
             return;
@@ -5077,7 +5089,7 @@
         let resolving = false;  // the resolve has started; the ring belongs to it, not to the wait
         function paint(hit) {
             if (view && box.classList.contains('on')) upgradeViewer(hit);
-            else { showViewer(hit, pointer); dockSpinner(); }
+            else { showViewer(hit, pointer); dockSpinner(); hwStart(el); }
             if (pinOnShow === el) { pinOnShow = null; place(); }
         }
         if (ruleMs) dbg('waiting ' + holdMs + ' ms for the page\'s own player before previewing');
@@ -6720,7 +6732,30 @@
     const EXC_MAX_MS = 2000;
     const EXC_COOL_MS = 3000;
 
+    const EXC_HOP_MS = 120;         // the hop's ceiling where animation frames never come
+
     let excBusy = false, excAt = 0, excSpent = false;
+    let excLong = false;            // this page needs the viewport to STAY at the bottom
+
+    // Two rendering steps: the page's IntersectionObserver and scroll handlers have run by then.
+    function twoFrames() {
+        return Promise.race([sleep(EXC_HOP_MS), new Promise(function (r) {
+            requestAnimationFrame(function () { requestAnimationFrame(function () { r(); }); });
+        })]);
+    }
+
+    // Wait up to EXC_MAX_MS for new media, stopping once it has stopped arriving.
+    async function excWatch(before) {
+        const until = Date.now() + EXC_MAX_MS;
+        let last = before, still = 0, grew = false;
+        while (Date.now() < until) {
+            await sleep(EXC_POLL_MS);
+            const now = mediaCount();
+            if (now > last) { grew = true; last = now; still = 0; }
+            else if (grew && ++still >= 2) break;
+        }
+        return { grew: grew, now: last };
+    }
 
     function docHeight() {
         const b = document.body, d = document.documentElement;
@@ -6736,28 +6771,31 @@
         excAt = Date.now();
         const sx = window.scrollX || 0, sy = window.scrollY || 0;
         const before = mediaCount();
-        let grew = false;
+        const long = excLong;
+        let got = null;
         try {
             // Explicitly 'auto': a page with scroll-behavior:smooth in its own CSS would
             // otherwise turn every excursion into a visible animation.
             window.scrollTo({ left: sx, top: docHeight(), behavior: 'auto' });
-            const until = Date.now() + EXC_MAX_MS;
-            let last = before, still = 0;
-            while (Date.now() < until) {
-                await sleep(EXC_POLL_MS);
-                const now = mediaCount();
-                if (now > last) { grew = true; last = now; still = 0; }
-                else if (grew && ++still >= 2) break;      // it has stopped arriving
-            }
-            dbg('excursion', { was: before, now: last, grew: grew,
-                ms: Date.now() - excAt, returnedTo: sx + ',' + sy });
+            // A hop is back within a frame or two, and the loading it set off is watched from home.
+            if (long) got = await excWatch(before);
+            else await twoFrames();
         } finally {
             window.scrollTo({ left: sx, top: sy, behavior: 'auto' });
-            excBusy = false;
+            if (long) excBusy = false;
         }
-        // A finite page must not scroll away and back on every press near the end.
-        if (!grew) excSpent = true;
-        return grew;
+        if (!long) {
+            try { got = await excWatch(before); } finally { excBusy = false; }
+        }
+        dbg('excursion' + (long ? ' (stayed at the bottom)' : ' (hop)'), { was: before, now: got.now,
+            grew: got.grew, ms: Date.now() - excAt, returnedTo: sx + ',' + sy });
+        if (got.grew) return true;
+        // The hop set nothing off: once per page, try staying down there, for a loader that
+        // reads the position after a delay. Only if that also finds nothing is the page finite.
+        if (!long) { excLong = true; return tourExcursion(true); }
+        excLong = false;
+        excSpent = true;
+        return false;
     }
 
     // ---- crossing to the next page
@@ -7049,6 +7087,7 @@
     }
 
     function plReset() {
+        hwScope = null;
         plCancel();
         plDone.clear();
         plKeep.length = 0;
@@ -7070,7 +7109,7 @@
     async function plRun(job) {
         const wait = plReserve();
         if (wait > 0) await sleep(wait);
-        if (job.gen !== plGen || !tour || plDone.has(job.el)) return;
+        if (job.gen !== plGen || (!tour && !job.hover) || plDone.has(job.el)) return;
         const token = { cancelled: false, fresh: false };
         plLive.push(token);
         let hit = null;
@@ -7142,6 +7181,57 @@
             old.load();
         }
     }
+
+    // ---- warming the section a hover started in
+    //
+    // One preview says the user is reading this part of the page, so the rest of it that is on
+    // screen goes through the same preloader; scrolling adds what comes into view.
+
+    const HW_SCROLL_MS = 200;
+
+    let hwScope = null, hwTimer = 0;
+
+    // Pick the hovered picture's section (the tour's own start rule) and warm what is visible in it.
+    function hwStart(el) {
+        if (!cfg.hoverPreload || tour || !el || !el.isConnected) return;
+        if (!(hwScope && hwScope.isConnected && hwScope.contains(el))) {
+            const pics = tourPics(cfg.tourMinDisplayed | 0);
+            const levels = tourLevels(el, pics);
+            hwScope = levels[tourPick(levels, pics)].el;
+            dbg('warming the section: ' + describeEl(hwScope));
+        }
+        hwFill();
+    }
+
+    function onScreen(el) {
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && r.height > 0 && r.bottom > 0 && r.right > 0 && r.top < vpH() && r.left < vpW();
+    }
+
+    // Queue the section's on-screen pictures; queued ones that scrolled away are dropped.
+    function hwFill() {
+        if (!cfg.hoverPreload || tour || !hwScope || !hwScope.isConnected) { hwScope = null; return; }
+        const pics = tourPics(cfg.tourMinDisplayed | 0).filter(function (p) {
+            return hwScope.contains(p) && onScreen(p);
+        });
+        const want = new Set(pics);
+        plQueue = plQueue.filter(function (j) { return !j.hover || want.has(j.el); });
+        let added = 0;
+        pics.forEach(function (p) {
+            if (plDone.has(p) || plQueue.some(function (j) { return j.el === p; })) return;
+            if (!shownUrl(p) || blocked(shownUrl(p))) return;
+            plQueue.push({ el: p, displayed: sizeOf(p), dist: PL_VIDEO_AHEAD + 1, gen: plGen, hover: true });
+            added++;
+        });
+        if (added) dbg('warming ' + added + ' more in the section', { queued: plQueue.length });
+        plPump();
+    }
+
+    window.addEventListener('scroll', function () {
+        if (!hwScope) return;
+        clearTimeout(hwTimer);
+        hwTimer = setTimeout(hwFill, HW_SCROLL_MS);
+    }, { passive: true });
 
     // ---- hosts that pushed back
     //
@@ -8009,6 +8099,9 @@
         num('hoverDelay', 'Hover delay',
             'How long the pointer rests on an image before the preview loads, in ms. ' +
             '(default: 120)', 0, 3000, 10);
+        check('hoverPreload', 'Load the pictures around the one you hover',
+            'Once a picture has been previewed, the others in the same part of the page start ' +
+            'loading in the background — only what is on screen, and more as you scroll.');
         num('zoomFactor', 'Opening zoom limit',
             'How far a small original is enlarged, in multiples of its size. 1 never enlarges; ' +
             'large originals always shrink to fit. (default: 2)', 0.1, 8, 0.1);
@@ -8070,7 +8163,7 @@
             0, 1000, 8);
         check('tourLoadMore', 'Let a scrolling page load more',
             'Near the end, the page is scrolled to the bottom and straight back so it loads ' +
-            'the next batch. You do not see it move.');
+            'the next batch — for a frame or two, on most pages.');
         check('tourCrossPage', 'Carry on onto the next page',
             'When the page runs out, the next one is fetched in the background and its ' +
             'pictures join the list. The page you are on is never left.');

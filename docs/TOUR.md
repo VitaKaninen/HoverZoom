@@ -466,6 +466,14 @@ sequentially. A preload buffer is a set, not a sequence; the user jumps to which
 are on. Dropping it removes most of the complexity. `PAGE_DELAY`'s 400ms serial politeness is also
 an order of magnitude too slow for 3/s — slot spacing replaces it.
 
+### Warming on hover — v0.131.0
+
+A hover preview (`paint()` → `hwStart`) picks the picture's section with the tour's own rule
+(`tourLevels` + `tourPick`, tour floor) and queues its **on-screen** pictures into this same
+preloader as `hover: true` jobs (`hwFill`); a debounced scroll re-runs it and drops queued hover
+jobs that scrolled away. The hover's own `resolve()` then hits `probeCache`. Off with
+`hoverPreload`. `plReset()` forgets the scope; a tour's `plFill` evicts hover jobs outside its window.
+
 ### Rules
 
 - **A global cap on in-flight preload requests**, separate from resolve concurrency. `MAX_PROBES`
@@ -719,6 +727,16 @@ pictures the user is still looking at rather than stalling them at the wall.
 - The ▶ "load more" affordance surfaces only if the automatic attempt failed or is still running.
 - Pass `behavior:'auto'` explicitly to `scrollIntoView`. A page with `scroll-behavior:smooth` in
   its CSS otherwise turns every excursion into a slow animation.
+
+### The hop — v0.131.0
+
+The excursion returns after two animation frames (`twoFrames()`, capped at `EXC_HOP_MS` where
+frames never come) and watches for new media **from home**: an IntersectionObserver or a
+scroll-event loader has fired by then, and its fetch lands wherever the viewport is. The old
+2 s stay at the bottom was visible and read as a jarring jump. A hop that loads nothing is
+followed once per page by the old stay (`excLong`), for a loader that reads the position after a
+debounce; if that grows the page, `excLong` sticks for it; if not, `excSpent`. So a finite page
+still shows one stay at the very end.
 
 ### Fullscreen
 
