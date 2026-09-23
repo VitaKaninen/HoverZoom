@@ -654,13 +654,19 @@ pictures the user is still looking at rather than stalling them at the wall.
 - **An exhausted flag** — if an excursion returns nothing new, stop trying. A finite page must not
   scroll-and-return on every press near the end.
 - **Off until the site has earned it (v0.141.0, user's design).** Most pages load everything at
-  once, so the excursion runs only on hosts in `hoverZoomGrowsOnScroll` (GM storage, never
-  expires). A host is learned when the **user** scrolls (a wheel/key/touch/press within 1 s before
+  once, so the excursion (and `tourFollow`, §9a) runs only on hosts in `cfg.scrollSites` — a list
+  in the panel under Per-site fixes, ✕ per row, kept by Reset. (v0.141.0-v0.142.0 kept it in GM key
+  `hoverZoomGrowsOnScroll`; `growsMigrate()` moves it in once.) A host is learned when the **user** scrolls (a wheel/key/touch/press within 1 s before
   the `scroll`), reaches within two viewports of the bottom, and the widget's count
   (`growsCount()` = `twTotal`'s derivation) rises within 0.6 s or 2.6 s. The count, not
   `mediaCount()`: ads and pixels change the raw count. The user-input test is what excludes our
-  own scrolls (hop, `tourFollow`) and scroll restoration on reload. Nothing unlearns a host yet —
-  the user accepted that; a false positive costs one hop per page. No built-in list of known
+  own scrolls (hop, `tourFollow`) and scroll restoration on reload.
+  **It is not a one-way gate (v0.143.0, user: false positives must be able to leave).** Evidence
+  runs both ways, in `hoverZoomScrollMisses` {host: n}: an excursion that comes back empty counts
+  one miss per page URL (`excGaveNothing`); `GROWS_FORGET` (5) in a row removes the host. Any
+  excursion that grows the page, or a hand scroll that raises the count again, clears the run.
+  A site with both feed and finite pages (Reddit: feed vs a post) may be forgotten after five
+  posts and relearned on the next hand scroll through a feed — acceptable, it self-corrects. No built-in list of known
   feeds, by design: the first slideshow on Google Images ends at 100 until the user scrolls once.
   **Test note:** a hidden Browser pane delivers no `scroll` events; dispatch `new Event('scroll')`
   by hand, and append whole posts (`#post-1` clones) to `forum-thread.html`, since single `<img>`s

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.142.0
+// @version     0.143.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -91,6 +91,7 @@
         smoothing: 'auto',          // 'auto' | 'pixelated' | 'crisp-edges' — image-rendering
         spinnerTheme: 'auto',       // 'auto' (follows the browser) | 'dark' | 'light'
         referrerSites: [],          // sites to load previews from WITHOUT a referrer
+        scrollSites: [],            // sites that load more when scrolled: learned, or the user's
         videoDelays: {},            // host -> {ms, rules, samples, fixes, user}: wait for the page's
                                     // own player before previewing; learned, or set by the user
         siteAudio: {},              // host -> {muted, volume}; absent means muted, which is the
@@ -6801,45 +6802,87 @@
 
     // ---- which sites load more when scrolled: learned from the user's own scrolling
 
-    const GROWS_KEY = 'hoverZoomGrowsOnScroll';
+    const GROWS_OLD_KEY = 'hoverZoomGrowsOnScroll';    // v0.141.0-v0.142.0's list, moved into cfg
+    const GROWS_MISS_KEY = 'hoverZoomScrollMisses';     // host -> page loads in a row that loaded nothing
+    const GROWS_FORGET = 5;
     const GROWS_INPUT_MS = 1000;    // a scroll this soon after wheel/key/touch/press is the user's
     const GROWS_SETTLE_MS = 600;
     const GROWS_LATE_MS = 2000;     // a second look, for a batch that lands after scrolling stops
-    let growsSet = null, growsBase = null, growsNear = false, growsTimer = 0, userInputAt = 0;
+    let growsBase = null, growsNear = false, growsTimer = 0, userInputAt = 0, growsMoved = false;
 
-    function growsHosts() {
-        if (growsSet) return growsSet;
-        growsSet = new Set();
-        try {
-            const raw = GM_getValue(GROWS_KEY, '');
-            if (raw) JSON.parse(raw).forEach(function (h) { growsSet.add(h); });
-        } catch (e) { console.warn('[HoverZoom] could not read the learned scrolling sites', e); }
-        return growsSet;
+    function growsMigrate() {
+        if (growsMoved) return;
+        growsMoved = true;
+        let old = [];
+        try { old = JSON.parse(GM_getValue(GROWS_OLD_KEY, '') || '[]'); } catch (e) { /* unreadable: nothing to move */ }
+        if (!old.length) return;
+        reloadSettings();
+        cfg.scrollSites = (cfg.scrollSites || []).concat(old.filter(function (h) { return (cfg.scrollSites || []).indexOf(h) === -1; }));
+        saveSettings();
+        GM_setValue(GROWS_OLD_KEY, '');
     }
 
-    function growsHere() { return growsHosts().has(pageHost()); }
+    function growsHere() {
+        growsMigrate();
+        const host = pageHost();
+        return (cfg.scrollSites || []).some(function (k) { return entryCovers(k, host); });
+    }
 
     function growsCount() { return mainPics(tourPics(Math.max(0, cfg.tourMinDisplayed | 0))).length; }
 
+    function growsMisses() {
+        try { return JSON.parse(GM_getValue(GROWS_MISS_KEY, '') || '{}'); } catch (e) { return {}; }
+    }
+
     function growsLearn(from, to) {
-        growsHosts().add(pageHost());
-        try { GM_setValue(GROWS_KEY, JSON.stringify(Array.from(growsHosts()))); }
-        catch (e) { console.warn('[HoverZoom] could not save the learned scrolling site', e); }
-        dbg('this site loads more when scrolled — learned from your scrolling', { host: pageHost(), from: from, to: to });
+        const host = pageHost();
+        reloadSettings();
+        if ((cfg.scrollSites || []).indexOf(host) === -1) cfg.scrollSites = (cfg.scrollSites || []).concat([host]);
+        saveSettings();
+        refreshPanel();
+        growsHit('learned from your scrolling, ' + from + ' → ' + to);
+    }
+
+    // Evidence the site does load more: its run of empty page loads starts again.
+    function growsHit(why) {
+        const host = pageHost(), m = growsMisses();
+        if (m[host]) { delete m[host]; GM_setValue(GROWS_MISS_KEY, JSON.stringify(m)); }
+        dbg('this site loads more when scrolled — ' + why, { host: host });
+    }
+
+    // A page here that loaded nothing when asked; GROWS_FORGET in a row and the site is forgotten.
+    function growsMiss() {
+        const host = pageHost(), m = growsMisses();
+        m[host] = (m[host] || 0) + 1;
+        const forget = m[host] >= GROWS_FORGET;
+        if (forget) delete m[host];
+        GM_setValue(GROWS_MISS_KEY, JSON.stringify(m));
+        dbg('this page loaded nothing when scrolled', { host: host, inARow: forget ? GROWS_FORGET : m[host] });
+        if (!forget) return;
+        reloadSettings();
+        cfg.scrollSites = (cfg.scrollSites || []).filter(function (k) { return k !== host; });
+        saveSettings();
+        refreshPanel();
+        dbg('forgot this site as one that loads more — ' + GROWS_FORGET + ' page loads in a row loaded nothing', { host: host });
     }
 
     // Pictures added after the user scrolled near the bottom: this site needs the excursion.
     function growsCheck(late) {
-        if (growsBase === null || growsHere()) { growsBase = null; return; }
+        if (growsBase === null) return;
         const n = growsCount();
-        if (n > growsBase && growsNear) { growsLearn(growsBase, n); growsBase = null; return; }
+        if (n > growsBase && growsNear) {
+            if (growsHere()) growsHit('seen again as you scrolled, ' + growsBase + ' → ' + n);
+            else growsLearn(growsBase, n);
+            growsBase = null;
+            return;
+        }
         if (late) { growsBase = null; growsNear = false; return; }
         growsTimer = setTimeout(function () { growsCheck(true); }, GROWS_LATE_MS);
     }
 
     function growsOnScroll() {
         if (tour || twStarting || excBusy || Date.now() - userInputAt > GROWS_INPUT_MS) return;
-        if (!cfg.tourLoadMore || !siteEnabled() || growsHere()) return;
+        if (!cfg.tourLoadMore || !siteEnabled()) return;
         if (growsBase === null) { growsBase = growsCount(); growsNear = false; }
         const h = vpH();
         if (h > 0 && (window.scrollY || 0) + 2 * h >= docHeight()) growsNear = true;
@@ -6867,9 +6910,8 @@
             let seen;
             try { seen = await excWatch(before); } finally { excBusy = false; }
             dbg('excursion (the bottom is on screen: watched, did not scroll)', { was: before, now: seen.now, grew: seen.grew });
-            if (seen.grew) return true;
-            excSpent = true;
-            excDead = { url: location.href, h: docHeight(), n: mediaCount() };
+            if (seen.grew) { growsHit('the slideshow found more'); return true; }
+            excGaveNothing();
             return false;
         }
         const sx = window.scrollX || 0, sy = window.scrollY || 0;
@@ -6893,13 +6935,20 @@
         }
         dbg('excursion' + (long ? ' (stayed at the bottom)' : ' (hop)'), { was: before, now: got.now,
             grew: got.grew, ms: Date.now() - excAt, returnedTo: sx + ',' + sy });
-        if (got.grew) { if (long) excLong = true; return true; }
+        if (got.grew) { if (long) excLong = true; growsHit('the slideshow found more'); return true; }
         // The hop set nothing off: once per page, try staying down there, for a loader that
         // reads the position after a delay. Only if that also finds nothing is the page finite.
         if (!long && !excStayTried) { excStayTried = true; return tourExcursion(true, true); }
-        excSpent = true;
-        excDead = { url: location.href, h: docHeight(), n: mediaCount() };
+        excGaveNothing();
         return false;
+    }
+
+    // Spent for this slideshow, dead for this page until it grows, and one miss for the site per page.
+    function excGaveNothing() {
+        excSpent = true;
+        const first = !excDead || excDead.url !== location.href;
+        excDead = { url: location.href, h: docHeight(), n: mediaCount() };
+        if (first) growsMiss();
     }
 
     // ---- crossing to the next page
@@ -7418,7 +7467,7 @@
     let panelOpened = null;     // Undo's snapshot — see openPanel(); MUST outlive a re-render
 
     // What the user entered per site, not knobs: `Reset to defaults` leaves these alone.
-    const RESET_KEEPS = ['siteList', 'blockList', 'referrerSites', 'siteAudio', 'videoDelays'];
+    const RESET_KEEPS = ['siteList', 'blockList', 'referrerSites', 'siteAudio', 'videoDelays', 'scrollSites'];
 
     // Open/closed, the fold, scroll and position for this TAB — sessionStorage is per tab and
     // per origin, so it follows a same-site link or a refresh and dies with the tab.
@@ -8301,8 +8350,8 @@
             0, 1000, 8);
         check('tourLoadMore', 'Let a scrolling page load more',
             'Near the end, the page is scrolled to the bottom and straight back so it loads ' +
-            'the next batch. Only on sites where scrolling down by hand has been seen to add ' +
-            'pictures — learned the first time it happens.');
+            'the next batch. Only on the sites listed under Per-site fixes, which are learned ' +
+            'from your own scrolling.');
         check('tourCrossPage', 'Carry on onto the next page',
             'When the page runs out, the next one is fetched in the background and its ' +
             'pictures join the list. The page you are on is never left.');
@@ -8410,6 +8459,18 @@
                 'that area of those pages wait that long. Add a site yourself to set a wait for ' +
                 'the whole site by hand; 0 ms stops the script learning anything for it.',
             examples: 'example.com also covers www.example.com. Adding a site again replaces its entry.',
+        });
+        list('scrollSites', {
+            heading: 'Scroll the page along with the slideshow on these sites',
+            description: 'For pages that load more pictures as you scroll down. A site is added ' +
+                'when scrolling down by hand makes the ◀ ▶ widget’s count go up, and drops off ' +
+                'by itself after ' + GROWS_FORGET + ' page loads in a row where scrolling loaded ' +
+                'nothing. Elsewhere the page never moves during a slideshow.',
+            examples: 'example.com also covers www.example.com',
+            placeholder: 'e.g. example.com',
+            addCurrentLabel: '+ This site',
+            addCurrentTitle: pageHost(),
+            currentValue: function () { return pageHost(); },
         });
 
         const foot = document.createElement('div');

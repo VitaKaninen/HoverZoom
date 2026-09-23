@@ -23,7 +23,7 @@ Then when I clicked undo changes, it did not restore them."*
   snapshot **from the values it had just wiped**. The button that undoes Reset was destroyed by
   Reset. `showPanel()` is the only thing that clears it, so a fresh visit re-arms and every
   re-render (Reset, Undo, `refreshPanel()`, another tab's write) keeps the original.
-- **`RESET_KEEPS`** — `siteList`, `blockList`, `referrerSites`, and since v0.78.0 `siteAudio` —
+- **`RESET_KEEPS`** — `siteList`, `blockList`, `referrerSites`, `siteAudio` (v0.78.0), `videoDelays`, `scrollSites` (v0.143.0) —
   is carried out of `cfg` and back over `DEFAULTS`. Those are things the user set per site; there
   is no default that reconstructs them, and the ✕ per row (or the sound button) already undoes
   them one at a time. Everything else is a knob with a right answer, which is what "reset to
