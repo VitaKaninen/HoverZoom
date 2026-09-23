@@ -99,7 +99,8 @@ loses its right-hand buttons. Two cases, two answers, asked for by the user 2026
   at the bottom becomes the widget's height instead of `STATUS_TIP_H`. `fitFull()` subtracts it too.
   Shrinking is the only answer here: a window filling the height has nowhere to move.
 - **Widget higher up** → `clearWidget()`, run at the end of both branches of `clampPosition()`,
-  moves the window up or down by the smaller amount that clears the bar and keeps it whole on screen.
+  moves the window up or down by the smaller amount that clears the bar and keeps it whole on screen
+  and out of the `bottomGap()` strip — a bump down into that strip loses to a bump up.
   If neither fits it leaves it. Skipped during a drag (it would fight the pointer) and in fullscreen.
 
 ## The wheel grows a PLACED window, about the POINTER · `E22`
