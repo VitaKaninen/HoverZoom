@@ -3,7 +3,7 @@
 What the preview **window** does, as a state machine. Menus, buttons, the status bar contents and
 the loading ring are out of scope except where they change what the window itself accepts.
 
-Describes `Hover-Zoom.user.js` **v0.139.0**.
+Describes `Hover-Zoom.user.js` **v0.140.0**.
 
 **Two words the user uses:** *the widget* is the floating ◀ `n / N` ▶ box; *the slideshow* is the pinned
 preview stepping through a queue of the page's pictures. The code and `docs/` say `tour` for the slideshow.
@@ -590,7 +590,7 @@ this table is a table.
 | `E56` | A slideshow never drops an entry: one that will not resolve shows the page's own picture with the reason and a ↻, where an ordinary hover shows nothing | [`docs/TOUR.md`](docs/TOUR.md) |
 | `E57` | A zoom and a top-left corner belong to the picture they were taken on, so leaving fullscreen after a slideshow step fits the new picture and puts it at the slideshow's spot instead | [`docs/TOUR.md`](docs/TOUR.md) |
 
-| `E58` | A lazy page is made to load more by a real scroll to the bottom and straight back — an IntersectionObserver sentinel cannot be spoofed. It works through fullscreen's `overflow:hidden`, and it stops for that slideshow once one attempt returns nothing | [`docs/TOUR.md`](docs/TOUR.md) |
+| `E58` | A lazy page is made to load more by a real scroll to the bottom and straight back — an IntersectionObserver sentinel cannot be spoofed. It works through fullscreen's `overflow:hidden`, and it stops for that slideshow once one attempt returns nothing. No scroll when the bottom is already on screen, and none on a page that came back empty until it has grown | [`docs/TOUR.md`](docs/TOUR.md) |
 
 | `E59` | Which link is forward is decided by three rungs — a declared `rel=next`, the hole in a numbered pager's range, then a forward word — and **ambiguity is refused, never guessed**. A harvested entry is a detached element carrying the page it came from, so its relative URLs resolve against that page and not against this one | [`docs/TOUR.md`](docs/TOUR.md) |
 | `E60` | The slideshow is stricter than a hover, and the picture it started on is the example: a floor on the longer side as drawn (`tourMinDisplayed`, lowered to the start picture's own size when that is smaller), and a **scope** — the outermost ancestor holding the same pictures as the smallest one that holds two, climbed past every wrapper (under 8 elements of chrome and 200 characters of text). `{`/`}` move it a level; the next page is only fetched from the whole page | [`docs/TOUR.md`](docs/TOUR.md) §1a |
