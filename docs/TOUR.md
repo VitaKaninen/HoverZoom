@@ -32,8 +32,9 @@ fight that. They are deleted. Do not put nav controls back on the frame.
   NEXT ARTICLE, and a whole-page scope carried the tour onto it, harvesting its icons and sidebar
   thumbnails (a fetched page has no layout, so the size gates cannot drop them). Only a whole-page
   scope crosses pages (`tourCross`), so an article never does.
-- **Every tour picture is centred**, as large as settings allow; the widget floats over it and no
-  space is reserved (user's call). Hover placement still follows `cfg.position`.
+- **Every tour picture opens at the slideshow's remembered spot** (centre by default; drag one to
+  move it — `E64`, [`VIEWER.md`](VIEWER.md)), as large as settings allow; the widget floats over it
+  and no space is reserved (user's call). Hover placement follows `cfg.position`.
 - **The entering press advances.** Measured sizes: re-publish after every counter change
   (`twSync` → `sizeChanged`), since the Browser pane never fires `ResizeObserver`.
 - **Arrow keys** are ours while a preview or tour is up, plus → from idle (above). Forum Stumbler has

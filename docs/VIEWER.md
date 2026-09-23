@@ -166,6 +166,35 @@ A **hover** preview is deliberately not free: it is positioned by the script, so
 screen while it fits, and is only stopped from sliding a gap in at an edge once grown past the
 window.
 
+### Remembered positions · `E64`
+
+Two memories, kept apart on purpose (user's call, 2026-09-22): a preview opened beside the pointer
+to be pinned is a different job from a slideshow parked at the bottom centre.
+
+- **`tour`** — every slideshow picture: `showViewer` while `tourActive()`, every `swapViewer`, and
+  leaving fullscreen onto a different picture. Default the centre.
+- **`hover`** — only under `position: 'last'` ("Where I last put it"). Beside-the-pointer and
+  centred never read or write it.
+- **Written only by a drop** (`endDrag` → `posDropped`) of a placed window moved by a drag, and only
+  to the memory the window answers to (`posKind()`). Moving a beside-the-pointer preview out of the
+  way saves nothing. Resizes and zooms save nothing.
+- **Spec = the widgets' window anchor**: `{x:{m,o}, y:{m,o}}`, the window's start/centre/end point
+  `o` px from the viewport's same point, so a different-sized picture grows away from the edge it
+  is anchored to. A drop flush with an edge or the centre anchors THERE (a wide picture's centre can
+  never reach an outer third, so thirds alone would call a right-edge drop "centre"); otherwise the
+  nearest third with the dock's hysteresis (`usDock.zone`). An axis the picture fills, or one the
+  drag did not move, keeps the anchor it had — a sideways drag must not re-anchor the top.
+- **Snap** (`posSnap`): 8 px to each axis's start, centre and end — the corners, edge middles and
+  the middle — nearest wins, only on an axis the drag has moved, computed from the UNSNAPPED
+  position so a snap can be pulled out of. Ctrl places freely.
+- `posApply` keeps the window whole on screen when it fits; `view.anchor` remembers the spec so an
+  upgrade and a window resize re-place from it instead of keeping the centre. A hover preview still
+  goes through `clampPosition()`, so at the bottom it sits `STATUS_TIP_H` higher than the pinned drop.
+- **Storage** `hoverZoomPos` = `{tour:{sites,last}, hover:{sites,last}}`. A site gets an entry only
+  when something is dropped there; `last` is the fallback. `posPerSite` off: `last` only. The user's
+  idea of consolidating a common default and storing only exceptions was declined: ~60 bytes a site,
+  and a site matching today's default would silently follow a later change.
+
 ### The zoom cluster, and the corner anchor that makes it usable · `E34`
 
 The bar carries a slider and the zoom level, in that order, immediately left of the ⊘/AA/▶

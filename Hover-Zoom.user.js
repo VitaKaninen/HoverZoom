@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.123.0
+// @version     0.124.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -73,7 +73,8 @@
         // how to display
         maxSizeMultiple: 1.2,       // how far the frame may GROW, as a multiple of the window.
         zoomFactor: 2,              // ceiling on the opening scale; the window still fits it
-        position: 'cursor',         // 'cursor' | 'center'
+        position: 'cursor',         // 'cursor' | 'center' | 'last' (where a pinned one was last dropped)
+        posPerSite: true,           // remembered positions (slideshow, 'last') are kept per site
         fadeMs: 200,
         borderWidth: 1,
         borderColor: '#45475a',
@@ -190,6 +191,7 @@
                 plReset();
                 refreshSiteMenu();                  // the mode or the list may have changed
                 if (panelHost) openPanel();         // re-render an open panel onto fresh values
+                twRefresh();
             });
         } catch (e) { /* not all managers implement it; reloadSettings() still covers the panel */ }
     }
@@ -278,7 +280,8 @@
         saveSettings();
         refreshSiteMenu();
         refreshPanel();
-        if (!siteEnabled()) cancel();
+        if (!siteEnabled()) { if (placed) unplace(); else cancel(); }
+        twRefresh();                        // the widget goes or comes back now, not at the next load
         dbg('site toggled', { host: host, list: cfg.siteList, enabledHere: siteEnabled() });
     }
 
@@ -3299,6 +3302,7 @@
             imgW: 0, imgH: 0, frameW: 0, frameH: 0, ox: 0, oy: 0, left: 0, top: 0,
             // null until a hand resize pins the edges; resizeBy() is the only writer.
             fixedW: null, fixedH: null,
+            anchor: null,           // the remembered spot it was placed by; posApply() sets it
         };
         reflow();
 
@@ -3306,7 +3310,9 @@
 
         const ow = outerW();
         const oh = outerH();
-        if (cfg.position === 'center' || tourActive()) {
+        const kind = posKind();
+        if (kind) posApply(posLoad(kind));
+        else if (cfg.position === 'center') {
             view.left = (m.vw - ow) / 2;
             view.top = (m.vh - oh) / 2;
         } else {
@@ -3357,15 +3363,18 @@
         view.ox = view.frameW / 2 - fx * view.imgW;
         view.oy = view.frameH / 2 - fy * view.imgH;
         reflow();
-        view.left = centreX - outerW() / 2;
-        view.top = centreY - outerH() / 2;
+        if (view.anchor) posApply(view.anchor);
+        else {
+            view.left = centreX - outerW() / 2;
+            view.top = centreY - outerH() / 2;
+        }
 
         setMedia(res);
         layout();
         deferredCaption(res.url);
     }
 
-    // A DIFFERENT picture into the same window, centred. A hand-set size stays; zoom and pan
+    // A DIFFERENT picture into the same window, at the slideshow's spot. A hand-set size stays; zoom and pan
     // reset, because a pan offset means nothing carried into another picture. See TOUR.md.
     function swapViewer(res) {
         if (!view) return;
@@ -3383,8 +3392,7 @@
         resetCaption();
 
         reflow();
-        view.left = (vpW() - outerW()) / 2;
-        view.top = (vpH() - outerH()) / 2;
+        posApply(posLoad('tour'));
 
         setMedia(res);
         layout();
@@ -3490,6 +3498,97 @@
         dimEl.classList.remove('catch');
         CAP_TARGET.removeEventListener('keydown', onPinKey, true);
         cancel();
+    }
+
+    // ------------------------------------------------------------- remembered positions
+
+    // Two memories: the slideshow's, and the hover preview's when it opens 'last'. A spec is
+    // {x:{m,o}, y:{m,o}} — the window's start/centre/end point, o px from the viewport's same
+    // point, m the nearest third (with the widgets' hysteresis). See VIEWER.md.
+    const POS_KEY = 'hoverZoomPos';     // GM: { tour: { sites, last }, hover: { sites, last } }
+    const POS_CENTRE = { x: { m: 'c', o: 0 }, y: { m: 'c', o: 0 } };
+
+    function posStore() {
+        try {
+            const v = JSON.parse(GM_getValue(POS_KEY, 'null'));
+            if (v && typeof v === 'object') return v;
+        } catch (e) { console.warn('[Hover Zoom] remembered positions unreadable; using the centre', e); }
+        return {};
+    }
+
+    // This site's spot when per-site is on and it has one, else the last drop anywhere, else the centre.
+    function posLoad(kind) {
+        const k = posStore()[kind] || {};
+        return (cfg.posPerSite && k.sites && k.sites[pageHost()]) || k.last || POS_CENTRE;
+    }
+
+    function posSave(kind, spec) {
+        const st = posStore();
+        const k = st[kind] = st[kind] || {};
+        k.sites = k.sites || {};
+        if (cfg.posPerSite) k.sites[pageHost()] = spec;
+        k.last = spec;
+        GM_setValue(POS_KEY, JSON.stringify(st));
+    }
+
+    // Which memory a window opened now answers to, if any.
+    function posKind() {
+        if (tourActive()) return 'tour';
+        return cfg.position === 'last' ? 'hover' : null;
+    }
+
+    function posPt(lo, len, m) { return m === 's' ? lo : m === 'c' ? lo + len / 2 : lo + len; }
+
+    function posAxis(a, len, V) {
+        const m = a && /^[sce]$/.test(a.m) ? a.m : 'c';
+        const lo = posPt(0, V, m) + ((a && +a.o) || 0) - posPt(0, len, m);
+        return len >= V ? (V - len) / 2 : Math.max(0, Math.min(V - len, lo));
+    }
+
+    // The window placed by a spec, whole on screen whenever it fits.
+    function posApply(spec) {
+        view.left = posAxis(spec.x, outerW(), vpW());
+        view.top = posAxis(spec.y, outerH(), vpH());
+        view.anchor = spec;
+    }
+
+    // A drop flush with an edge or the centre anchors there; anywhere else, the nearest third.
+    // A wide picture's centre never reaches an outer third, so the snap has to say it.
+    function posSpec(prev) {
+        const ax = function (lo, len, V, p) {
+            if (len >= V - 1) return p || { m: 'c', o: 0 };     // filling the axis says nothing about it
+            const m = Math.abs(lo) < 0.5 ? 's' : Math.abs(lo + len - V) < 0.5 ? 'e'
+                : Math.abs(lo + len / 2 - V / 2) < 0.5 ? 'c' : usDock.zone(p && p.m, lo, len, V);
+            return { m: m, o: Math.round((posPt(lo, len, m) - posPt(0, V, m)) * 100) / 100 };
+        };
+        return { x: ax(view.left, outerW(), vpW(), prev && prev.x),
+                 y: ax(view.top, outerH(), vpH(), prev && prev.y) };
+    }
+
+    // 8 px to the window's edges and middle on each axis: the corners, the edge middles, the centre.
+    function posSnap(l, t) {
+        const one = function (v, len, V) {
+            let best = v, gap = usDock.SNAP + 0.01;
+            [0, (V - len) / 2, V - len].forEach(function (c) {
+                if (Math.abs(v - c) < gap) { gap = Math.abs(v - c); best = c; }
+            });
+            return best;
+        };
+        return { x: one(l, outerW(), vpW()), y: one(t, outerH(), vpH()) };
+    }
+
+    // A pinned window let go after a move: remembered if it answers to a memory. An axis the drag
+    // did not move keeps the anchor it had.
+    function posDropped(movedX, movedY) {
+        if (!vpW() || !vpH()) return;
+        const prev = view.anchor;
+        const spec = posSpec(prev);
+        if (prev && !movedX) spec.x = prev.x;
+        if (prev && !movedY) spec.y = prev.y;
+        view.anchor = spec;
+        const kind = posKind();
+        if (kind) posSave(kind, view.anchor);
+        dbg('window dropped', { kind: kind || '(not remembered)', spec: JSON.stringify(view.anchor) });
     }
 
     // ------------------------------------------------------------- fullscreen
@@ -3637,8 +3736,11 @@
         view.scale = swapped ? view.fitScale
             : Math.max(p.scale, minScaleFor(view.natW, view.natH));
         reflow();
-        view.left = swapped ? (vpW() - outerW()) / 2 : p.left;
-        view.top = swapped ? (vpH() - outerH()) / 2 : p.top;
+        if (swapped) posApply(posLoad('tour'));
+        else {
+            view.left = p.left;
+            view.top = p.top;
+        }
         layout();
     }
 
@@ -4710,9 +4812,13 @@
     // One place, so the mouseup path and the released-outside-the-window path cannot drift.
     function endDrag() {
         if (!drag) return;
+        const d = drag;
         drag = null;
         if (box) box.classList.remove('drag');
         applyCursor();      // the release may land with no further movement to redraw it
+        if (d.mode === 'move' && d.moved && view && placed && !fullActive()) {
+            posDropped(Math.abs(d.rl - d.sl) >= 1, Math.abs(d.rt - d.st) >= 1);
+        }
     }
 
     function onMove(e) {
@@ -4742,8 +4848,18 @@
         drag.x = e.clientX;
         drag.y = e.clientY;
         if (drag.mode === 'move') {
-            view.left += dx;
-            view.top += dy;
+            // Snapped from the unsnapped position, or a snap could never be pulled out of.
+            if (!drag.moved) {
+                drag.rl = drag.sl = view.left;
+                drag.rt = drag.st = view.top;
+                drag.moved = true;
+            }
+            drag.rl += dx;
+            drag.rt += dy;
+            // Only an axis the drag has moved snaps; a sideways drag must not pull the top to an edge.
+            const p = e.ctrlKey ? { x: drag.rl, y: drag.rt } : posSnap(drag.rl, drag.rt);
+            view.left = Math.abs(drag.rl - drag.sl) >= 1 ? p.x : drag.rl;
+            view.top = Math.abs(drag.rt - drag.st) >= 1 ? p.y : drag.rt;
             layout();       // clampPosition() keeps a grabbable strip of it on screen
         } else {
             panBy(dx, dy);
@@ -5034,6 +5150,7 @@
         const lo = minScaleFor(view.natW, view.natH);
         if (view.scale < lo) view.scale = lo;
         reflow();
+        if (view.anchor) posApply(view.anchor);     // a bottom-anchored window stays on the bottom
         layout();
     });
     const TOUR_KEYS = { ArrowRight: 1, ']': 1, ArrowLeft: -1, '[': -1 };
@@ -6951,7 +7068,7 @@
             refreshSiteMenu();
             applyLook();                    // a preview that is already up follows along
             if (view && box && box.classList.contains('on')) { reflow(); layout(); showBar(); }
-            twSync();
+            twRefresh();
         }
 
         let mount = body;
@@ -7471,15 +7588,22 @@
         act.el.addEventListener('change', syncModKey);
         syncModKey();
         const pos = pick('position', 'Opens', ' ', [
-            ['cursor', 'Beside the pointer'], ['center', 'Centred in the window']]);
+            ['cursor', 'Beside the pointer'], ['center', 'Centred in the window'],
+            ['last', 'Where I last put it']]);
         const posHint = pos.row.querySelector('.hint');
         function syncPos() {
-            posHint.textContent = pos.el.value === 'center'
-                ? 'Pin it by clicking the image under the pointer.'
-                : 'Pin it by clicking the preview.';
+            posHint.textContent = pos.el.value === 'cursor'
+                ? 'Pin it by clicking the preview.'
+                : pos.el.value === 'last'
+                    ? 'Pin it by clicking the image under the pointer, then drag it where you want it; ' +
+                      'it opens there from then on. Hold Ctrl to place it without snapping.'
+                    : 'Pin it by clicking the image under the pointer.';
         }
         pos.el.addEventListener('change', syncPos);
         syncPos();
+        check('posPerSite', 'Remember positions per site',
+            'Where a slideshow picture — or, with “Where I last put it”, a preview — was dragged is ' +
+            'kept for that site; other sites use the last place you put one. Off: one place everywhere.');
         num('hoverDelay', 'Hover delay',
             'How long the pointer rests on an image before the preview loads, in ms. ' +
             '(default: 120)', 0, 3000, 10);
