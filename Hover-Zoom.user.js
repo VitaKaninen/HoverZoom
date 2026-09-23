@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.143.0
+// @version     0.144.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -6240,10 +6240,18 @@
 
     // The page scrolls behind the preview to keep the anchor on screen, so a feed that empties
     // what is far from the viewport (Google in Firefox) mounts the next section as the tour walks.
+    // Ahead, as a reader scrolls: the picture near the top, so the page shows what comes next.
+    const FOLLOW_TOP = 0.1, FOLLOW_BAND = 0.4;      // fractions of the viewport height
     function tourFollow(el) {
-        if (!el || el.__hzBase || !el.isConnected || excAway || onScreen(el) || !growsHere()) return;
-        try { el.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' }); }
-        catch (e) { dbg('tour: could not bring the picture on screen', String(e)); }
+        if (!el || el.__hzBase || !el.isConnected || !growsHere()) return;
+        const h = vpH();
+        if (!(h > 0)) return;
+        const top = el.getBoundingClientRect().top;
+        if (top >= h * FOLLOW_TOP - 1 && top <= h * FOLLOW_BAND) return;
+        try {
+            if (docHeight() > h + EXC_EDGE_PX) window.scrollBy({ left: 0, top: top - h * FOLLOW_TOP, behavior: 'instant' });
+            else el.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' });    // an inner scroller
+        } catch (e) { dbg('tour: could not bring the picture on screen', String(e)); }
     }
 
     // Re-derive and report where the anchor is. The index and total are the only things kept
@@ -6740,33 +6748,20 @@
         return { url: url, w: w, h: h, reason: reason };
     }
 
-    // ---- making a lazy page load more, without moving what the user is looking at
-    //
-    // There is no other way. Infinite scroll is driven by an IntersectionObserver on a sentinel,
-    // which fires on a genuine viewport intersection and cannot be spoofed: a synthetic `scroll`
-    // event does not help, because the handler reads the real `scrollY` and correctly concludes
-    // nothing moved. So the viewport goes to the bottom and comes straight back. See TOUR.md §9.
+    // ---- making a lazy page load more: the page is scrolled as a reader scrolls it (tourFollow),
+    // and the batch that arrives is watched for. A loader fires on a real viewport intersection and
+    // cannot be spoofed. See TOUR.md §9.
 
     const TOUR_AHEAD = 10;          // landing this close to the end, either way, triggers a refill
     const TOUR_START_TRIES = 5;     // unshowable entries a start from the widget walks past
     const EXC_POLL_MS = 150;
     const EXC_MAX_MS = 2000;
     const EXC_COOL_MS = 3000;
+    const EXC_STEP = 0.9;           // at the wall, the page moves on this many viewports, like Page Down
 
-    const EXC_HOP_MS = 120;         // the hop's ceiling where animation frames never come
-
-    let excBusy = false, excAt = 0, excSpent = false, excAway = false;
-    let excLong = false;            // a stay at the bottom grew this page: every excursion here stays
-    let excStayTried = false;       // a hop that found nothing has had this page's one stay
+    let excBusy = false, excAt = 0, excSpent = false;
     let excDead = null;             // {url, h, n} when this page last loaded nothing; never reset
     const EXC_EDGE_PX = 2;
-
-    // Two rendering steps: the page's IntersectionObserver and scroll handlers have run by then.
-    function twoFrames() {
-        return Promise.race([sleep(EXC_HOP_MS), new Promise(function (r) {
-            requestAnimationFrame(function () { requestAnimationFrame(function () { r(); }); });
-        })]);
-    }
 
     // Wait up to EXC_MAX_MS for new media, stopping once it has stopped arriving.
     async function excWatch(before) {
@@ -6897,48 +6892,26 @@
         window.addEventListener('scroll', growsOnScroll, { passive: true });
     }
 
-    async function tourExcursion(force, stay) {
+    // Watch for the batch the page loads once following has brought its bottom on screen. At the
+    // wall (`force`) the page is scrolled on by a screen, as a reader would: never to the bottom,
+    // which skips the middle of a feed that mounts only near the viewport (Google in Firefox).
+    async function tourAskMore(force) {
         if (excBusy || excSpent || !cfg.tourLoadMore) return false;
-        if (!growsHere()) { excSpent = true; dbg('excursion skipped: this site has not been seen to load more when scrolled'); return false; }
+        if (!growsHere()) { excSpent = true; dbg('load more: not on this site, which has not been seen to load more when scrolled'); return false; }
         if (!force && Date.now() - excAt < EXC_COOL_MS) return false;
-        if (excStillDead()) { excSpent = true; dbg('excursion skipped: this page loaded nothing last time and has not grown'); return false; }
+        if (excStillDead()) { excSpent = true; dbg('load more: this page loaded nothing last time and has not grown'); return false; }
+        if (!excBottomShown()) {
+            if (!force) return false;
+            window.scrollBy({ left: 0, top: Math.round(vpH() * EXC_STEP), behavior: 'instant' });
+        }
         excBusy = true;
         excAt = Date.now();
         const before = mediaCount();
-        if (excBottomShown()) {
-            // No scroll: watching from here is already a stay at the bottom.
-            let seen;
-            try { seen = await excWatch(before); } finally { excBusy = false; }
-            dbg('excursion (the bottom is on screen: watched, did not scroll)', { was: before, now: seen.now, grew: seen.grew });
-            if (seen.grew) { growsHit('the slideshow found more'); return true; }
-            excGaveNothing();
-            return false;
-        }
-        const sx = window.scrollX || 0, sy = window.scrollY || 0;
-        const long = stay || excLong;
-        let got = null;
-        try {
-            // 'instant', not 'auto': 'auto' obeys the page's own scroll-behavior:smooth.
-            excAway = true;
-            window.scrollTo({ left: sx, top: docHeight(), behavior: 'instant' });
-            // A hop is back within a frame or two, and the loading it set off is watched from home.
-            if (long) got = await excWatch(before);
-            else await twoFrames();
-        } finally {
-            excAway = false;
-            window.scrollTo({ left: sx, top: sy, behavior: 'instant' });
-            if (tour && placed) tourFollow(tour.el);    // the tour may have moved on while we were away
-            if (long) excBusy = false;
-        }
-        if (!long) {
-            try { got = await excWatch(before); } finally { excBusy = false; }
-        }
-        dbg('excursion' + (long ? ' (stayed at the bottom)' : ' (hop)'), { was: before, now: got.now,
-            grew: got.grew, ms: Date.now() - excAt, returnedTo: sx + ',' + sy });
-        if (got.grew) { if (long) excLong = true; growsHit('the slideshow found more'); return true; }
-        // The hop set nothing off: once per page, try staying down there, for a loader that
-        // reads the position after a delay. Only if that also finds nothing is the page finite.
-        if (!long && !excStayTried) { excStayTried = true; return tourExcursion(true, true); }
+        let seen;
+        try { seen = await excWatch(before); } finally { excBusy = false; }
+        dbg('load more: watched the bottom of the page', { was: before, now: seen.now, grew: seen.grew, atWall: !!force });
+        if (seen.grew) { growsHit('the slideshow found more'); return true; }
+        if (!excBottomShown()) return false;        // a screen further on at the next press
         excGaveNothing();
         return false;
     }
@@ -7145,7 +7118,7 @@
     // Scroll first, then the next page: a page that will load more in place is cheaper, and it
     // keeps everything in one document where the layout gates still apply.
     async function tourMore(force) {
-        if (await tourExcursion(force)) { if (tour && tour.had) tourAdopt(tour.had); return true; }
+        if (await tourAskMore(force)) { if (tour && tour.had) tourAdopt(tour.had); return true; }
         return await tourCross();
     }
 
@@ -8349,9 +8322,9 @@
             'Longer side as drawn, in px. Starting on a smaller one lowers it. (default: 128)',
             0, 1000, 8);
         check('tourLoadMore', 'Let a scrolling page load more',
-            'Near the end, the page is scrolled to the bottom and straight back so it loads ' +
-            'the next batch. Only on the sites listed under Per-site fixes, which are learned ' +
-            'from your own scrolling.');
+            'The page scrolls along ahead of the slideshow, as you would scroll it, so it loads ' +
+            'the next batch before you reach the end. Only on the sites listed under Per-site ' +
+            'fixes, which are learned from your own scrolling.');
         check('tourCrossPage', 'Carry on onto the next page',
             'When the page runs out, the next one is fetched in the background and its ' +
             'pictures join the list. The page you are on is never left.');

@@ -56,7 +56,7 @@ fight that. They are deleted. Do not put nav controls back on the frame.
 
 A *tour* is next/previous navigation through the page's pictures, driven from a pinned preview
 window. Each step swaps a different picture into the same window at the slideshow's spot, and the
-page scrolls behind it to keep the current picture on screen (§9a).
+page scrolls along ahead of it, on sites that load more as they scroll (§9).
 
 **No line numbers into `Hover-Zoom.user.js` appear below, deliberately.** They were here, taken at
 v0.79.0, and v0.80.0–v0.85.0 moved the probe region ~110 lines; a plan this long outlives any of
@@ -147,7 +147,7 @@ list length changes under you.
   by `left`. A plain `(top, left)` sort scrambles a ragged grid where a neighbour sits a few px
   lower. **Never let the row's extent grow as items join** (the v0.100–v0.135 band): on masonry
   (Google Images' columns since 2026) overlaps chain into bands taller than the viewport, the tour
-  walks down one column then jumps back up to the next, and with the page following (§9a) the page
+  walks down one column then jumps back up to the next, and with the page following (§9) the page
   scrolls up and down. Measured on Google, 199 pictures: band 35 upward jumps >150 px (max 624),
   anchored 3 (max 178).
 - Ties break on document order.
@@ -218,7 +218,7 @@ Consequences that follow from that rule and are intended:
   from the start picture when a virtualised feed destroys it. `tour.level` survives that.
 - **The next page is only fetched from a scope that is the whole page** (`tourCross()` refuses,
   without setting `crossSpent`). A tour confined to one post has no business on page 2; `}` up to
-  the whole page and ▶ at the wall crosses as before. The excursion (§9) still runs — it is
+  the whole page and ▶ at the wall crosses as before. Loading more (§9) still runs — it is
   invisible and a scoped infinite grid benefits.
 - Harvested entries join the list only while the scope is the whole page, for the same reason.
 
@@ -581,158 +581,76 @@ symptom of forgetting is silence.
 
 ---
 
-## 9. Loading more of the page — BUILT, v0.98.0
+## 9. Loading more of the page — rebuilt v0.144.0: the page is scrolled as a reader scrolls it
 
-Measured on `test-pages/infinite-scroll.html`, an IntersectionObserver-driven feed built for this:
-three excursions grew it 18 → 36 → 54 → 72 pictures at **~490 ms each**, the counter following
-each time, and `window.scrollY` read 0 at every step. A fourth found nothing in 2.1 s and set the
-exhausted flag; ▶ at 72/72 then costs nothing at all.
+**The rule (user's design, 2026-09-23):** a lazy page loads more because the page scrolls along
+*ahead* of the slideshow, the way a person scrolling it would — never by a jump. `tourFollow()`
+keeps the current picture in the top part of the viewport (its top between `FOLLOW_TOP` 10 % and
+`FOLLOW_BAND` 40 %; outside that, `scrollBy` puts it back at 10 %), so the screen always shows
+what comes next and the page's own loader fires about a screen before the last picture.
+`tourAskMore()` does no scrolling of its own: once the bottom is on screen (`excBottomShown()`) it
+watches (`excWatch`, ≤ 2 s) for the batch; before that it returns `false` and following gets there.
+At the wall (`force`, ▶ on the last picture) with the bottom still off screen, it scrolls on by
+`EXC_STEP` (0.9 viewport), like Page Down, and the next press goes a screen further.
 
-**§15's open question is answered: programmatic scrolling works straight through `lockScroll()`'s
-`overflow:hidden`.** Scrolled to 400 and back with both `documentElement` and `body` at
-`overflow:hidden` and `scrollbar-width:none`, and the excursion grew the page 36 → 54 *while
-fullscreen*. No unlock/relock dance is needed, and none was added.
+**Why not the old jump (v0.98.0–v0.143.0: to the bottom and straight back, "the excursion"/"the
+hop"/"the stay").** It skipped the middle: Google Images in Firefox/LibreWolf **mounts each
+50-result batch only when the viewport comes near it**, so after a jump batches 2–5 were empty
+`div`s of ~2,300 px and the counter read the top 50 and the bottom 50 (user, 2026-09-23). Following
+was added in v0.134.0 to mount them, and it only ever scrolled once the picture was *off* screen and
+then *centred* it — so it trailed the slideshow, and at the last picture on Google left the bottom
+~490 px below the screen with nothing loading. That lag is what the jump had been covering for.
+Do not bring a jump back to buy lead time; move `FOLLOW_*` instead.
 
-One departure: the plan wanted the ▶ "load more" affordance to surface separately. It did not need
-to. **▶ at the wall simply *is* the request** — `tourNav` finds nothing ahead, runs an excursion,
-and steps into what arrives — so there is no second control to explain.
+**Measured in real Chrome, 2026-09-23, jump off, following ahead** (one press per 3.5 s, widget
+start at #1, Google Images "hot air balloon", viewport 911 px): the next batch arrived at **step 86,
+14 before the end** (user's bar: never within 10); 100 → 200, carried on, page moved only downward
+in small steps. The user's rule: the picture being viewed stays in the top half, and the widget
+never gets within 10 of the end before more arrives. At 3 presses/s the batch landed at step 93 —
+see TESTING.md on pace. ← from nothing (lands on #100, bottom on screen): batch 1.1 s later,
+→ gave 101/200. Bing: the second batch loaded at step 29 (41 → 84); Bing auto-loads only two
+batches, then shows a "See more images" button no scroll passes, so its slideshow ends there.
 
-**The ends close the slideshow (v0.126.0, `E67`, user's call).** ◀ on the first picture and ▶ on the
-last `tourQuit()` (= `dismiss()`), so neither button is ever dim while pictures exist. ▶ goes through
-`tourWall()`: `tourMoreOnce(true)` (one shared request, so a press lands on a refill already running;
-`force` skips the excursion's cooldown), step if it grew, quit only if `tourExhausted()` — a `false`
-from a busy or cooling source is not an end. A held key (`repeat`) never quits. ← with nothing open
-is `tourFromStart(-1)`: the last picture loaded now, and ▶ from there loads more as usual.
+- **Only on a learned host** (`growsHere()`); elsewhere the page never moves during a slideshow
+  (v0.142.0, user: "disable both until we need them"). `cfg.scrollSites` is the list — panel,
+  Per-site fixes, ✕ per row, kept by Reset (v0.141.0–v0.142.0 kept it in GM key
+  `hoverZoomGrowsOnScroll`; `growsMigrate()` moves it once). A host is learned when the **user**
+  scrolls (wheel/key/touch/press within 1 s before the `scroll`), is within two viewports of the
+  bottom, and the widget's count (`growsCount()` = `twTotal`'s derivation, not `mediaCount()`: ads
+  and pixels move the raw count) rises within 0.6 s or 2.6 s. The user-input test excludes our own
+  scrolls and scroll restoration. No built-in list of feeds, by design: the first slideshow on
+  Google Images ends at 100 until the user has scrolled once.
+- **Not a one-way gate (v0.143.0, user).** `hoverZoomScrollMisses` {host: n}: a watch at the
+  bottom that finds nothing counts one miss per page URL (`excGaveNothing`); `GROWS_FORGET` (5) in
+  a row removes the host. A batch found, or a hand scroll that raises the count, clears the run.
+  A site with feed and finite pages (Reddit feed vs a post) may be forgotten and relearned — fine.
+- **A page that loaded nothing** is `excDead {url, docHeight, mediaCount}` (never reset, unlike
+  `excSpent`, which is per slideshow); asking again waits until the page has grown.
+- **Cooldown** `EXC_COOL_MS`, or a watch re-fires on every press while content loads.
+- Scrolls are `behavior:'instant'`: `'auto'` obeys a page's `scroll-behavior:smooth`.
+- **Programmatic scrolling works through `lockScroll()`'s `overflow:hidden`** (measured v0.98.0,
+  fullscreen), so fullscreen needs nothing extra — and `.dim.full` hides the page anyway.
+- `twStarting` guards the page-scroll `cancel()`, since a start from the widget is not yet placed;
+  a scroll WE make fires `mouseout`/`mouseover` under a still pointer (CLAUDE.md trap).
+- **Virtualised feeds** (Twitter, Reddit) keep ~20 posts in the DOM; only a moving viewport reaches
+  further, which following now is.
 
-## 9a. Why it has to be a real scroll
+**▶ at the wall *is* the request, and the ends close the slideshow** (v0.126.0, `E67`).
+`tourWall()`: `tourMoreOnce(true)` (one shared request, so a press lands on one already running;
+`force` skips the cooldown), step if it grew, quit only if `tourExhausted()` — a `false` from a busy
+source, or from "scrolled on, not at the bottom yet", is not an end. A held key never quits. The wall
+also re-reads the page first (`tourAdopt(tour.had)`), for a batch that landed after the watch ended.
 
-**Since v0.142.0 only on a learned host (`growsHere()`, §9 "Off until the site has earned it")** —
-elsewhere the page never scrolls, which is the pre-v0.134.0 rule; following existed only to mount
-lazy batches, so a page that loads at once gains nothing from it (user: "disable both until we
-need them"). **Reversed v0.134.0 (user's call): the page follows the tour.** `tourFollow()` (from
-`tourRemember`) scrolls the anchor to the centre, `behavior:'instant'`, only when it is off screen;
-the page stays where the tour ended. Was: "the page never scrolls". Why it changed: Google Images
-in Firefox/LibreWolf **mounts each 50-result batch only when the viewport comes near it** (measured
-after an excursion: 300 results, batches 2–5 were empty `div`s of ~2,300 px each, because the jump
-to the bottom skipped them; once mounted they stay — the user scrolled the page and nothing ever
-unloaded). A still page never lists them — the counter sat at 100/100 on picture #300. Following
-mounts the anchor's neighbourhood, which also answers the virtualised-feed limit below.
-`twStarting` guards the page-scroll `cancel()`, since a start from the widget is not yet placed.
-Scrolls use `'instant'`: `'auto'` obeys the page's own `scroll-behavior:smooth`.
+The list itself needs no scrolling for what is already in the DOM: `querySelectorAll` sees the whole
+document and `collectCandidates` reads `data-src`/`data-srcset`.
 
-The list already handles this — `querySelectorAll` sees the whole document regardless of viewport,
-and `collectCandidates` reads `data-src`/`data-srcset`, so below-the-fold lazy images
-usually resolve to a real URL without ever being displayed. On the user's Google Images case ~50
-results are in the DOM at load while only 20 are visible; all 50 are in the tour immediately.
-
-### The hard constraint
-
-**Without moving the viewport there is no reliable way to make a lazy page load more.** Most modern
-infinite scroll uses an IntersectionObserver on a sentinel, which fires on genuine viewport
-intersection and cannot be spoofed. Synthetic `scroll` events do not help — the handler reads the
-real `scrollY` and correctly concludes nothing moved.
-
-Worse on **virtualised** feeds (Twitter, Reddit, most modern infinite feeds): they have already
-destroyed the pictures above and below the viewport, keeping ~20 posts in the DOM. A non-scrolling
-tour there reaches maybe 10–30 pictures. That is not fixable without moving the viewport. Ordinary
-pages — forums, imgur, boorus, blogs, image hosts, search results — keep everything in the DOM and
-are fully reachable.
-
-### The excursion
-
-Fires **automatically on landing within 10 of the end, in either direction, including a start from
-the widget with ←** (v0.133.0: ← from nothing, Esc, ← again loads a batch each time), so the refill overlaps with
-pictures the user is still looking at rather than stalling them at the wall.
-
-1. Record scroll position.
-2. Scroll to the bottom.
-3. Bounded poll (~150ms, up to ~2s) for new nodes.
-4. Scroll back to the exact prior position.
-5. Re-derive; new entries join in document order and feed the preload queue with no extra plumbing.
-
-- **Cooldown**, or it re-fires on every press while content loads.
-- **An exhausted flag** — if an excursion returns nothing new, stop trying. A finite page must not
-  scroll-and-return on every press near the end.
-- **Off until the site has earned it (v0.141.0, user's design).** Most pages load everything at
-  once, so the excursion (and `tourFollow`, §9a) runs only on hosts in `cfg.scrollSites` — a list
-  in the panel under Per-site fixes, ✕ per row, kept by Reset. (v0.141.0-v0.142.0 kept it in GM key
-  `hoverZoomGrowsOnScroll`; `growsMigrate()` moves it in once.) A host is learned when the **user** scrolls (a wheel/key/touch/press within 1 s before
-  the `scroll`), reaches within two viewports of the bottom, and the widget's count
-  (`growsCount()` = `twTotal`'s derivation) rises within 0.6 s or 2.6 s. The count, not
-  `mediaCount()`: ads and pixels change the raw count. The user-input test is what excludes our
-  own scrolls (hop, `tourFollow`) and scroll restoration on reload.
-  **It is not a one-way gate (v0.143.0, user: false positives must be able to leave).** Evidence
-  runs both ways, in `hoverZoomScrollMisses` {host: n}: an excursion that comes back empty counts
-  one miss per page URL (`excGaveNothing`); `GROWS_FORGET` (5) in a row removes the host. Any
-  excursion that grows the page, or a hand scroll that raises the count again, clears the run.
-  A site with both feed and finite pages (Reddit: feed vs a post) may be forgotten after five
-  posts and relearned on the next hand scroll through a feed — acceptable, it self-corrects.
-  Measured in real Chrome, v0.143.0: Google Images unlearned → ← opens 100/100, page still; four
-  wheel scrolls → count 100 → 200, learned; ← → follows to #200, → gives 201/300. Wikipedia
-  (27 pictures) never moved. Bing Images learned at 47 → 90; it auto-loads only two batches and
-  then shows a "See more images" button no scroll passes, so its slideshow ends there correctly
-  (one miss, reset by the next page's hit). Reddit cannot be opened by the Chrome extension. No built-in list of known
-  feeds, by design: the first slideshow on Google Images ends at 100 until the user scrolls once.
-  **Test note:** a hidden Browser pane delivers no `scroll` events; dispatch `new Event('scroll')`
-  by hand, and append whole posts (`#post-1` clones) to `forum-thread.html`, since single `<img>`s
-  added outside a post are not in the widget's count.
-- **Only scroll where it can matter (v0.140.0, user: "it does it on every page").** Bottom already
-  on screen (`excBottomShown()`: short page, or already there) → no scroll, just `excWatch` — its
-  loader has fired, and quitting without the watch would close the slideshow on a batch in flight.
-  A page that came back empty is remembered as `excDead {url, docHeight, mediaCount}` (never
-  reset, unlike `excSpent`); a later slideshow skips the excursion until the page has grown. So a
-  long finite page scrolls once per page load, a short one never. There is no way to tell an
-  infinite page from a finite one *without* asking once.
-- Scroll with `behavior:'instant'` (§9a): `'auto'` obeys a page's own `scroll-behavior:smooth` and
-  turns every excursion into a slow animation.
-
-### The hop — v0.131.0
-
-The excursion returns after two animation frames (`twoFrames()`, capped at `EXC_HOP_MS` where
-frames never come) and watches for new media **from home**: an IntersectionObserver or a
-scroll-event loader has fired by then, and its fetch lands wherever the viewport is. The old
-2 s stay at the bottom was visible and read as a jarring jump. A hop that loads nothing is
-followed by the old stay, for a loader that reads the position after a debounce — **once per page**
-(`excStayTried`, never reset). If the stay grows the page, `excLong` sticks and every excursion there
-stays; if not, `excSpent` for this tour. So a finite page shows one stay, on its first tour.
-`excSpent` alone resets per tour (`tourEnd`), which until v0.139.0 made the stay repeat on every
-tour (measured on `forum-thread.html`: hop + 2 s stay each time). Measured on Google Images in real Chrome: away 30–34 ms,
-100 → 200 → 300 results.
-
-**A feed appends each batch as a SIBLING block** (Google Images: 100 per block under one parent).
-The tour's scope is the first block, so the batch landed outside it: counter stuck at /100, the
-wall found `tourExhausted()` (scoped ⇒ no cross-page) and quit, while the idle widget, counting
-the whole page, said 100+. `tourAdopt()` fixes it: after an excursion grows the page, if no new
-picture is inside the scope, widen to the nearest ancestor holding new ones — only when that
-ancestor holds nothing else that was already on the page (so a sidebar is never pulled in).
-
-**A tour started from the widget (`mainOnly`) re-derives its scope on every press** as
-`tourCommon(mainPics(...))` — the same derivation the idle widget counts — so it never needs
-adopting. Fixing it at start was the LibreWolf bug: batches arrive there because the page
-*follows* the tour, not from an excursion, so they were already in any snapshot taken at the
-excursion, counted as stray, and the tour ended at 50 while the widget (after close) said 150.
-`{`/`}` clear `mainOnly` and fix the scope. For a tour pinned from a hover, `tour.had` is taken at
-`tourStart`, and `tourGrow` runs `tourAdopt` near the end without waiting for an excursion.
-
-**The return goes to the tour, not to the saved position.** The tour keeps stepping during the
-2 s stay; returning to the pre-excursion `scrollY` put the page back where the tour *was*, and the
-next step's `tourFollow` scrolled down again (user saw it as up-then-down). So the `finally`
-restores the position and then `tourFollow(tour.el)` in the same task (no paint between), and
-`tourFollow` does nothing while `excAway` (at the bottom), or it would pull the page off the loader.
-
-**The wall looks once more before quitting.** In LibreWolf a batch can land seconds after the stay
-stopped watching; the excursion then marks the page spent and ▶ at the end quit while 100 more
-pictures sat there. `tourWall()` now runs `tourAdopt(tour.had)` (the page's pictures when the
-tour started) and steps if the list got longer.
-
-### Fullscreen
-
-Fullscreen is the **easy** case. `borderPx()` returns 0 and `fitFull()` sizes to the
-screen, so the frame is always the whole viewport: every picture
-re-fits, and the controls are stationary because the frame never changes size. Nothing extra.
-
-Excursions are better there too — `.dim.full` blacks the page out completely, so the scroll is
-literally invisible rather than merely subtle.
+**A feed appends each batch as a SIBLING block** (Google Images: 100 per block under one parent), so
+a scope fixed at the first block misses it. `tourAdopt()` widens the scope to the nearest ancestor
+holding the new pictures, only when that ancestor holds nothing else already on the page (no
+sidebar pulled in). **A tour started from the widget (`mainOnly`) re-derives its scope on every press**
+(`tourCommon(mainPics(...))`, the idle widget's derivation), so it never needs adopting; fixing it at
+start ended LibreWolf's tour at 50 while the widget said 150. `{`/`}` clear `mainOnly`. For a tour
+pinned from a hover, `tour.had` is taken at `tourStart` and `tourGrow` adopts near the end.
 
 ---
 
@@ -836,7 +754,7 @@ The keys in `DEFAULTS`. Remember the hoisting trap in `../CLAUDE.md`: every
 | `tourWindow` | `12` | how many entries to keep buffered ahead |
 | `tourWorkers` | `6` | concurrent preload resolves |
 | `tourScrubRate` | `5` | max steps/sec while an arrow is held |
-| `tourLoadMore` | `true` | the scroll excursion |
+| `tourLoadMore` | `true` | scrolling along ahead so a feed loads more (§9) |
 | `tourCrossPage` | `true` | harvest the next page in the background |
 
 Retry timings (5s stall, 4 attempts, 15s ceiling) apply to all hovers, not only tours, and are

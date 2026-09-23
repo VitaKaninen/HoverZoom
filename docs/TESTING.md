@@ -77,7 +77,7 @@ ancestor-link candidate ever comes back missing on a shadow-DOM site.
   Constructing the site's markup with its real cross-origin URLs inside `test-page.html` at
   runtime exercises the entire pipeline — cover walk, `UPGRADES`, the video probe — against the
   actual files. That is how gifwow was verified.
-- **`test-pages/infinite-scroll.html` is the tour's excursion fixture** (v0.98.0). An
+- **`test-pages/infinite-scroll.html` is the tour's load-more fixture** (v0.98.0; a hidden Browser pane fires no IntersectionObserver, so it only works while the pane is shown). An
   IntersectionObserver on a sentinel appends the next batch, which is the shape every real
   infinite feed uses and the reason a synthetic `scroll` event cannot make one load more.
   `?batches=N` caps the growth so the exhausted flag has something to hit, and every tile is a
@@ -189,9 +189,14 @@ ancestor-link candidate ever comes back missing on a shadow-DOM site.
   as the blank-screenshot and zero-rAF problems. **Call `resize_window` to pin an emulated
   viewport before measuring any geometry**, and sanity-check `clientHeight` in the same call as
   the measurement rather than trusting it.
-- **The user's real Chrome (the `claude-in-chrome` tools) runs the manager's INSTALLED copy, not the
-  file on disk** — an edit is not live there until the manager updates it (checked 2026-09-23: disk
-  at v0.138.0, the log said v0.137.0). Read the version off the log before testing a fix: on any page,
+- **Step a slideshow in real Chrome at a person's pace — one press per 3–5 s, and few runs.** Each
+  step makes the preloader fetch full-size originals ahead (3–10 s each to resolve), so 3 presses/s
+  saturates the user's connection and the preview sits on one picture while the index races on.
+  The index still drives following and loading, so scroll results hold; any timing at the END of a
+  list (did the batch arrive before the wall?) is an artefact at that speed. (2026-09-23, user.)
+- **The user's real Chrome (the `claude-in-chrome` tools) now tracks the file on disk** (user,
+  2026-09-23; an uncommitted edit was live there the same day). Before that it ran the manager's
+  installed copy (disk v0.138.0, log v0.137.0). Read the version off the log before testing a fix: on any page,
   `document.dispatchEvent(new CustomEvent('hover-zoom:debug',{detail:true}))` turns the log on and
   prints it. **The test page ALSO loads its own copy** — two hosts, two previews. Silence the page's copy first:
   `localStorage.setItem('hoverZoomSettings', JSON.stringify({siteMode:'blacklist',
