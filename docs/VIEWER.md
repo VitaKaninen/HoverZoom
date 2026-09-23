@@ -173,8 +173,8 @@ to be pinned is a different job from a slideshow parked at the bottom centre.
 
 - **`tour`** — every slideshow picture: `showViewer` while `tourActive()`, every `swapViewer`, and
   leaving fullscreen onto a different picture. Default the centre.
-- **`hover`** — only under `position: 'last'` ("Where I last put it"). Beside-the-pointer and
-  centred never read or write it.
+- **`hover`** — only under `position: 'last'` ("Where I last put it"). Beside-the-pointer never
+  reads or writes it.
 - **Written only by a drop** (`endDrag` → `posDropped`) of a placed window moved by a drag — see
   the threshold below — and only to the memory the window answers to (`posKind()`). Moving a beside-the-pointer preview out of the
   way saves nothing. Resizes and zooms save nothing.
@@ -193,6 +193,8 @@ to be pinned is a different job from a slideshow parked at the bottom centre.
   an axis is saved only when the drag moved it at least `POS_MOVE_MIN` (40 px) AND the window has
   `POS_ROOM_MIN` (80 px, or 10% of the window) of spare room on it. A picture nearly the window's
   size is janky to position, and nudging it must not overwrite the default (user's call).
+- **A slideshow step re-reads the memory** (`swapViewer` → `posLoad('tour')`), not `view.anchor`,
+  so a drop too small to be remembered lasts until the next step and no longer.
 - `posApply` keeps the window whole on screen when it fits; `view.anchor` remembers the spec so an
   upgrade and a window resize re-place from it instead of keeping the centre. A hover preview still
   goes through `clampPosition()`, so at the bottom it sits `STATUS_TIP_H` higher than the pinned drop.
@@ -1164,8 +1166,8 @@ of the frame, and the strip does the same.
 
 **It is derived, not chosen.** `grabBand()` is the same `max(CORNER_REACH, RESIZE_IN + MOVE_BAND,
 chrome() + borderWidth)` that `hitRegion()` tests, so raising the frame margin widens the clearance
-instead of burying the slider. At the defaults that is 24 px, which puts `barMinW()` at 274 px for
-a picture and 298 px for a clip.
+instead of burying the slider. At the defaults that is 24 px, which puts `barMinW()` at 288 px for
+a picture and 312 px for a clip (five buttons since the bar's ✕, `E68`).
 
 **It reads `chrome()`, the SETTING, not `chromeThickness()`, the setting clamped to the frame.**
 `barMinW()` feeds `minFrameW()` feeds `reflow()`, which is what sets `frameW` — asking about the

@@ -45,14 +45,14 @@ needs. **Opening all five defeats the point**; if a task genuinely spans two, re
 | finding the original — URL rules, linked pages, imgur, video previews, the loading ring | [`docs/RESOLVER.md`](docs/RESOLVER.md) |
 | the settings panel, stored settings, the manager's menu | [`docs/SETTINGS.md`](docs/SETTINGS.md) |
 | the test page, the `debug` log, the Browser pane's many lies | [`docs/TESTING.md`](docs/TESTING.md) |
-| the tour — next/previous navigation through a page's pictures | [`docs/TOUR.md`](docs/TOUR.md). All built, v0.96.0–v0.100.0 (§7 in v0.88.0–v0.89.0, now in [`docs/RESOLVER.md`](docs/RESOLVER.md)); §1a is the scope — what a tour leaves out that a hover would show |
+| the slideshow (`tour` in the code) and the ◀ ▶ widget that starts it | [`docs/TOUR.md`](docs/TOUR.md) — its first lines give the user's two words, *slideshow* and *widget*. Built v0.96.0–v0.100.0, reworked around the widget v0.120.0–v0.139.0; §1a is the scope — what a slideshow leaves out that a hover would show |
 | any banner-gate threshold | [`banner-test-sites.md`](banner-test-sites.md) — ~40 live pages measured in two browsers; every number in the gate sits next to a row |
-| the tour widget's position, or any floating widget shared with Forum Stumbler / RNFP | [`docs/WIDGET-DOCK.md`](docs/WIDGET-DOCK.md) — the shared `dock/us-dock.js`; never edit a synced copy |
+| the widget's position, or any floating widget shared with Forum Stumbler / RNFP | [`docs/WIDGET-DOCK.md`](docs/WIDGET-DOCK.md) — the shared `dock/us-dock.js`; never edit a synced copy |
 | the zoom **percentage** — what it counts, and why it once moved with browser zoom (fixed in v0.72.0) | [`docs/ZOOM-UNITS.md`](docs/ZOOM-UNITS.md) |
 | the user cited an ID — `S05`, `E22`, `T17`, `P4` | [`INTERACTION.md`](INTERACTION.md) says what it is in one line; then `grep -rn "E22" docs/` for the argument |
 
-**Find code by name, not by reading the file.** `Hover-Zoom.user.js` is ~4,800 lines, and a
-whole-file read costs ~58k tokens. `grep -n` for the function, then read the range around it.
+**Find code by name, not by reading the file.** `Hover-Zoom.user.js` is ~8,400 lines, and a
+whole-file read costs ~100k tokens. `grep -n` for the function, then read the range around it.
 
 ### Keeping this current
 
@@ -219,8 +219,8 @@ path has been touched twice ever, both times in 2021.
 *child* of it — capture descends from the ancestor, so those two run first and their
 `stopPropagation()` keeps the child's own handlers from ever firing. Found on the X button, which
 looked correct, hovered correctly, and did nothing. Both handlers now `return` early on
-**`isBoxControl(e.target)`**, which is the one list of exempt controls — just the ⊘ now that the
-⋮ button is gone (v0.12.0) and the X with it (v0.34.0). Any new control placed inside the box
+**`isBoxControl(e.target)`**, which is the one list of exempt controls — the bar's buttons, both ✕, the ⊘
+popover, the zoom cluster and the video strip. Any new control placed inside the box
 goes in there — it is not optional, and the symptom is silence. Found 2026-09-03 in browser testing; nothing
 static catches it — `node --check` passes and the markup is fine.
 
@@ -230,10 +230,12 @@ static catches it — `node --check` passes and the markup is fine.
 
 ```bash
 node --check Hover-Zoom.user.js     # syntax
-node test-resolver.js               # 330 assertions: the pure URL and video-link logic, the
+node test-resolver.js               # 339 assertions: the pure URL and video-link logic, the
                                     # banner gate's shape test against every measured page in
                                     # banner-test-sites.md, the tour's next-page detector, the
                                     # learned wait's arithmetic and the captcha gate
+node dock/test-dock.js               # the shared widget dock's layout and drops
+node dock/sync-dock.js --check      # the dock copy in all three scripts matches (reads the siblings)
 python make-test-images.py          # regenerate fixtures into test-images/
 ```
 

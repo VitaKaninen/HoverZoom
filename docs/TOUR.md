@@ -1,12 +1,18 @@
 # The tour — next/previous navigation through a page's pictures
 
-**Status: BUILT, v0.96.0-v0.99.0** (§7 earlier, in v0.88.0-v0.89.0). Every section of this plan
-is now code. It is kept as the reasoning behind the shape, not as a to-do list; where the build
-departed from the plan the section says so, and §15 lists what is still only a guess.
+**Vocabulary.** The user says **the slideshow** (the pinned preview stepping through a queue of the
+page's pictures) and **the widget** (the floating ◀ `n / N` ▶ box that starts it). The code and these
+notes say `tour`; every user-facing string says *slideshow* or *widget* (settled 2026-09-23).
 
-The live account of what the code does is `INTERACTION.md` `S25`, `S26`, `T29`-`T39`, `E54`-`E60`, `E63`.
+**Status: BUILT, v0.96.0-v0.99.0; reworked v0.120.0-v0.139.0** around the widget. Kept as the
+reasoning behind the shape; where the build departed from the plan the section says so, and §15
+lists what is still only a guess. Section numbers are cited from code comments, so a deleted section
+leaves a gap rather than a renumbering (§3, §4, §12, §13 went with the in-window nav group).
 
-## The tour widget — BUILT, v0.120.0. Supersedes §2's anchored corner, §3 and §4's nav group
+The live account of what the code does is `INTERACTION.md` `S25`, `S26`, `T29`-`T40`, `E54`-`E60`,
+`E63`, `E64`, `E67`.
+
+## The widget — BUILT, v0.120.0. Replaced the in-window nav group
 
 ◀ ▶ used to live inside the frame, whose size changes per picture, so every step moved them; the
 relocation, the anchored corner, the two-press entry and the nav-driven size floors all existed to
@@ -48,9 +54,9 @@ fight that. They are deleted. Do not put nav controls back on the frame.
 - **Position memory** (`DOCK_KEY`): per site, falling back to the last drop anywhere; first run
   attaches on top of Forum Stumbler's bar, or the window's bottom-right when it is absent.
 
-A *tour* is next/previous navigation through every picture on the page, driven from a pinned
-preview window. The window stays put; the page does not move; each step swaps a different picture
-into the same frame.
+A *tour* is next/previous navigation through the page's pictures, driven from a pinned preview
+window. Each step swaps a different picture into the same window at the slideshow's spot, and the
+page scrolls behind it to keep the current picture on screen (§9a).
 
 **No line numbers into `Hover-Zoom.user.js` appear below, deliberately.** They were here, taken at
 v0.79.0, and v0.80.0–v0.85.0 moved the probe region ~110 lines; a plan this long outlives any of
@@ -234,24 +240,15 @@ Three functions now put media in the window, and they are not interchangeable:
 
 | Function | Used when | Keeps |
 |---|---|---|
-| `showViewer()` | opening a new window | nothing; positions from the pointer, fades in |
+| `showViewer()` | opening a new window | nothing; positions from the pointer or a remembered spot (`E64`), fades in |
 | `upgradeViewer()` | a better version of **the same** picture arrived | zoom and pan — you stay on the same spot |
-| **`swapViewer()`** — new | a **different** picture, same window | position, and the hand-set size if there is one |
+| **`swapViewer()`** | a **different** picture, same window | the hand-set size if there is one; placed at the slideshow's spot |
 
 `swapViewer()` resets `scale` to `fitScale` and recentres `ox`/`oy` — carrying a pan offset into a
 different picture is meaningless. Borrow the centre-preserving arithmetic from `upgradeViewer()`.
 
 It must also update `active` and `activeShown`, or ⊘ blocks the wrong image and unpinning
 misbehaves.
-
-### The anchored corner
-
-**The bottom-right corner of the window does not move during a tour.** The nav buttons live at the
-bottom-right of the strip, so pinning that corner keeps them under the pointer across every swap.
-
-Capture `right = view.left + outerW()` and `bottom = view.top + outerH()` before the swap; after
-`reflow()` recomputes the frame, set `view.left = right - outerW()` and
-`view.top = bottom - outerH()`. `clampPosition()` still runs after.
 
 ### Growing and shrinking — already free
 
@@ -260,105 +257,10 @@ new code: `view.fixedW`/`fixedH` are null until a hand resize, `resizeBy()` is t
 writer, and `reflow()` already branches on them. `swapViewer()` calls `reflow()` and gets
 the right answer either way.
 
-### Size floors
+### The frame during a tour
 
-- **Width is already floored.** `reflow()` floors `frameW` at `minFrameW()` → `barMinW()` when
-  placed, and centres a narrower picture inside it. Small images letterbox rather than
-  shrinking the controls.
-- **Height is not.** `frameH` floors at `MIN_FRAME` (48), while the strip hides below `VCTL_MIN_H`
-  (110). A short image mid-tour would make the nav buttons vanish. Add a height floor during a
-  tour.
-- **One deliberate decision reverses.** The comment above the bar metrics constants says the strip's metrics
-  intentionally never reach `btnGutter()`, `barMinW()` or `bottomGap()` — floating it means it
-  reserves nothing. That was right for optional video controls. It is wrong once the strip holds
-  the only mouse route to next/prev: `barMinW()` must account for the strip's width when nav is
-  present, or a narrow frame clips the buttons off.
-- **Cap the frame at the viewport during a tour.** `maxSizeMultiple` defaults to 1.2 (`growBox()`), so a frame can exceed the viewport; anchored bottom-right, a large picture would then
-  run off the top-left and be clipped there for the whole tour. Treat a tour as a lightbox.
-
----
-
-## 3. Entering tour mode
-
-| From | Gesture | Result |
-|---|---|---|
-| hovering, not pinned | → or Next | pin, relocate, enter — **the picture stays** |
-| pinned by mouse | → or Next (first time) | relocate, enter — **the picture stays** |
-| in the tour | → or Next | advance |
-
-Entering and advancing were one press until v0.100.0; the user asked for them to be two, and
-`tourNav()`'s `!tour.on` branch is that: relocate, derive, counter, preload, return. The next
-press is the first step. A held key still scrubs — the first `keydown` is never a repeat.
-
-Relocation puts the anchored corner at `vpW() - EDGE_GAP`, `vpH() - EDGE_GAP`. Not flush:
-`bottomGap()`'s 20px allowance is for the browser's link-target tooltip, which is painted
-bottom-**left**, so the bottom-right corner does not owe it.
-
-**Relocation happens exactly once per pinned window.** One boolean, set on the first arrow/next
-press, never consulted again. After that the window is the user's: if they drag or resize it, use
-what is there and never touch the position again — including when they walk back to the start with
-◀ and forward again.
-
-Dragging needs no flag. Each swap recomputes `left`/`top` from the bottom-right corner, so a drag
-moves that corner and later swaps hold the new one.
-
-The flag is per pinned window. Unpinning and pinning a different picture starts a fresh tour and
-relocates again on its first arrow press.
-
-Animate the move over **100ms**. Try it; a jump is acceptable if the animation looks worse.
-
----
-
-## 4. The strip
-
-One element holds both groups. Do not build a second floating box.
-
-```
-[ ▶ 0:04/0:31 ══slider══ 100% 🔊 ]  [ ◀  124 / 294  ▶ ]
- └────── video group, .hasvid only ──┘ └── nav group, always ──┘
-```
-
-- **Video:** full-width strip; scrubber flexes into whatever the nav group leaves.
-- **Image:** the same strip shrinks to the nav group and sits right, same height, same background,
-  same blur.
-
-The mechanism is one line: `.vctl` currently pins both edges in `layoutChrome()`. Make
-`left` conditional — `grabInset()` with a clip, `auto` without. An absolutely positioned box with
-only `right` set shrinks to content. Transitions between the two are free because `layoutChrome()`
-runs from every `layout()`, which runs from `setMedia()`.
-
-Give the nav-only state an **explicit width** rather than relying on shrink-to-fit — `../CLAUDE.md`
-records that shrink-to-fit for an abspos box diverges between Chromium and Firefox, and the Browser
-pane cannot see a Firefox-only fault.
-
-### Style is shared by construction
-
-- Build ◀ ▶ with `mkVBtn()`. Identical box, hover wash, tooltip, and mousedown/click
-  swallowing, for free.
-- Hoist the four `.vctl .vbtn` rules to bare `.vbtn` so a restyle is one place.
-  Only `.vsound .vbtn` sizing stays scoped.
-- Hide the video group with a **class, not `hidden`**. `../CLAUDE.md`: `[hidden]` loses to an
-  explicit `display`, and the group carries `display:flex`. This has cost a version twice.
-
-### The counter
-
-`124 / 294` between the buttons, matching the reference. The total updates as scrolling and
-cross-page harvesting grow the list. It is the user's sense of how far through the page they are,
-which is also why entries are never silently dropped (§1).
-
-### Five places currently assume "strip means video"
-
-| Where | Now | Change to |
-|---|---|---|
-| `.box.hot.hasvid.tall .vctl` | `.box.hot.hasvid.tall .vctl{display:flex}` | drop `.hasvid`; gate the **video group** on it |
-| `barHoverBand()` | widens the band only for a clip | widen whenever the strip is up |
-| `pointerOverBar()` | `if (mediaEl !== vidEl) return false` | must include the strip for images, or it fades out from under the hand reaching for ◀ |
-| `layoutChrome()` | sets both edges | `left` conditional as above |
-| `VCTL_MIN_H` (110) | strip hides on short frames | a lower threshold for nav-only, or the §2 height floor |
-
-`isBoxControl()` already exempts the whole `vctlEl` subtree, so buttons inside the strip
-are safe from the capture-listener trap with no extra code. A separate box would have to be
-registered there by hand — and the symptom of forgetting is silence.
+Capped at the viewport (`growBox()`): a tour is a lightbox. No height or width floor is owed to
+nav controls any more — they are in the widget.
 
 ---
 
@@ -371,8 +273,7 @@ registered there by hand — and the symptom of forgetting is silence.
   Correct edge case falls out: a tall picture at fit-width pans vertically, so Up/Down pan while
   Left/Right navigate.
 - **Up/Down always pan.** Unchanged.
-- **Add an always-navigates pair** (`[` / `]`, or PageUp/PageDown), or zooming in traps the user on
-  the current picture.
+- **`[` / `]` always navigate**, or zooming in would trap the user on the current picture.
 - **`{` / `}` narrow and widen the scope** (§1a). Not on repeat.
 - `capOwns()` already stands the arrows down while the zoom field, scrubber or volume
   slider has focus. Unchanged, works for free.
@@ -749,9 +650,8 @@ pictures the user is still looking at rather than stalling them at the wall.
 - **Cooldown**, or it re-fires on every press while content loads.
 - **An exhausted flag** — if an excursion returns nothing new, stop trying. A finite page must not
   scroll-and-return on every press near the end.
-- The ▶ "load more" affordance surfaces only if the automatic attempt failed or is still running.
-- Pass `behavior:'auto'` explicitly to `scrollIntoView`. A page with `scroll-behavior:smooth` in
-  its CSS otherwise turns every excursion into a slow animation.
+- Scroll with `behavior:'instant'` (§9a): `'auto'` obeys a page's own `scroll-behavior:smooth` and
+  turns every excursion into a slow animation.
 
 ### The hop — v0.131.0
 
@@ -759,9 +659,11 @@ The excursion returns after two animation frames (`twoFrames()`, capped at `EXC_
 frames never come) and watches for new media **from home**: an IntersectionObserver or a
 scroll-event loader has fired by then, and its fetch lands wherever the viewport is. The old
 2 s stay at the bottom was visible and read as a jarring jump. A hop that loads nothing is
-followed once per page by the old stay (`excLong`), for a loader that reads the position after a
-debounce; if that grows the page, `excLong` sticks for it; if not, `excSpent`. So a finite page
-still shows one stay at the very end. Measured on Google Images in real Chrome: away 30–34 ms,
+followed by the old stay, for a loader that reads the position after a debounce — **once per page**
+(`excStayTried`, never reset). If the stay grows the page, `excLong` sticks and every excursion there
+stays; if not, `excSpent` for this tour. So a finite page shows one stay, on its first tour.
+`excSpent` alone resets per tour (`tourEnd`), which until v0.139.0 made the stay repeat on every
+tour (measured on `forum-thread.html`: hop + 2 s stay each time). Measured on Google Images in real Chrome: away 30–34 ms,
 100 → 200 → 300 results.
 
 **A feed appends each batch as a SIBLING block** (Google Images: 100 per block under one parent).
@@ -793,16 +695,11 @@ tour started) and steps if the list got longer.
 ### Fullscreen
 
 Fullscreen is the **easy** case. `borderPx()` returns 0 and `fitFull()` sizes to the
-screen, so the frame is always the whole viewport: the corner anchor is a no-op, every picture
+screen, so the frame is always the whole viewport: every picture
 re-fits, and the controls are stationary because the frame never changes size. Nothing extra.
 
 Excursions are better there too — `.dim.full` blacks the page out completely, so the scroll is
 literally invisible rather than merely subtle.
-
-**One thing to verify:** `lockScroll()` sets `overflow:hidden` on both `documentElement`
-and `body`. Programmatic scrolling normally still works through `overflow:hidden`, but confirm it
-in a real browser rather than assuming. If it blocks, `scrollLock` already stores the previous
-values — restore them for the excursion and re-apply after.
 
 ---
 
@@ -892,13 +789,13 @@ This is the largest piece of the feature. Build it last, after the tour works on
 
 ## 11. Settings
 
-Proposed keys, added to `DEFAULTS`. Remember the hoisting trap in `../CLAUDE.md`: every
+The keys in `DEFAULTS`. Remember the hoisting trap in `../CLAUDE.md`: every
 `const` the loader touches must be declared **above** the `cfg =` line, or `readSettings()`'s own
 `catch` swallows the `ReferenceError` and the script silently runs on defaults.
 
 | Key | Default | What |
 |---|---|---|
-| `tourButtons` | `true` | show the tour widget |
+| `tourButtons` | `true` | show the widget |
 | `tourFade`, `tourFadeTo` | `true`, `35` | the widget faint until the pointer nears, at this opacity % |
 | `tourKeyStart` | `true` | → / ← with nothing open start at the first / last picture |
 | `tourKeys` | `true` | arrows navigate when the picture cannot pan horizontally |
@@ -913,33 +810,6 @@ Retry timings (5s stall, 4 attempts, 15s ceiling) apply to all hovers, not only 
 probably constants rather than settings unless testing says otherwise.
 
 ---
-
-## 12. Build order
-
-1. ~~Rewrite the invariant (§0). Derive-on-demand list, anchor resolution, ordering (§1). Arrow-key
-   handoff and scrub (§5). Tour mode entry, corner anchor, one-time relocation, size floors (§2,
-   §3).~~ — **done, v0.96.0.**
-2. ~~Strip restructure: nav group, counter, the five `hasvid` sites, CSS hoist (§4).~~ — **done,
-   v0.96.0**, in the same version as step 1: the counter is what step 1's derivation is *for*, so
-   splitting them would have shipped a version whose only new state nothing displayed.
-3. ~~Retry and timeout changes (§7)~~ — **done, v0.88.0-v0.89.0.** They stood alone, as predicted.
-4. ~~Concurrent preloader with slot spacing and the no-rush list (§6).~~ — **done, v0.97.0.**
-5. ~~Failure display and the Retry button (§8)~~ — **done: display v0.88.0, the widened trigger and
-   ↻ v0.96.0.**
-6. ~~Scroll excursion and load-more (§9).~~ - **done, v0.98.0.**
-7. ~~Cross-page harvesting (§10).~~ - **done, v0.99.0.**
-
-Version bump and commit at each step, per `../../CLAUDE.md`.
-
-## 13. Documentation owed
-
-- `INTERACTION.md` needs new IDs. Highest currently used: **S24, T28, E47, P12**. Reserve S25+ for
-  tour states, T29+ for the transitions (enter tour, next, previous, relocate, load more, cross
-  page), E48+ for the edges — the arrow-key handoff, the scrub throttle, the thumbnail fallback,
-  the anchored corner surviving a user drag.
-- Add a row to the "Start here" table in `../CLAUDE.md` pointing at this file.
-- New traps that belong in `../CLAUDE.md`'s "Traps that fire BEFORE you act": the Retry button and
-  any new bar control needing `isBoxControl()`; the stall-vs-total timeout distinction.
 
 ## 14. Measured, 2026-09-07
 

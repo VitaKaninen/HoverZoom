@@ -92,9 +92,9 @@ Three more settings went in v0.40.0, for the same reason as v0.39.0's seven:
 | `cursorGap` | **It never did anything.** The window opens at `pointer.x + gap` and `nudgeIntoReach()` then pulls it back until the pointer is 10 px inside the frame — which is unconditional, because a pointer-transparent preview is pinned by a press *inside its rectangle* (`E1`). The gap was overwritten on every path, at every value. |
 
 **The first section is ordered by what people change**, not by topic: *Show a preview* →
-*Hotkey* → *Opens* → *Hover delay* → the gates. `position` came up out of Advanced to sit there; `position` carries a hint that **changes with the value**, because the
-centred answer needs one sentence the cursor answer does not (how to pin it — `E30`). Its label
-was *Opens* until v0.44.0 — a verb where every other label is a noun.
+*Hotkey* → *Opens* → *Hover delay* → the gates. `position` came up out of Advanced to sit there,
+with a hint that **changes with the value**: under *Where I last put it* the preview opens away from
+the pointer, so the hint says how to pin it and how to set the spot (`E30`, `E64`).
 
 **The footer is not sticky any more.** `.panel` is a flex column, `.body` is the scroller and
 `.foot` sits below it — reported as "there is open space below the buttons and text scrolling
@@ -427,7 +427,7 @@ held only those and `hoverDelay`, so it is gone. `hoverDelay` sat at the top of 
 v0.78.0; it is behaviour, not looks, so it now follows *Opens* in *The preview*.
 
 **Labels since v0.78.0:** *Location* → *Opens*, *Required upsize* → *Minimum size ratio*, *Pin
-preview with* → *Pin with*, *Video to play in a preview* → *Play in a preview* with *No video at
+preview with* → *Pin with* (retired with `pinButton`, v0.126.0), *Video to play in a preview* → *Play in a preview* with *No video at
 all* → *Nothing that moves* (which is what `none` means, `E32`, so the hint no longer has to say
 so), *Delay before the preview appears* → *Hover delay*, *Preview fade in / out* → *Preview fade*.
 Storage keys unchanged.

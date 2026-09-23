@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.138.0
+// @version     0.139.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -54,12 +54,12 @@
         siteList: [],               // hostnames, matched by suffix
         blockList: [],              // image URLs never to preview; '*' matches anything
 
-        // the tour — next/previous through every picture on the page, from a pinned window
-        tourButtons: true,          // the tour widget: ◀ ▶ and the counter, in its own box
+        // the slideshow ("tour" in the code) — next/previous through the page's pictures
+        tourButtons: true,          // the widget: ◀ ▶ and the counter, in its own box
         tourFade: true,             // the widget is faint until the pointer comes near
         tourFadeTo: 35,             // ...at this opacity, %
         tourKeys: true,             // arrows navigate when the picture cannot pan sideways
-        tourKeyStart: true,         // → (←) with nothing open starts the tour at the first (last) picture
+        tourKeyStart: true,         // → (←) with nothing open starts the slideshow at the first (last) picture
         tourMinDisplayed: 128,      // the tour's own floor: longer side as drawn, px; emoji and badges fall under it
         tourWindow: 12,             // entries kept buffered ahead
         tourWorkers: 6,             // concurrent speculative resolves
@@ -2091,8 +2091,6 @@
         return Math.min(MIN_MEDIA / Math.max(w, h), fitScaleFor(w, h));
     }
 
-    function minFrameH() { return MIN_FRAME; }
-
     // The frame follows the picture, up to the growth ceiling.
     function reflow() {
         if (!view) return;
@@ -2100,7 +2098,7 @@
         view.imgW = view.natW * view.scale;
         view.imgH = view.natH * view.scale;
         const mw = Math.min(minFrameW(), g.w);
-        const mh = Math.min(minFrameH(), g.h);
+        const mh = Math.min(MIN_FRAME, g.h);
         view.frameW = Math.round(view.fixedW != null ? view.fixedW
             : Math.max(mw, Math.min(view.imgW, g.w)));
         view.frameH = Math.round(Math.max(mh, view.fixedH != null ? view.fixedH
@@ -2571,7 +2569,7 @@
     const RATE_MIN = 0.0625, RATE_MAX = 16;
     const RATE_POP_W = 96;                      // matches .spop's min-width
 
-    // The round-cornered strip buttons, shared by the preview's shadow root and the tour widget's.
+    // The round-cornered strip buttons, shared by the preview's shadow root and the widget's.
     function vbtnCss() {
         return [
             '.vbtn{flex:none;display:flex;align-items:center;justify-content:center;',
@@ -3546,7 +3544,7 @@
         if (!tour) tourStart();     // a tour begun from the widget brings its own
         reflow();       // the controls appear with `placed`, and minFrameW() grows with them
         layout();
-        tourChrome();
+        twSync();
     }
 
     function unplace() {
@@ -4031,7 +4029,7 @@
             else w = h * drag.aspect;
         }
         w = Math.max(Math.min(minFrameW(), g.w), Math.min(w, g.w));
-        h = Math.max(Math.min(minFrameH(), g.h), Math.min(h, g.h));
+        h = Math.max(Math.min(MIN_FRAME, g.h), Math.min(h, g.h));
         if (drag.ex === 'l') view.left = drag.l0 + (drag.w0 - w);
         else if (!drag.ex) view.left = drag.l0 - (w - drag.w0) / 2;
         if (drag.ey === 't') view.top = drag.t0 + (drag.h0 - h);
@@ -6171,7 +6169,7 @@
         tour.scope = levels[to].el;
         tour.mainOnly = false;
         const list = tourSync();
-        tourChrome();
+        twSync();
         dbg('tour scope: ' + describeEl(tour.scope), { level: to + 1 + ' of ' + levels.length, pictures: list.length });
         if (tour.on && tour.index >= 0) plFill(list, tour.index, scrubDir);
     }
@@ -6257,19 +6255,12 @@
         return list;
     }
 
-    // The widget's counter and buttons, from whatever the last derivation found. `–` means the
-    // pinned picture is not itself in the list — a background image, or one just blocked.
-    function tourChrome() {
-        twSync();
-    }
-
     // The picture the window was pinned on sets the tour's area and its size floor: it is the
     // user's example of what they want to see. A tour begun on a 100px thumbnail admits 100px.
     function tourStart() {
         tour = { el: active || null, start: active || null, url: activeShown || (view ? view.url : ''),
             x: 0, y: 0, index: -1, total: 0, on: false,
             scope: null, level: -1, floor: Math.max(0, cfg.tourMinDisplayed | 0) };
-        tour.had = new Set(tourPics(tour.floor));
         if (tour.el) {
             const r = tour.el.getBoundingClientRect();
             tour.x = r.left + (window.scrollX || 0);
@@ -6278,7 +6269,7 @@
             const long = s ? Math.max(s.w, s.h) : 0;
             if (long >= 1 && long < tour.floor) tour.floor = Math.floor(long);
         }
-        if (cfg.tourButtons) tourSync();    // only the counter needs the number up front
+        tour.had = new Set(tourPics(tour.floor));   // at the final floor, or tourAdopt() sees old pictures as new
     }
 
     function tourEnd() {
@@ -6291,7 +6282,7 @@
         twRefresh();
     }
 
-    // ---- the tour widget: ◀ n / N ▶ in its own fixed box, placed by the shared dock. See TOUR.md.
+    // ---- the widget: ◀ n / N ▶ in its own fixed box, placed by the shared dock. See TOUR.md.
 
     const DOCK_KEY = 'hoverZoomDock';   // GM: { sites: { host: spec }, last: spec }
     const TW_NEAR = 60;                 // px: the pointer this close lights the widget up
@@ -6299,7 +6290,7 @@
 
     let tw = null;              // { host, box, prev, count, next, dock, rect, near }
     let twPics = 0;             // pictures on the page by the cheap count, capped at 2
-    let twTotal = -1;           // the real count, taken when the pointer nears the widget
+    let twTotal = -1;           // the real count: at load, when scrolling stops, and when the pointer nears the widget
     let twStarting = null;      // the token of a tour being opened from the widget
     let twRecountTimer = 0;
 
@@ -6307,7 +6298,7 @@
         try {
             const v = JSON.parse(GM_getValue(DOCK_KEY, 'null'));
             if (v && typeof v === 'object') return v;
-        } catch (e) { console.warn('[Hover Zoom] tour widget position unreadable; using the default', e); }
+        } catch (e) { console.warn('[Hover Zoom] widget position unreadable; using the default', e); }
         return { sites: {}, last: null };
     }
 
@@ -6336,7 +6327,7 @@
         if (tw || !isTopFrame || !document.body) return;
         const host = document.createElement('div');
         host.id = 'hover-zoom-tour';
-        // `all:initial` would out-rank [hidden], so visibility is `display`, set by twShow().
+        // `all:initial` would out-rank [hidden], so visibility is `display`, set by twRefresh().
         host.style.cssText = 'all:initial;position:fixed;right:0;bottom:0;z-index:2147483647;' +
             'width:max-content;display:none';
         const sr = host.attachShadow({ mode: 'open' });
@@ -6433,7 +6424,7 @@
         twRecountTimer = setTimeout(twRefresh, TW_RECOUNT_MS);
     }
 
-    // Counter and buttons: the tour's position when one is running, the page's total when not.
+    // Counter and buttons: the slideshow's position (`–` when its picture is not in the list), else the page's total.
     function twSync() {
         if (!tw) return;
         const on = !!tour && tour.on;
@@ -6567,7 +6558,7 @@
             url: (res.url || '').slice(-60) });
         showViewer(res, pointer);
         place();
-        tourChrome();
+        twSync();
         const now = tourEntries();
         plFill(now, tour.index, dir);
         if (now.length - 1 - tour.index < TOUR_AHEAD) tourGrow(dir, false);
@@ -6610,7 +6601,7 @@
         tour.total = list.length;
         if (to < 0) {
             tour.index = tourAt(list);
-            tourChrome();
+            twSync();
             if (repeat) { if (dir > 0) tourGrow(dir, true); return; }
             // A press past either end ends the slideshow; forward asks the page for more first.
             if (dir < 0) tourQuit();
@@ -6623,7 +6614,7 @@
             // The position is the operand the reading-order sort compared, so it is logged.
             doc: Math.round(list[to].x) + ',' + Math.round(list[to].y),
             to: list[to].el.tagName + ' ' + (list[to].url || '(nothing)').slice(-48) });
-        tourChrome();
+        twSync();
         plFill(list, to, dir);
         // Refill BEFORE the wall, so the page loads more while there are still pictures to look at.
         if (list.length - 1 - to < TOUR_AHEAD) tourGrow(dir, false);
@@ -6764,7 +6755,8 @@
     const EXC_HOP_MS = 120;         // the hop's ceiling where animation frames never come
 
     let excBusy = false, excAt = 0, excSpent = false, excAway = false;
-    let excLong = false;            // this page needs the viewport to STAY at the bottom
+    let excLong = false;            // a stay at the bottom grew this page: every excursion here stays
+    let excStayTried = false;       // a hop that found nothing has had this page's one stay
 
     // Two rendering steps: the page's IntersectionObserver and scroll handlers have run by then.
     function twoFrames() {
@@ -6793,14 +6785,14 @@
 
     function mediaCount() { return document.querySelectorAll('img,video').length; }
 
-    async function tourExcursion(force) {
+    async function tourExcursion(force, stay) {
         if (excBusy || excSpent || !cfg.tourLoadMore) return false;
         if (!force && Date.now() - excAt < EXC_COOL_MS) return false;
         excBusy = true;
         excAt = Date.now();
         const sx = window.scrollX || 0, sy = window.scrollY || 0;
         const before = mediaCount();
-        const long = excLong;
+        const long = stay || excLong;
         let got = null;
         try {
             // 'instant', not 'auto': 'auto' obeys the page's own scroll-behavior:smooth.
@@ -6820,11 +6812,10 @@
         }
         dbg('excursion' + (long ? ' (stayed at the bottom)' : ' (hop)'), { was: before, now: got.now,
             grew: got.grew, ms: Date.now() - excAt, returnedTo: sx + ',' + sy });
-        if (got.grew) return true;
+        if (got.grew) { if (long) excLong = true; return true; }
         // The hop set nothing off: once per page, try staying down there, for a loader that
         // reads the position after a delay. Only if that also finds nothing is the page finite.
-        if (!long) { excLong = true; return tourExcursion(true); }
-        excLong = false;
+        if (!long && !excStayTried) { excStayTried = true; return tourExcursion(true, true); }
         excSpent = true;
         return false;
     }
@@ -7093,12 +7084,12 @@
         if (tour && tour.had && !stepAfter) {
             const was = tour.scope;
             tourAdopt(tour.had);
-            if (tour.scope !== was) { tourSync(); tourChrome(); }
+            if (tour.scope !== was) { tourSync(); twSync(); }
         }
         tourMoreOnce(false).then(function (grew) {
             if (!grew || !tour || !placed) return;
             const list = tourSync();
-            tourChrome();
+            twSync();
             if (!list) return;
             if (stepAfter) { tourNav(dir, false); return; }
             if (tour.index >= 0) plFill(list, tour.index, dir);
@@ -7116,7 +7107,7 @@
     const PL_VIDEO_AHEAD = 2;   // clips buffered in full rather than to metadata
     const PL_MAX_WORKERS = 12;
 
-    const plDone = new Map();   // element -> { res, displayed } for everything already resolved
+    const plDone = new Map();   // element -> { res, displayed, sig } for everything already resolved
     let plQueue = [];
     let plLive = [];            // tokens of running speculative resolves, for cancellation
     let plRunning = 0;
@@ -8130,7 +8121,7 @@
         pick('modifierKey', 'Hotkey', null, [
             ['ctrl', 'Ctrl'], ['alt', 'Alt'], ['shift', 'Shift']]);
         const hotTog = check('hotkeyToggle', 'Hotkey turns previews off until pressed again',
-            'A tap of the hotkey on its own turns previews off in this tab — the slideshow widget ' +
+            'A tap of the hotkey on its own turns previews off in this tab — the ◀ ▶ widget ' +
             'still works — and another turns them back on. Off: previews are held back only while ' +
             'it is held, and pressing it closes one that is open.');
         const actHint = act.row.querySelector('.hint');
@@ -8187,10 +8178,10 @@
             'If the zoom percentages look wrong, set this to your display’s scaling. (default: 1)',
             1, 4, 0.25);
 
-        section('Next and previous');
-        check('tourButtons', 'Show the tour widget',
+        section('The slideshow');
+        check('tourButtons', 'Show the ◀ ▶ widget',
             '◀ ▶ and a counter in a small box of their own. ' +
-            '▶ with nothing open starts at the page’s first picture. Drag it anywhere; hold Ctrl to ' +
+            '▶ with nothing open starts the slideshow at the page’s first picture. Drag it anywhere; hold Ctrl to ' +
             'place it without snapping. It remembers where it was put on each site.');
         (function () {
             const cb = document.createElement('input');
@@ -8219,8 +8210,8 @@
         check('tourKeys', 'Arrow keys step through the page',
             'Left and right move to the next picture unless the one you are looking at is ' +
             'zoomed in far enough to pan sideways. [ and ] always move; { and } narrow and ' +
-            'widen the part of the page the tour covers.');
-        check('tourKeyStart', '→ or ← with nothing open starts the tour',
+            'widen the part of the page the slideshow covers.');
+        check('tourKeyStart', '→ or ← with nothing open starts the slideshow',
             '→ at the first picture and ← at the last, the same as ▶ and ◀ on the widget. A page that ' +
             'uses the arrows for itself keeps them.');
         num('tourMinDisplayed', 'Leave out pictures smaller than',
@@ -8257,7 +8248,7 @@
 
         advanced('Advanced options');
 
-        section('Next and previous');
+        section('The slideshow');
         num('tourWindow', 'Pictures to load ahead',
             'How far ahead of where you are the next pictures are fetched. Deeper absorbs a ' +
             'burst; it does not make them arrive faster. (default: 12)', 0, 40, 1);
