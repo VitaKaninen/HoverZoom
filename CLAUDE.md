@@ -128,6 +128,10 @@ has already been misdiagnosed once. (The shared ones — `innerHTML` on Trusted-
 - **The event target at a document listener is the shadow HOST**, never the element inside a shadow
   root; `composedPath()[0]` is the real one. A diagnostic that reads `e.target.getRootNode()` can
   never say "in a shadow root".
+- **Under the manager the script boots AFTER the page loaded, so `twRefresh()` runs synchronously
+  at boot** — anything it calls runs before every `let` declared below that point (TDZ throw, whole
+  script dead: no previews, no settings). The test pages load the script while still `loading`, so
+  that path is deferred there and passes. Defer new work out of boot paths (`setTimeout`). Cost v0.127.0.
 - **Never pass `view: window` to an event constructor.** Under Tampermonkey `window` is a proxy, the
   constructor throws, and a `try` around it makes the dispatch silently never happen — the test
   pages (no sandbox) pass. Found on `primeLink`, v0.126.0.

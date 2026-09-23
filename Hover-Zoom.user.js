@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.127.0
+// @version     0.128.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -6379,7 +6379,7 @@
         const on = twWanted();
         if (on) twTheme();
         if (on && !tour) twTotal = tourPics(Math.max(0, cfg.tourMinDisplayed | 0)).length;
-        if (on) twWarmFirst();
+        if (on) setTimeout(twWarmFirst, 0);     // never during boot: it reads `let`s declared further down
         const shown = tw.host.style.display !== 'none';
         if (on !== shown) {
             tw.host.style.display = on ? 'block' : 'none';
