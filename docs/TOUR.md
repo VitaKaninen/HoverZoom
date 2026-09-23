@@ -650,6 +650,13 @@ pictures the user is still looking at rather than stalling them at the wall.
 - **Cooldown**, or it re-fires on every press while content loads.
 - **An exhausted flag** — if an excursion returns nothing new, stop trying. A finite page must not
   scroll-and-return on every press near the end.
+- **Only scroll where it can matter (v0.140.0, user: "it does it on every page").** Bottom already
+  on screen (`excBottomShown()`: short page, or already there) → no scroll, just `excWatch` — its
+  loader has fired, and quitting without the watch would close the slideshow on a batch in flight.
+  A page that came back empty is remembered as `excDead {url, docHeight, mediaCount}` (never
+  reset, unlike `excSpent`); a later slideshow skips the excursion until the page has grown. So a
+  long finite page scrolls once per page load, a short one never. There is no way to tell an
+  infinite page from a finite one *without* asking once.
 - Scroll with `behavior:'instant'` (§9a): `'auto'` obeys a page's own `scroll-behavior:smooth` and
   turns every excursion into a slow animation.
 

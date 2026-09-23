@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.139.0
+// @version     0.140.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -6757,6 +6757,8 @@
     let excBusy = false, excAt = 0, excSpent = false, excAway = false;
     let excLong = false;            // a stay at the bottom grew this page: every excursion here stays
     let excStayTried = false;       // a hop that found nothing has had this page's one stay
+    let excDead = null;             // {url, h, n} when this page last loaded nothing; never reset
+    const EXC_EDGE_PX = 2;
 
     // Two rendering steps: the page's IntersectionObserver and scroll handlers have run by then.
     function twoFrames() {
@@ -6785,13 +6787,36 @@
 
     function mediaCount() { return document.querySelectorAll('img,video').length; }
 
+    // The bottom of the page is on screen now, so any loader there has already fired.
+    function excBottomShown() {
+        const h = vpH();
+        return h > 0 && (window.scrollY || 0) + h >= docHeight() - EXC_EDGE_PX;
+    }
+
+    // This page loaded nothing when last asked, and has not grown since.
+    function excStillDead() {
+        return !!excDead && excDead.url === location.href &&
+            docHeight() <= excDead.h && mediaCount() <= excDead.n;
+    }
+
     async function tourExcursion(force, stay) {
         if (excBusy || excSpent || !cfg.tourLoadMore) return false;
         if (!force && Date.now() - excAt < EXC_COOL_MS) return false;
+        if (excStillDead()) { excSpent = true; dbg('excursion skipped: this page loaded nothing last time and has not grown'); return false; }
         excBusy = true;
         excAt = Date.now();
-        const sx = window.scrollX || 0, sy = window.scrollY || 0;
         const before = mediaCount();
+        if (excBottomShown()) {
+            // No scroll: watching from here is already a stay at the bottom.
+            let seen;
+            try { seen = await excWatch(before); } finally { excBusy = false; }
+            dbg('excursion (the bottom is on screen: watched, did not scroll)', { was: before, now: seen.now, grew: seen.grew });
+            if (seen.grew) return true;
+            excSpent = true;
+            excDead = { url: location.href, h: docHeight(), n: mediaCount() };
+            return false;
+        }
+        const sx = window.scrollX || 0, sy = window.scrollY || 0;
         const long = stay || excLong;
         let got = null;
         try {
@@ -6817,6 +6842,7 @@
         // reads the position after a delay. Only if that also finds nothing is the page finite.
         if (!long && !excStayTried) { excStayTried = true; return tourExcursion(true, true); }
         excSpent = true;
+        excDead = { url: location.href, h: docHeight(), n: mediaCount() };
         return false;
     }
 
