@@ -666,7 +666,12 @@ pictures the user is still looking at rather than stalling them at the wall.
   one miss per page URL (`excGaveNothing`); `GROWS_FORGET` (5) in a row removes the host. Any
   excursion that grows the page, or a hand scroll that raises the count again, clears the run.
   A site with both feed and finite pages (Reddit: feed vs a post) may be forgotten after five
-  posts and relearned on the next hand scroll through a feed — acceptable, it self-corrects. No built-in list of known
+  posts and relearned on the next hand scroll through a feed — acceptable, it self-corrects.
+  Measured in real Chrome, v0.143.0: Google Images unlearned → ← opens 100/100, page still; four
+  wheel scrolls → count 100 → 200, learned; ← → follows to #200, → gives 201/300. Wikipedia
+  (27 pictures) never moved. Bing Images learned at 47 → 90; it auto-loads only two batches and
+  then shows a "See more images" button no scroll passes, so its slideshow ends there correctly
+  (one miss, reset by the next page's hit). Reddit cannot be opened by the Chrome extension. No built-in list of known
   feeds, by design: the first slideshow on Google Images ends at 100 until the user scrolls once.
   **Test note:** a hidden Browser pane delivers no `scroll` events; dispatch `new Event('scroll')`
   by hand, and append whole posts (`#post-1` clones) to `forum-thread.html`, since single `<img>`s
