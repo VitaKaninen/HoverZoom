@@ -57,4 +57,8 @@ folder: the `monkey-root` launch entry, `python -m http.server 8740 --directory 
   `<html>` (so a widget must be one) plus attribute observers on each widget.
 - **A script with its own geometry (RNFP)** passes `handle: () => false`, publishes its rect through
   `load`/`size` and `reload()`, and runs its own drag with `snap()`, `dragAt()` and `dragEnd()`.
+- **Colours are shared too**: `usDock.THEME` (RNFP's palette, dark and light) and `usDock.FONT`;
+  `usDock.theme()` picks by `pageIsDark()` — `<body>`, `<html>`, then what paints the window's middle
+  (apps paint a wrapper; our own widgets skipped), and a page that paints nothing is light unless it
+  declares a dark `color-scheme`. Not the OS setting: a plain white page under a dark OS is light.
 - **A widget that is thrown away calls `destroy()`** (FS rebuilds its bar; RNFP closes its panel).

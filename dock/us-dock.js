@@ -24,6 +24,50 @@ const usDock = (function () {
 
     function isDock(n) { return n.nodeType === 1 && n.hasAttribute(A_ID); }
 
+    // Every widget wears RNFP's palette, the light one on a light page.
+    const THEME = {
+        dark: { bg: '#1a1a1b', bg2: '#232325', bg3: '#2d2d30', border: '#343536', text: '#d7dadc',
+            muted: '#8a8d91', shadow: '0 8px 24px rgba(0,0,0,.6)', scheme: 'dark' },
+        light: { bg: '#ffffff', bg2: '#f3f5f7', bg3: '#e6e9ec', border: '#d5d9dd', text: '#1c1c1c',
+            muted: '#5c6c74', shadow: '0 8px 24px rgba(0,0,0,.25)', scheme: 'light' },
+    };
+    const FONT = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
+
+    // Luminance of an opaque-enough background, or null for a transparent one.
+    function bgLum(node) {
+        const nums = (getComputedStyle(node).backgroundColor || '').match(/[\d.]+/g);
+        if (!nums || nums.length < 3) return null;
+        if (nums.length >= 4 && parseFloat(nums[3]) < 0.5) return null;
+        return 0.2126 * nums[0] + 0.7152 * nums[1] + 0.0722 * nums[2];
+    }
+
+    // The page's own background decides: <body>, <html>, then whatever paints the middle of the
+    // window (apps paint a wrapper). A page that paints nothing is white unless it declares dark.
+    function pageIsDark() {
+        const seen = [document.body, document.documentElement];
+        for (const node of seen) {
+            const l = node ? bgLum(node) : null;
+            if (l !== null) return l < 128;
+        }
+        const vp = viewport();
+        const stack = document.elementsFromPoint ? document.elementsFromPoint(vp.w / 2, vp.h / 2) : [];
+        for (const top of stack) {
+            if (top.closest && top.closest('[' + A_ID + ']')) continue;     // a widget reads its own colour
+            for (let n = top; n && seen.indexOf(n) < 0; n = n.parentElement) {
+                const l = bgLum(n);
+                if (l !== null) return l < 128;
+            }
+        }
+        const root = document.documentElement;
+        const meta = document.querySelector('meta[name="color-scheme" i]');
+        const cs = ((root ? getComputedStyle(root).colorScheme : '') || '') + ' ' + (meta ? meta.content : '');
+        if (!/dark/.test(cs)) return false;
+        if (!/light/.test(cs)) return true;
+        return !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    }
+
+    function theme() { return pageIsDark() ? THEME.dark : THEME.light; }
+
     // The layout viewport, scrollbars excluded; <body> answers for it on a quirks-mode page.
     function viewport() {
         const el = (document.compatMode === 'BackCompat' && document.body) || document.documentElement;
@@ -462,6 +506,7 @@ const usDock = (function () {
         };
     }
 
-    return { create: create, solve: solve, makeSpec: makeSpec, snap: snap, zone: zone, SNAP: SNAP };
+    return { create: create, solve: solve, makeSpec: makeSpec, snap: snap, zone: zone, SNAP: SNAP,
+        THEME: THEME, FONT: FONT, pageIsDark: pageIsDark, theme: theme };
 })();
 // ==== us-dock end ====

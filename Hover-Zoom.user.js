@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.122.0
+// @version     0.123.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -5122,6 +5122,50 @@
 
         function isDock(n) { return n.nodeType === 1 && n.hasAttribute(A_ID); }
 
+        // Every widget wears RNFP's palette, the light one on a light page.
+        const THEME = {
+            dark: { bg: '#1a1a1b', bg2: '#232325', bg3: '#2d2d30', border: '#343536', text: '#d7dadc',
+                muted: '#8a8d91', shadow: '0 8px 24px rgba(0,0,0,.6)', scheme: 'dark' },
+            light: { bg: '#ffffff', bg2: '#f3f5f7', bg3: '#e6e9ec', border: '#d5d9dd', text: '#1c1c1c',
+                muted: '#5c6c74', shadow: '0 8px 24px rgba(0,0,0,.25)', scheme: 'light' },
+        };
+        const FONT = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
+
+        // Luminance of an opaque-enough background, or null for a transparent one.
+        function bgLum(node) {
+            const nums = (getComputedStyle(node).backgroundColor || '').match(/[\d.]+/g);
+            if (!nums || nums.length < 3) return null;
+            if (nums.length >= 4 && parseFloat(nums[3]) < 0.5) return null;
+            return 0.2126 * nums[0] + 0.7152 * nums[1] + 0.0722 * nums[2];
+        }
+
+        // The page's own background decides: <body>, <html>, then whatever paints the middle of the
+        // window (apps paint a wrapper). A page that paints nothing is white unless it declares dark.
+        function pageIsDark() {
+            const seen = [document.body, document.documentElement];
+            for (const node of seen) {
+                const l = node ? bgLum(node) : null;
+                if (l !== null) return l < 128;
+            }
+            const vp = viewport();
+            const stack = document.elementsFromPoint ? document.elementsFromPoint(vp.w / 2, vp.h / 2) : [];
+            for (const top of stack) {
+                if (top.closest && top.closest('[' + A_ID + ']')) continue;     // a widget reads its own colour
+                for (let n = top; n && seen.indexOf(n) < 0; n = n.parentElement) {
+                    const l = bgLum(n);
+                    if (l !== null) return l < 128;
+                }
+            }
+            const root = document.documentElement;
+            const meta = document.querySelector('meta[name="color-scheme" i]');
+            const cs = ((root ? getComputedStyle(root).colorScheme : '') || '') + ' ' + (meta ? meta.content : '');
+            if (!/dark/.test(cs)) return false;
+            if (!/light/.test(cs)) return true;
+            return !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+        }
+
+        function theme() { return pageIsDark() ? THEME.dark : THEME.light; }
+
         // The layout viewport, scrollbars excluded; <body> answers for it on a quirks-mode page.
         function viewport() {
             const el = (document.compatMode === 'BackCompat' && document.body) || document.documentElement;
@@ -5560,7 +5604,8 @@
             };
         }
 
-        return { create: create, solve: solve, makeSpec: makeSpec, snap: snap, zone: zone, SNAP: SNAP };
+        return { create: create, solve: solve, makeSpec: makeSpec, snap: snap, zone: zone, SNAP: SNAP,
+            THEME: THEME, FONT: FONT, pageIsDark: pageIsDark, theme: theme };
     })();
     // ==== us-dock end ====
 
@@ -5885,13 +5930,16 @@
         style.textContent = [
             ':host{all:initial}',
             '.tw{display:flex;align-items:center;gap:' + NAV_GAP + 'px;box-sizing:border-box;',
-            'height:' + VCTL_H + 'px;padding:0 ' + VCTL_PAD + 'px;border-radius:7px;',
-            'background:rgba(17,17,27,.72);backdrop-filter:blur(7px) saturate(1.4);',
-            '-webkit-backdrop-filter:blur(7px) saturate(1.4);border:1px solid rgba(205,214,244,.14);',
-            'font:11px/16px system-ui,sans-serif;color:#cdd6f4;white-space:nowrap;cursor:move;',
+            'height:' + VCTL_H + 'px;padding:0 ' + VCTL_PAD + 'px;border-radius:8px;',
+            'background:var(--bg);border:1px solid var(--border);box-shadow:var(--shadow);',
+            'font:13px/16px ' + usDock.FONT + ';color:var(--text);white-space:nowrap;cursor:move;',
             'user-select:none;transition:opacity .15s ease}',
-            '.count{flex:none;padding:0 4px;font-variant-numeric:tabular-nums;letter-spacing:.02em;color:#bac2de}',
-        ].concat(vbtnCss()).join('');
+            '.count{flex:none;padding:0 4px;font-variant-numeric:tabular-nums;color:var(--text)}',
+        ].concat(vbtnCss(), [
+            '.tw .vbtn{color:var(--text)}',
+            '.tw .vbtn:hover{background:var(--bg3)}',
+            '.tw .vbtn.faint:hover{background:none}',
+        ]).join('');
         sr.appendChild(style);
         const box = document.createElement('div');
         box.className = 'tw';
@@ -5948,6 +5996,7 @@
         }
         twPics = twCount();
         const on = twWanted();
+        if (on) twTheme();
         if (on && !tour) twTotal = tourPics(Math.max(0, cfg.tourMinDisplayed | 0)).length;
         const shown = tw.host.style.display !== 'none';
         if (on !== shown) {
@@ -5955,6 +6004,13 @@
             tw.dock.show(on);
         }
         twSync();
+    }
+
+    // RNFP's palette, light or dark by the page behind it.
+    function twTheme() {
+        const t = usDock.theme();
+        ['bg', 'bg3', 'border', 'text', 'shadow'].forEach(function (k) { tw.box.style.setProperty('--' + k, t[k]); });
+        tw.box.style.colorScheme = t.scheme;
     }
 
     function twRecount() {
