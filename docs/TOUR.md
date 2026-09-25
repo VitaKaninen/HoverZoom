@@ -188,6 +188,23 @@ from comment selectors, sibling forum posts and landmarks, with a switcher on th
 the test forum right and real forums the user uses wrong; the user judged markup rules more likely to
 break things than fix them. Do not rebuild it without the user; they are still thinking about it.
 
+**Forum survey, 2026-09-25** (DOM probe, mostly logged out; raised again by the user as "end the
+slideshow after the main post"). Two layouts, and the reply box only separates one of them:
+- *Thread forums* — XenForo, vBulletin 6, phpBB, Invision, Discourse, Flarum, Stack Exchange: the
+  first post and every reply are identical repeated siblings (`article.message`, `table[id^=post]`,
+  `div.post.bg1/bg2`, `article.cPost`, `.topic-post`/`#post_1`, `.PostStream-item`). The reply box
+  (vB quick reply, XF/IPS "log in to reply", SE "Your Answer") is **after the last reply**, and
+  Discourse/Flarum's composer is a floating panel — so it never divides post from replies. The
+  boundary is the end of sibling #1 — but only on page 1; on page 2+ sibling #1 is a reply.
+- *Comment pages* — HN, Lemmy, Reddit, WordPress, imgur: post and comments are different
+  containers (`table.fatitem` vs `tr.comtr`; `ul.comments.border-top`; `#comments.comments-area`;
+  `.Gallery-Content` vs `.CommentsList`), often with an "N comments" heading. The box sits between
+  post and comments on HN (and Reddit/Lemmy when logged in); WordPress's "Leave a Reply" is after.
+- 4chan: form above the OP; OP and replies are siblings, the OP marked `.opContainer`.
+- Markup that names the OP where present: Discourse `#post_1`/`.topic-owner`, 4chan `.opContainer`,
+  Invision JSON-LD `DiscussionForumPosting` + `comment[]`; XenForo marks *every* post `Comment`.
+- Bot checks blocked phpbb.com, simplemachines.org, eevblog (SMF), community.mybb.com.
+
 ## 1a. The scope and the floor — BUILT, v0.100.0
 
 A hover may expand anything — an icon, an avatar, a sidebar picture. A tour must not: asked for
