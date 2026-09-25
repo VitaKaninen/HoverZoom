@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.153.0
+// @version     0.154.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -4517,7 +4517,32 @@
         const why = videoLinkReason(el);
         if (!why) return null;
         if (cfg.videoMode !== 'all') return why;
-        return dormantPlayer() ? why + ' — and this page holds a dormant player' : null;
+        if (dormantPlayer()) { ownPlayerLearn(); return why + ' — and this page holds a dormant player'; }
+        return ownPlayerHosts().indexOf(pageHost()) >= 0 ? why + ' — and this site has held one before' : null;
+    }
+
+    const OWN_PLAYER_KEY = 'hoverZoomOwnPlayer';    // GM: [host] sites seen with a dormant player beside video links
+    let ownPlayerList = null;
+
+    function ownPlayerHosts() {
+        if (ownPlayerList) return ownPlayerList;
+        try {
+            const v = JSON.parse(GM_getValue(OWN_PLAYER_KEY, '[]'));
+            ownPlayerList = Array.isArray(v) ? v : [];
+        } catch (e) { console.warn('[Hover Zoom] own-player sites unreadable', e); ownPlayerList = []; }
+        return ownPlayerList;
+    }
+
+    // A site that builds its player on the first hover is refused from the next load on. See E61.
+    function ownPlayerLearn() {
+        const host = pageHost();
+        if (!isTopFrame || !host || ownPlayerHosts().indexOf(host) >= 0) return;
+        ownPlayerList = null;
+        const all = ownPlayerHosts().concat(host);
+        GM_setValue(OWN_PLAYER_KEY, JSON.stringify(all));
+        ownPlayerList = all;
+        dbg('this site previews its own videos; its video-link thumbnails are refused from now on', host);
+        setTimeout(twRecount, 0);
     }
 
     // ---- the learned wait for a player that lands late. See E62.
@@ -6607,7 +6632,7 @@
         if (near === tw.near) return;
         tw.near = near;
         // Counted at load and after scrolling; a page that changed without either is caught here.
-        if (near && !tour) twTotal = mainPics(tourPics(Math.max(0, cfg.tourMinDisplayed | 0))).length;
+        if (near && !tour) { twRefresh(); return; }     // a count under two hides it
         twSync();
     }
 

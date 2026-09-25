@@ -345,6 +345,12 @@ things were true and each cost a version:
   the geometry above is the backstop for a player created on demand. The cost: a page with any
   hidden `<video>` — a background clip, an ad slot — refuses `/watch?`-shaped thumbnails under
   `all`. Narrow, and the debug line names it.
+- **The dormant player may not exist yet** (v0.154.0). YouTube's feed holds no `<video>` until the
+  first thumbnail hover builds its inline player, so at load every thumbnail passed and the widget
+  counted them (exposed by v0.150.0's recount on image load). The first time the dormant-player
+  refusal fires, the host is stored in `hoverZoomOwnPlayer` (GM, top frame only) and its video-link
+  thumbnails are refused from then on, dormant player or not. No panel UI; clear it from the
+  manager's storage tab. A learned host never un-learns.
 
 v0.104.0 shipped the opposite — holding the preview *over* the arrived player — and the user's
 first look said it: "since the video is playing behind it, the preview should not be showing at
