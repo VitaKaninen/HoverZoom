@@ -26,8 +26,11 @@ fight that. They are deleted. Do not put nav controls back on the frame.
   `[hidden]` rule. `twRefresh` sets both, and `dock.show()` tells the other scripts.
 - **Shown** on pages with two drawn pictures at `tourMinDisplayed` (`twCount`, stops at 2), or while a
   tour runs. The `– / N` total (`tourPics`) is taken with every recount — load, scroll stopping, SPA
-  navigation — and again when the pointer comes near, which catches a page that changed without
-  scrolling (no MutationObserver: design invariant). Faint (`tourFade`, at `tourFadeTo` %) until the
+  navigation, any `<img>` `load` (document capture; a lazy picture landing after page load, v0.150.0)
+  — and again when the pointer comes near, which catches a page that changed without
+  scrolling (no MutationObserver: design invariant). With `debug` on, a changed count logs
+  `twReport()`: every drawn picture and the gate that dropped it, URLs replaced by `U1…` labels
+  (the user diagnoses private sites with it — keep it URL-free). Faint (`tourFade`, at `tourFadeTo` %) until the
   pointer is within `TW_NEAR`; a `mouseover` on the host covers a pointer resting where it appears.
 - **▶ with nothing open starts at the FIRST picture, ◀ at the LAST** (user's call: no guessing a
   start) — `tourFromStart(dir)`. **→ / ← do the same** (`tourKeyStart`, default on):

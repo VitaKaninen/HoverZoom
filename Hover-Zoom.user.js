@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.149.0
+// @version     0.150.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -6466,7 +6466,9 @@
             buildTourWidget();
         }
         twPics = twCount();
+        const was = twTotal;
         if (!tour) twTotal = twPics >= 2 ? mainPics(tourPics(Math.max(0, cfg.tourMinDisplayed | 0))).length : 0;
+        if (!tour && twTotal !== was && debugOn()) dbg('widget count ' + twTotal, twReport());
         const on = twWanted();
         if (on) twTheme();
         if (on) setTimeout(twWarmFirst, 0);     // never during boot: it reads `let`s declared further down
@@ -6483,6 +6485,31 @@
         const t = usDock.theme();
         ['bg', 'bg3', 'border', 'text', 'shadow'].forEach(function (k) { tw.box.style.setProperty('--' + k, t[k]); });
         tw.box.style.colorScheme = t.scheme;
+    }
+
+    // Debug: every drawn picture and why the widget did or did not count it. No URLs, only shapes.
+    function twReport() {
+        const floor = Math.max(0, cfg.tourMinDisplayed | 0);
+        const all = document.querySelectorAll('img,video');
+        const urls = new Map(), out = [];
+        for (let i = 0; i < all.length && out.length < 40; i++) {
+            const el = all[i], r = el.getBoundingClientRect();
+            if (Math.max(r.width, r.height) < 50) continue;
+            const u = shownUrl(el) || '';
+            if (!urls.has(u)) urls.set(u, 'U' + (urls.size + 1));
+            const lazy = el.getAttribute('data-src') ? ' data-src' + (el.getAttribute('data-src') === el.getAttribute('src') ? '=src' : '≠src') : '';
+            let why;
+            if (!el.getClientRects().length) why = 'not laid out';
+            else if (!shownMedia(el)) why = 'hidden (opacity/visibility)';
+            else if ((why = refusal(el))) why = 'refused: ' + why.replace(/\S*[\/?]\S*/g, '<url>');
+            else if (!tourWorthy(el, floor)) why = 'under the floor (' + floor + 'px)';
+            else if (sideColumn(el)) why = 'side column';
+            else why = 'COUNTED';
+            out.push(el.tagName.toLowerCase() + ' ' + Math.round(r.width) + 'x' + Math.round(r.height) +
+                (el.naturalWidth ? ' nat ' + el.naturalWidth + 'x' + el.naturalHeight : '') + ' ' + urls.get(u) + lazy +
+                (r.top > vpH() ? ' below' : r.bottom < 0 ? ' above' : '') + ' — ' + why);
+        }
+        return out;
     }
 
     function twRecount() {
@@ -6634,6 +6661,11 @@
         if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', twRefresh);
         else twRefresh();
         window.addEventListener('load', twRecount);
+        // A lazy picture landing after page load changes the count with no scroll to catch it.
+        document.addEventListener('load', function (e) {
+            const t = e.target;
+            if (t && (t.tagName === 'IMG' || t.tagName === 'VIDEO') && !tour) twRecount();
+        }, true);
         window.addEventListener('scroll', twRecount, { passive: true });
         window.addEventListener('popstate', twRecount);
         if (window.navigation) window.navigation.addEventListener('navigatesuccess', twRecount);
