@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.157.0
+// @version     0.158.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -6783,7 +6783,7 @@
         const tag = g.key.slice(0, dot).toLowerCase(), cls = g.key.slice(dot + 1);
         if (!cls && tag.indexOf('-') < 0) return false;      // a bare <div> is inside everything
         const sel = cls ? tag + '.' + CSS.escape(cls) : tag;
-        return g.some(function (e) { return !!e.querySelector(sel); });
+        return g.some(function (e) { return [].some.call(e.querySelectorAll(sel), postishDeep); });
     }
 
     // A box's rect, or its children's together when it draws none itself (display:contents, an inline custom element).
@@ -6946,7 +6946,22 @@
             line.style.height = Math.round(r.height) + 'px';
             line.firstChild.textContent = 'Hover Zoom: sidebar (' + s.n + ' picture' + (s.n === 1 ? '' : 's') + ' left out)';
         });
+        linesUnstack();
         if (want) tourLinesReport(pe, sides);
+    }
+
+    // Moves each sidebar label down until it clears the post-end label and the ones already placed.
+    function linesUnstack() {
+        const placed = postLine && postLine.style.display !== 'none' ? [postLine.firstChild.getBoundingClientRect()] : [];
+        sideLines.forEach(function (line) {
+            const label = line.firstChild;
+            for (let top = 2; top < 400; top += 20) {
+                label.style.top = top + 'px';
+                const r = label.getBoundingClientRect();
+                if (!placed.some(function (o) { return r.left < o.right && r.right > o.left && r.top < o.bottom && r.bottom > o.top; })) break;
+            }
+            placed.push(label.getBoundingClientRect());
+        });
     }
 
     // Structure only — tags, classes, ids, sizes, positions; never a URL or the page's text.
@@ -6962,7 +6977,9 @@
             pe.cut ? pe.how : pe.why)];
         if (pe && pe.g) {
             lines.push('posts: ' + pe.g.key.toLowerCase() + ' ×' + pe.g.length + '; 1st ' + at(pe.g[0]) + '; 2nd ' + at(pe.g[1]));
-            lines.push('1st post: ' + chain(pe.g[0]));
+            const h1 = document.querySelector('h1');
+            lines.push('1st post: ' + chain(pe.g[0]) + '; h1 ' + (!h1 ? 'none' : pe.g[0].contains(h1) ? 'inside it' :
+                precedes(h1, pe.g[0]) ? 'above it' : 'below it'));
         }
         if (pe && pe.lead && pe.lead.el) lines.push('evidence: ' + pe.lead.el.tagName.toLowerCase() + ' ' + at(pe.lead.el) + ' — ' + chain(pe.lead.el));
         if (pe && pe.cut) lines.push('cut: ' + describeEl(pe.cut) + ' ' + at(pe.cut));

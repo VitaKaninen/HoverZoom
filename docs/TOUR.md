@@ -207,7 +207,8 @@ reply's first picture** — exact placement and consistency between sites do not
    children are mostly **cards** (h1–h3 link ≥8 chars to another page, not a profile) is skipped
    whole — judged on all of them, or two recipe cards sharing `category-summer` pass as a thread.
 2. The group is **comments under a post** if its replies nest (a member holds another of its own
-   class — Lemmy, WordPress; forum posts never nest), or above member 1 there is (`postLead`): a
+   class that is itself post-like — Lemmy, WordPress; forum posts never nest; Bootstrap's `div.row`
+   nests by design, and without the post-like test a page's first post was cut as a comment), or above member 1 there is (`postLead`): a
    picture with shorter side ≥ 100 px after the last h1, outside site chrome/sidebars (a 683×52 logo
    strip and a 159×26 button are not); a visible editor (HN); an "N comments/answers" or "leave a
    reply" heading (SE, WordPress); or ≥ 800 characters of non-link text after the h1. Then the cut
