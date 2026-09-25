@@ -1,0 +1,64 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Lazy thumbnails behind a blocked placeholder</title>
+<!--
+  A site that draws one shared placeholder where every thumbnail will be and swaps in data-src
+  when it scrolls into view. The placeholder is on the block list (this page's GM stand-in adds
+  it, so the real stored settings are untouched). Expected: the widget shows on arrival with
+  every thumbnail counted, hovering a placeholder previews its data-src picture, and a
+  slideshow walks all of them.
+-->
+<style>
+  body { margin: 0; font: 14px sans-serif; background: #eee; }
+  .main { display: flex; flex-direction: column; gap: 20px; padding: 20px; }
+  .list { display: flex; flex-direction: column; gap: 14px; }
+  .list img { width: 200px; height: 150px; object-fit: cover; background: #ccc; }
+</style>
+<div class="main">
+  <img src="../test-images/photo-800x600.jpg" width="666" height="500" alt="">
+  <div class="list" id="list"></div>
+</div>
+<script>
+  var pics = ['scene.jpg', 'photo.jpg', 'photo-800x600.jpg', 'scene.jpg?b', 'photo.jpg?b',
+    'photo-800x600.jpg?b', 'scene.jpg?c', 'photo.jpg?c', 'photo-800x600.jpg?c', 'scene.jpg?d'];
+  var list = document.getElementById('list');
+  pics.forEach(function (p) {
+    var a = document.createElement('a');
+    a.href = '../test-images/' + p;
+    var i = document.createElement('img');
+    i.src = '../test-images/icon.png';
+    i.setAttribute('data-src', '../test-images/' + p);
+    i.loading = 'lazy';
+    a.appendChild(i);
+    list.appendChild(a);
+  });
+  // The site's loader: data-src -> src once on screen, after a delay like a real one.
+  var io = new IntersectionObserver(function (es) {
+    es.forEach(function (e) {
+      if (!e.isIntersecting) return;
+      io.unobserve(e.target);
+      setTimeout(function () { e.target.src = e.target.getAttribute('data-src'); e.target.setAttribute('data-loaded', 'true'); }, 400);
+    });
+  });
+  list.querySelectorAll('img').forEach(function (i) { io.observe(i); });
+</script>
+
+<script>
+  var GM_getValue = function (key, dflt) {
+    var v = localStorage.getItem(key);
+    if (key !== 'hoverZoomSettings') return v === null ? dflt : v;
+    var s = {};
+    try { s = JSON.parse(v || '{}') || {}; } catch (e) { s = {}; }
+    s.blockList = (s.blockList || []).concat(['*/test-images/icon.png']);
+    return JSON.stringify(s);
+  };
+  var GM_setValue = function (key, val) { localStorage.setItem(key, val); };
+  var GM_addValueChangeListener = function (key, fn) {
+    window.addEventListener('storage', function (e) {
+      if (e.key === key) fn(key, e.oldValue, e.newValue, true);
+    });
+  };
+  var GM_registerMenuCommand = function () { return 'x'; };
+  var GM_unregisterMenuCommand = function () {};
+</script>
+<script src="../Hover-Zoom.user.js"></script>

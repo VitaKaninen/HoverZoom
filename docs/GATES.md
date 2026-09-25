@@ -781,6 +781,12 @@ cannot know about — a watermark, a sprite sheet, one specific image simply not
   element's own src). They differ whenever the preview is an upgrade, and blocking only the resolved
   one leaves the thumbnail still opening a preview that then fails to upgrade. `activeShown` exists
   solely for this and is cleared in `cancel()`.
+- **A blocked lazy-load placeholder does not block the picture behind it (v0.151.0).** Users block a
+  site's shared placeholder gif; every unloaded `<img>` shows it, so judging `shownUrl` refused them
+  all and the widget counted only what had loaded. `pictureUrl(el)` is the unblocked `DATA_ATTRS` URL
+  when the shown one is blocked (`lazyBehindBlocked`); `refusal()`, the tour's entry URL and hover
+  preload judge that. The resolver already skipped blocked candidates and probed `data-src`.
+  Fixture: `test-pages/lazy-blocked.html` (widget `– / 11` with nothing loaded).
 - **The button is only on a PLACED window** (`.box.hot .cap .block`): a hover preview is
   pointer-transparent, so a button on it cannot be clicked at all. The flow is hover → click to pin →
   ⊘, and the panel says so, because it is not guessable.

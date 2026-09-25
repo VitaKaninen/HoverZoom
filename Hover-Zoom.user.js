@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.150.0
+// @version     0.151.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -835,6 +835,26 @@
 
     function blocked(url) {
         return blockMatch(url, cfg.blockList);
+    }
+
+    // A lazy <img> still showing a blocked placeholder: the unblocked picture its data attribute names, else null.
+    function lazyBehindBlocked(el) {
+        if (el.tagName !== 'IMG' || !el.getAttribute) return null;
+        const shown = shownUrl(el);
+        if (!shown || !blocked(shown)) return null;
+        for (let i = 0; i < DATA_ATTRS.length; i++) {
+            const v = (el.getAttribute(DATA_ATTRS[i]) || '').trim();
+            if (!v || /\s/.test(v)) continue;
+            let abs;
+            try { abs = new URL(v, baseOf(el)).href; } catch (e) { continue; }
+            if (abs !== shown && /^https?:/.test(abs) && !blocked(abs)) return abs;
+        }
+        return null;
+    }
+
+    // The URL a picture is judged and known by: the shown one, or the real one behind a blocked placeholder.
+    function pictureUrl(el) {
+        return lazyBehindBlocked(el) || shownUrl(el);
     }
 
     const unstable = new Set();
@@ -4899,7 +4919,7 @@
         // Before the <img> branch, because these are the furniture rules that apply to one.
         if (cfg.skipFurniture && (why = bannerReason(el))) return 'bannerGate (skipFurniture is on): ' + why;
         if (cfg.skipFurniture && (why = pinnedWallpaperReason(el))) return 'backgroundGate (skipFurniture is on): ' + why;
-        if (el.tagName === 'IMG') return blocked(shownUrl(el)) ? 'its URL matches the block list' : null;
+        if (el.tagName === 'IMG') return blocked(pictureUrl(el)) ? 'its URL matches the block list' : null;
         // element with a background image and no img of its own
         if (el.querySelector && el.querySelector('img')) return 'not an <img>, and it holds one — that <img> is the target, not this';
         const bg = backgroundUrl(el);
@@ -6250,7 +6270,7 @@
             const el = pics[i];
             if (scope !== root && !scope.contains(el)) continue;
             const r = el.getBoundingClientRect();
-            items.push({ el: el, url: shownUrl(el), x: r.left + sx, y: r.top + sy,
+            items.push({ el: el, url: pictureUrl(el), x: r.left + sx, y: r.top + sy,
                 h: r.height, n: items.length });
         }
         const live = tourOrder(items);
@@ -7468,7 +7488,8 @@
         let added = 0;
         pics.forEach(function (p) {
             if (plDone.has(p) || plQueue.some(function (j) { return j.el === p; })) return;
-            if (!shownUrl(p) || blocked(shownUrl(p))) return;
+            const u = pictureUrl(p);
+            if (!u || blocked(u)) return;
             plQueue.push({ el: p, displayed: sizeOf(p), dist: PL_VIDEO_AHEAD + 1, gen: plGen, hover: true });
             added++;
         });
