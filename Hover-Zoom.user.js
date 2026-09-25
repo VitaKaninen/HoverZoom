@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.151.0
+// @version     0.152.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -1626,6 +1626,7 @@
             ':host{all:initial}',
             '.dim{position:fixed;inset:0;background:transparent;pointer-events:none}',
             '.dim.catch{pointer-events:auto}',
+            '.dim.catch.thru{pointer-events:none}',
             // Fullscreen puts the whole document on the screen, so the page is still behind us.
             // vw/vh INCLUDE the scrollbar's reserved strip; inset:0 stops short of it. See E42.
             '.dim.full{background:#11111b;width:100vw;height:100vh}',
@@ -3624,7 +3625,7 @@
         tap = null;
         box.classList.remove('placed', 'drag');
         box.style.cursor = '';
-        dimEl.classList.remove('catch');
+        dimEl.classList.remove('catch', 'thru');
         CAP_TARGET.removeEventListener('keydown', onPinKey, true);
         cancel();
     }
@@ -4314,6 +4315,49 @@
             (panelHost.contains && panelHost.contains(node)))) return true;
         if (tw && node === tw.host) return true;
         return !!host && (node === host || (host.contains && host.contains(node)));
+    }
+
+    const PASS_CONTROL = 'button,input,select,textarea,summary,label,[contenteditable=""],[contenteditable="true"],' +
+        '[role="button"],[role="checkbox"],[role="switch"],[role="tab"],[role="menuitem"],[role="radio"],' +
+        '[role="slider"],[role="combobox"],[role="option"]';
+
+    function closestComposed(el, sel) {
+        while (el) {
+            const hit = el.closest ? el.closest(sel) : null;
+            if (hit) return hit;
+            const r = el.getRootNode ? el.getRootNode() : null;
+            el = r && r.host ? r.host : null;
+        }
+        return null;
+    }
+
+    // What the page has at a point, under our own layers, inside any open shadow root.
+    function pageElAt(x, y) {
+        const hits = document.elementsFromPoint(x, y);
+        let el = null;
+        for (let i = 0; i < hits.length; i++) if (!ours(hits[i])) { el = hits[i]; break; }
+        while (el && el.shadowRoot) {
+            const inner = el.shadowRoot.elementFromPoint(x, y);
+            if (!inner || inner === el) break;
+            el = inner;
+        }
+        return el;
+    }
+
+    // A control the press was meant for — a button, a field, another userscript's widget — not a link or picture.
+    function pageControlAt(x, y) {
+        const el = pageElAt(x, y);
+        if (!el) return false;
+        if (closestComposed(el, '[data-us-dock]')) return true;
+        if (closestComposed(el, 'a[href],img,video,picture,svg image')) return false;
+        return !!closestComposed(el, PASS_CONTROL);
+    }
+
+    // Over a page control, the backdrop lets the press through; the press then closes the window. See E70.
+    function thruSync(x, y) {
+        if (!dimEl) return;
+        const on = placed && !drag && !dimEl.classList.contains('full') && pageControlAt(x, y);
+        dimEl.classList.toggle('thru', on);
     }
 
     function modifierHeld(e) {
@@ -5077,6 +5121,7 @@
         pointer.x = e.clientX;
         pointer.y = e.clientY;
         twNear(e.clientX, e.clientY);
+        if (placed) thruSync(e.clientX, e.clientY);
         if (active && !placed && playerArrived(active)) return;
         if (spinEl && spinEl.classList.contains('on')) moveSpinner();
         const over = !!view && !!box && box.classList.contains('on') &&
@@ -5363,6 +5408,10 @@
             return;
         }
         if (ours(e.target)) { claimClick(); return; }   // onBoxDown / the backdrop own this one
+        if (placed && e.button === 0) {     // through the backdrop onto a page control: close, let it act
+            dbg('a press on a page control closes the window and goes through', describeEl(e.target));
+            dismiss();
+        }
         if (!placed && e.button === 2 && cfg.activation === 'modifier' && (modifierDown || modifierHeld(e)) &&
             pressPinsPreview(e)) {
             claimClick();
@@ -6867,6 +6916,8 @@
     const EXC_MAX_MS = 2000;
     const EXC_COOL_MS = 3000;
     const EXC_STEP = 0.9;           // at the wall, the page moves on this many viewports, like Page Down
+    const EXC_WALK_MS = 250;        // a pause on each screen of the walk, for a loader to fire
+    const EXC_WALK_MAX = 40;        // screens one press may walk
 
     let excBusy = false, excAt = 0, excSpent = false;
     let excDead = null;             // {url, h, n} when this page last loaded nothing; never reset
@@ -6912,7 +6963,7 @@
     const GROWS_INPUT_MS = 1000;    // a scroll this soon after wheel/key/touch/press is the user's
     const GROWS_SETTLE_MS = 600;
     const GROWS_LATE_MS = 2000;     // a second look, for a batch that lands after scrolling stops
-    let growsBase = null, growsNear = false, growsTimer = 0, userInputAt = 0, growsMoved = false;
+    let growsBase = null, growsHad = null, growsNear = false, growsTimer = 0, userInputAt = 0, growsMoved = false;
 
     function growsMigrate() {
         if (growsMoved) return;
@@ -6932,7 +6983,8 @@
         return (cfg.scrollSites || []).some(function (k) { return entryCovers(k, host); });
     }
 
-    function growsCount() { return mainPics(tourPics(Math.max(0, cfg.tourMinDisplayed | 0))).length; }
+    function growsPics() { return mainPics(tourPics(Math.max(0, cfg.tourMinDisplayed | 0))); }
+    function growsCount() { return growsPics().length; }
 
     function growsMisses() {
         try { return JSON.parse(GM_getValue(GROWS_MISS_KEY, '') || '{}'); } catch (e) { return {}; }
@@ -6973,21 +7025,24 @@
     // Pictures added after the user scrolled near the bottom: this site needs the excursion.
     function growsCheck(late) {
         if (growsBase === null) return;
-        const n = growsCount();
-        if (n > growsBase && growsNear) {
+        const now = growsPics(), n = now.length;
+        // New elements, not a lazy page filling in the ones it already had.
+        const added = now.some(function (p) { return !growsHad.has(p); });
+        if (n > growsBase && added && growsNear) {
             if (growsHere()) growsHit('seen again as you scrolled, ' + growsBase + ' → ' + n);
             else growsLearn(growsBase, n);
             growsBase = null;
+            growsHad = null;
             return;
         }
-        if (late) { growsBase = null; growsNear = false; return; }
+        if (late) { growsBase = null; growsHad = null; growsNear = false; return; }
         growsTimer = setTimeout(function () { growsCheck(true); }, GROWS_LATE_MS);
     }
 
     function growsOnScroll() {
         if (tour || twStarting || excBusy || Date.now() - userInputAt > GROWS_INPUT_MS) return;
         if (!cfg.tourLoadMore || !siteEnabled()) return;
-        if (growsBase === null) { growsBase = growsCount(); growsNear = false; }
+        if (growsBase === null) { const had = growsPics(); growsBase = had.length; growsHad = new Set(had); growsNear = false; }
         const h = vpH();
         if (h > 0 && (window.scrollY || 0) + 2 * h >= docHeight()) growsNear = true;
         clearTimeout(growsTimer);
@@ -7009,20 +7064,29 @@
         if (!growsHere()) { excSpent = true; dbg('load more: not on this site, which has not been seen to load more when scrolled'); return false; }
         if (!force && Date.now() - excAt < EXC_COOL_MS) return false;
         if (excStillDead()) { excSpent = true; dbg('load more: this page loaded nothing last time and has not grown'); return false; }
-        if (!excBottomShown()) {
-            if (!force) return false;
-            window.scrollBy({ left: 0, top: Math.round(vpH() * EXC_STEP), behavior: 'instant' });
-        }
+        if (!force && !excBottomShown()) return false;
         excBusy = true;
         excAt = Date.now();
         const before = mediaCount();
         let seen;
-        try { seen = await excWatch(before); } finally { excBusy = false; }
+        try {
+            if (force) await excWalk(before);
+            seen = await excWatch(before);
+        } finally { excBusy = false; }
         dbg('load more: watched the bottom of the page', { was: before, now: seen.now, grew: seen.grew, atWall: !!force });
         if (seen.grew) { growsHit('the slideshow found more'); return true; }
         if (!excBottomShown()) return false;        // a screen further on at the next press
         excGaveNothing();
         return false;
+    }
+
+    // At the wall: on down a screen at a time, as Page Down would, until the bottom shows or pictures are added.
+    async function excWalk(before) {
+        for (let i = 0; i < EXC_WALK_MAX && !excBottomShown() && mediaCount() <= before; i++) {
+            window.scrollBy({ left: 0, top: Math.round(vpH() * EXC_STEP), behavior: 'instant' });
+            await sleep(EXC_WALK_MS);
+            if (!tour) return;
+        }
     }
 
     // Spent for this slideshow, dead for this page until it grows, and one miss for the site per page.

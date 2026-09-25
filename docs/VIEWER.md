@@ -37,6 +37,13 @@ on it.
   listening there would see a phantom click. Use `e.composedPath()[0]`, **not** `e.target` —
   outside the shadow tree the target is retargeted to the host.
 - A click outside usually lands on the thumbnail, so it suppresses (`E2`).
+- **A press meant for a page control goes through (`E70`, v0.152.0, user).** Over a button, field,
+  label, control role or another userscript's docked widget (`[data-us-dock]`, e.g. Forum Stumbler's
+  ▶ next page), `thruSync()` sets `.dim.thru` (pointer-events none), so the press reaches it and the
+  window-capture `mousedown` dismisses. Links and pictures are excluded — there the first click only
+  closes, since that is what a click away usually means. Decided on mousemove, because a press that
+  has already targeted the backdrop cannot be redirected (a `click` goes to the common ancestor);
+  so after a scroll under a still pointer the first press still only closes.
 
 `bottomReserve` is retired: `usableHeight()` is now just the viewport, floored at 64 px because the
 Browser pane reports `clientHeight` 0 while hidden. It survives as the single answer to "where is

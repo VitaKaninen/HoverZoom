@@ -593,8 +593,10 @@ keeps the current picture in the top part of the viewport (its top between `FOLL
 what comes next and the page's own loader fires about a screen before the last picture.
 `tourAskMore()` does no scrolling of its own: once the bottom is on screen (`excBottomShown()`) it
 watches (`excWatch`, ≤ 2 s) for the batch; before that it returns `false` and following gets there.
-At the wall (`force`, ▶ on the last picture) with the bottom still off screen, it scrolls on by
-`EXC_STEP` (0.9 viewport), like Page Down, and the next press goes a screen further.
+At the wall (`force`, ▶ on the last picture) `excWalk()` pages down by `EXC_STEP` (0.9 viewport)
+with a `EXC_WALK_MS` pause per screen, **within the one press**, until the bottom shows or elements
+are added, then watches. One screen per press (v0.144.0–v0.151.0) made a page with a long tail
+under its last picture take ~5 slow presses (2 s watch each) or 30+ fast ones to end (user, v0.152.0).
 
 **Why not the old jump (v0.98.0–v0.143.0: to the bottom and straight back, "the excursion"/"the
 hop"/"the stay").** It skipped the middle: Google Images in Firefox/LibreWolf **mounts each
@@ -620,7 +622,9 @@ batches, then shows a "See more images" button no scroll passes, so its slidesho
   `hoverZoomGrowsOnScroll`; `growsMigrate()` moves it once). A host is learned when the **user**
   scrolls (wheel/key/touch/press within 1 s before the `scroll`), is within two viewports of the
   bottom, and the widget's count (`growsCount()` = `twTotal`'s derivation, not `mediaCount()`: ads
-  and pixels move the raw count) rises within 0.6 s or 2.6 s. The user-input test excludes our own
+  and pixels move the raw count) rises within 0.6 s or 2.6 s **with elements not there before**
+  (`growsHad`): a lazy page filling in placeholders it already had raises the count too, and was
+  learned as a feed (v0.152.0). The user-input test excludes our own
   scrolls and scroll restoration. No built-in list of feeds, by design: the first slideshow on
   Google Images ends at 100 until the user has scrolled once.
 - **Not a one-way gate (v0.143.0, user).** `hoverZoomScrollMisses` {host: n}: a watch at the
