@@ -207,13 +207,14 @@ reply's first picture** — exact placement and consistency between sites do not
    children are mostly **cards** (h1–h3 link ≥8 chars to another page, not a profile) is skipped
    whole — judged on all of them, or two recipe cards sharing `category-summer` pass as a thread.
 2. The group is **comments under a post** if its replies nest (a member holds another of its own
-   class that is itself post-like — Lemmy, WordPress; forum posts never nest; Bootstrap's `div.row`
-   nests by design, and without the post-like test a page's first post was cut as a comment), or above member 1 there is (`postLead`): a
+   class — Lemmy, WordPress; forum posts never nest), or above member 1 there is (`postLead`): a
    picture with shorter side ≥ 100 px after the last h1, outside site chrome/sidebars (a 683×52 logo
    strip and a 159×26 button are not); a visible editor (HN); an "N comments/answers" or "leave a
    reply" heading (SE, WordPress); or ≥ 800 characters of non-link text after the h1. Then the cut
    is the group's `COMMENTS_SEL` ancestor if it does not hold the h1 (Invision's `#comments` holds
-   every post), else member 1.
+   every post), else member 1 — **unless member 1 holds the h1**: then it is the post, and the cut is
+   member 2. (A Bootstrap page grouped its `div.row`s, which nest by design, and cut at the post's own
+   top; requiring the nested row to be post-like did not help — its rows were.)
 3. Otherwise it is a **thread** and member 1 is the OP: cut = member 2 — unless the page is past the
    first (`threadPage()`: URL `page-N`/`/page/N`/`page=`/`start=`/SMF `topic=N.M`, or the pager's
    current number) or member 1's `data-post-number`/`data-number` is not 1 (Discourse/Flarum deep

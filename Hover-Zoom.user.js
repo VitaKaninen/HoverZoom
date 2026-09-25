@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.158.0
+// @version     0.159.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -6783,7 +6783,7 @@
         const tag = g.key.slice(0, dot).toLowerCase(), cls = g.key.slice(dot + 1);
         if (!cls && tag.indexOf('-') < 0) return false;      // a bare <div> is inside everything
         const sel = cls ? tag + '.' + CSS.escape(cls) : tag;
-        return g.some(function (e) { return [].some.call(e.querySelectorAll(sel), postishDeep); });
+        return g.some(function (e) { return !!e.querySelector(sel); });
     }
 
     // A box's rect, or its children's together when it draws none itself (display:contents, an inline custom element).
@@ -6867,6 +6867,8 @@
             if (lead) {
                 const box = g[0].closest(COMMENTS_SEL);
                 const h1 = document.querySelector('h1');
+                if (h1 && g[0].contains(h1)) return { cut: g[1], how: 'comments below the post (' + lead.why +
+                    '; the title is in the 1st, so replies start at the 2nd)', g: g, lead: lead };
                 return { cut: box && !(h1 && box.contains(h1)) ? box : g[0], how: 'comments below the post (' + lead.why + ')',
                     g: g, lead: lead };
             }
