@@ -219,8 +219,19 @@ reply's first picture** — exact placement and consistency between sites do not
    links): no cut, the whole page is replies.
 4. No group: the first `COMMENTS_SEL` element, if any.
 
-Debug: setting `showPostEnd` draws `hz-post-end` (red, document-absolute, redrawn by `twRefresh`)
-with `how`, or dashed at the top with `why`.
+Debug: setting `showPostEnd` ("Draw where the slideshow stops") draws `hz-post-end` (red,
+document-absolute, redrawn by `twRefresh` via `tourLinesSync`) with `how`, or dashed at the top with
+`why`, plus one orange `hz-side-edge` per sidebar holding pictures (`sidebars()`, from
+`sideColumnEl`; a sidebar with no pictures draws nothing), on the edge facing the main column. It
+also logs `[Hover Zoom] slideshow lines` to the console once per change (`tourLinesReport`):
+tags/classes/ids, sizes and positions only — no URLs, no page text — so the user can paste it
+without revealing what they were reading. **Ask for that report first** when a line is wrong.
+
+Custom elements: `postish` also tests the tag name when it has a hyphen, and `nests` uses a
+classless custom tag as its selector — Reddit's comments are classless nested `<shreddit-comment>`,
+which matched nothing before v0.157.0 (no line at all). Unknown elements are `display:inline` and
+report an empty rect, so geometry goes through `rectOf` (children's union).
+`test-pages/reddit-like.html` is that shape; the tool browsers cannot open reddit.com itself.
 
 Measured 2026-09-25 in Chrome, logged out — right: XenForo (anandtech), phpBB (linuxmint),
 Invision (linustechtips, and page 2 → none), vBulletin 6 (city-data), Discourse (meta), HN, Lemmy,

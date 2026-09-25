@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.156.0
+// @version     0.157.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -98,7 +98,7 @@
                                     // only default a first visit may have — see AUDIO_DEFAULT
 
         debug: false,               // log every hover decision to the console
-        showPostEnd: false,         // draw a red line where the slideshow's post ends
+        showPostEnd: false,         // draw the slideshow's post end (red) and sidebars (orange)
     };
 
     const KEY = 'hoverZoomSettings';
@@ -6566,7 +6566,7 @@
 
     function twRefresh() {
         if (!isTopFrame || !document.body) return;
-        if (cfg.showPostEnd || postLine) postLineSync();
+        if (cfg.showPostEnd || postLine || sideLines.length) tourLinesSync();
         if (!tw) {
             if (!cfg.tourButtons || !siteEnabled() || CAPTCHA_HERE) return;
             buildTourWidget();
@@ -6661,7 +6661,10 @@
     }
 
     // A tall, narrow column standing beside a wider one: a sidebar, by width alone. See TOUR.md §1b.
-    function sideColumn(el) {
+    function sideColumn(el) { return !!sideColumnEl(el); }
+
+    // { col, main }: the sidebar holding el and the wider column beside it, or null.
+    function sideColumnEl(el) {
         const vw = vpW();
         let node = el, narrow = null;
         while (node && node !== document.body && node !== document.documentElement) {
@@ -6669,16 +6672,16 @@
             narrow = node;
             node = node.parentElement;
         }
-        if (!narrow || !node) return false;
+        if (!narrow || !node) return null;
         const nr = narrow.getBoundingClientRect();
-        if (nr.height < Math.min(600, vpH() * 0.6)) return false;     // a floated figure, not a column
+        if (nr.height < Math.min(600, vpH() * 0.6)) return null;      // a floated figure, not a column
         for (let i = 0; i < node.children.length; i++) {
             const c = node.children[i];
             if (c === narrow) continue;
             const r = c.getBoundingClientRect();
-            if (r.width > nr.width * 1.5 && r.top < nr.bottom && r.bottom > nr.top) return true;
+            if (r.width > nr.width * 1.5 && r.top < nr.bottom && r.bottom > nr.top) return { col: narrow, main: c };
         }
-        return false;
+        return null;
     }
 
     // What a slideshow started from idle may show: everything but the sidebars.
@@ -6714,7 +6717,8 @@
 
     function postish(e) {
         if (!e) return false;
-        if (POST_WORD.test((e.getAttribute('class') || '') + ' ' + e.id)) return true;
+        // the tag too: Reddit's comments are classless <shreddit-comment>
+        if (POST_WORD.test((e.getAttribute('class') || '') + ' ' + e.id + ' ' + (e.tagName.indexOf('-') > 0 ? e.tagName : ''))) return true;
         if (/comment|posting|answer/i.test((e.getAttribute('itemtype') || '') + ' ' + (e.getAttribute('itemprop') || ''))) return true;
         return e.hasAttribute('data-post-id') || e.hasAttribute('data-post-number') || e.hasAttribute('data-content');
     }
@@ -6753,13 +6757,13 @@
             sibGroups(p).forEach(function (m, key) {
                 m = m.filter(function (e) {        // vBulletin's empty div#lastpost anchor goes, not the group
                     if (!postishDeep(e)) return false;
-                    const r = e.getBoundingClientRect();
+                    const r = rectOf(e);
                     return r.height >= 40 && r.width >= vw * 0.3;
                 });
                 if (m.length < 2) return;
                 let text = 0, prev = null;
                 for (let j = 0; j < m.length; j++) {
-                    const r = m[j].getBoundingClientRect();
+                    const r = rectOf(m[j]);
                     if (prev && r.top < prev.bottom - 2) return;       // side by side: a grid, not a thread
                     prev = r;
                     text += m[j].textContent.length;
@@ -6776,10 +6780,23 @@
     // Replies inside replies: a comment tree (Lemmy, Reddit, WordPress). A forum's posts never nest.
     function nests(g) {
         const dot = g.key.indexOf('.');
-        const cls = g.key.slice(dot + 1);
-        if (!cls) return false;
-        const sel = g.key.slice(0, dot).toLowerCase() + '.' + CSS.escape(cls);
+        const tag = g.key.slice(0, dot).toLowerCase(), cls = g.key.slice(dot + 1);
+        if (!cls && tag.indexOf('-') < 0) return false;      // a bare <div> is inside everything
+        const sel = cls ? tag + '.' + CSS.escape(cls) : tag;
         return g.some(function (e) { return !!e.querySelector(sel); });
+    }
+
+    // A box's rect, or its children's together when it draws none itself (display:contents, an inline custom element).
+    function rectOf(e) {
+        const r = e.getBoundingClientRect();
+        if (r.height > 0 || !e.firstElementChild) return r;
+        let t = Infinity, l = Infinity, b = -Infinity, rt = -Infinity;
+        for (let c = e.firstElementChild; c; c = c.nextElementSibling) {
+            const q = c.getBoundingClientRect();
+            if (!q.width && !q.height) continue;
+            t = Math.min(t, q.top); l = Math.min(l, q.left); b = Math.max(b, q.bottom); rt = Math.max(rt, q.right);
+        }
+        return t === Infinity ? r : { top: t, left: l, bottom: b, right: rt, width: rt - l, height: b - t };
     }
 
     function precedes(a, b) { return !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) && !a.contains(b); }
@@ -6817,12 +6834,16 @@
             return Math.min(r.width, r.height) >= LEAD_PIC && precedes(p, g0) && (!from || precedes(from, p)) &&
                 !sideColumn(p) && !siteChrome(p);
         });
-        if (pics.length) return 'pictures above';
+        if (pics.length) return { why: 'pictures above', el: pics[0] };
         const eds = document.querySelectorAll('textarea, [contenteditable="true"], [contenteditable=""]');
-        for (let i = 0; i < eds.length; i++) if (eds[i].getClientRects().length && precedes(eds[i], g0)) return 'reply box above';
+        for (let i = 0; i < eds.length; i++) {
+            if (eds[i].getClientRects().length && precedes(eds[i], g0)) return { why: 'reply box above', el: eds[i] };
+        }
         const hs = document.querySelectorAll('h2, h3, h4, h5, [role="heading"]');
         for (let i = 0; i < hs.length; i++) {
-            if (precedes(hs[i], g0) && hs[i].getClientRects().length && COMMENT_HEAD.test(hs[i].textContent)) return 'comment heading';
+            if (precedes(hs[i], g0) && hs[i].getClientRects().length && COMMENT_HEAD.test(hs[i].textContent)) {
+                return { why: 'comment heading', el: hs[i] };
+            }
         }
         const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
         if (from) w.currentNode = from;
@@ -6832,9 +6853,9 @@
             const p = t.parentElement;
             if (!p || (from && from.contains(p)) || p.closest(LEAD_SKIP) || !p.getClientRects().length) continue;
             n += t.nodeValue.replace(/\s+/g, ' ').trim().length;
-            if (n >= LEAD_TEXT) return 'text above';
+            if (n >= LEAD_TEXT) return { why: 'text above', el: p };
         }
-        return '';
+        return null;
     }
 
     // { cut, how } — the first element a slideshow of the post leaves out — or null (with `why` for the debug line).
@@ -6842,23 +6863,24 @@
         const floor = Math.max(0, cfg.tourMinDisplayed | 0);
         const g = postGroup();
         if (g) {
-            const lead = nests(g) ? 'replies nest' : postLead(g[0], floor);
+            const lead = nests(g) ? { why: 'replies nest', el: null } : postLead(g[0], floor);
             if (lead) {
                 const box = g[0].closest(COMMENTS_SEL);
                 const h1 = document.querySelector('h1');
-                return { cut: box && !(h1 && box.contains(h1)) ? box : g[0], how: 'comments below the post (' + lead + ')' };
+                return { cut: box && !(h1 && box.contains(h1)) ? box : g[0], how: 'comments below the post (' + lead.why + ')',
+                    g: g, lead: lead };
             }
             const num = g[0].getAttribute('data-post-number') || g[0].getAttribute('data-number') ||
                 (g[0].querySelector('[data-post-number]') || g[0]).getAttribute('data-post-number');
-            if (num && num !== '1') return { cut: null, why: 'thread opens on post ' + num + ', not the first' };
+            if (num && num !== '1') return { cut: null, why: 'thread opens on post ' + num + ', not the first', g: g };
             const pg = threadPage();
-            if (pg > 1) return { cut: null, why: 'thread page ' + pg + ' — every post is a reply' };
-            return { cut: g[1], how: 'thread: replies start at the 2nd post' };
+            if (pg > 1) return { cut: null, why: 'thread page ' + pg + ' — every post is a reply', g: g };
+            return { cut: g[1], how: 'thread: replies start at the 2nd post', g: g };
         }
         const cs = document.querySelectorAll(COMMENTS_SEL);
         for (let i = 0; i < cs.length; i++) {
             const c = cs[i];
-            if (c.getBoundingClientRect().height > 0 && !c.querySelector('h1') && !c.parentElement.closest(COMMENTS_SEL)) {
+            if (rectOf(c).height > 0 && !c.querySelector('h1') && !c.parentElement.closest(COMMENTS_SEL)) {
                 return { cut: c, how: 'comment area' };
             }
         }
@@ -6870,27 +6892,87 @@
         return pe && pe.cut ? pics.filter(function (p) { return !atOrAfter(pe.cut, p); }) : pics;
     }
 
-    // Debug: a red line across the page where the slideshow stops.
-    let postLine = null;
-    function postLineSync() {
+    // ---- debug lines (setting showPostEnd): red where the post ends, orange where each sidebar begins.
+    let postLine = null;            // hz-post-end
+    let sideLines = [];             // hz-side-edge, one per sidebar
+    let linesReported = '';         // the last report logged, so a page logs once per change
+
+    function mkDebugLine(tag, css, color) {
+        const line = document.createElement(tag);
+        line.style.cssText = 'all:initial;position:absolute;z-index:2147483646;pointer-events:none;display:block;' + css;
+        const label = document.createElement('span');
+        label.style.cssText = 'all:initial;position:absolute;padding:1px 6px;background:' + color + ';color:#fff;' +
+            'font:12px/16px sans-serif;border-radius:0 0 4px 4px;white-space:nowrap;top:2px;' +
+            (tag === 'hz-post-end' ? 'right:8px' : 'left:2px');
+        line.appendChild(label);
+        return line;
+    }
+
+    // The sidebars the pictures sit in, each once.
+    function sidebars() {
+        const out = [];
+        tourPics(Math.max(0, cfg.tourMinDisplayed | 0)).forEach(function (p) {
+            const s = sideColumnEl(p);
+            if (!s) return;
+            const have = out.find(function (o) { return o.col === s.col; });
+            if (have) have.n++; else out.push({ col: s.col, main: s.main, n: 1 });
+        });
+        return out;
+    }
+
+    function tourLinesSync() {
         const want = !!cfg.showPostEnd && isTopFrame && !!document.body;
         const pe = want ? postEnd() : null;
-        if (!pe) { if (postLine) postLine.style.display = 'none'; return; }
-        if (!postLine) {
-            postLine = document.createElement('hz-post-end');
-            postLine.style.cssText = 'all:initial;position:absolute;left:0;right:0;height:0;z-index:2147483646;' +
-                'pointer-events:none;border-top:3px solid #f00;display:block';
-            const tag = document.createElement('span');
-            tag.style.cssText = 'all:initial;position:absolute;right:8px;top:2px;padding:1px 6px;background:#f00;color:#fff;' +
-                'font:12px/16px sans-serif;border-radius:0 0 4px 4px;white-space:nowrap';
-            postLine.appendChild(tag);
+        const sides = want ? sidebars() : [];
+        const sx = window.scrollX || 0, sy = window.scrollY || 0;
+        if (pe) {
+            if (!postLine) postLine = mkDebugLine('hz-post-end', 'left:0;right:0;height:0;border-top:3px solid #f00', '#f00');
+            if (!postLine.isConnected) document.documentElement.appendChild(postLine);
+            const y = pe.cut ? rectOf(pe.cut).top + sy - 2 : sy + 40;
+            postLine.style.top = Math.round(y) + 'px';
+            postLine.style.borderTopStyle = pe.cut ? 'solid' : 'dashed';
+            postLine.firstChild.textContent = 'Hover Zoom: ' + (pe.cut ? 'slideshow ends here — ' + pe.how : 'no post end — ' + pe.why);
+            postLine.style.display = 'block';
+        } else if (postLine) postLine.style.display = 'none';
+        while (sideLines.length > sides.length) sideLines.pop().remove();
+        sides.forEach(function (s, i) {
+            let line = sideLines[i];
+            if (!line) line = sideLines[i] = mkDebugLine('hz-side-edge', 'width:0;border-left:3px solid #f80', '#f80');
+            if (!line.isConnected) document.documentElement.appendChild(line);
+            const r = s.col.getBoundingClientRect(), m = s.main.getBoundingClientRect();
+            const left = r.left + r.width / 2 < m.left + m.width / 2;       // the edge facing the main column
+            line.style.left = Math.round((left ? r.right : r.left) + sx - 1) + 'px';
+            line.style.top = Math.round(r.top + sy) + 'px';
+            line.style.height = Math.round(r.height) + 'px';
+            line.firstChild.textContent = 'Hover Zoom: sidebar (' + s.n + ' picture' + (s.n === 1 ? '' : 's') + ' left out)';
+        });
+        if (want) tourLinesReport(pe, sides);
+    }
+
+    // Structure only — tags, classes, ids, sizes, positions; never a URL or the page's text.
+    function tourLinesReport(pe, sides) {
+        const sy = window.scrollY || 0;
+        const at = function (el) { const r = rectOf(el); return Math.round(r.width) + '×' + Math.round(r.height) + ' at y ' + Math.round(r.top + sy); };
+        const chain = function (el) {
+            const out = [];
+            for (let i = 0; el && el !== document.documentElement && i < 6; i++, el = el.parentElement) out.push(describeEl(el));
+            return out.join(' < ');
+        };
+        const lines = ['post end: ' + (!pe ? 'none — no repeated posts and no comment area found' :
+            pe.cut ? pe.how : pe.why)];
+        if (pe && pe.g) {
+            lines.push('posts: ' + pe.g.key.toLowerCase() + ' ×' + pe.g.length + '; 1st ' + at(pe.g[0]) + '; 2nd ' + at(pe.g[1]));
+            lines.push('1st post: ' + chain(pe.g[0]));
         }
-        if (!postLine.isConnected) document.documentElement.appendChild(postLine);
-        const y = pe.cut ? pe.cut.getBoundingClientRect().top + (window.scrollY || 0) - 2 : (window.scrollY || 0) + 40;
-        postLine.style.top = Math.round(y) + 'px';
-        postLine.style.borderTopStyle = pe.cut ? 'solid' : 'dashed';
-        postLine.firstChild.textContent = 'Hover Zoom: ' + (pe.cut ? 'slideshow ends here — ' + pe.how : 'no post end — ' + pe.why);
-        postLine.style.display = 'block';
+        if (pe && pe.lead && pe.lead.el) lines.push('evidence: ' + pe.lead.el.tagName.toLowerCase() + ' ' + at(pe.lead.el) + ' — ' + chain(pe.lead.el));
+        if (pe && pe.cut) lines.push('cut: ' + describeEl(pe.cut) + ' ' + at(pe.cut));
+        lines.push('thread page: ' + threadPage() + '; h1: ' + document.getElementsByTagName('h1').length +
+            '; window ' + vpW() + '×' + vpH());
+        sides.forEach(function (s) { lines.push('sidebar: ' + chain(s.col) + ' ' + at(s.col) + ', ' + s.n + ' pictures'); });
+        const text = lines.join('\n');
+        if (text === linesReported) return;
+        linesReported = text;
+        console.info('[Hover Zoom] slideshow lines\n' + text);
     }
 
     // The smallest element holding every picture the widget counted: the article, not the page
@@ -8816,9 +8898,10 @@
         section('Diagnostics');
         check('debug', 'Log every hover to the console',
             'One line per hover in the console (F12). Leave off unless chasing a problem.');
-        check('showPostEnd', 'Draw a red line where the post ends',
-            'On a thread or an article with comments, a slideshow keeps to the post; the line marks where ' +
-            'it stops. Dashed, at the top, when the page has replies but no post (page 2 of a thread).');
+        check('showPostEnd', 'Draw where the slideshow stops',
+            'A red line where the post ends (its replies or comments are left out; dashed at the top when ' +
+            'the page has replies but no post), an orange one where each sidebar begins. What was found is ' +
+            'logged to the console (F12): page structure and sizes only, no addresses or text.');
 
         section('Per-site fixes');
         const refSites = list('referrerSites', {

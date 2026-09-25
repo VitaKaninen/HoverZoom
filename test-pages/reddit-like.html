@@ -1,0 +1,42 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Reddit-shaped post — the post end</title>
+<!--
+  Reddit's shape, which the tool browsers here cannot open: a post, then classless custom
+  elements <shreddit-comment> nested inside each other in a <shreddit-comment-tree>. Unknown
+  elements are display:inline, so the comments draw no box of their own (rectOf).
+  Expect the red line at the comment tree, and the post's two pictures kept.
+-->
+<style>
+  body { font: 15px/1.4 sans-serif; margin: 16px; }
+  .layout { display: flex; gap: 24px; }
+  main { flex: 1; }
+  shreddit-post img, shreddit-comment img { display: block; margin: 8px 0; }
+  .c { padding: 8px 0 8px 16px; border-left: 2px solid #ccc; }
+</style></head>
+<body>
+<div class="layout"><main>
+  <shreddit-post>
+    <h1>A post with two pictures</h1>
+    <img src="../test-images/photo-800x600.jpg" width="400" height="300" alt="">
+    <img src="../test-images/photo-800x600.jpg" width="400" height="300" alt="">
+  </shreddit-post>
+  <shreddit-comment-tree>
+    <shreddit-comment depth="0"><div class="c">First comment with a picture
+      <img src="../test-images/photo-800x600.jpg" width="300" height="200" alt="">
+      <shreddit-comment depth="1"><div class="c">A reply</div></shreddit-comment>
+    </div></shreddit-comment>
+    <shreddit-comment depth="0"><div class="c">Second comment
+      <img src="../test-images/photo-800x600.jpg" width="300" height="200" alt="">
+    </div></shreddit-comment>
+    <shreddit-comment depth="0"><div class="c">Third comment, text only</div></shreddit-comment>
+  </shreddit-comment-tree>
+</main></div>
+<script>
+  var GM_getValue = function (key, dflt) { var v = localStorage.getItem(key); return v === null ? dflt : v; };
+  var GM_setValue = function (key, val) { localStorage.setItem(key, val); };
+  var GM_addValueChangeListener = function () {};
+  var GM_registerMenuCommand = function () { return 'x'; };
+  var GM_unregisterMenuCommand = function () {};
+</script>
+<script src="../Hover-Zoom.user.js"></script>
+</body></html>
