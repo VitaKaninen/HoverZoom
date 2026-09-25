@@ -183,28 +183,54 @@ ancestor still under 45% of the window, if it is at least min(600 px, 60% of the
 sibling 1.5× wider beside it (overlapping vertically). The height test keeps floated figures and grid
 cards out. Width only, no markup: the user's rule is "the wide middle column is the content".
 
-**Tried and reverted (v0.129.0):** named sections (Main/Replies/Comments/sidebars/header/footer)
-from comment selectors, sibling forum posts and landmarks, with a switcher on the widget. It split
-the test forum right and real forums the user uses wrong. **Shelved, not rejected** (user, 2026-09-25):
-first versions normally need tuning; it was pulled only so other slideshow issues that might interact
-with it could be settled first. Rebuilding it is expected — start when the user says to.
+v0.129.0's named sections (Main/Replies/Comments/…, with a switcher) were reverted in v0.130.0 —
+**shelved, not rejected** (user): pulled only so other slideshow issues could settle first. §1c is the
+part of it the user asked back for; the switcher and the other sections are not rebuilt.
 
-**Forum survey, 2026-09-25** (DOM probe, mostly logged out; raised again by the user as "end the
-slideshow after the main post"). Two layouts, and the reply box only separates one of them:
-- *Thread forums* — XenForo, vBulletin 6, phpBB, Invision, Discourse, Flarum, Stack Exchange: the
-  first post and every reply are identical repeated siblings (`article.message`, `table[id^=post]`,
-  `div.post.bg1/bg2`, `article.cPost`, `.topic-post`/`#post_1`, `.PostStream-item`). The reply box
-  (vB quick reply, XF/IPS "log in to reply", SE "Your Answer") is **after the last reply**, and
-  Discourse/Flarum's composer is a floating panel — so it never divides post from replies. The
-  boundary is the end of sibling #1 — but only on page 1; on page 2+ sibling #1 is a reply.
-- *Comment pages* — HN, Lemmy, Reddit, WordPress, imgur: post and comments are different
-  containers (`table.fatitem` vs `tr.comtr`; `ul.comments.border-top`; `#comments.comments-area`;
-  `.Gallery-Content` vs `.CommentsList`), often with an "N comments" heading. The box sits between
-  post and comments on HN (and Reddit/Lemmy when logged in); WordPress's "Leave a Reply" is after.
-- 4chan: form above the OP; OP and replies are siblings, the OP marked `.opContainer`.
-- Markup that names the OP where present: Discourse `#post_1`/`.topic-owner`, 4chan `.opContainer`,
-  Invision JSON-LD `DiscussionForumPosting` + `comment[]`; XenForo marks *every* post `Comment`.
-- Bot checks blocked phpbb.com, simplemachines.org, eevblog (SMF), community.mybb.com.
+## 1c. The post end — v0.156.0
+
+A slideshow of a thread or an article keeps to the post: its replies/comments are left out.
+`postEnd()` → `{ cut, how }`, the first element left out (everything at or after it in document
+order, `atOrAfter`), or `{ cut: null, why }`, or null. Re-derived on every call; nothing held.
+Applied: idle start and the widget count always (`idlePics`); a pinned start only when the start
+picture is above the cut (`tour.postOnly` — begun in the comments, the comments are the tour).
+`}` at the whole page lifts it. A post-only tour is confined: no harvest, no next page.
+The user's pass mark: **the line may land anywhere between the end of the post and the first
+reply's first picture** — exact placement and consistency between sites do not matter.
+
+1. `postGroup()`: the largest (by text) run of siblings sharing a tag and **any one** class, every
+   member post-like (`postishDeep`: /post|comment|message|repl|answer|comtr/ in class/id, comment
+   itemtype, `data-post-*`, checked 5 levels down the first-child chain — vBulletin wraps
+   `table#post…` in 4 bare divs), ≥40 px tall, ≥30% of the window wide, stacked (not side by side).
+   Any one class, not the exact list: XenForo's OP carries extra `message--thfeature_firstPost`.
+   Members under 40 px are dropped, not fatal (vB's empty `div#lastpost`). A parent whose post-like
+   children are mostly **cards** (h1–h3 link ≥8 chars to another page, not a profile) is skipped
+   whole — judged on all of them, or two recipe cards sharing `category-summer` pass as a thread.
+2. The group is **comments under a post** if its replies nest (a member holds another of its own
+   class — Lemmy, WordPress; forum posts never nest), or above member 1 there is (`postLead`): a
+   picture with shorter side ≥ 100 px after the last h1, outside site chrome/sidebars (a 683×52 logo
+   strip and a 159×26 button are not); a visible editor (HN); an "N comments/answers" or "leave a
+   reply" heading (SE, WordPress); or ≥ 800 characters of non-link text after the h1. Then the cut
+   is the group's `COMMENTS_SEL` ancestor if it does not hold the h1 (Invision's `#comments` holds
+   every post), else member 1.
+3. Otherwise it is a **thread** and member 1 is the OP: cut = member 2 — unless the page is past the
+   first (`threadPage()`: URL `page-N`/`/page/N`/`page=`/`start=`/SMF `topic=N.M`, or the pager's
+   current number) or member 1's `data-post-number`/`data-number` is not 1 (Discourse/Flarum deep
+   links): no cut, the whole page is replies.
+4. No group: the first `COMMENTS_SEL` element, if any.
+
+Debug: setting `showPostEnd` draws `hz-post-end` (red, document-absolute, redrawn by `twRefresh`)
+with `how`, or dashed at the top with `why`.
+
+Measured 2026-09-25 in Chrome, logged out — right: XenForo (anandtech), phpBB (linuxmint),
+Invision (linustechtips, and page 2 → none), vBulletin 6 (city-data), Discourse (meta), HN, Lemmy,
+WordPress (smittenkitchen), Stack Exchange, 4chan, imgur, test-pages/forum-thread.html. No line
+(right): HN front, a XenForo forum index, the WordPress home page. Not reached: Reddit (the
+extension refuses it), phpbb.com / simplemachines.org / eevblog / community.mybb.com (bot checks).
+Unverified: Flarum; logged-in pages (an editor above member 1 reads as comments — 4chan's hidden
+top form is why that would matter); Discourse before its posts render (null until they do).
+Survey notes: on thread forums the reply box is **after the last reply**, never between post and
+replies; on comment pages it is between (HN, and Reddit/Lemmy logged in).
 
 ## 1a. The scope and the floor — BUILT, v0.100.0
 

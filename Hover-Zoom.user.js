@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.155.0
+// @version     0.156.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -98,6 +98,7 @@
                                     // only default a first visit may have — see AUDIO_DEFAULT
 
         debug: false,               // log every hover decision to the console
+        showPostEnd: false,         // draw a red line where the slideshow's post ends
     };
 
     const KEY = 'hoverZoomSettings';
@@ -6316,7 +6317,8 @@
         let cur = levels.length - 1;
         if (tour.scope) for (let i = 0; i < levels.length; i++) if (levels[i].el.contains(tour.scope)) { cur = i; break; }
         const to = Math.max(min, Math.min(levels.length - 1, cur + dir));
-        if (to === cur) { dbg('tour scope: already ' + (dir > 0 ? 'the whole page' : 'as narrow as it goes')); return; }
+        if (to === cur && dir > 0 && tour.postOnly) tour.postOnly = false;     // } at the whole page: the replies too
+        else if (to === cur) { dbg('tour scope: already ' + (dir > 0 ? 'the whole page' : 'as narrow as it goes')); return; }
         tour.level = to;
         tour.scope = levels[to].el;
         tour.mainOnly = false;
@@ -6330,6 +6332,7 @@
     // sorted in DOCUMENT coordinates, or the order changes as the page scrolls.
     function tourEntries() {
         let pics = tourPics(tourFloor());
+        if (tour && tour.postOnly) pics = postPics(pics);
         // Started from the widget: the area is re-derived like the widget's own count, so batches
         // the page mounts as it follows the tour join it.
         if (tour && tour.mainOnly) { pics = mainPics(pics); tour.scope = tourCommon(pics); }
@@ -6350,7 +6353,12 @@
         const live = tourOrder(items);
         // Pages fetched from the pager come after everything this document holds, in the order
         // they were harvested — they have no document coordinates to be sorted by. See §10.
-        return harvest.length && scope === root ? live.concat(harvest) : live;
+        return harvest.length && scope === root && !tourConfined() ? live.concat(harvest) : live;
+    }
+
+    // Kept to part of this page — a narrowed scope, or the post above its replies: no next page.
+    function tourConfined() {
+        return !!tour && (!!tour.postOnly || (!!tour.scope && tour.scope !== document.documentElement));
     }
 
     // Where the anchor sits in a freshly derived list: element identity, then URL. Never an
@@ -6428,6 +6436,8 @@
             const s = tourSize(tour.el);
             const long = s ? Math.max(s.w, s.h) : 0;
             if (long >= 1 && long < tour.floor) tour.floor = Math.floor(long);
+            const pe = postEnd();       // begun in the post: its replies stay out; begun in them, they are the tour
+            tour.postOnly = !!pe && !!pe.cut && !atOrAfter(pe.cut, tour.el);
         }
         tour.had = new Set(tourPics(tour.floor));   // at the final floor, or tourAdopt() sees old pictures as new
     }
@@ -6556,13 +6566,14 @@
 
     function twRefresh() {
         if (!isTopFrame || !document.body) return;
+        if (cfg.showPostEnd || postLine) postLineSync();
         if (!tw) {
             if (!cfg.tourButtons || !siteEnabled() || CAPTCHA_HERE) return;
             buildTourWidget();
         }
         twPics = twCount();
         const was = twTotal;
-        if (!tour) twTotal = twPics >= 2 ? mainPics(tourPics(Math.max(0, cfg.tourMinDisplayed | 0))).length : 0;
+        if (!tour) twTotal = twPics >= 2 ? idlePics(Math.max(0, cfg.tourMinDisplayed | 0)).length : 0;
         if (!tour && twTotal !== was && debugOn()) dbg('widget count ' + twTotal, twReport());
         const on = twWanted();
         if (on) twShownOn = location.href;
@@ -6673,6 +6684,215 @@
     // What a slideshow started from idle may show: everything but the sidebars.
     function mainPics(pics) { return pics.filter(function (p) { return !sideColumn(p); }); }
 
+    // What the widget counts and ▶ starts on: the main column, down to the post end.
+    function idlePics(floor) { return postPics(mainPics(tourPics(floor))); }
+
+    // ---- the post end: where a thread's first post or an article stops and replies/comments begin. See TOUR.md §1c.
+    const POST_WORD = /post|comment|message|repl|answer|comtr/i;
+    const SIG_SKIP = /^(bg\d|odd|even|alt\d?|first|last|new|unread|is-.*|.*\d{3,}.*|.*--(highlighted|selected|op|owner|first|last).*)$/i;
+    const COMMENTS_SEL = '#comments, .comments, .comment-list, .commentlist, .comments-area, .commentarea, ' +
+        '.comment-tree, #disqus_thread, #answers, .CommentsList, shreddit-comment-tree';
+    const CHROME_SEL = 'nav, aside, footer, [role="navigation"], [role="banner"], [role="contentinfo"], [role="complementary"]';
+    const LEAD_SKIP = 'a, script, style, noscript, template, button, select, option, label, ' + CHROME_SEL;
+    const LEAD_TEXT = 800;      // characters of prose (link text excluded) before the group that make it comments
+    const LEAD_PIC = 100;       // px, shorter side: a picture above the group this big is the post's
+    const COMMENT_HEAD = /^\s*(\d[\d,.]*\s*k?\s+(comments?|repl(y|ies)|answers?|responses?)\b|leave a (reply|comment)|add a comment|post a comment|comments?\s*\(\d)/i;
+
+    // Siblings sharing a tag and any one class; the OP often carries extra ones (XenForo's firstPost).
+    function sibGroups(p) {
+        const g = new Map();
+        for (let c = p.firstElementChild; c; c = c.nextElementSibling) {
+            const keys = [].filter.call(c.classList, function (k) { return !SIG_SKIP.test(k); });
+            if (!keys.length) keys.push('');
+            keys.forEach(function (k) {
+                const key = c.tagName + '.' + k, a = g.get(key);
+                if (a) a.push(c); else g.set(key, [c]);
+            });
+        }
+        return g;
+    }
+
+    function postish(e) {
+        if (!e) return false;
+        if (POST_WORD.test((e.getAttribute('class') || '') + ' ' + e.id)) return true;
+        if (/comment|posting|answer/i.test((e.getAttribute('itemtype') || '') + ' ' + (e.getAttribute('itemprop') || ''))) return true;
+        return e.hasAttribute('data-post-id') || e.hasAttribute('data-post-number') || e.hasAttribute('data-content');
+    }
+
+    // Down the first-child chain too: vBulletin wraps table#post… in four bare divs.
+    function postishDeep(e) {
+        for (let i = 0; e && i < 5; i++, e = e.firstElementChild) if (postish(e)) return true;
+        return false;
+    }
+
+    // An index of cards, not a thread: most members carry a headline linking to another page.
+    // A forum's headings link to the poster's profile or back into this page, and do not count.
+    const PROFILE_URL = /\/(members?|profile|users?|u|member\.php)\b|[?&](u|showuser|userid)=/i;
+    function cardList(m) {
+        const here = location.origin + location.pathname;
+        let n = 0;
+        m.forEach(function (e) {
+            const a = e.querySelector('h1 a[href], h2 a[href], h3 a[href]');
+            if (a && a.textContent.trim().length >= 8 && a.href.split('#')[0].split('?')[0] !== here &&
+                !PROFILE_URL.test(a.href)) n++;
+        });
+        return n * 2 > m.length;
+    }
+
+    // The largest run of same-shaped sibling posts, stacked down the main column.
+    function postGroup() {
+        if (!document.body) return null;
+        const vw = vpW();
+        const all = document.body.getElementsByTagName('*');
+        let best = null;
+        for (let i = 0; i < all.length; i++) {
+            const p = all[i];
+            if (p.childElementCount < 2) continue;
+            // judged on every post-like child, or two cards sharing a category class pass as a thread
+            if (cardList([].filter.call(p.children, postishDeep))) continue;
+            sibGroups(p).forEach(function (m, key) {
+                m = m.filter(function (e) {        // vBulletin's empty div#lastpost anchor goes, not the group
+                    if (!postishDeep(e)) return false;
+                    const r = e.getBoundingClientRect();
+                    return r.height >= 40 && r.width >= vw * 0.3;
+                });
+                if (m.length < 2) return;
+                let text = 0, prev = null;
+                for (let j = 0; j < m.length; j++) {
+                    const r = m[j].getBoundingClientRect();
+                    if (prev && r.top < prev.bottom - 2) return;       // side by side: a grid, not a thread
+                    prev = r;
+                    text += m[j].textContent.length;
+                }
+                if ((best && text <= best.text) || sideColumn(m[0])) return;
+                best = { m: m, text: text, key: key };
+            });
+        }
+        if (!best) return null;
+        best.m.key = best.key;
+        return best.m;
+    }
+
+    // Replies inside replies: a comment tree (Lemmy, Reddit, WordPress). A forum's posts never nest.
+    function nests(g) {
+        const dot = g.key.indexOf('.');
+        const cls = g.key.slice(dot + 1);
+        if (!cls) return false;
+        const sel = g.key.slice(0, dot).toLowerCase() + '.' + CSS.escape(cls);
+        return g.some(function (e) { return !!e.querySelector(sel); });
+    }
+
+    function precedes(a, b) { return !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) && !a.contains(b); }
+    function atOrAfter(cut, el) { return cut === el || cut.contains(el) || precedes(cut, el); }
+
+    function siteChrome(el) {
+        if (el.closest(CHROME_SEL)) return true;
+        const h = el.closest('header');
+        return !!h && !h.parentElement.closest('main, article, [role="main"]');
+    }
+
+    // The thread's page number, where the page says; a page past the first opens on a reply.
+    function threadPage() {
+        const u = location.pathname + location.search;
+        let m = /[\/-]page[-\/]?(\d+)/i.exec(u) || /[?&](?:page|pg)=(\d+)/i.exec(location.search);
+        if (m) return +m[1] || 1;
+        m = /[?&]start=(\d+)/i.exec(location.search) || /[?&]topic=\d+\.(\d+)/i.exec(location.search);
+        if (m) return +m[1] > 0 ? 2 : 1;
+        const cur = document.querySelectorAll('[aria-current="page"], .pageNav-page--current, .pagination .active, ' +
+            '.pagination .current, .pagenav .current, .pages .current, .ipsPagination_active');
+        for (let i = 0; i < cur.length; i++) {
+            const t = cur[i].textContent.trim();
+            if (/^\d+$/.test(t)) return +t;
+        }
+        return 1;
+    }
+
+    // What sits above the group that makes it comments on something rather than the thread itself.
+    function postLead(g0, floor) {
+        let from = null;
+        const h1s = document.getElementsByTagName('h1');
+        for (let i = 0; i < h1s.length; i++) if (h1s[i].getClientRects().length && precedes(h1s[i], g0)) from = h1s[i];
+        const pics = tourPics(floor).filter(function (p) {
+            const r = p.getBoundingClientRect();        // a logo strip or a button is not the post's picture
+            return Math.min(r.width, r.height) >= LEAD_PIC && precedes(p, g0) && (!from || precedes(from, p)) &&
+                !sideColumn(p) && !siteChrome(p);
+        });
+        if (pics.length) return 'pictures above';
+        const eds = document.querySelectorAll('textarea, [contenteditable="true"], [contenteditable=""]');
+        for (let i = 0; i < eds.length; i++) if (eds[i].getClientRects().length && precedes(eds[i], g0)) return 'reply box above';
+        const hs = document.querySelectorAll('h2, h3, h4, h5, [role="heading"]');
+        for (let i = 0; i < hs.length; i++) {
+            if (precedes(hs[i], g0) && hs[i].getClientRects().length && COMMENT_HEAD.test(hs[i].textContent)) return 'comment heading';
+        }
+        const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+        if (from) w.currentNode = from;
+        let n = 0, t;
+        while ((t = w.nextNode())) {
+            if (!precedes(t, g0)) break;
+            const p = t.parentElement;
+            if (!p || (from && from.contains(p)) || p.closest(LEAD_SKIP) || !p.getClientRects().length) continue;
+            n += t.nodeValue.replace(/\s+/g, ' ').trim().length;
+            if (n >= LEAD_TEXT) return 'text above';
+        }
+        return '';
+    }
+
+    // { cut, how } — the first element a slideshow of the post leaves out — or null (with `why` for the debug line).
+    function postEnd() {
+        const floor = Math.max(0, cfg.tourMinDisplayed | 0);
+        const g = postGroup();
+        if (g) {
+            const lead = nests(g) ? 'replies nest' : postLead(g[0], floor);
+            if (lead) {
+                const box = g[0].closest(COMMENTS_SEL);
+                const h1 = document.querySelector('h1');
+                return { cut: box && !(h1 && box.contains(h1)) ? box : g[0], how: 'comments below the post (' + lead + ')' };
+            }
+            const num = g[0].getAttribute('data-post-number') || g[0].getAttribute('data-number') ||
+                (g[0].querySelector('[data-post-number]') || g[0]).getAttribute('data-post-number');
+            if (num && num !== '1') return { cut: null, why: 'thread opens on post ' + num + ', not the first' };
+            const pg = threadPage();
+            if (pg > 1) return { cut: null, why: 'thread page ' + pg + ' — every post is a reply' };
+            return { cut: g[1], how: 'thread: replies start at the 2nd post' };
+        }
+        const cs = document.querySelectorAll(COMMENTS_SEL);
+        for (let i = 0; i < cs.length; i++) {
+            const c = cs[i];
+            if (c.getBoundingClientRect().height > 0 && !c.querySelector('h1') && !c.parentElement.closest(COMMENTS_SEL)) {
+                return { cut: c, how: 'comment area' };
+            }
+        }
+        return null;
+    }
+
+    function postPics(pics) {
+        const pe = postEnd();
+        return pe && pe.cut ? pics.filter(function (p) { return !atOrAfter(pe.cut, p); }) : pics;
+    }
+
+    // Debug: a red line across the page where the slideshow stops.
+    let postLine = null;
+    function postLineSync() {
+        const want = !!cfg.showPostEnd && isTopFrame && !!document.body;
+        const pe = want ? postEnd() : null;
+        if (!pe) { if (postLine) postLine.style.display = 'none'; return; }
+        if (!postLine) {
+            postLine = document.createElement('hz-post-end');
+            postLine.style.cssText = 'all:initial;position:absolute;left:0;right:0;height:0;z-index:2147483646;' +
+                'pointer-events:none;border-top:3px solid #f00;display:block';
+            const tag = document.createElement('span');
+            tag.style.cssText = 'all:initial;position:absolute;right:8px;top:2px;padding:1px 6px;background:#f00;color:#fff;' +
+                'font:12px/16px sans-serif;border-radius:0 0 4px 4px;white-space:nowrap';
+            postLine.appendChild(tag);
+        }
+        if (!postLine.isConnected) document.documentElement.appendChild(postLine);
+        const y = pe.cut ? pe.cut.getBoundingClientRect().top + (window.scrollY || 0) - 2 : (window.scrollY || 0) + 40;
+        postLine.style.top = Math.round(y) + 'px';
+        postLine.style.borderTopStyle = pe.cut ? 'solid' : 'dashed';
+        postLine.firstChild.textContent = 'Hover Zoom: ' + (pe.cut ? 'slideshow ends here — ' + pe.how : 'no post end — ' + pe.why);
+        postLine.style.display = 'block';
+    }
+
     // The smallest element holding every picture the widget counted: the article, not the page
     // around it. <body> is the whole page, and only the whole page carries on onto the next one.
     function tourCommon(pics) {
@@ -6689,8 +6909,7 @@
     function twWarmFirst() {
         if (tour || placed || !twWanted()) return;
         const floor = Math.max(0, cfg.tourMinDisplayed | 0);
-        const pics = tourPics(floor);
-        const main = mainPics(pics);
+        const main = idlePics(floor);
         const first = tourEntriesIn(main, tourCommon(main))[0];
         if (!first || (twWarm && twWarm.el === first.el)) return;
         const w = twWarm = { el: first.el, displayed: sizeOf(first.el), res: undefined };
@@ -6710,7 +6929,7 @@
         cancel();
         const floor = Math.max(0, cfg.tourMinDisplayed | 0);
         tour = { el: null, start: null, url: '', x: 0, y: 0, index: -1, total: 0, on: true,
-            scope: null, mainOnly: true, level: -1, floor: floor, had: new Set(tourPics(floor)) };
+            scope: null, mainOnly: true, postOnly: true, level: -1, floor: floor, had: new Set(tourPics(floor)) };
         const list = tourEntries();
         if (!list.length) { tourEnd(); return; }
         let at = dir > 0 ? 0 : list.length - 1;
@@ -7280,8 +7499,8 @@
     async function tourCross() {
         if (crossBusy || crossSpent || !cfg.tourCrossPage) return false;
         // A tour confined to part of this page has no business on the next one. Not spent: } widens.
-        if (tour && tour.scope && tour.scope !== document.documentElement) {
-            dbg('no next page — the tour is confined to ' + describeEl(tour.scope) + '; } widens it');
+        if (tourConfined()) {
+            dbg('no next page — the tour is confined to ' + (tour.postOnly ? 'the post' : describeEl(tour.scope)) + '; } widens it');
             return false;
         }
         crossBusy = true;
@@ -7351,7 +7570,7 @@
 
     // Nothing left to ask for: the page will not load more and there is no next page to fetch.
     function tourExhausted() {
-        const scoped = !!tour && !!tour.scope && tour.scope !== document.documentElement;
+        const scoped = tourConfined();
         return (excSpent || !cfg.tourLoadMore) && (crossSpent || !cfg.tourCrossPage || scoped);
     }
 
@@ -8597,6 +8816,9 @@
         section('Diagnostics');
         check('debug', 'Log every hover to the console',
             'One line per hover in the console (F12). Leave off unless chasing a problem.');
+        check('showPostEnd', 'Draw a red line where the post ends',
+            'On a thread or an article with comments, a slideshow keeps to the post; the line marks where ' +
+            'it stops. Dashed, at the top, when the page has replies but no post (page 2 of a thread).');
 
         section('Per-site fixes');
         const refSites = list('referrerSites', {
