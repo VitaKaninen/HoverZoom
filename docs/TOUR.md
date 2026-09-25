@@ -185,8 +185,9 @@ cards out. Width only, no markup: the user's rule is "the wide middle column is 
 
 **Tried and reverted (v0.129.0):** named sections (Main/Replies/Comments/sidebars/header/footer)
 from comment selectors, sibling forum posts and landmarks, with a switcher on the widget. It split
-the test forum right and real forums the user uses wrong; the user judged markup rules more likely to
-break things than fix them. Do not rebuild it without the user; they are still thinking about it.
+the test forum right and real forums the user uses wrong. **Shelved, not rejected** (user, 2026-09-25):
+first versions normally need tuning; it was pulled only so other slideshow issues that might interact
+with it could be settled first. Rebuilding it is expected — start when the user says to.
 
 **Forum survey, 2026-09-25** (DOM probe, mostly logged out; raised again by the user as "end the
 slideshow after the main post"). Two layouts, and the reply box only separates one of them:
