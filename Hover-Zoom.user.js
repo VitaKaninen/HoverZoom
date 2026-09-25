@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.154.0
+// @version     0.155.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -6453,6 +6453,7 @@
     let twTotal = -1;           // the real count: at load, when scrolling stops, and when the pointer nears the widget
     let twStarting = null;      // the token of a tour being opened from the widget
     let twRecountTimer = 0;
+    let twShownOn = null;       // the URL the widget was last shown on: it stays there at any count (debugging)
 
     function dockStore() {
         try {
@@ -6550,7 +6551,7 @@
     }
 
     function twWanted() {
-        return !!cfg.tourButtons && isTopFrame && siteEnabled() && !CAPTCHA_HERE && (!!tour || (twPics >= 2 && twTotal >= 2));
+        return !!cfg.tourButtons && isTopFrame && siteEnabled() && !CAPTCHA_HERE && (!!tour || (twPics >= 2 && twTotal >= 2) || twShownOn === location.href);
     }
 
     function twRefresh() {
@@ -6564,6 +6565,7 @@
         if (!tour) twTotal = twPics >= 2 ? mainPics(tourPics(Math.max(0, cfg.tourMinDisplayed | 0))).length : 0;
         if (!tour && twTotal !== was && debugOn()) dbg('widget count ' + twTotal, twReport());
         const on = twWanted();
+        if (on) twShownOn = location.href;
         if (on) twTheme();
         if (on) setTimeout(twWarmFirst, 0);     // never during boot: it reads `let`s declared further down
         const shown = tw.host.style.display !== 'none';

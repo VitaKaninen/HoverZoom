@@ -25,7 +25,9 @@ fight that. They are deleted. Do not put nav controls back on the frame.
 - **Visibility is `style.display`, not `[hidden]`**: the host's inline `all:initial` out-ranks the UA
   `[hidden]` rule. `twRefresh` sets both, and `dock.show()` tells the other scripts.
 - **Shown** on pages with two drawn pictures at `tourMinDisplayed` (`twCount`, stops at 2), or while a
-  tour runs. The `– / N` total (`tourPics`) is taken with every recount — load, scroll stopping, SPA
+  tour runs. **Once shown it stays on that URL whatever the count** (`twShownOn`, v0.155.0) — the
+  user's request, for debugging: a widget left at `– / 0` flags a count that dropped, to be judged
+  a bug or legitimate. Temporary; restore hiding when the user says so. The `– / N` total (`tourPics`) is taken with every recount — load, scroll stopping, SPA
   navigation, any `<img>` `load` (document capture; a lazy picture landing after page load, v0.150.0)
   — and again when the pointer comes near, which catches a page that changed without
   scrolling (no MutationObserver: design invariant). With `debug` on, a changed count logs
