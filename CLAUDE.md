@@ -97,7 +97,7 @@ has already been misdiagnosed once. (The shared ones — `innerHTML` on Trusted-
   own copy, and the manager lists every frame's menu commands together. Site decisions use
   `pageHost()`, never `location.hostname`. See `E29`.
 - **Never write `el.title = '…'` — call `setTip(el, text)`.** The script draws its own tooltips so
-  every one waits the same `TIP_DELAY_MS`; a `title` left on an element shows the browser's own a
+  every one waits `TIP_DELAY_MS` (or its own `delay`); a `title` left on an element shows the browser's own a
   second later, under ours. See [`docs/VIEWER.md`](docs/VIEWER.md).
 - **A range input fires NO `change` when the press does not move the value.** Every "held" flag
   here — `volDrag`, `seekDrag`, `zoomDrag` — is armed on `mousedown`, so clearing it only on

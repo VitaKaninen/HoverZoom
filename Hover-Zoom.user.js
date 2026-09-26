@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.170.0
+// @version     0.171.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -2105,7 +2105,7 @@
 
     // ---- tooltips: drawn here, because a native `title`'s delay belongs to the browser
 
-    const TIP_DELAY_MS = 300;   // the one value; every control in the script waits exactly this
+    const TIP_DELAY_MS = 300;   // every control waits this, except a help tip given its own delay
 
     let tipEl = null, tipTimer = 0, tipFor = null;
 
@@ -2151,20 +2151,25 @@
     }
 
     // Replaces `el.title = text` everywhere; the attribute is removed or both would show.
-    function setTip(el, text) {
+    function setTip(el, text, delay) {
         if (!el) return;
         el.__tip = text || '';
+        if (delay) el.__tipDelay = delay;
         if (el.hasAttribute && el.hasAttribute('title')) el.removeAttribute('title');
         if (el.__tipBound) return;
         el.__tipBound = true;
         el.addEventListener('mouseenter', function () {
             clearTimeout(tipTimer);
             tipFor = el;
-            tipTimer = setTimeout(function () { if (tipFor === el) showTip(el); }, TIP_DELAY_MS);
+            tipTimer = setTimeout(function () { if (tipFor === el) showTip(el); }, el.__tipDelay || TIP_DELAY_MS);
         });
         el.addEventListener('mouseleave', hideTip);
         el.addEventListener('mousedown', hideTip, true);
     }
+
+    // A still pointer sends no mouseleave, so a wheel or a key is what ends a tip under it.
+    window.addEventListener('wheel', function () { if (tipFor || (tipEl && tipEl.parentNode)) hideTip(); }, { capture: true, passive: true });
+    window.addEventListener('keydown', function () { if (tipFor || (tipEl && tipEl.parentNode)) hideTip(); }, true);
 
     const MAX_MULTIPLE_ABS = 4;
 
@@ -6554,6 +6559,7 @@
     let twStarting = null;      // the token of a tour being opened from the widget
     let twRecountTimer = 0;
     let twLoadTimer = 0;
+    const TW_HELP_MS = 1000;    // the widget's help waits longer than a button's tip
     let twShownOn = null;       // the URL the widget was last shown on: it stays there at any count (debugging)
     let twWheelArmed = null;    // the URL the wheel button was clicked on; the wheel then steps anywhere
     let twWheelIn = false;      // the pointer is within wheelReach of the button
@@ -6626,12 +6632,13 @@
         const prev = mkVBtn(ICON_PREV, null, function () { if (!twHeld) twPress(-1); });
         const count = document.createElement('span');
         count.className = 'count';
-        setTip(count, 'Drag to move; Ctrl skips snapping');
+        setTip(count, '◀ ▶  previous / next; hold to repeat\n' +
+            '⇅  wheel near it flips; click: wheel flips anywhere\n' +
+            'Drag to move; Ctrl: no snapping', TW_HELP_MS);
         const next = mkVBtn(ICON_NEXT, null, function () { if (!twHeld) twPress(1); });
         twHoldOn(prev, -1);
         twHoldOn(next, 1);
-        const wheel = mkVBtn(ICON_WHEEL, 'Wheel near here: next / previous. Click: the wheel steps anywhere',
-            twWheelClick);
+        const wheel = mkVBtn(ICON_WHEEL, null, twWheelClick);
         wheel.classList.add('wheel');
         const load = document.createElement('span');
         load.className = 'load';
@@ -6714,7 +6721,7 @@
         let n = 0;
         els.forEach(function (el) { if (plHas(el)) n++; });
         const all = n > 0 && n >= els.length;
-        const text = !n ? '' : all ? 'all loaded' : n + ' loaded';
+        const text = !n || !debugOn() ? '' : all ? 'all loaded' : n + ' loaded';
         if (tw.load.textContent === text) return;
         tw.load.textContent = text;
         tw.load.classList.toggle('done', all);
@@ -6817,7 +6824,8 @@
         if (twWheelArmed === location.href) { if (panelOwns(e)) return; }
         else if (!twWheelZone(e.clientX, e.clientY, cfg.wheelReach)) return;
         e.preventDefault();
-        e.stopImmediatePropagation();
+        e.stopImmediatePropagation();       // the tip's own wheel listener never sees this one
+        hideTip();
         const now = Date.now();
         const px = e.deltaY * (e.deltaMode === 1 ? 33 : e.deltaMode === 2 ? 800 : 1);
         if (now - twWheelLast > 500 || (px > 0) !== (twWheelAcc > 0)) twWheelAcc = 0;

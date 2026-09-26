@@ -61,6 +61,9 @@ fight that. They are deleted. Do not put nav controls back on the frame.
   different URL, `tourEnd` on any close. Reach (`wheelReach`) is always live and measured from the
   button, not the widget (user's call); armed means anywhere. A setting because the user tunes it.
   ◀ ▶ repeat when held (`twHoldOn`); that listener must be capture — see `../../CLAUDE.md`.
+- **One help tip, on the counter** (v0.171.0, user's call): the buttons have none; resting on the
+  middle for `TW_HELP_MS` lists all three in three lines. The loaded count (`twLoadSync`) shows only
+  with `debug` on.
 - **Position memory** (`DOCK_KEY`): per site, falling back to the last drop anywhere; first run
   attaches on top of Forum Stumbler's bar, or the window's bottom-right when it is absent.
 

@@ -860,7 +860,11 @@ Every hint used to be `el.title = '…'`, whose appearance timing belongs to the
 about a second in Chrome, different in Firefox, and settable from neither CSS nor JS. Asked on
 2026-09-05 for tooltips that are consistent and quicker, the only honest answer was to stop using
 `title`: `setTip(el, text)` now replaces every one of them, and `TIP_DELAY_MS` (300 ms) is what all
-of them wait.
+of them wait — except a help tip given its own `delay` (the widget's, `TW_HELP_MS`, 1 s).
+
+- **A still pointer sends no `mouseleave`,** so a tip over a control the wheel is working (the ⇅
+  button) stayed up for ever (v0.171.0). Any `wheel` or `keydown` hides the tip (window capture);
+  `twWheel` calls `hideTip()` itself, because its `stopImmediatePropagation` can outrank that listener.
 
 - **`setTip()` removes the `title` attribute.** Leave it on and the browser draws its own tooltip a
   second later, underneath ours.
