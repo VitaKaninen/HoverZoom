@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.162.0
+// @version     0.163.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -63,8 +63,8 @@
         tourMinDisplayed: 128,      // the tour's own floor: longer side as drawn, px; emoji and badges fall under it
         tourWindow: 12,             // entries kept buffered ahead
         tourWorkers: 6,             // concurrent speculative resolves
-        tourScrubRate: 5,           // steps/sec ceiling while an arrow is held
-        wheelZone: 20,              // px around the widget's wheel button that an armed wheel steps in
+        tourHoldRate: 0,            // steps/sec ceiling while an arrow or ◀ ▶ is held; 0 = none
+        wheelReach: 50,             // px around the widget's wheel button in which the wheel steps
         tourLoadMore: true,         // the scroll excursion that makes a lazy page load more
         tourCrossPage: true,        // harvest the next page in the background
 
@@ -109,7 +109,7 @@
         'skipWhileMouseDown', 'playVideos', 'skipVideos', 'skipPageBackgrounds',
         'skipBanners', 'skipDecorative', 'enabled', 'maxDisplayed', 'cursorGap', 'noReferrer',
         'showEvenIfNotLarger', 'previewVideos', 'previewOverPlayer', 'barFade', 'showStatusBar',
-        'frameMargin', 'borderMode', 'pinButton'];
+        'frameMargin', 'borderMode', 'pinButton', 'tourScrubRate', 'wheelZone'];
 
     // The retirements that DO convert.
     function migrate(o) {
@@ -6514,10 +6514,14 @@
     let twStarting = null;      // the token of a tour being opened from the widget
     let twRecountTimer = 0;
     let twShownOn = null;       // the URL the widget was last shown on: it stays there at any count (debugging)
-    let twWheelArmed = null;    // the URL the wheel button was clicked on; the wheel steps within wheelZone of it
-    let twWheelIn = false;      // the pointer is inside that zone
-    let twWheelAt = 0;          // the last wheel step
-    const TW_WHEEL_GAP_MS = 150;    // one step per notch: events closer than this are the same notch
+    let twWheelArmed = null;    // the URL the wheel button was clicked on; the wheel then steps anywhere
+    let twWheelAcc = 0;         // wheel travel not yet stepped on, px
+    let twWheelLast = 0;        // the last wheel event we took
+    const TW_WHEEL_STEP_PX = 50;    // a notch is 100; a touchpad sends many small ones
+    let twHoldT = 0;            // ◀ ▶ held down: the repeat timer
+    let twHeld = false;         // this press repeated, so its click must not step again
+    const TW_HOLD_DELAY_MS = 500;   // Windows' default keyboard repeat delay and rate
+    const TW_HOLD_EVERY_MS = 33;
 
     function dockStore() {
         try {
@@ -6570,17 +6574,18 @@
             '.tw .vbtn:hover{background:var(--bg3)}',
             '.tw .vbtn.faint:hover{background:none}',
             '.tw .vbtn.wheel.armed,.tw .vbtn.wheel.armed:hover{background:#89b4fa;color:#1e1e2e}',
-            '.tw .vbtn.wheel.paused{box-shadow:inset 0 0 0 1.5px #89b4fa}',
         ]).join('');
         sr.appendChild(style);
         const box = document.createElement('div');
         box.className = 'tw';
-        const prev = mkVBtn(ICON_PREV, null, function () { twPress(-1); });
+        const prev = mkVBtn(ICON_PREV, null, function () { if (!twHeld) twPress(-1); });
         const count = document.createElement('span');
         count.className = 'count';
         setTip(count, 'Drag to move; Ctrl skips snapping');
-        const next = mkVBtn(ICON_NEXT, null, function () { twPress(1); });
-        const wheel = mkVBtn(ICON_WHEEL, 'Wheel here: next / previous. Click: start, and the wheel keeps stepping near this button',
+        const next = mkVBtn(ICON_NEXT, null, function () { if (!twHeld) twPress(1); });
+        twHoldOn(prev, -1);
+        twHoldOn(next, 1);
+        const wheel = mkVBtn(ICON_WHEEL, 'Wheel near here: next / previous. Click: the wheel steps anywhere',
             twWheelClick);
         wheel.classList.add('wheel');
         box.appendChild(prev);
@@ -6694,8 +6699,7 @@
         tw.prev.classList.toggle('faint', !n);      // faint only with nothing to show; at either end a press wraps
         tw.next.classList.toggle('faint', !n);
         tw.wheel.classList.toggle('faint', !n);
-        tw.wheel.classList.toggle('armed', !!twWheelArmed && twWheelIn);
-        tw.wheel.classList.toggle('paused', !!twWheelArmed && !twWheelIn);
+        tw.wheel.classList.toggle('armed', !!twWheelArmed);
         const fade = Math.max(0, Math.min(100, +cfg.tourFadeTo || 0)) / 100;
         tw.box.style.opacity = cfg.tourFade && !tw.near ? String(fade) : '1';
         if (tw.host.style.display !== 'none') tw.dock.sizeChanged();     // the counter's width
@@ -6704,10 +6708,6 @@
     // The pointer near the widget lights it up.
     function twNear(x, y) {
         if (!tw || !tw.rect || tw.host.style.display === 'none') return;
-        if (twWheelArmed) {
-            const inZone = twWheelZone(x, y, cfg.wheelZone);
-            if (inZone !== twWheelIn) { twWheelIn = inZone; twSync(); }
-        }
         const r = tw.rect;
         const near = x >= r.x - TW_NEAR && x <= r.x + r.w + TW_NEAR && y >= r.y - TW_NEAR && y <= r.y + r.h + TW_NEAR;
         if (near === tw.near) return;
@@ -6728,7 +6728,6 @@
 
     function twWheelSet(on) {
         twWheelArmed = on ? location.href : null;
-        twWheelIn = on;
         twSync();
     }
 
@@ -6739,22 +6738,47 @@
         if (!(placed && view)) tourFromStart(1);
     }
 
-    // Window capture, bound at boot so it runs before onPinWheel: a wheel over the button, or anywhere
-    // in its zone while armed, steps the slideshow instead of scrolling or zooming.
+    // Window capture, bound at boot so it runs before onPinWheel: a wheel within wheelReach of the
+    // button, or anywhere while armed, steps the slideshow instead of scrolling or zooming.
     function twWheel(e) {
         if (!e.deltaY || !tw) return;
-        const armed = twWheelArmed === location.href;
-        if (!twWheelZone(e.clientX, e.clientY, armed ? cfg.wheelZone : 0)) return;
+        if (twWheelArmed === location.href) { if (panelOwns(e)) return; }
+        else if (!twWheelZone(e.clientX, e.clientY, cfg.wheelReach)) return;
         e.preventDefault();
         e.stopImmediatePropagation();
         const now = Date.now();
-        if (now < wheelHoldUntil || now - twWheelAt < TW_WHEEL_GAP_MS) return;
-        twWheelAt = now;
-        const dir = e.deltaY > 0 ? 1 : -1;
+        if (now < wheelHoldUntil) return;
+        const px = e.deltaY * (e.deltaMode === 1 ? 33 : e.deltaMode === 2 ? 800 : 1);
+        if (now - twWheelLast > 500 || (px > 0) !== (twWheelAcc > 0)) twWheelAcc = 0;
+        twWheelLast = now;
+        twWheelAcc += px;
+        if (Math.abs(twWheelAcc) < TW_WHEEL_STEP_PX) return;
+        twWheelAcc = 0;
+        const dir = px > 0 ? 1 : -1;
         if (placed && view) {
             if (!tour) tourStart();
             tourNav(dir, false, true);
         } else if (!twStarting) tourFromStart(dir);
+    }
+
+    // ◀ ▶ held: after TW_HOLD_DELAY_MS they repeat like a held arrow key, scrubbing.
+    function twHoldOn(btn, dir) {
+        btn.addEventListener('mousedown', function (e) {
+            if (e.button !== 0) return;
+            twHoldStop();
+            twHeld = false;
+            twHoldT = setTimeout(function tick() {
+                twHeld = true;
+                if (placed && view && tour) tourNav(dir, true);
+                else if (!placed && !twStarting && !tour) twPress(dir);
+                twHoldT = setTimeout(tick, TW_HOLD_EVERY_MS);
+            }, TW_HOLD_DELAY_MS);
+        }, true);   // capture: mkVBtn's capture stopPropagation() cancels this node's bubble listeners
+    }
+
+    function twHoldStop() {
+        clearTimeout(twHoldT);
+        twHoldT = 0;
     }
 
     function twBusy() { return !!twStarting || (!!tw && !!tw.dock && tw.dock.dragging()); }
@@ -7192,6 +7216,8 @@
         }, true);
         window.addEventListener('scroll', twRecount, { passive: true });
         CAP_TARGET.addEventListener('wheel', twWheel, WHEEL_OPTS);
+        window.addEventListener('mouseup', twHoldStop, true);
+        window.addEventListener('blur', twHoldStop);
         window.addEventListener('popstate', twRecount);
         if (window.navigation) window.navigation.addEventListener('navigatesuccess', twRecount);
     }
@@ -7215,8 +7241,8 @@
     function tourNav(dir, repeat, wheel) {
         if (!placed || !view || !tour) return;
         if (repeat) {
-            const gap = 1000 / Math.max(1, Math.min(30, cfg.tourScrubRate || 5));
-            if (Date.now() - scrubAt < gap) return;
+            const rate = +cfg.tourHoldRate || 0;
+            if (rate > 0 && Date.now() - scrubAt < 1000 / rate) return;
         }
         scrubAt = Date.now();
         scrubDir = dir;
@@ -9009,12 +9035,12 @@
         num('tourWorkers', 'Loaded at once',
             'How many are fetched in parallel. This is what sets the rate. Measured at about ' +
             '5 pictures a second at 6. (default: 6)', 1, 12, 1);
-        num('tourScrubRate', 'Scrub rate',
-            'Pictures per second while an arrow is held down. Faster than about 5 and they go ' +
-            'by too quickly to see. (default: 5)', 1, 30, 1);
-        num('wheelZone', 'Wheel button reach',
-            'Once the wheel button is clicked, the wheel steps the slideshow while the pointer is ' +
-            'within this many px of it. (default: 20)', 0, 500, 1);
+        num('tourHoldRate', 'Hold speed limit',
+            'Pictures per second while an arrow key or ◀ ▶ is held down; the picture loads when ' +
+            'you let go. 0 is no limit: as fast as the key repeats. (default: 0)', 0, 60, 1);
+        num('wheelReach', 'Wheel button reach',
+            'The wheel steps the slideshow while the pointer is within this many px of the wheel ' +
+            'button. Click the button to make it step anywhere. (default: 50)', 0, 500, 1);
 
         section('The preview window');
         num('wheelZoomStep', 'Wheel zoom step',

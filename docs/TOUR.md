@@ -58,8 +58,9 @@ fight that. They are deleted. Do not put nav controls back on the frame.
   no key handler of its own (checked twice, 2026-09-22).
 - **The ⇅ wheel button** (`T41`, `E72`, v0.162.0): for 50+ step tours, where a pointer drifting off
   ▶ costs a click. Armed state is `twWheelArmed` = the URL it was armed on; `twRefresh` disarms on a
-  different URL, `tourEnd` on any close. The zone is measured from the button, not the widget
-  (user's call); `wheelZone` is a setting because the user expects to tune it.
+  different URL, `tourEnd` on any close. Reach (`wheelReach`) is always live and measured from the
+  button, not the widget (user's call); armed means anywhere. A setting because the user tunes it.
+  ◀ ▶ repeat when held (`twHoldOn`); that listener must be capture — see `../../CLAUDE.md`.
 - **Position memory** (`DOCK_KEY`): per site, falling back to the last drop anywhere; first run
   attaches on top of Forum Stumbler's bar, or the window's bottom-right when it is absent.
 
@@ -359,8 +360,8 @@ OS key repeat is ~30/s, ten times the target rate, and would outrun any buffer i
 
 - **Holding an arrow scrubs**: step through the list without resolving, and start resolving only
   once the key has been still for ~150ms.
-- **Throttle the scrub to 5 steps/sec.** Faster than that and the user cannot see the pictures well
-  enough to know when to stop. Start at 5/s and tune.
+- **No throttle** (v0.163.0, user's call; was 5/s on the argument that faster is too quick to see
+  where to stop). `tourHoldRate` restores a cap; 0 by default.
 
 ---
 
@@ -836,8 +837,8 @@ The keys in `DEFAULTS`. Remember the hoisting trap in `../CLAUDE.md`: every
 | `tourMinDisplayed` | `128` | the tour's floor on the longer side as drawn, px (§1a) |
 | `tourWindow` | `12` | how many entries to keep buffered ahead |
 | `tourWorkers` | `6` | concurrent preload resolves |
-| `tourScrubRate` | `5` | max steps/sec while an arrow is held |
-| `wheelZone` | `20` | px around the armed wheel button in which the wheel steps |
+| `tourHoldRate` | `0` | max steps/sec while an arrow or ◀ ▶ is held; 0 = the repeat rate. Replaced `tourScrubRate` (5), retired so a stored 5 does not survive |
+| `wheelReach` | `50` | px around the wheel button in which the wheel steps. Replaced `wheelZone` (20), retired likewise |
 | `tourLoadMore` | `true` | scrolling along ahead so a feed loads more (§9) |
 | `tourCrossPage` | `true` | harvest the next page in the background |
 
@@ -957,8 +958,6 @@ imgur mp4, four clips: **1.0–9.6 MB** (images on the same run were 40 KB–1.3
 
 - Whether a 100ms relocation animation looks better than a jump (§3). Built as an animation; not
   yet judged by eye.
-- The right scrub rate. Shipped at 5/s and measured at 4.7-5.5 steps/sec under a 30/s key repeat,
-  so the throttle does what it says; whether 5 is the right *number* is still a guess (§5).
 - Whether 6 workers still clears 3/s on a slow connection, where bandwidth binds instead of
   latency (§14).
 
