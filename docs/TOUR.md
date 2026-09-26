@@ -522,7 +522,12 @@ progressive emit path. Fall back to the live path only if the preload has not se
 
 `probeVideo()` sets `preload='metadata'` and then calls `v.load()` to **abort** the fetch
 once it has dimensions. Images land in the HTTP cache as a side effect of probing; clips do not.
-Pre-warming a clip needs a separate hidden `<video preload="auto">` for the winning URL.
+Pre-warming a clip needs a separate hidden `<video preload="auto">` for the winning URL
+(`plWarmVideo`). **How many is set by behaviour** (v0.170.0, `plVidLeft` on every slideshow step):
+leaving a clip with under 90% of it played (`vidEl.played`) means flipping, `PL_VIDS_FLIP` (12)
+ahead; watching it through means `PL_VIDS_WATCH` (5). Hover and page jobs never buffer a clip. How
+much of each clip Chrome fetches under `preload="auto"` is the browser's call and was not measured;
+the pane cannot test the watched branch at all — a hidden pane never plays a video.
 
 Also keep the winning `Image` object alive for buffered entries — `probeImage` lets it go and
 relies on the HTTP cache, which Chromium can evict.

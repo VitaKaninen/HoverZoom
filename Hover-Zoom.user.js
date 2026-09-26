@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.169.0
+// @version     0.170.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -7340,6 +7340,7 @@
             return;
         }
         seamDir = 0;
+        plVidLeft();
         tourGo(list, to, dir, repeat);
     }
 
@@ -7992,7 +7993,9 @@
 
     const PL_GAP_MS = 120;      // minimum spacing between speculative request STARTS
     const PL_GUESSES = 1;       // guesses a speculative resolve may spend beyond its keeps
-    const PL_VIDEO_AHEAD = 2;   // clips buffered in full rather than to metadata
+    const PL_VIDEO_AHEAD = 2;   // a hover job's distance sits past this, so it never buffers a clip
+    const PL_VIDS_WATCH = 5;    // clips buffered ahead while the user watches them through
+    const PL_VIDS_FLIP = 12;    // ...and while they leave them unfinished
     const PL_MAX_WORKERS = 12;
 
     const plDone = new Map();   // plKey -> { res, displayed, sig }; kept for the life of the page
@@ -8088,7 +8091,7 @@
         if (!hit) return;
         // Probing an image leaves it in the HTTP cache; probing a clip does not, because
         // probeVideo() aborts the fetch the moment it has the dimensions.
-        if (hit.video) { if (job.dist <= PL_VIDEO_AHEAD) plWarmVideo(hit.url); }
+        if (hit.video) { if (!job.hover && job.dist <= plVidsAhead) plWarmVideo(hit.url); }
         else plKeepImage(hit);
     }
 
@@ -8104,6 +8107,10 @@
             if (depth && Math.abs(d) > depth) continue;
             if (plHas(list[i].el)) continue;
             jobs.push({ el: list[i].el, dist: d >= 0 ? d : -2 * d, gen: plGen });
+        }
+        for (let k = 1; k <= plVidsAhead; k++) {
+            const e = list[at + k * dir], pre = e && plGet(e.el);
+            if (pre && pre.res && pre.res.video) plWarmVideo(pre.res.url);
         }
         jobs.sort(function (x, y) { return x.dist - y.dist; });
         plQueue = jobs;
@@ -8145,6 +8152,17 @@
 
     // Stage 2 for clips: a real buffered fetch, which the metadata probe deliberately aborts.
     let plVids = [];
+    let plVidsAhead = PL_VIDS_WATCH;
+
+    // Leaving a clip the slideshow showed: unfinished means flipping, so buffer further ahead.
+    function plVidLeft() {
+        if (!view || mediaEl !== vidEl || !(vidEl.duration > 0)) return;
+        let played = 0;
+        for (let i = 0; i < vidEl.played.length; i++) played += vidEl.played.end(i) - vidEl.played.start(i);
+        const was = plVidsAhead;
+        plVidsAhead = played >= vidEl.duration * 0.9 ? PL_VIDS_WATCH : PL_VIDS_FLIP;
+        if (plVidsAhead !== was) dbg('clips buffered ahead: ' + plVidsAhead, { played: played.toFixed(1) + ' of ' + vidEl.duration.toFixed(1) + ' s' });
+    }
 
     function plWarmVideo(url) {
         if (plVids.some(function (v) { return v.src === url; })) return;
@@ -8153,7 +8171,7 @@
         v.muted = true;
         v.src = url;
         plVids.push(v);
-        while (plVids.length > PL_VIDEO_AHEAD) {
+        while (plVids.length > plVidsAhead) {
             const old = plVids.shift();
             old.removeAttribute('src');
             old.load();
