@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.167.0
+// @version     0.168.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -47,6 +47,7 @@
         hoverDelay: 120,            // ms before resolving
         hoverPreload: true,         // a preview loads the rest of its section, as far as is on screen
         minDisplayed: 16,           // ignore images displayed smaller than this — the only size gate
+        sizeGate: false,            // only preview when the original is minRatio times what is drawn
         minRatio: 1,                // full size must be this much bigger; below 1 previews anything
         videoMode: 'clips',         // 'none' | 'clips' (animated clips) | 'all' (+ links to a video page)
         skipFurniture: true,        // never preview the page's own furniture: its background, a
@@ -77,7 +78,7 @@
 
         // how to display
         maxSizeMultiple: 1.2,       // how far the frame may GROW, as a multiple of the window.
-        zoomFactor: 2,              // ceiling on the opening scale; the window still fits it
+        zoomLimit: 4,               // ceiling on the opening scale; the window still fits it
         position: 'cursor',         // 'cursor' | 'last' (where a pinned one was last dropped; the centre until then)
         posPerSite: true,           // remembered positions (slideshow, 'last') are kept per site
         fadeMs: 200,
@@ -110,7 +111,7 @@
         'skipWhileMouseDown', 'playVideos', 'skipVideos', 'skipPageBackgrounds',
         'skipBanners', 'skipDecorative', 'enabled', 'maxDisplayed', 'cursorGap', 'noReferrer',
         'showEvenIfNotLarger', 'previewVideos', 'previewOverPlayer', 'barFade', 'showStatusBar',
-        'frameMargin', 'borderMode', 'pinButton', 'tourScrubRate', 'wheelZone', 'tourWindow'];
+        'frameMargin', 'borderMode', 'pinButton', 'tourScrubRate', 'wheelZone', 'tourWindow', 'zoomFactor'];
 
     // The retirements that DO convert.
     function migrate(o) {
@@ -1374,10 +1375,13 @@
         return p;
     }
 
-    // The required upsize. Applies to the linked page's own answer too — a ratio nobody enforces is a setting that does nothing.
-    // Strictly greater, so 1 means "anything bigger at all" without asking for 1.000001.
+    // With sizeGate, the required upsize, strictly (1 is "anything bigger"), linked pages included.
+    // Without it, anything the window would draw larger than the page does.
     function bigEnough(dim, displayed) {
-        return dim.w > displayed.w * cfg.minRatio || dim.h > displayed.h * cfg.minRatio;
+        if (cfg.sizeGate) return dim.w > displayed.w * cfg.minRatio || dim.h > displayed.h * cfg.minRatio;
+        const m = viewportBox();
+        const s = Math.min(fromShown(cfg.zoomLimit), m.w / dim.w, m.h / dim.h);
+        return dim.w * s > displayed.w + 1 || dim.h * s > displayed.h + 1;
     }
 
     // `guesses` caps the non-keep candidates for a SPECULATIVE resolve; the full search runs on
@@ -1492,7 +1496,17 @@
             emit(best);
         }
         await linked;
-        if (trusted) return trusted;
+        if (trusted) {
+            // The linked page names the picture, but the page's own copy of it may be bigger.
+            const own = shown && !trusted.video && !token.cancelled && !unstable.has(shown) ? await probe(shown, false) : null;
+            if (own && !own.video && own.w * own.h > trusted.w * trusted.h && sameShape(native, own)) {
+                const hit = { url: shown, w: own.w, h: own.h, display: own.display, from: 'the page\'s own picture, bigger than the linked page\'s' };
+                dbg('hit', hit);
+                emit(hit);
+                return hit;
+            }
+            return trusted;
+        }
         // Nothing loaded AND something actually failed — the caller shows the reason. A run
         // that only rejected candidates for being too small leaves this null on purpose.
         if (!best && failure) token.failure = failure;
@@ -2172,7 +2186,7 @@
         if (view && view.fixedW != null) return Math.min(maxScale(), view.fixedW / w, view.fixedH / h);
         const m = viewportBox();
         const mh = view && view.capH ? Math.min(m.h, view.capH) : m.h;
-        return Math.min(fromShown(cfg.zoomFactor), maxScale(), m.w / w, mh / h);
+        return Math.min(fromShown(cfg.zoomLimit), maxScale(), m.w / w, mh / h);
     }
 
     const MIN_MEDIA = 32;
@@ -3478,7 +3492,7 @@
         buildViewer();
 
         const m = viewportBox();
-        const fit = Math.min(fromShown(cfg.zoomFactor), m.w / res.w, m.h / res.h);
+        const fit = Math.min(fromShown(cfg.zoomLimit), m.w / res.w, m.h / res.h);
 
         view = {
             url: res.url, natW: res.w, natH: res.h, reason: res.reason || null,
@@ -9029,12 +9043,16 @@
             '(default: 120)', 0, 3000, 10);
         check('hoverPreload', 'Load the pictures around the one you hover',
             'After one preview, nearby pictures on screen load in the background.');
-        num('zoomFactor', 'Opening zoom limit',
+        num('zoomLimit', 'Opening zoom limit',
             'How far a small original is enlarged, in multiples of its size. 1 never enlarges; ' +
-            'large originals always shrink to fit. (default: 2)', 0.1, 8, 0.1);
+            'large originals always shrink to fit. (default: 4)', 0.1, 8, 0.1);
+        check('sizeGate', 'Only preview when a bigger version exists',
+            'Off: every picture previews, enlarged if nothing bigger is found. On: only when the ' +
+            'original is at least the ratio below times the size on the page. The slideshow ' +
+            'shows every picture either way. (default: off)');
         num('minRatio', 'Minimum size ratio',
-            'Original ÷ the image on the page. 1 previews anything larger; below 1 previews ' +
-            'smaller originals too. (default: 1)', 0.1, 100, 0.1);
+            'Used only with the box above. Original ÷ the image on the page. 1 previews anything ' +
+            'larger; below 1 previews smaller originals too. (default: 1)', 0.1, 100, 0.1);
         num('minDisplayed', 'Ignore images smaller than',
             'As drawn on the page, in px. Lower it for icons and avatars; a YouTube avatar is ' +
             'about 24. (default: 16)', 0, 2000, 1);
@@ -9298,6 +9316,7 @@
         skipFurniture: cfg.skipFurniture,
         blockList: cfg.blockList.length,
         lateWait: (function () { const w = vdEntryFor(pageHost()); return w ? (w.ms == null ? 'learning' : w.ms + ' ms') : 'none'; })(),
+        sizeGate: cfg.sizeGate,
         minRatio: cfg.minRatio,
         minDisplayed: cfg.minDisplayed,
     });

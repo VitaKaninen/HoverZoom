@@ -196,9 +196,11 @@ path has been touched twice ever, both times in 2021.
   anchor is an element and a position, never an index, so a virtualised feed deleting the node
   under you is survivable. Rewritten with the user's approval 2026-09-07 for the tour.)*
 - **No format allowlist.** Extension never decides eligibility. The only gate is
-  "is the candidate actually bigger than what's displayed", measured by loading it. A candidate
-  the linked page *declares* skips the guessing checks but **not** the `minRatio` gate (v0.40.0
-  reversed the v0.19.0 exemption — see [`docs/RESOLVER.md`](docs/RESOLVER.md)).
+  `bigEnough()`, measured by loading the candidate: by default (`sizeGate` off, v0.168.0) "would
+  the window draw it larger than the page does", so every picture previews, enlarged up to
+  `zoomLimit` (4); with `sizeGate` on, "is it `minRatio` times what is displayed". A candidate the
+  linked page *declares* skips the guessing checks but **not** that gate (v0.40.0 — see
+  [`docs/RESOLVER.md`](docs/RESOLVER.md)), and the page's own file beats it when bigger.
 - **No hardcoded size caps.** `minDisplayed` / `minRatio` are settings; the defaults are 16 / 1,
   and `minDisplayed` is the ONLY size gate — nothing separately singles out icons or avatars.
 - **Per-element probe state.** No shared lock, no `.one()`. `probeCache` is keyed by URL and

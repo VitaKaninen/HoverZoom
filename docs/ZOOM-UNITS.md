@@ -87,8 +87,8 @@ By name, not line — the file is ~4,200 lines and moves. All of these are ident
 | `zoomStops()` cache | **`stopsKey` must include `zoomUnit()`** — see the trap below |
 | `zoomLo()` | `ZOOM_LO_CAP` is a shown 25 %, so `fromShown(ZOOM_LO_CAP)` |
 | `zoomHi()` | `fromShown(Math.min(cfg.maxZoom, MAX_SCALE_ABS))` |
-| `fitScaleFor()` | `Math.min(fromShown(cfg.zoomFactor), …)` |
-| the other `cfg.zoomFactor` site | the opening fit in the show path — same treatment |
+| `fitScaleFor()` | `Math.min(fromShown(cfg.zoomLimit), …)` (`zoomFactor` until v0.168.0) |
+| the other `cfg.zoomLimit` sites | the opening fit in the show path and `bigEnough()` — same treatment |
 | the other `cfg.maxZoom` site | `Math.max(lo, fromShown(Math.min(cfg.maxZoom, MAX_SCALE_ABS)))` |
 | settings panel | the `num()` row above |
 

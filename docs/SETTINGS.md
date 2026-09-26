@@ -63,6 +63,14 @@ Two sweeps, both asked for after reading the panel end to end:
 what reads as one idea. It is **Opening zoom limit** now: `maxZoom` is how far you may zoom by
 hand, `zoomFactor` only how far a small image is enlarged on the way up.
 
+## `sizeGate` and `zoomLimit` (v0.168.0)
+
+The user's call: a small picture is worth enlarging even when no bigger file exists, so a hover
+always previews by default. `sizeGate` (off) turns `minRatio` back on as the only-if-bigger test;
+off, `bigEnough()` asks whether the window would draw it larger than the page does. `zoomLimit`
+(4) replaced `zoomFactor` (2), retired so a stored 2 does not survive. The slideshow shows every
+picture either way — a rejected candidate there falls back to the page's own (`tourFallback`).
+
 ## `showEvenIfNotLarger` retired — it is `minRatio` below 1 (v0.43.0)
 
 *Preview pictures that are already full size* asked the same question as the row above it.

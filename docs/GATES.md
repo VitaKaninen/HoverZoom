@@ -685,6 +685,10 @@ tile at 263. Anything added above pushes 40 out of the band and the test silentl
 
 ## A copy of what is on screen is reachable below `minRatio` 1, on purpose (v0.43.0)
 
+Since v0.168.0 this applies only with `sizeGate` on. Off (the default), `bigEnough()` accepts
+anything the window would draw larger than the page draws it, so the identical copy floating over
+its own image at the same scale still cannot happen — the window has to be bigger.
+
 `showEvenIfNotLarger` is retired into `minRatio < 1` — see
 [`SETTINGS.md`](SETTINGS.md). It carried a guard worth recording, because the guard went with it:
 its fallback had no size comparison, so a frame could hold the identical bytes at the identical

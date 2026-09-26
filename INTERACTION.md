@@ -130,11 +130,13 @@ The element tested is not always the one under the pointer. When the hover targe
 single picture directly beneath it in the same card is tried instead (`E18`), and that picture
 then faces every precondition here in its own right.
 
-A candidate that passes all ten still shows nothing unless a probe finds an image **larger than**
-`minRatio` (1.2×) times what is displayed — strictly, so 1 means "anything bigger at all" — **and
-shaped like it** (`E19`) — see `T04`. Since
-v0.40.0 that ratio applies to what a linked page declares as well; the page is trusted about
-*what* the thumbnail stands for, not about whether it is worth a window.
+A candidate that passes all ten still shows nothing unless a probe finds an image **shaped like
+it** (`E19`) that passes `bigEnough()` — see `T04`. By default (`sizeGate` off, v0.168.0) that is
+"the window would draw it larger than the page does", so the page's own picture previews enlarged
+(up to `zoomLimit`, 4×) when nothing bigger exists. With `sizeGate` on it is **larger than**
+`minRatio` times what is displayed — strictly, so 1 means "anything bigger at all". Either way it
+applies to what a linked page declares as well, and the page's own file wins over the linked page's
+when it is bigger.
 
 `P7` is five separate tests, listed in `E17`. It applies to CSS backgrounds only; the one rule
 that also judges an `<img>` is `P10`, and it is deliberately much narrower. `P10` runs on CSS
