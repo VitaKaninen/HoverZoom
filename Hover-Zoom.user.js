@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.160.0
+// @version     0.161.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -3157,8 +3157,11 @@
         applyIdle(barNoDelay() && !barWanted());
     }
 
+    let swapSeq = 0;            // bumped by anything that puts media in the frame; a staged swap checks it
+
     // Point the frame at a resolved candidate, picking the face that can display it.
     function setMedia(res) {
+        swapSeq++;
         const wantsVideo = !!res.video;
         mediaEl = wantsVideo ? vidEl : imgEl;
         const idle = wantsVideo ? imgEl : vidEl;
@@ -3516,9 +3519,26 @@
 
     // A DIFFERENT picture into the same window, at the slideshow's spot. A hand-set size stays; zoom and pan
     // reset, because a pan offset means nothing carried into another picture. See TOUR.md.
+    // Stages an image off-screen first: the frame must not resize around the old picture. See TOUR.md §2.
     function swapViewer(res) {
         if (!view) return;
+        const seq = ++swapSeq;
+        if (res.video) { commitSwap(res); return; }
+        const im = new Image();
+        if (noReferrerHere()) im.referrerPolicy = 'no-referrer';
+        im.src = res.display || res.url;
+        if (im.complete && im.naturalWidth) { commitSwap(res); return; }
+        showSpinner();
+        dockSpinner();
+        const done = function () {
+            if (seq !== swapSeq || !view || !tourActive()) return;
+            hideSpinner();
+            commitSwap(res);
+        };
+        im.decode().then(done, done);
+    }
 
+    function commitSwap(res) {
         view.url = res.url;
         view.natW = res.w;
         view.natH = res.h;
@@ -7162,6 +7182,7 @@
         if (!placed || !view || !tour || !tour.el) return;
         const el = tour.el;
         const displayed = sizeOf(el);
+        swapSeq++;                  // a swap still loading for the last entry must not land over this one
         active = el;
         activeShown = shownUrl(el);
         if (token) token.cancelled = true;

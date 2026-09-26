@@ -312,6 +312,15 @@ different picture is meaningless. Borrow the centre-preserving arithmetic from `
 It must also update `active` and `activeShown`, or ⊘ blocks the wrong image and unpinning
 misbehaves.
 
+**An image is staged before the frame changes** (v0.161.0). The probe having loaded a URL does not
+mean `imgEl` can paint it at once: a no-store response or an evicted preload is fetched again, and
+while it loads the browser keeps painting the OLD picture, stretched into the new frame size.
+`swapViewer()` loads it into an off-screen `Image`, `decode()`s it (the spinner shows meanwhile),
+and only then does `commitSwap()` resize and set `src`. A decode failure still commits, so the
+frame's own error handling runs. `swapSeq` is bumped by `setMedia()` and at the top of
+`tourShow()`, so a staged swap that finishes after the user has moved on is dropped. Videos commit
+directly.
+
 ### Growing and shrinking — already free
 
 Frame follows the picture unless the user hand-resized. This is existing behaviour and needs no
