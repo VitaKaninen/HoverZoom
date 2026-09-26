@@ -8135,7 +8135,7 @@
     function plBudget() {
         const mb = Math.max(0, cfg.preloadMB | 0);
         if (mb) return mb * 1048576;
-        const dm = +navigator.deviceMemory || 0;       // GB, rounded, capped at 8; Chromium only
+        const dm = +navigator.deviceMemory || 0;       // GB, rounded; Chromium only (the pane reports 32)
         return (dm ? Math.min(1024, dm * 128) : 1024) * 1048576;
     }
 

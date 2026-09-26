@@ -396,7 +396,8 @@ OS key repeat is ~30/s, ten times the target rate, and would outrun any buffer i
   every step; **nothing running is cancelled**, since a picture passed at speed is wanted on the
   way back.
 - **Files are held to a byte budget, not a count** (`plKeepImage`, `preloadMB`; 0 = 1/8 of
-  `navigator.deviceMemory`, max 1024 MB, else 1024). The size is estimated at 0.5 byte/px — nothing
+  `navigator.deviceMemory` (Chromium only; the pane reports 32, so the spec's cap of 8 is not
+  universal), max 1024 MB, else 1024). The size is estimated at 0.5 byte/px — nothing
   cross-origin reports it. Held because the HTTP cache evicts and a `no-store` file is never cached.
 - **The no-rush list rides on the diagnosis that already exists.** `diagnose()` classifies a 429 /
   `Retry-After` as `busy`; `hardBlock()` hangs off that one line and needs no request of its own.
