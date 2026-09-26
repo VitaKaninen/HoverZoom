@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.163.0
+// @version     0.164.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -6215,7 +6215,6 @@
     let tour = null;            // the pinned window's navigation state; null when nothing is pinned
 
     const TOUR_ROW = 0.5;       // share of the shorter item's height that puts two in one row
-    const TOUR_SETTLE_MS = 150; // an arrow must be still this long before a scrub resolves
 
     // Is a tour under way — as opposed to a window merely pinned? Geometry reads this.
     function tourActive() { return !!tour && tour.on; }
@@ -6490,8 +6489,6 @@
     }
 
     function tourEnd() {
-        clearTimeout(scrubTimer);
-        scrubTimer = 0;
         seamDir = 0;
         if (seamNoteEl) seamNoteEl.classList.remove('on');
         twWheelSet(false);
@@ -6515,6 +6512,7 @@
     let twRecountTimer = 0;
     let twShownOn = null;       // the URL the widget was last shown on: it stays there at any count (debugging)
     let twWheelArmed = null;    // the URL the wheel button was clicked on; the wheel then steps anywhere
+    let twWheelIn = false;      // the pointer is within wheelReach of the button
     let twWheelAcc = 0;         // wheel travel not yet stepped on, px
     let twWheelLast = 0;        // the last wheel event we took
     const TW_WHEEL_STEP_PX = 50;    // a notch is 100; a touchpad sends many small ones
@@ -6699,7 +6697,7 @@
         tw.prev.classList.toggle('faint', !n);      // faint only with nothing to show; at either end a press wraps
         tw.next.classList.toggle('faint', !n);
         tw.wheel.classList.toggle('faint', !n);
-        tw.wheel.classList.toggle('armed', !!twWheelArmed);
+        tw.wheel.classList.toggle('armed', !!twWheelArmed || twWheelIn);
         const fade = Math.max(0, Math.min(100, +cfg.tourFadeTo || 0)) / 100;
         tw.box.style.opacity = cfg.tourFade && !tw.near ? String(fade) : '1';
         if (tw.host.style.display !== 'none') tw.dock.sizeChanged();     // the counter's width
@@ -6708,6 +6706,8 @@
     // The pointer near the widget lights it up.
     function twNear(x, y) {
         if (!tw || !tw.rect || tw.host.style.display === 'none') return;
+        const inReach = twWheelZone(x, y, cfg.wheelReach);
+        if (inReach !== twWheelIn) { twWheelIn = inReach; twSync(); }
         const r = tw.rect;
         const near = x >= r.x - TW_NEAR && x <= r.x + r.w + TW_NEAR && y >= r.y - TW_NEAR && y <= r.y + r.h + TW_NEAR;
         if (near === tw.near) return;
@@ -7228,7 +7228,7 @@
         return !!tour && !!view && cfg.tourKeys && !(view.imgW > view.frameW + 0.5);
     }
 
-    let scrubTimer = 0, scrubAt = 0, scrubDir = 1;
+    let scrubAt = 0, scrubDir = 1;
     let wallBusy = false;       // ▶ at the last picture is asking the page for more
     let seamDir = 0;            // the end a wheel notch last stopped at; the next one wraps
     let wheelHoldUntil = 0;     // the wheel is ignored until then, after stopping at an end
@@ -7279,17 +7279,13 @@
         plFill(list, to, dir);
         // Refill BEFORE the wall, so the page loads more while there are still pictures to look at.
         if (list.length - 1 - to < TOUR_AHEAD) tourGrow(dir, false);
-        clearTimeout(scrubTimer);
-        if (repeat) scrubTimer = setTimeout(tourShow, TOUR_SETTLE_MS);
-        else tourShow();
+        tourShow();
     }
 
     // Resolve the anchor and put it in the window. Nothing is emitted progressively: a tour that
     // showed every improvement as it landed would flash a thumbnail into a mid-size into the
     // original at every step. See TOUR.md §6.
     async function tourShow() {
-        clearTimeout(scrubTimer);
-        scrubTimer = 0;
         if (!placed || !view || !tour || !tour.el) return;
         const el = tour.el;
         const displayed = sizeOf(el);

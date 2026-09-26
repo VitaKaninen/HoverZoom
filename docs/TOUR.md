@@ -358,8 +358,8 @@ nav controls any more — they are in the widget.
 
 OS key repeat is ~30/s, ten times the target rate, and would outrun any buffer instantly.
 
-- **Holding an arrow scrubs**: step through the list without resolving, and start resolving only
-  once the key has been still for ~150ms.
+- **Holding an arrow steps and shows** every picture (v0.164.0, user's call: they need to see where
+  they are). It was a scrub — resolve only once the key was still 150 ms — which moved only the counter.
 - **No throttle** (v0.163.0, user's call; was 5/s on the argument that faster is too quick to see
   where to stop). `tourHoldRate` restores a cap; 0 by default.
 

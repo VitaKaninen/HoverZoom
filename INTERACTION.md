@@ -417,8 +417,9 @@ the current picture on screen (`T35`).
 #### S26 · scrubbing
 An arrow held down, or ◀ ▶ held (repeating after 500 ms at 30/s, Windows' keyboard defaults).
 - The counter steps at the key's repeat rate — uncapped since v0.163.0 (user's call); `tourHoldRate`
-  caps it, 0 by default — and **nothing is resolved** until it has been still for 150 ms. The
-  counter is the feedback.
+  caps it, 0 by default — and **every step shows its picture** (v0.164.0; before, nothing resolved
+  until the key was still). A step whose picture is not loaded yet leaves the last one up; the
+  preload buffer is what keeps up.
 - Releasing resolves whatever the anchor landed on. Any other press cancels the pending resolve.
 
 #### S15 · placed, upgrading
@@ -478,7 +479,7 @@ inert.
 | `T28` | `S10` fullscreen | Drag the picture, an edge, or the status bar | Nothing moves — fullscreen is locked to the screen, and the cursor stays an arrow. A spilling picture still pans, with the `grab` cursor, and panning past its edge does not carry the window with it (`E35`, `E40`) |
 | `T29` | `S05` | `→` or `←` (or `[` / `]`) on a preview you are only hovering | `S25` — it pins and steps to the next picture, at the slideshow's spot (`E54`) |
 | `T30` | `S10`/`S25` | ◀ ▶ on the widget, or `→` `←` where the picture cannot pan sideways, or `[` `]` always | `S25` on the next picture, at the slideshow's spot. A hand-set size stays; zoom and pan reset (`E54`, `E55`). Past either end it wraps (`E67`) |
-| `T31` | `S25` | Hold the key, or ◀ ▶ for 500 ms | `S26` — the counter steps at the repeat rate (`tourHoldRate` caps it; 0 = none) and nothing resolves until it has been still 150 ms. Stops at an end, never wraps. A held button's release does not step again |
+| `T31` | `S25` | Hold the key, or ◀ ▶ for 500 ms | `S26` — the counter steps at the repeat rate (`tourHoldRate` caps it; 0 = none) and every step shows its picture, as the wheel does. Stops at an end, never wraps. A held button's release does not step again |
 | `T32` | `S25` | ⊘ on the picture | `S25` on the next one — mid-slideshow, blocking means "not this one", not "close the window" |
 | `T33` | `S25` | Reach a picture that will not resolve | `S25` showing the page's own thumbnail with the reason in the bar, and ↻ to ask again (`E56`) |
 | `T34` | `S25` fullscreen | `f`, or the button, after stepping | `S25` windowed, fitted to the picture now in the frame and at the slideshow's spot — not the zoom and top-left of the picture that went in (`E57`) |
@@ -487,7 +488,7 @@ inert.
 | `T37` | `S10`/`S25` | `{` or `}` | The scope narrows or widens by one level of the page — the counter's total changes to say so. Never below two pictures, never past the whole page. An anchor left outside a narrowed scope shows as `– / n` and the next step goes by position (`E60`) |
 | `T38` | `S01` | ▶ on the widget, or → (◀ or ← for the last) | `S25` on the **first** picture of the smallest area holding them all, sidebars left out, opened at the slideshow's spot and pinned. Nothing on the page is hovered on the way (`E63`) |
 | `T39` | any | Drag the widget (Ctrl held: no snapping) | It moves, snapping 8 px to window edges, the window's centre and other scripts' widgets; widgets attached to it move with it. The drop is remembered for this site and as the default for new ones (`E63`) |
-| `T41` | any | The widget's ⇅ button: wheel over it, or click it | Wheel over it steps like ◀ ▶ (starting the slideshow from idle, down = first). The wheel always steps within `wheelReach` (50 px) of the button. A click starts the slideshow and **arms** it (filled blue): the wheel then steps anywhere on the page, the settings panel excepted. A second click disarms and leaves the slideshow open; any close, navigation or reload disarms (`E72`) |
+| `T41` | any | The widget's ⇅ button: wheel over it, or click it | Wheel over it steps like ◀ ▶ (starting the slideshow from idle, down = first). The wheel always steps within `wheelReach` (50 px) of the button. A click starts the slideshow and **arms** it (filled blue — as it also is while the pointer is in reach): the wheel then steps anywhere on the page, the settings panel excepted. A second click disarms and leaves the slideshow open; any close, navigation or reload disarms (`E72`) |
 | `T40` | `S10`/`S25` | Drag a pinned window and let go (Ctrl held: no snapping) | It snaps to the window's corners and edge middles (16 px) and centre (40 px) on the axes the drag moved, and stays where it is dropped. In a slideshow the drop becomes the slideshow's spot, under `position: last` where previews open — but only on an axis moved 40 px or more with 80 px (10%) of room to spare; otherwise nothing is remembered (`E64`) |
 | `T25` | — | *Retired in v0.34.0.* Moving the window used to freeze its size as a ceiling; it no longer touches the size at all (`E22`) |
 
