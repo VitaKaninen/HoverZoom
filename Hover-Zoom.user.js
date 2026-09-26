@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.168.0
+// @version     0.169.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -45,7 +45,7 @@
         modifierKey: 'ctrl',        // the hotkey: 'ctrl' | 'alt' | 'shift'
         hotkeyToggle: false,        // 'hover': a lone tap turns previews off in this tab until the next
         hoverDelay: 120,            // ms before resolving
-        hoverPreload: true,         // a preview loads the rest of its section, as far as is on screen
+        hoverPreload: true,         // load the page's pictures ahead of the user, as far as they show interest
         minDisplayed: 16,           // ignore images displayed smaller than this — the only size gate
         sizeGate: false,            // only preview when the original is minRatio times what is drawn
         minRatio: 1,                // full size must be this much bigger; below 1 previews anything
@@ -6553,6 +6553,7 @@
     let twTotal = -1;           // the real count: at load, when scrolling stops, and when the pointer nears the widget
     let twStarting = null;      // the token of a tour being opened from the widget
     let twRecountTimer = 0;
+    let twLoadTimer = 0;
     let twShownOn = null;       // the URL the widget was last shown on: it stays there at any count (debugging)
     let twWheelArmed = null;    // the URL the wheel button was clicked on; the wheel then steps anywhere
     let twWheelIn = false;      // the pointer is within wheelReach of the button
@@ -6610,6 +6611,9 @@
             'font:13px/16px ' + usDock.FONT + ';color:var(--text);white-space:nowrap;cursor:move;',
             'user-select:none;transition:opacity .15s ease}',
             '.count{flex:none;padding:0 4px;font-variant-numeric:tabular-nums;color:var(--text)}',
+            '.load{flex:none;padding:0 2px;font-size:11px;font-variant-numeric:tabular-nums;color:var(--muted)}',
+            '.load.done{color:var(--done)}',
+            '.load:empty{display:none}',
         ].concat(vbtnCss(), [
             '.tw .vbtn{color:var(--text)}',
             '.tw .vbtn:hover{background:var(--bg3)}',
@@ -6629,12 +6633,15 @@
         const wheel = mkVBtn(ICON_WHEEL, 'Wheel near here: next / previous. Click: the wheel steps anywhere',
             twWheelClick);
         wheel.classList.add('wheel');
+        const load = document.createElement('span');
+        load.className = 'load';
         box.appendChild(prev);
         box.appendChild(count);
         box.appendChild(next);
         box.appendChild(wheel);
+        box.appendChild(load);
         sr.appendChild(box);
-        tw = { host: host, box: box, prev: prev, count: count, next: next, wheel: wheel, dock: null, rect: null, near: false };
+        tw = { host: host, box: box, prev: prev, count: count, next: next, wheel: wheel, load: load, dock: null, rect: null, near: false };
         // A pointer already resting where the widget appears sends no mousemove, only this.
         host.addEventListener('mouseover', function (e) { twNear(e.clientX, e.clientY); });
         document.body.appendChild(host);
@@ -6672,6 +6679,7 @@
 
     function twRefresh() {
         if (!isTopFrame || !document.body) return;
+        setTimeout(pgTick, 0);                  // never during boot, as below
         if (cfg.showPostEnd || postLine || sideLines.length) tourLinesSync();
         if (!tw) {
             if (!cfg.tourButtons || !siteEnabled() || CAPTCHA_HERE) return;
@@ -6692,12 +6700,33 @@
             tw.dock.show(on);
         }
         twSync();
+        twLoadLater();
+    }
+
+    function twLoadLater() { if (!twLoadTimer) twLoadTimer = setTimeout(twLoadSync, 250); }
+
+    // How many of the slideshow's pictures are already answered: "212 loaded", then "all loaded".
+    function twLoadSync() {
+        twLoadTimer = 0;
+        if (!tw || tw.host.style.display === 'none') return;
+        const els = tour ? tourEntries().map(function (e) { return e.el; })
+                         : idlePics(Math.max(0, cfg.tourMinDisplayed | 0));
+        let n = 0;
+        els.forEach(function (el) { if (plHas(el)) n++; });
+        const all = n > 0 && n >= els.length;
+        const text = !n ? '' : all ? 'all loaded' : n + ' loaded';
+        if (tw.load.textContent === text) return;
+        tw.load.textContent = text;
+        tw.load.classList.toggle('done', all);
+        setTip(tw.load, n + ' of ' + els.length + ' pictures loaded ahead');
+        tw.dock.sizeChanged();
     }
 
     // RNFP's palette, light or dark by the page behind it.
     function twTheme() {
         const t = usDock.theme();
-        ['bg', 'bg3', 'border', 'text', 'shadow'].forEach(function (k) { tw.box.style.setProperty('--' + k, t[k]); });
+        ['bg', 'bg3', 'border', 'text', 'muted', 'shadow'].forEach(function (k) { tw.box.style.setProperty('--' + k, t[k]); });
+        tw.box.style.setProperty('--done', t.scheme === 'dark' ? '#a6e3a1' : '#40a02b');
         tw.box.style.colorScheme = t.scheme;
     }
 
@@ -8036,7 +8065,7 @@
         }
     }
 
-    function plDoneOne() { plRunning--; plPump(); }
+    function plDoneOne() { plRunning--; plPump(); twLoadLater(); }
 
     async function plRun(job) {
         const wait = plReserve();
@@ -8143,6 +8172,8 @@
     // Pick the hovered picture's section (the tour's own start rule) and warm what is visible in it.
     function hwStart(el) {
         if (!cfg.hoverPreload || tour || !el || !el.isConnected) return;
+        pgHovered = window.scrollY || 0;
+        if (pointer.y > vpH() * PG_LOW) pgWant(2);
         if (!(hwScope && hwScope.isConnected && hwScope.contains(el))) {
             const pics = tourPics(cfg.tourMinDisplayed | 0);
             const levels = tourLevels(el, pics);
@@ -8164,7 +8195,7 @@
             return hwScope.contains(p) && onScreen(p);
         });
         const want = new Set(pics);
-        plQueue = plQueue.filter(function (j) { return !j.hover || want.has(j.el); });
+        plQueue = plQueue.filter(function (j) { return !j.hover || j.page || want.has(j.el); });
         let added = 0;
         pics.forEach(function (p) {
             if (plHas(p) || plQueue.some(function (j) { return j.el === p; })) return;
@@ -8174,6 +8205,60 @@
             added++;
         });
         if (added) dbg('warming ' + added + ' more in the section', { queued: plQueue.length });
+        plPump();
+    }
+
+    // ---- loading the page ahead of the user
+    //
+    // Interest decides how far: what is on screen on arrival, the next screen after a hover near
+    // the bottom, and everything once they scroll a few screens down or scroll after a hover.
+
+    const PG_LOW = 0.6;             // a hover below this fraction of the viewport looks ahead
+    const PG_ALL_SCREENS = 3;       // scrolled this many screens down: they want the whole page
+
+    let pgLevel = 0;                // 1 on screen, 2 the next screen too, 3 everything
+    let pgHref = '';
+    let pgHovered = -1;             // scrollY at the last preview, -1 before any
+
+    function pgWant(level) {
+        if (level > pgLevel) {
+            pgLevel = level;
+            dbg('loading ahead: ' + ['', 'what is on screen', 'the next screen', 'the whole page'][level]);
+        }
+        pgFill();
+    }
+
+    // Re-read interest from the scroll position, then queue.
+    function pgTick() {
+        if (pgHref !== location.href) { pgHref = location.href; pgLevel = 0; pgHovered = -1; }
+        const y = window.scrollY || 0, h = vpH();
+        if (h > 0 && (y >= h * PG_ALL_SCREENS || (pgHovered >= 0 && Math.abs(y - pgHovered) >= h))) pgWant(3);
+        else pgWant(1);
+    }
+
+    // Queue the pictures the current level covers, nearest the screen first.
+    function pgFill() {
+        if (!cfg.hoverPreload || tour || !pgLevel || !siteEnabled() || CAPTCHA_HERE) return;
+        const level = plDepth() ? 1 : pgLevel;         // saving data: only what is on screen
+        const h = vpH();
+        if (!(h > 0)) return;
+        const want = [];
+        idlePics(Math.max(0, cfg.tourMinDisplayed | 0)).forEach(function (p) {
+            const r = p.getBoundingClientRect();
+            if (!r.width || !r.height) return;
+            if (level < 3 && (r.bottom <= 0 || r.top >= h * level)) return;
+            want.push({ el: p, d: r.top >= 0 ? r.top : h - 2 * r.top });
+        });
+        want.sort(function (a, b) { return a.d - b.d; });
+        let added = 0;
+        want.forEach(function (w) {
+            if (plHas(w.el) || plQueue.some(function (j) { return j.el === w.el; })) return;
+            const u = pictureUrl(w.el);
+            if (!u || blocked(u)) return;
+            plQueue.push({ el: w.el, dist: PL_VIDEO_AHEAD + 1, gen: plGen, hover: true, page: true });
+            added++;
+        });
+        if (added) dbg('loading ' + added + ' more ahead', { queued: plQueue.length });
         plPump();
     }
 
@@ -9041,8 +9126,10 @@
         num('hoverDelay', 'Hover delay',
             'How long the pointer rests on an image before the preview loads, in ms. ' +
             '(default: 120)', 0, 3000, 10);
-        check('hoverPreload', 'Load the pictures around the one you hover',
-            'After one preview, nearby pictures on screen load in the background.');
+        check('hoverPreload', 'Load pictures ahead',
+            'What is on screen loads when you arrive; the next screen when you hover near the ' +
+            'bottom; the whole page once you scroll a few screens down, or scroll after a ' +
+            'preview. The slideshow always loads its own.');
         num('zoomLimit', 'Opening zoom limit',
             'How far a small original is enlarged, in multiples of its size. 1 never enlarges; ' +
             'large originals always shrink to fit. (default: 4)', 0.1, 8, 0.1);

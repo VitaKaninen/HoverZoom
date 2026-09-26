@@ -225,6 +225,9 @@ ancestor-link candidate ever comes back missing on a shadow-DOM site.
   old code. Bust it explicitly before reloading:
   `await fetch('/Hover-Zoom.user.js', {cache:'reload'}); location.reload();` — and when something
   you just wrote appears to be absent, check that first rather than the code.
+- **`scrollTo` in the pane fires no `scroll` event** (no animation frames, so no rendering step to
+  dispatch it; measured 2026-09-26). Anything keyed to scrolling — `twRecount`, `pgTick`, `hwFill` —
+  needs `dispatchEvent(new Event('scroll'))` after the scroll, or it reads as a script bug.
 - **CSS transitions do not advance while the pane is hidden**, so opacity reads as its start value
   for ever. Anything about fading has to be reasoned from the code — measuring it there returns
   `0` and looks like a bug in the thing you are testing (2026-09-05, chasing `fadeMs`).
