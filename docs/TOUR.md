@@ -56,6 +56,10 @@ fight that. They are deleted. Do not put nav controls back on the frame.
   (`twSync` → `sizeChanged`), since the Browser pane never fires `ResizeObserver`.
 - **Arrow keys** are ours while a preview or tour is up, plus → from idle (above). Forum Stumbler has
   no key handler of its own (checked twice, 2026-09-22).
+- **The ⇅ wheel button** (`T41`, `E72`, v0.162.0): for 50+ step tours, where a pointer drifting off
+  ▶ costs a click. Armed state is `twWheelArmed` = the URL it was armed on; `twRefresh` disarms on a
+  different URL, `tourEnd` on any close. The zone is measured from the button, not the widget
+  (user's call); `wheelZone` is a setting because the user expects to tune it.
 - **Position memory** (`DOCK_KEY`): per site, falling back to the last drop anywhere; first run
   attaches on top of Forum Stumbler's bar, or the window's bottom-right when it is absent.
 
@@ -710,10 +714,14 @@ batches, then shows a "See more images" button no scroll passes, so its slidesho
 - **Virtualised feeds** (Twitter, Reddit) keep ~20 posts in the DOM; only a moving viewport reaches
   further, which following now is.
 
-**▶ at the wall *is* the request, and the ends close the slideshow** (v0.126.0, `E67`).
+**▶ at the wall *is* the request, and the ends wrap** (`E67`; they closed the slideshow v0.126.0-v0.161.0).
 `tourWall()`: `tourMoreOnce(true)` (one shared request, so a press lands on one already running;
-`force` skips the cooldown), step if it grew, quit only if `tourExhausted()` — a `false` from a busy
-source, or from "scrolled on, not at the bottom yet", is not an end. A held key never quits. The wall
+`force` skips the cooldown), step if it grew, wrap (`tourSeam`) only if `tourExhausted()` — a `false`
+from a busy source, or from "scrolled on, not at the bottom yet", is not an end. `wallBusy` drops
+presses while it runs, or each would step/wrap when it resolves. A held key never wraps.
+Wrapping is the user's call: a wheel spun to the end should not close anything. A note that stayed up
+was rejected (it hides the picture); so was ignoring the wheel until it stops (a free-spinning wheel
+must then be stopped by hand) — hence the fixed 1 s hold at the seam, wheel only (`E72`). The wall
 also re-reads the page first (`tourAdopt(tour.had)`), for a batch that landed after the watch ended.
 
 The list itself needs no scrolling for what is already in the DOM: `querySelectorAll` sees the whole
@@ -829,6 +837,7 @@ The keys in `DEFAULTS`. Remember the hoisting trap in `../CLAUDE.md`: every
 | `tourWindow` | `12` | how many entries to keep buffered ahead |
 | `tourWorkers` | `6` | concurrent preload resolves |
 | `tourScrubRate` | `5` | max steps/sec while an arrow is held |
+| `wheelZone` | `20` | px around the armed wheel button in which the wheel steps |
 | `tourLoadMore` | `true` | scrolling along ahead so a feed loads more (§9) |
 | `tourCrossPage` | `true` | harvest the next page in the background |
 

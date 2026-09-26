@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.161.0
+// @version     0.162.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -64,6 +64,7 @@
         tourWindow: 12,             // entries kept buffered ahead
         tourWorkers: 6,             // concurrent speculative resolves
         tourScrubRate: 5,           // steps/sec ceiling while an arrow is held
+        wheelZone: 20,              // px around the widget's wheel button that an armed wheel steps in
         tourLoadMore: true,         // the scroll excursion that makes a lazy page load more
         tourCrossPage: true,        // harvest the next page in the background
 
@@ -1508,6 +1509,7 @@
 
     let gripEl = null;          // invisible collar that carries the outer half of the resize strip
     let spinEl = null, spinSvg = null;
+    let seamNoteEl = null, seamNoteTimer = 0;
     let fsEl = null;            // the bar's fullscreen button
     let vctlEl = null, vgrpEl = null, vplayEl = null, vtimeEl = null, vseekEl = null,
         vrateEl = null, vmuteEl = null, vsoundEl = null, vvolEl = null, vvolInEl = null,
@@ -1549,6 +1551,7 @@
     const ICON_NOPLAY = ['M8 5.5v13l10-6.5z', 'M4.5 19.5l15-15'];
     const ICON_PREV = 'M15 5l-8 7 8 7V5z';
     const ICON_NEXT = 'M9 5l8 7-8 7V5z';
+    const ICON_WHEEL = 'M7 3l-4 5h3v13h2V8h3L7 3zm10 18l4-5h-3V3h-2v13h-3l4 5z';
     const ICON_CLOSE = 'M6.4 5L12 10.6 17.6 5 19 6.4 13.4 12 19 17.6 17.6 19 12 13.4 6.4 19 5 17.6 10.6 12 5 6.4z';
     const ICON_RETRY = 'M12 5V2L8 6l4 4V7a5 5 0 1 1-5 5H5a7 7 0 1 0 7-7z';
 
@@ -1811,6 +1814,10 @@
             // Docked: the bar sits BELOW the picture rather than on it, so it must be opaque —
             // a spilling image runs on under it and would otherwise show through.
             '.box.bardock .cap{background:#1e1e2e}',
+            '.seamnote{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:50;',
+            'pointer-events:none;white-space:nowrap;color:#fff;font:600 22px/1.2 system-ui,sans-serif;',
+            'text-shadow:0 0 3px #000,0 1px 8px rgba(0,0,0,.85);opacity:0;transition:opacity .5s ease}',
+            '.seamnote.on{opacity:.9;transition:none}',
             '.spin{position:fixed;width:' + SPIN_SIZE + 'px;height:' + SPIN_SIZE + 'px;',
             'display:none;pointer-events:none;',
             'filter:drop-shadow(0 2px 6px rgba(0,0,0,.5))}',
@@ -1837,6 +1844,10 @@
 
         box = document.createElement('div');
         box.className = 'box';
+
+        seamNoteEl = document.createElement('div');
+        seamNoteEl.className = 'seamnote';
+        box.appendChild(seamNoteEl);
 
         imgEl = document.createElement('img');
         imgEl.draggable = false;
@@ -6481,6 +6492,9 @@
     function tourEnd() {
         clearTimeout(scrubTimer);
         scrubTimer = 0;
+        seamDir = 0;
+        if (seamNoteEl) seamNoteEl.classList.remove('on');
+        twWheelSet(false);
         tour = null;
         plReset();
         crossReset();
@@ -6500,6 +6514,10 @@
     let twStarting = null;      // the token of a tour being opened from the widget
     let twRecountTimer = 0;
     let twShownOn = null;       // the URL the widget was last shown on: it stays there at any count (debugging)
+    let twWheelArmed = null;    // the URL the wheel button was clicked on; the wheel steps within wheelZone of it
+    let twWheelIn = false;      // the pointer is inside that zone
+    let twWheelAt = 0;          // the last wheel step
+    const TW_WHEEL_GAP_MS = 150;    // one step per notch: events closer than this are the same notch
 
     function dockStore() {
         try {
@@ -6551,6 +6569,8 @@
             '.tw .vbtn{color:var(--text)}',
             '.tw .vbtn:hover{background:var(--bg3)}',
             '.tw .vbtn.faint:hover{background:none}',
+            '.tw .vbtn.wheel.armed,.tw .vbtn.wheel.armed:hover{background:#89b4fa;color:#1e1e2e}',
+            '.tw .vbtn.wheel.paused{box-shadow:inset 0 0 0 1.5px #89b4fa}',
         ]).join('');
         sr.appendChild(style);
         const box = document.createElement('div');
@@ -6560,11 +6580,15 @@
         count.className = 'count';
         setTip(count, 'Drag to move; Ctrl skips snapping');
         const next = mkVBtn(ICON_NEXT, null, function () { twPress(1); });
+        const wheel = mkVBtn(ICON_WHEEL, 'Wheel here: next / previous. Click: start, and the wheel keeps stepping near this button',
+            twWheelClick);
+        wheel.classList.add('wheel');
         box.appendChild(prev);
         box.appendChild(count);
         box.appendChild(next);
+        box.appendChild(wheel);
         sr.appendChild(box);
-        tw = { host: host, box: box, prev: prev, count: count, next: next, dock: null, rect: null, near: false };
+        tw = { host: host, box: box, prev: prev, count: count, next: next, wheel: wheel, dock: null, rect: null, near: false };
         // A pointer already resting where the widget appears sends no mousemove, only this.
         host.addEventListener('mouseover', function (e) { twNear(e.clientX, e.clientY); });
         document.body.appendChild(host);
@@ -6611,6 +6635,7 @@
         const was = twTotal;
         if (!tour) twTotal = twPics >= 2 ? idlePics(Math.max(0, cfg.tourMinDisplayed | 0)).length : 0;
         if (!tour && twTotal !== was && debugOn()) dbg('widget count ' + twTotal, twReport());
+        if (twWheelArmed && twWheelArmed !== location.href) twWheelSet(false);
         const on = twWanted();
         if (on) twShownOn = location.href;
         if (on) twTheme();
@@ -6666,8 +6691,11 @@
         const on = !!tour && tour.on;
         const at = on ? tour.index : -1, n = on ? tour.total : twTotal;
         tw.count.textContent = (at >= 0 ? at + 1 : '–') + ' / ' + (n >= 0 ? n : '–');
-        tw.prev.classList.toggle('faint', !n);      // at either end a press ends the slideshow
+        tw.prev.classList.toggle('faint', !n);      // faint only with nothing to show; at either end a press wraps
         tw.next.classList.toggle('faint', !n);
+        tw.wheel.classList.toggle('faint', !n);
+        tw.wheel.classList.toggle('armed', !!twWheelArmed && twWheelIn);
+        tw.wheel.classList.toggle('paused', !!twWheelArmed && !twWheelIn);
         const fade = Math.max(0, Math.min(100, +cfg.tourFadeTo || 0)) / 100;
         tw.box.style.opacity = cfg.tourFade && !tw.near ? String(fade) : '1';
         if (tw.host.style.display !== 'none') tw.dock.sizeChanged();     // the counter's width
@@ -6676,6 +6704,10 @@
     // The pointer near the widget lights it up.
     function twNear(x, y) {
         if (!tw || !tw.rect || tw.host.style.display === 'none') return;
+        if (twWheelArmed) {
+            const inZone = twWheelZone(x, y, cfg.wheelZone);
+            if (inZone !== twWheelIn) { twWheelIn = inZone; twSync(); }
+        }
         const r = tw.rect;
         const near = x >= r.x - TW_NEAR && x <= r.x + r.w + TW_NEAR && y >= r.y - TW_NEAR && y <= r.y + r.h + TW_NEAR;
         if (near === tw.near) return;
@@ -6683,6 +6715,46 @@
         // Counted at load and after scrolling; a page that changed without either is caught here.
         if (near && !tour) { twRefresh(); return; }     // a count under two hides it
         twSync();
+    }
+
+    // Is (x, y) within `pad` px of the wheel button?
+    function twWheelZone(x, y, pad) {
+        if (!tw || tw.host.style.display === 'none') return false;
+        const r = tw.wheel.getBoundingClientRect();
+        if (!r.width) return false;
+        pad = Math.max(0, +pad || 0);
+        return x >= r.left - pad && x <= r.right + pad && y >= r.top - pad && y <= r.bottom + pad;
+    }
+
+    function twWheelSet(on) {
+        twWheelArmed = on ? location.href : null;
+        twWheelIn = on;
+        twSync();
+    }
+
+    // The wheel button: arm and start the slideshow, or disarm and leave it open.
+    function twWheelClick() {
+        if (twWheelArmed) { twWheelSet(false); return; }
+        twWheelSet(true);
+        if (!(placed && view)) tourFromStart(1);
+    }
+
+    // Window capture, bound at boot so it runs before onPinWheel: a wheel over the button, or anywhere
+    // in its zone while armed, steps the slideshow instead of scrolling or zooming.
+    function twWheel(e) {
+        if (!e.deltaY || !tw) return;
+        const armed = twWheelArmed === location.href;
+        if (!twWheelZone(e.clientX, e.clientY, armed ? cfg.wheelZone : 0)) return;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        const now = Date.now();
+        if (now < wheelHoldUntil || now - twWheelAt < TW_WHEEL_GAP_MS) return;
+        twWheelAt = now;
+        const dir = e.deltaY > 0 ? 1 : -1;
+        if (placed && view) {
+            if (!tour) tourStart();
+            tourNav(dir, false, true);
+        } else if (!twStarting) tourFromStart(dir);
     }
 
     function twBusy() { return !!twStarting || (!!tw && !!tw.dock && tw.dock.dragging()); }
@@ -7119,6 +7191,7 @@
             if (t && (t.tagName === 'IMG' || t.tagName === 'VIDEO') && !tour) twRecount();
         }, true);
         window.addEventListener('scroll', twRecount, { passive: true });
+        CAP_TARGET.addEventListener('wheel', twWheel, WHEEL_OPTS);
         window.addEventListener('popstate', twRecount);
         if (window.navigation) window.navigation.addEventListener('navigatesuccess', twRecount);
     }
@@ -7130,11 +7203,16 @@
     }
 
     let scrubTimer = 0, scrubAt = 0, scrubDir = 1;
+    let wallBusy = false;       // ▶ at the last picture is asking the page for more
+    let seamDir = 0;            // the end a wheel notch last stopped at; the next one wraps
+    let wheelHoldUntil = 0;     // the wheel is ignored until then, after stopping at an end
+    const WHEEL_HOLD_MS = 1000;
+    const SEAM_NOTE_MS = 1000;
 
     // One press of ◀ / ▶ or a navigating arrow. A HELD key scrubs: the anchor moves at the scrub
     // rate and nothing resolves until the key has been still, because OS key repeat is ~30/s and
     // would outrun any buffer instantly. See TOUR.md §5.
-    function tourNav(dir, repeat) {
+    function tourNav(dir, repeat, wheel) {
         if (!placed || !view || !tour) return;
         if (repeat) {
             const gap = 1000 / Math.max(1, Math.min(30, cfg.tourScrubRate || 5));
@@ -7153,11 +7231,18 @@
             tour.index = tourAt(list);
             twSync();
             if (repeat) { if (dir > 0) tourGrow(dir, true); return; }
-            // A press past either end ends the slideshow; forward asks the page for more first.
-            if (dir < 0) tourQuit();
-            else tourWall();
+            if (wallBusy) return;
+            // A press past either end wraps; forward asks the page for more first.
+            if (dir < 0 || seamDir === dir) tourSeam(dir, wheel);
+            else tourWall(wheel);
             return;
         }
+        seamDir = 0;
+        tourGo(list, to, dir, repeat);
+    }
+
+    // Step the slideshow to list[to].
+    function tourGo(list, to, dir, repeat) {
         tourRemember(list[to]);
         tour.index = to;
         dbg('tour step', { at: to + 1, of: list.length, dir: dir, scrubbing: !!repeat,
@@ -7713,12 +7798,13 @@
     }
 
     // ▶ on the last picture: more if the page has any, otherwise the slideshow ends.
-    async function tourWall() {
+    async function tourWall(wheel) {
         showSpinner();
         dockSpinner();
         let grew = false;
+        wallBusy = true;
         try { grew = await tourMoreOnce(true); }
-        finally { hideSpinner(); }
+        finally { hideSpinner(); wallBusy = false; }
         if (!tour || !placed) return;
         if (grew) { tourSync(); tourNav(1, false); return; }
         // A batch that landed after the excursion stopped watching (LibreWolf: seconds later).
@@ -7729,13 +7815,35 @@
             tourNav(1, false);
             return;
         }
-        if (tourExhausted()) tourQuit();
+        if (tourExhausted()) tourSeam(1, wheel);
     }
 
-    // The slideshow closed from one of its ends, as if it had never been started.
-    function tourQuit() {
-        dbg('tour ended at ' + (tour && tour.index > 0 ? 'the last picture' : 'the first picture'));
-        dismiss();
+    // Past an end: the wheel stops there once (note + WHEEL_HOLD_MS deaf), anything else wraps.
+    function tourSeam(dir, wheel) {
+        if (!tour || !placed) return;
+        if (wheel && seamDir !== dir) {
+            seamDir = dir;
+            wheelHoldUntil = Date.now() + WHEEL_HOLD_MS;
+            seamNote(dir > 0 ? 'Last picture' : 'First picture');
+            return;
+        }
+        seamDir = 0;
+        const list = tourEntries();
+        tour.total = list.length;
+        if (list.length < 2) return;
+        const to = dir > 0 ? 0 : list.length - 1;
+        dbg('tour wrapped to ' + (dir > 0 ? 'the first picture' : 'the last picture'), { of: list.length });
+        seamNote(dir > 0 ? 'Wrapped to the first picture' : 'Wrapped to the last picture');
+        tourGo(list, to, dir, false);
+    }
+
+    // White text over the picture, faded out after SEAM_NOTE_MS.
+    function seamNote(text) {
+        if (!seamNoteEl) return;
+        clearTimeout(seamNoteTimer);
+        seamNoteEl.textContent = text;
+        seamNoteEl.classList.add('on');
+        seamNoteTimer = setTimeout(function () { seamNoteEl.classList.remove('on'); }, SEAM_NOTE_MS);
     }
 
     // Fire and forget: the refill overlaps with pictures the user is still looking at rather
@@ -8904,6 +9012,9 @@
         num('tourScrubRate', 'Scrub rate',
             'Pictures per second while an arrow is held down. Faster than about 5 and they go ' +
             'by too quickly to see. (default: 5)', 1, 30, 1);
+        num('wheelZone', 'Wheel button reach',
+            'Once the wheel button is clicked, the wheel steps the slideshow while the pointer is ' +
+            'within this many px of it. (default: 20)', 0, 500, 1);
 
         section('The preview window');
         num('wheelZoomStep', 'Wheel zoom step',
