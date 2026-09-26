@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.159.0
+// @version     0.160.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -256,6 +256,7 @@
     }
 
     let siteMenuId = null;
+    let linesMenuId = null;         // the debug lines' toggle, beside the site one
 
     function siteMenuLabel() {
         const on = siteEnabled();
@@ -272,9 +273,24 @@
             try { GM_unregisterMenuCommand(siteMenuId); } catch (e) { return; }
             siteMenuId = null;
         }
+        if (linesMenuId != null) {
+            try { GM_unregisterMenuCommand(linesMenuId); } catch (e) { return; }
+            linesMenuId = null;
+        }
         try {
             siteMenuId = GM_registerMenuCommand(siteMenuLabel(), toggleSite);
+            linesMenuId = GM_registerMenuCommand((cfg.showPostEnd ? '☑' : '☐') + ' Draw where the slideshow stops', toggleLines);
         } catch (e) { /* nothing to fall back to; the panel still has the list */ }
+    }
+
+    // The menu's copy of the panel's Diagnostics checkbox.
+    function toggleLines() {
+        reloadSettings();
+        cfg.showPostEnd = !cfg.showPostEnd;
+        saveSettings();
+        refreshSiteMenu();
+        refreshPanel();
+        twRefresh();
     }
 
     // reloadSettings() first for the same reason blockCurrent() does it.
