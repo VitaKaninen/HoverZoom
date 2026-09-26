@@ -360,7 +360,7 @@ OS key repeat is ~30/s, ten times the target rate, and would outrun any buffer i
 
 - **Holding an arrow steps and shows** every picture (v0.164.0, user's call: they need to see where
   they are). It was a scrub — resolve only once the key was still 150 ms — which moved only the counter.
-  Each repeat (and each wheel notch) waits for the last step's picture to reach `setMedia` (v0.165.0):
+  Every user step waits for the last step's picture to reach `setMedia` (v0.165.0; singles too since v0.166.0):
   load time is the only limit and nothing is skipped. Without it a 30/s repeat showed 7 of 34.
 - **No throttle** (v0.163.0, user's call; was 5/s on the argument that faster is too quick to see
   where to stop). `tourHoldRate` restores a cap; 0 by default.
@@ -721,10 +721,11 @@ batches, then shows a "See more images" button no scroll passes, so its slidesho
 `tourWall()`: `tourMoreOnce(true)` (one shared request, so a press lands on one already running;
 `force` skips the cooldown), step if it grew, wrap (`tourSeam`) only if `tourExhausted()` — a `false`
 from a busy source, or from "scrolled on, not at the bottom yet", is not an end. `wallBusy` drops
-presses while it runs, or each would step/wrap when it resolves. A held key never wraps.
+presses while it runs, or each would step/wrap when it resolves.
 Wrapping is the user's call: a wheel spun to the end should not close anything. A note that stayed up
 was rejected (it hides the picture); so was ignoring the wheel until it stops (a free-spinning wheel
-must then be stopped by hand) — hence the fixed 1 s hold at the seam, wheel only (`E72`). The wall
+must then be stopped by hand) — hence the fixed 1 s hold at the seam, for every input alike (`E72`;
+the user expects all modes to behave the same and differ only in how they are started). The wall
 also re-reads the page first (`tourAdopt(tour.had)`), for a batch that landed after the watch ended.
 
 The list itself needs no scrolling for what is already in the DOM: `querySelectorAll` sees the whole

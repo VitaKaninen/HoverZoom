@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.165.0
+// @version     0.166.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -4234,14 +4234,14 @@
             // Left/Right step through the page's pictures unless the picture itself can pan
             // sideways. Up/Down always pan. See TOUR.md §5.
             case 'ArrowLeft':
-                if (tourOwnsArrows()) tourNav(-1, e.repeat); else panBy(step, 0); break;
+                if (tourOwnsArrows()) tourNav(-1, e.repeat, true); else panBy(step, 0); break;
             case 'ArrowRight':
-                if (tourOwnsArrows()) tourNav(1, e.repeat); else panBy(-step, 0); break;
+                if (tourOwnsArrows()) tourNav(1, e.repeat, true); else panBy(-step, 0); break;
             case 'ArrowUp': panBy(0, step); break;
             case 'ArrowDown': panBy(0, -step); break;
             // The always-navigates pair, or zooming in traps you on the current picture.
-            case '[': tourNav(-1, e.repeat); break;
-            case ']': tourNav(1, e.repeat); break;
+            case '[': tourNav(-1, e.repeat, true); break;
+            case ']': tourNav(1, e.repeat, true); break;
             // The tour's area: one level of the page narrower or wider. See TOUR.md §1a.
             case '{': if (!e.repeat) tourRescope(-1); break;
             case '}': if (!e.repeat) tourRescope(1); break;
@@ -5578,7 +5578,7 @@
             !e.ctrlKey && !e.metaKey && !e.altKey && !panelHost && !typingIn(e)) {
             lastUserAct = Date.now();       // the close this causes is not a player's; see E62
             place();
-            tourNav(dir, e.repeat);
+            tourNav(dir, e.repeat, true);
             e.preventDefault();
             e.stopPropagation();
             return;
@@ -6750,7 +6750,6 @@
         e.preventDefault();
         e.stopImmediatePropagation();
         const now = Date.now();
-        if (now < wheelHoldUntil) return;
         const px = e.deltaY * (e.deltaMode === 1 ? 33 : e.deltaMode === 2 ? 800 : 1);
         if (now - twWheelLast > 500 || (px > 0) !== (twWheelAcc > 0)) twWheelAcc = 0;
         twWheelLast = now;
@@ -6772,7 +6771,7 @@
             twHeld = false;
             twHoldT = setTimeout(function tick() {
                 twHeld = true;
-                if (placed && view && tour) tourNav(dir, true);
+                if (placed && view && tour) tourNav(dir, true, true);
                 else if (!placed && !twStarting && !tour) twPress(dir);
                 twHoldT = setTimeout(tick, TW_HOLD_EVERY_MS);
             }, TW_HOLD_DELAY_MS);
@@ -6789,7 +6788,7 @@
     function twPress(dir) {
         if (placed && view) {
             if (!tour) tourStart();
-            tourNav(dir, false);
+            tourNav(dir, false, true);
             return;
         }
         tourFromStart(dir);
@@ -7233,17 +7232,18 @@
 
     let scrubAt = 0, scrubDir = 1;
     let wallBusy = false;       // ▶ at the last picture is asking the page for more
-    let seamDir = 0;            // the end a wheel notch last stopped at; the next one wraps
-    let wheelHoldUntil = 0;     // the wheel is ignored until then, after stopping at an end
-    const WHEEL_HOLD_MS = 1000;
+    let seamDir = 0;            // the end the last step stopped at; the next one wraps
+    let seamHoldUntil = 0;      // user steps are ignored until then, after stopping at an end
+    const SEAM_HOLD_MS = 1000;
     const SEAM_NOTE_MS = 1000;
 
     // One press of ◀ / ▶ or a navigating arrow. A HELD key scrubs: the anchor moves at the scrub
     // rate and nothing resolves until the key has been still, because OS key repeat is ~30/s and
     // would outrun any buffer instantly. See TOUR.md §5.
-    function tourNav(dir, repeat, wheel) {
+    // `user`: a key, click, hold or wheel — paced by the picture on screen and stopped once at each end.
+    function tourNav(dir, repeat, user) {
         if (!placed || !view || !tour) return;
-        if ((repeat || wheel) && tourWaitEl) return;    // paced by the browser: never step past an unshown picture
+        if (user && (tourWaitEl || Date.now() < seamHoldUntil)) return;     // never step past an unshown picture
         if (repeat) {
             const rate = +cfg.tourHoldRate || 0;
             if (rate > 0 && Date.now() - scrubAt < 1000 / rate) return;
@@ -7260,11 +7260,10 @@
         if (to < 0) {
             tour.index = tourAt(list);
             twSync();
-            if (repeat) { if (dir > 0) tourGrow(dir, true); return; }
             if (wallBusy) return;
             // A press past either end wraps; forward asks the page for more first.
-            if (dir < 0 || seamDir === dir) tourSeam(dir, wheel);
-            else tourWall(wheel);
+            if (dir < 0 || seamDir === dir) tourSeam(dir, user);
+            else tourWall(user);
             return;
         }
         seamDir = 0;
@@ -7379,6 +7378,7 @@
         if (!tour || tour.el !== el || !view) return;
         if (res) { swapViewer(res); return; }
         dbg('tour: nothing to show for this one — moving on', { why: why || '(none)' });
+        tourWaitEl = null;
         tourNav(scrubDir, false);
     }
 
@@ -7825,7 +7825,7 @@
     }
 
     // ▶ on the last picture: more if the page has any, otherwise the slideshow ends.
-    async function tourWall(wheel) {
+    async function tourWall(user) {
         showSpinner();
         dockSpinner();
         let grew = false;
@@ -7842,15 +7842,15 @@
             tourNav(1, false);
             return;
         }
-        if (tourExhausted()) tourSeam(1, wheel);
+        if (tourExhausted()) tourSeam(1, user);
     }
 
-    // Past an end: the wheel stops there once (note + WHEEL_HOLD_MS deaf), anything else wraps.
-    function tourSeam(dir, wheel) {
+    // Past an end: user input stops there once (note, SEAM_HOLD_MS deaf); the next step wraps.
+    function tourSeam(dir, user) {
         if (!tour || !placed) return;
-        if (wheel && seamDir !== dir) {
+        if (user && seamDir !== dir) {
             seamDir = dir;
-            wheelHoldUntil = Date.now() + WHEEL_HOLD_MS;
+            seamHoldUntil = Date.now() + SEAM_HOLD_MS;
             seamNote(dir > 0 ? 'Last picture' : 'First picture');
             return;
         }
