@@ -418,9 +418,10 @@ the current picture on screen (`T35`).
 An arrow held down, or ◀ ▶ held (repeating after 500 ms at 30/s, Windows' keyboard defaults).
 - The counter steps at the key's repeat rate — uncapped since v0.163.0 (user's call); `tourHoldRate`
   caps it, 0 by default — and **every step shows its picture** (v0.164.0; before, nothing resolved
-  until the key was still). A step whose picture is not loaded yet leaves the last one up; the
-  preload buffer is what keeps up.
-- Each step cancels the previous step's resolve, so releasing leaves the last picture loading.
+  until the key was still). **A step waits until the previous picture is on screen** (`tourWaitEl`,
+  cleared in `setMedia`; v0.165.0): the browser sets the pace, nothing is skipped, as in the Windows
+  photo viewer. A repeat arriving while it waits is dropped, not queued.
+- A single press or click is not paced: it steps at once and cancels a picture still loading.
 
 #### S15 · placed, upgrading
 Placing is a reason to keep looking, not to stop, so the search runs on.
@@ -479,7 +480,7 @@ inert.
 | `T28` | `S10` fullscreen | Drag the picture, an edge, or the status bar | Nothing moves — fullscreen is locked to the screen, and the cursor stays an arrow. A spilling picture still pans, with the `grab` cursor, and panning past its edge does not carry the window with it (`E35`, `E40`) |
 | `T29` | `S05` | `→` or `←` (or `[` / `]`) on a preview you are only hovering | `S25` — it pins and steps to the next picture, at the slideshow's spot (`E54`) |
 | `T30` | `S10`/`S25` | ◀ ▶ on the widget, or `→` `←` where the picture cannot pan sideways, or `[` `]` always | `S25` on the next picture, at the slideshow's spot. A hand-set size stays; zoom and pan reset (`E54`, `E55`). Past either end it wraps (`E67`) |
-| `T31` | `S25` | Hold the key, or ◀ ▶ for 500 ms | `S26` — the counter steps at the repeat rate (`tourHoldRate` caps it; 0 = none) and every step shows its picture, as the wheel does. Stops at an end, never wraps. A held button's release does not step again |
+| `T31` | `S25` | Hold the key, or ◀ ▶ for 500 ms | `S26` — the counter steps at the repeat rate (`tourHoldRate` caps it; 0 = none) and every step shows its picture, waiting for it before the next (`tourWaitEl`). Stops at an end, never wraps. A held button's release does not step again |
 | `T32` | `S25` | ⊘ on the picture | `S25` on the next one — mid-slideshow, blocking means "not this one", not "close the window" |
 | `T33` | `S25` | Reach a picture that will not resolve | `S25` showing the page's own thumbnail with the reason in the bar, and ↻ to ask again (`E56`) |
 | `T34` | `S25` fullscreen | `f`, or the button, after stepping | `S25` windowed, fitted to the picture now in the frame and at the slideshow's spot — not the zoom and top-left of the picture that went in (`E57`) |
@@ -608,7 +609,7 @@ this table is a table.
 | `E68` | Two ✕: one at the right end of the bar (fullscreen moved left of it, and `btnGutter` counts it, so the minimum pinned width grew by one button), and a transparent ring-and-✕ 26 px across, 10 px in from the top-right corner, on a pinned window, fading with the status bar (hover-only when the bar is off). `hitRegion` answers null over it, so the corner still resizes from the ring round it | [`docs/VIEWER.md`](docs/VIEWER.md) |
 | `E69` | The window keeps its status bar off the ◀ ▶ widget. Widget docked at the window's bottom (its bottom within `TW_FLOOR_BAND` of it): `bottomGap()` grows to clear it, so the opening size, the slideshow and fullscreen all stop above it. Widget higher up: a bar that lands on it moves the window up or down, whichever is less and still on screen and above the bottom strip, and if neither fits it shrinks from the bottom to end above the widget (`clearWidget()` from `clampPosition()`, `view.capH`); not during a drag, nor in fullscreen | [`docs/VIEWER.md`](docs/VIEWER.md) |
 | `E70` | A click outside a placed window that lands on a page **control** — a button, field, label, `[role=button]`-like, or another userscript's docked widget (`[data-us-dock]`) — closes the window AND reaches the control; links and pictures still only close it. The backdrop goes `thru` while the pointer is over one (`thruSync()` on mousemove); not in fullscreen | [`docs/VIEWER.md`](docs/VIEWER.md) |
-| `E72` | The wheel button (`T41`) steps once per event carrying 50 px of travel (a notch is 100; touchpad deltas accumulate, reset after 500 ms idle or a reversal) — no cooldown, so a fast spin steps as fast as it arrives (v0.163.0). A wheel notch past an end does not wrap: it shows "Last picture"/"First picture" and the wheel is ignored for 1 s (`WHEEL_HOLD_MS`; notches then are dropped, not queued), so a free-spinning wheel visibly stops; the next notch after wraps. Its listener is `window` capture bound at boot, ahead of `onPinWheel`, with `stopImmediatePropagation` | [`docs/TOUR.md`](docs/TOUR.md) |
+| `E72` | The wheel button (`T41`) steps once per event carrying 50 px of travel (a notch is 100; touchpad deltas accumulate, reset after 500 ms idle or a reversal) — no cooldown; paced like a held key, so a notch while the last picture is still loading is dropped and nothing is skipped (v0.165.0). A wheel notch past an end does not wrap: it shows "Last picture"/"First picture" and the wheel is ignored for 1 s (`WHEEL_HOLD_MS`; notches then are dropped, not queued), so a free-spinning wheel visibly stops; the next notch after wraps. Its listener is `window` capture bound at boot, ahead of `onPinWheel`, with `stopImmediatePropagation` | [`docs/TOUR.md`](docs/TOUR.md) |
 | `E71` | On a thread or an article with comments, the slideshow keeps to the **post** (`postEnd()`): a thread's replies start at its 2nd post; comments under a post start at their list. Always for ▶/→ from idle and the widget's count; from a pinned picture only when it is in the post. `}` at the whole page lets the replies in. Page 2+ of a thread has no post end. Setting `showPostEnd` draws the cut as a red line and each sidebar's inner edge as an orange one, and logs what it found to the console | [`docs/TOUR.md`](docs/TOUR.md) §1c |
 
 `E3` is retired with the detached state (v0.28.0); `E4` and `E5` are retired as dangling.

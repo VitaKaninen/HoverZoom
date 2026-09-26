@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.164.0
+// @version     0.165.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -3169,10 +3169,12 @@
     }
 
     let swapSeq = 0;            // bumped by anything that puts media in the frame; a staged swap checks it
+    let tourWaitEl = null;      // a slideshow step not on screen yet: held keys and the wheel wait for it
 
     // Point the frame at a resolved candidate, picking the face that can display it.
     function setMedia(res) {
         swapSeq++;
+        tourWaitEl = null;
         const wantsVideo = !!res.video;
         mediaEl = wantsVideo ? vidEl : imgEl;
         const idle = wantsVideo ? imgEl : vidEl;
@@ -6489,6 +6491,7 @@
     }
 
     function tourEnd() {
+        tourWaitEl = null;
         seamDir = 0;
         if (seamNoteEl) seamNoteEl.classList.remove('on');
         twWheelSet(false);
@@ -7240,6 +7243,7 @@
     // would outrun any buffer instantly. See TOUR.md §5.
     function tourNav(dir, repeat, wheel) {
         if (!placed || !view || !tour) return;
+        if ((repeat || wheel) && tourWaitEl) return;    // paced by the browser: never step past an unshown picture
         if (repeat) {
             const rate = +cfg.tourHoldRate || 0;
             if (rate > 0 && Date.now() - scrubAt < 1000 / rate) return;
@@ -7270,6 +7274,7 @@
     // Step the slideshow to list[to].
     function tourGo(list, to, dir, repeat) {
         tourRemember(list[to]);
+        tourWaitEl = list[to].el;
         tour.index = to;
         dbg('tour step', { at: to + 1, of: list.length, dir: dir, scrubbing: !!repeat,
             // The position is the operand the reading-order sort compared, so it is logged.
