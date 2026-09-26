@@ -360,8 +360,11 @@ OS key repeat is ~30/s, ten times the target rate, and would outrun any buffer i
 
 - **Holding an arrow steps and shows** every picture (v0.164.0, user's call: they need to see where
   they are). It was a scrub — resolve only once the key was still 150 ms — which moved only the counter.
-  Every user step waits for the last step's picture to reach `setMedia` (v0.165.0; singles too since v0.166.0):
-  load time is the only limit and nothing is skipped. Without it a 30/s repeat showed 7 of 34.
+  **No step ever waits** (v0.167.0, user's call; v0.165–v0.166 made every step wait for its picture,
+  which ignored presses behind a slow one). A step shows the loaded original, else the page's own
+  picture at once (`tourPageRes`), else an empty frame in the page's light/dark with a centred ring
+  (`blankFrame`, after `TOUR_BLANK_MS`). Nothing is requested for a step until the user rests on it
+  `TOUR_REST_MS` (`tourRest`), so flipping faster than the network requests nothing new.
 - **No throttle** (v0.163.0, user's call; was 5/s on the argument that faster is too quick to see
   where to stop). `tourHoldRate` restores a cap; 0 by default.
 
@@ -384,9 +387,17 @@ OS key repeat is ~30/s, ten times the target rate, and would outrun any buffer i
   have rejected.
 - **`probeCache` dedup is worth more than expected.** Five separate entries in one window resolved
   to the same slow URL and cost one request between them, because the cache holds the *promise*.
-- **The buffer is bounded by eviction, not by a cap.** `plFill` keeps `tourWindow` entries either
-  side of the anchor and deletes the rest — which is also what stops the map holding element
-  references a virtualised feed has already destroyed.
+- **Answers are kept for the life of the page** (v0.167.0; user skims 300 pictures, wraps and
+  skims again). `plDone` is keyed by `plKey` — picture URL plus link href, the element only for a
+  placeholder, whose URL is shared — so a feed that rebuilds its nodes keeps them, and closing the
+  slideshow (`plStop`) keeps them too. Only a settings change or ⊘ clears them (`plReset`).
+- **Everything loads, nearest first, ahead before behind** (behind counts double). `preloadAhead`
+  limits it either way; 0 = all, 12 when the browser's data saver is on. The queue is rebuilt on
+  every step; **nothing running is cancelled**, since a picture passed at speed is wanted on the
+  way back.
+- **Files are held to a byte budget, not a count** (`plKeepImage`, `preloadMB`; 0 = 1/8 of
+  `navigator.deviceMemory`, max 1024 MB, else 1024). The size is estimated at 0.5 byte/px — nothing
+  cross-origin reports it. Held because the HTTP cache evicts and a `no-store` file is never cached.
 - **The no-rush list rides on the diagnosis that already exists.** `diagnose()` classifies a 429 /
   `Retry-After` as `busy`; `hardBlock()` hangs off that one line and needs no request of its own.
   It is remembered in GM storage across sessions, and it drops the pool to strictly serial.
@@ -482,8 +493,6 @@ jobs that scrolled away. The hover's own `resolve()` then hits `probeCache`. Off
   constructor throws.
 - **Foreground jumps the queue.** A resolve the user is waiting on must never sit behind six
   speculative ones. Two priority tiers.
-- **Cancel on direction change.** Reversing with ◀ or blocking with ⊘ drops queued preloads that
-  are no longer near the cursor.
 - **Preloads never write to `view`.** Own token; `onHit` records only.
 - `probeCache` is keyed by URL and holds a promise, so concurrent probes of one URL
   collapse automatically. Free.
@@ -838,7 +847,8 @@ The keys in `DEFAULTS`. Remember the hoisting trap in `../CLAUDE.md`: every
 | `tourKeyStart` | `true` | → / ← with nothing open start at the first / last picture |
 | `tourKeys` | `true` | arrows navigate when the picture cannot pan horizontally |
 | `tourMinDisplayed` | `128` | the tour's floor on the longer side as drawn, px (§1a) |
-| `tourWindow` | `12` | how many entries to keep buffered ahead |
+| `preloadAhead` | `0` | entries loaded either way of the anchor; 0 = all. Replaced `tourWindow` (12) |
+| `preloadMB` | `0` | memory for held files; 0 = automatic |
 | `tourWorkers` | `6` | concurrent preload resolves |
 | `tourHoldRate` | `0` | max steps/sec while an arrow or ◀ ▶ is held; 0 = the repeat rate. Replaced `tourScrubRate` (5), retired so a stored 5 does not survive |
 | `wheelReach` | `50` | px around the wheel button in which the wheel steps. Replaced `wheelZone` (20), retired likewise |

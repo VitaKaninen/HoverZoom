@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.166.0
+// @version     0.167.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -61,7 +61,8 @@
         tourKeys: true,             // arrows navigate when the picture cannot pan sideways
         tourKeyStart: true,         // → (←) with nothing open starts the slideshow at the first (last) picture
         tourMinDisplayed: 128,      // the tour's own floor: longer side as drawn, px; emoji and badges fall under it
-        tourWindow: 12,             // entries kept buffered ahead
+        preloadAhead: 0,            // slideshow pictures loaded ahead of (and behind) the current one; 0 = all
+        preloadMB: 0,               // memory for loaded pictures; 0 = automatic
         tourWorkers: 6,             // concurrent speculative resolves
         tourHoldRate: 0,            // steps/sec ceiling while an arrow or ◀ ▶ is held; 0 = none
         wheelReach: 50,             // px around the widget's wheel button in which the wheel steps
@@ -109,7 +110,7 @@
         'skipWhileMouseDown', 'playVideos', 'skipVideos', 'skipPageBackgrounds',
         'skipBanners', 'skipDecorative', 'enabled', 'maxDisplayed', 'cursorGap', 'noReferrer',
         'showEvenIfNotLarger', 'previewVideos', 'previewOverPlayer', 'barFade', 'showStatusBar',
-        'frameMargin', 'borderMode', 'pinButton', 'tourScrubRate', 'wheelZone'];
+        'frameMargin', 'borderMode', 'pinButton', 'tourScrubRate', 'wheelZone', 'tourWindow'];
 
     // The retirements that DO convert.
     function migrate(o) {
@@ -3169,12 +3170,14 @@
     }
 
     let swapSeq = 0;            // bumped by anything that puts media in the frame; a staged swap checks it
-    let tourWaitEl = null;      // a slideshow step not on screen yet: held keys and the wheel wait for it
+    let blanked = false;        // a slideshow step with nothing to show yet: the frame is empty
+    let tourRestTimer = 0;
+    let spinCentred = false;
 
     // Point the frame at a resolved candidate, picking the face that can display it.
     function setMedia(res) {
         swapSeq++;
-        tourWaitEl = null;
+        if (blanked) unblank();
         const wantsVideo = !!res.video;
         mediaEl = wantsVideo ? vidEl : imgEl;
         const idle = wantsVideo ? imgEl : vidEl;
@@ -3395,6 +3398,11 @@
     function moveSpinner() {
         if (!spinEl) return;
         const m = viewportBox();
+        if (spinCentred && view && box && box.classList.contains('on')) {
+            spinEl.style.left = Math.round(view.left + insetX() + (view.frameW - SPIN_SIZE) / 2) + 'px';
+            spinEl.style.top = Math.round(view.top + insetY() + (view.frameH - SPIN_SIZE) / 2) + 'px';
+            return;
+        }
         if (spinDocked && view && box && box.classList.contains('on')) {
             const capH = barShown() ? capEl.offsetHeight : 0;
             spinEl.style.left =
@@ -3405,6 +3413,24 @@
         }
         spinEl.style.left = Math.min(pointer.x + 16, m.vw - SPIN_SIZE - EDGE_GAP) + 'px';
         spinEl.style.top = Math.min(pointer.y + 16, m.vh - SPIN_SIZE - bottomGap()) + 'px';
+    }
+
+    // Empty the frame, in the page's light or dark, with the spinner in the middle.
+    function blankFrame() {
+        if (!view || !box) return;
+        imgEl.hidden = true;
+        vidEl.hidden = true;
+        clearMedia(vidEl);
+        paintOver(box, 'background-color', darkMode() ? '#1e1e2e' : '#ffffff');
+        blanked = spinCentred = true;
+        showSpinner();
+        moveSpinner();
+    }
+
+    function unblank() {
+        blanked = spinCentred = false;
+        paintOver(box, 'background-color', '#1e1e2e');
+        moveSpinner();
     }
 
     function hideSpinner() {
@@ -6491,12 +6517,12 @@
     }
 
     function tourEnd() {
-        tourWaitEl = null;
+        clearTimeout(tourRestTimer);
         seamDir = 0;
         if (seamNoteEl) seamNoteEl.classList.remove('on');
         twWheelSet(false);
         tour = null;
-        plReset();
+        plStop();
         crossReset();
         excSpent = false;       // a fresh tour asks the page again; it may have grown since
         twRefresh();
@@ -7152,7 +7178,7 @@
         resolve(w.el, w.displayed, { cancelled: false, fresh: false }, null).then(function (res) {
             if (twWarm !== w) return;
             w.res = res || null;
-            if (res && !res.video) plKeepImage(res.url);
+            if (res && !res.video) plKeepImage(res);
             dbg('slideshow: first picture ready', res ? res.w + '×' + res.h + ' ' + res.url.slice(-48) : 'nothing found');
         }, function () { if (twWarm === w) w.res = null; });
     }
@@ -7170,7 +7196,7 @@
         let at = dir > 0 ? 0 : list.length - 1;
         const myToken = twStarting = token = { cancelled: false, fresh: true };
         showSpinner();
-        let res = null, el = null, displayed = null;
+        let res = null, el = null, displayed = null, fromPage = false;
         try {
             for (let tries = 0; tries < TOUR_START_TRIES && at >= 0 && at < list.length; tries++, at += dir) {
                 tourRemember(list[at]);
@@ -7183,8 +7209,11 @@
                 activeShown = shownUrl(el);
                 const warm = twWarm && twWarm.el === el && twWarm.res && sameDisplayed(twWarm.displayed, displayed) ? twWarm.res : null;
                 primeLink(el);
-                res = warm || await resolve(el, displayed, myToken, null);
-                if (!res && !myToken.cancelled) res = await tourFallbackRes(el, displayed, myToken.failure);
+                const pre = plGet(el);
+                res = warm || (pre && pre.res && sameDisplayed(pre.displayed, displayed) ? pre.res : null);
+                fromPage = !res;
+                if (!res) res = await tourPageRes(el, displayed);
+                if (!res && !myToken.cancelled) { fromPage = false; res = await resolve(el, displayed, myToken, null); }
                 if (res || myToken.cancelled || !tour) break;
                 dbg('tour: nothing to show for this one — trying the next', { at: at + 1 });
             }
@@ -7196,12 +7225,13 @@
             if (!placed) { active = null; activeShown = null; tourEnd(); }
             return;
         }
-        plDone.set(el, { res: res, displayed: displayed });
+        if (!fromPage) plSet(el, { res: res, displayed: displayed });
         dbg('tour started from the widget', { pictures: list.length, from: dir > 0 ? 'the first' : 'the last',
             url: (res.url || '').slice(-60) });
         showViewer(res, pointer);
         place();
         twSync();
+        if (fromPage) tourRest(el, displayed, myToken);
         const now = tourEntries();
         plFill(now, tour.index, dir);
         if (now.length - 1 - tour.index < TOUR_AHEAD) tourGrow(dir, false);
@@ -7243,7 +7273,7 @@
     // `user`: a key, click, hold or wheel — paced by the picture on screen and stopped once at each end.
     function tourNav(dir, repeat, user) {
         if (!placed || !view || !tour) return;
-        if (user && (tourWaitEl || Date.now() < seamHoldUntil)) return;     // never step past an unshown picture
+        if (user && Date.now() < seamHoldUntil) return;
         if (repeat) {
             const rate = +cfg.tourHoldRate || 0;
             if (rate > 0 && Date.now() - scrubAt < 1000 / rate) return;
@@ -7273,7 +7303,6 @@
     // Step the slideshow to list[to].
     function tourGo(list, to, dir, repeat) {
         tourRemember(list[to]);
-        tourWaitEl = list[to].el;
         tour.index = to;
         dbg('tour step', { at: to + 1, of: list.length, dir: dir, scrubbing: !!repeat,
             // The position is the operand the reading-order sort compared, so it is logged.
@@ -7286,10 +7315,9 @@
         tourShow();
     }
 
-    // Resolve the anchor and put it in the window. Nothing is emitted progressively: a tour that
-    // showed every improvement as it landed would flash a thumbnail into a mid-size into the
-    // original at every step. See TOUR.md §6.
-    async function tourShow() {
+    // Put the anchor in the window at once: its loaded original, else the page's own picture, else
+    // an empty frame. Nothing is requested for it until the user rests on it. See TOUR.md §6.
+    function tourShow() {
         if (!placed || !view || !tour || !tour.el) return;
         const el = tour.el;
         const displayed = sizeOf(el);
@@ -7297,46 +7325,66 @@
         active = el;
         activeShown = shownUrl(el);
         if (token) token.cancelled = true;
+        clearTimeout(tourRestTimer);
         hideSpinner();              // the cancelled resolve owned it and will not hide it now
         const myToken = token = { cancelled: false, fresh: true };
-        // A settled preload goes straight in: the point of preloading is not only the latency but
-        // the flashing, and the live path emits every improvement as it lands. A cut budget that
-        // found nothing, or one measured against a different displayed size, is not usable.
         primeLink(el);
-        const pre = plDone.get(el);
+        const pre = plGet(el);
         if (pre && pre.res && sameDisplayed(pre.displayed, displayed)) {
             dbg('tour: from the preload buffer', pre.res);
             swapViewer(pre.res);
-            if (pre.sig === undefined || pre.sig === candSig(el)) return;
             // The preload spent one guess, or the page has offered more since (Google fills a
-            // result's link on hover): the full search runs now and upgrades in place.
-            plDone.set(el, { res: pre.res, displayed: displayed });
-            showSpinner();
-            dockSpinner();
-            let up = null;
-            try { up = await resolve(el, displayed, myToken, null); }
-            finally { if (!myToken.cancelled) hideSpinner(); }
-            if (myToken.cancelled || !tour || tour.el !== el || !view || !betterHit(pre.res, up)) return;
-            dbg('tour: the full search beat the preload', { was: pre.res, now: up });
-            plDone.set(el, { res: up, displayed: displayed });
-            upgradeViewer(up);
+            // result's link on hover): the full search runs once the user rests here.
+            if (pre.sig !== undefined && pre.sig !== candSig(el)) tourRest(el, displayed, myToken, pre.res);
             return;
         }
-        plPaused = true;            // a resolve the user is waiting on never queues behind six
-        showSpinner();
-        dockSpinner();
-        let hit = null;
-        try {
-            hit = await resolve(el, displayed, myToken, null);
-        } finally {
-            plPaused = false;
-            plPump();
-            if (!myToken.cancelled) hideSpinner();
-        }
-        if (myToken.cancelled || !tour || tour.el !== el || !view) return;
-        plDone.set(el, { res: hit, displayed: displayed });
-        if (hit) swapViewer(hit);
-        else await tourFallback(el, displayed, myToken.failure);
+        const blank = setTimeout(function () { if (!myToken.cancelled && !myToken.shown) blankFrame(); }, TOUR_BLANK_MS);
+        tourPageRes(el, displayed).then(function (res) {
+            clearTimeout(blank);
+            if (myToken.cancelled || myToken.shown || !tour || tour.el !== el || !view) return;
+            if (!res) { if (!blanked) blankFrame(); return; }
+            myToken.shown = true;
+            swapViewer(res);
+        });
+        tourRest(el, displayed, myToken);
+    }
+
+    const TOUR_REST_MS = 300;       // a step held this long is one the user is looking at
+    const TOUR_BLANK_MS = 150;      // the page's own picture gets this long before the frame empties
+
+    // The full search for the anchor, once the user has stopped on it; the result replaces what is shown.
+    function tourRest(el, displayed, myToken, had) {
+        clearTimeout(tourRestTimer);
+        tourRestTimer = setTimeout(async function () {
+            if (myToken.cancelled || !tour || tour.el !== el || !view) return;
+            plPaused = true;        // a resolve the user is waiting on never queues behind six
+            showSpinner();
+            dockSpinner();
+            let hit = null;
+            try {
+                hit = await resolve(el, displayed, myToken, null);
+            } finally {
+                plPaused = false;
+                plPump();
+                if (!myToken.cancelled) hideSpinner();
+            }
+            if (myToken.cancelled || !tour || tour.el !== el || !view) return;
+            if (had) {
+                if (!betterHit(had, hit)) return;
+                dbg('tour: the full search beat the preload', { was: had, now: hit });
+                plSet(el, { res: hit, displayed: displayed });
+                upgradeViewer(hit);
+                return;
+            }
+            plSet(el, { res: hit, displayed: displayed });
+            if (!hit) { await tourFallback(el, displayed, myToken.failure); return; }
+            myToken.shown = true;
+            if (hit.url === view.url && hit.w === view.natW && hit.h === view.natH && !blanked) {
+                if (view.reason) { view.reason = null; resetCaption(); layout(); }
+                return;
+            }
+            swapViewer(hit);
+        }, TOUR_REST_MS);
     }
 
     // A link with no address yet is one the page fills on hover (Google Images): a tour entry is
@@ -7378,28 +7426,29 @@
         if (!tour || tour.el !== el || !view) return;
         if (res) { swapViewer(res); return; }
         dbg('tour: nothing to show for this one — moving on', { why: why || '(none)' });
-        tourWaitEl = null;
         tourNav(scrubDir, false);
     }
 
     // The page's own picture with the reason, as something the window can show; null if even that fails.
     async function tourFallbackRes(el, displayed, why) {
+        const res = await tourPageRes(el, displayed);
+        if (!res) return null;
+        res.reason = why || 'no larger version found';
+        dbg('tour: showing the page\'s own picture — ' + res.reason, res.url);
+        return res;
+    }
+
+    // The page's own picture as something the window can show; null for a placeholder or a failure.
+    async function tourPageRes(el, displayed) {
         const url = shownUrl(el);
         if (!url || blocked(url) || placeholder(el, url)) return null;
         const n = nativeSize(el);
-        let w = (n && n.w) || displayed.w;
-        let h = (n && n.h) || displayed.h;
-        if (!w || !h) {
-            // An entry harvested from a fetched page has no layout and nothing decoded, so its
-            // own size is not known until something measures it. See TOUR.md §10.
-            const dim = await probe(url, false);
-            if (!dim) return null;
-            w = dim.w;
-            h = dim.h;
-        }
-        const reason = why || 'no larger version found';
-        dbg('tour: showing the page\'s own picture — ' + reason, url);
-        return { url: url, w: w, h: h, reason: reason };
+        if (n && n.w && n.h && !n.scaled) return { url: url, w: n.w, h: n.h };
+        // A srcset size is density-divided, and verifyMedia() would mark the URL unstable. An
+        // entry harvested from a fetched page has nothing decoded at all. See E45, TOUR.md §10.
+        const dim = await probe(url, false);
+        if (!dim || dim.video) return null;
+        return { url: url, w: dim.w, h: dim.h };
     }
 
     // ---- making a lazy page load more: the page is scrolled as a reader scrolls it (tourFollow),
@@ -7903,7 +7952,7 @@
     const PL_VIDEO_AHEAD = 2;   // clips buffered in full rather than to metadata
     const PL_MAX_WORKERS = 12;
 
-    const plDone = new Map();   // element -> { res, displayed, sig } for everything already resolved
+    const plDone = new Map();   // plKey -> { res, displayed, sig }; kept for the life of the page
     let plQueue = [];
     let plLive = [];            // tokens of running speculative resolves, for cancellation
     let plRunning = 0;
@@ -7939,12 +7988,29 @@
     }
 
     function plReset() {
-        hwScope = null;
-        plCancel();
+        plStop();
         plDone.clear();
         plKeep.length = 0;
+        plKeepBytes = 0;
+    }
+
+    // The slideshow closed: stop loading, keep every answer for the next one.
+    function plStop() {
+        hwScope = null;
+        plCancel();
         plDir = 0;
     }
+
+    // Answers are known by picture and link, so a feed that rebuilds its elements keeps them.
+    function plKey(el) {
+        const u = pictureUrl(el);
+        if (!u || placeholder(el, u)) return el;
+        const a = closestAcross(el, 'a');
+        return u + '\n' + ((a && a.getAttribute('href')) || '');
+    }
+    function plGet(el) { return plDone.get(plKey(el)); }
+    function plHas(el) { return plDone.has(plKey(el)); }
+    function plSet(el, v) { plDone.set(plKey(el), v); }
 
     function plPump() {
         if (plPaused) return;
@@ -7961,16 +8027,18 @@
     async function plRun(job) {
         const wait = plReserve();
         if (wait > 0) await sleep(wait);
-        if (job.gen !== plGen || (!tour && !job.hover) || plDone.has(job.el)) return;
+        if (job.gen !== plGen || (!tour && !job.hover)) return;
+        primeLink(job.el);
+        if (plHas(job.el)) return;
         const token = { cancelled: false, fresh: false };
         plLive.push(token);
         let hit = null;
-        primeLink(job.el);
-        try { hit = await resolve(job.el, job.displayed, token, null, PL_GUESSES); }
+        const displayed = sizeOf(job.el);
+        try { hit = await resolve(job.el, displayed, token, null, PL_GUESSES); }
         catch (e) { hit = null; }
         plLive = plLive.filter(function (t) { return t !== token; });
         if (job.gen !== plGen || token.cancelled) return;
-        plDone.set(job.el, { res: hit, displayed: job.displayed, sig: candSig(job.el, PL_GUESSES) });
+        plSet(job.el, { res: hit, displayed: displayed, sig: candSig(job.el, PL_GUESSES) });
         dbg('preloaded', { ahead: job.dist, buffered: plDone.size, queued: plQueue.length,
             workers: plWorkers(), got: hit ? hit.w + '×' + hit.h + ' ' + hit.url.slice(-48)
                                           : 'nothing (the full search runs on arrival)' });
@@ -7978,43 +8046,58 @@
         // Probing an image leaves it in the HTTP cache; probing a clip does not, because
         // probeVideo() aborts the fetch the moment it has the dimensions.
         if (hit.video) { if (job.dist <= PL_VIDEO_AHEAD) plWarmVideo(hit.url); }
-        else plKeepImage(hit.url);
+        else plKeepImage(hit);
     }
 
-    // Queue the entries ahead of the anchor and drop everything outside the window either way,
-    // which is also what keeps the map from holding nodes a virtualised feed has destroyed.
+    // Queue every entry not yet answered, nearest first and ahead before behind. Nothing running
+    // is cancelled: a picture passed at speed is still wanted when the user comes back.
     function plFill(list, at, dir) {
-        const depth = Math.max(0, Math.min(40, cfg.tourWindow | 0));
-        if (!depth || at < 0) return;
-        if (dir !== plDir) { plCancel(); plDir = dir; }
-        const ahead = [];
-        const keep = new Set();
-        if (list[at]) keep.add(list[at].el);
-        for (let i = 1; i <= depth; i++) {
-            const f = list[at + i * dir], b = list[at - i * dir];
-            if (f) { ahead.push({ e: f, dist: i }); keep.add(f.el); }
-            if (b) keep.add(b.el);
+        if (at < 0) return;
+        const depth = plDepth();
+        plDir = dir;
+        const jobs = [];
+        for (let i = 0; i < list.length; i++) {
+            const d = (i - at) * dir;
+            if (depth && Math.abs(d) > depth) continue;
+            if (plHas(list[i].el)) continue;
+            jobs.push({ el: list[i].el, dist: d >= 0 ? d : -2 * d, gen: plGen });
         }
-        plDone.forEach(function (v, k) { if (!keep.has(k)) plDone.delete(k); });
-        plQueue = plQueue.filter(function (j) { return keep.has(j.el); });
-        plSerial = ahead.some(function (a) { return noRush(hostOf(a.e.url)); });
-        ahead.forEach(function (a) {
-            if (plDone.has(a.e.el)) return;
-            if (plQueue.some(function (j) { return j.el === a.e.el; })) return;
-            plQueue.push({ el: a.e.el, displayed: sizeOf(a.e.el), dist: a.dist, gen: plGen });
-        });
+        jobs.sort(function (x, y) { return x.dist - y.dist; });
+        plQueue = jobs;
+        plSerial = list.some(function (e) { return noRush(hostOf(e.url)); });
         plPump();
     }
 
-    // A probe lets its Image go and relies on the HTTP cache, which Chromium can evict.
-    const plKeep = [];
+    // How far either way the slideshow loads; 0 is all of it, unless the browser is saving data.
+    function plDepth() {
+        const n = Math.max(0, cfg.preloadAhead | 0);
+        if (n) return n;
+        const c = navigator.connection;
+        return c && c.saveData ? 12 : 0;
+    }
 
-    function plKeepImage(url) {
+    // A probe lets its Image go and relies on the HTTP cache, which Chromium can evict, and which a
+    // server can refuse ("no-store"). Held Images keep the files in memory, up to a budget.
+    const plKeep = [];
+    let plKeepBytes = 0;
+    const PL_BYTES_PER_PX = 0.5;    // an estimate of a compressed picture's size; nothing measures it
+
+    function plBudget() {
+        const mb = Math.max(0, cfg.preloadMB | 0);
+        if (mb) return mb * 1048576;
+        const dm = +navigator.deviceMemory || 0;       // GB, rounded, capped at 8; Chromium only
+        return (dm ? Math.min(1024, dm * 128) : 1024) * 1048576;
+    }
+
+    function plKeepImage(res) {
+        if (plKeep.some(function (k) { return k.url === res.url; })) return;
         const im = new Image();
         if (noReferrerHere()) im.referrerPolicy = 'no-referrer';
-        im.src = url;
-        plKeep.push(im);
-        while (plKeep.length > Math.max(4, cfg.tourWindow | 0)) plKeep.shift();
+        im.src = res.url;
+        const bytes = Math.max(1, (res.w * res.h) || 0) * PL_BYTES_PER_PX;
+        plKeep.push({ url: res.url, im: im, bytes: bytes });
+        plKeepBytes += bytes;
+        while (plKeep.length > 1 && plKeepBytes > plBudget()) plKeepBytes -= plKeep.shift().bytes;
     }
 
     // Stage 2 for clips: a real buffered fetch, which the metadata probe deliberately aborts.
@@ -8070,10 +8153,10 @@
         plQueue = plQueue.filter(function (j) { return !j.hover || want.has(j.el); });
         let added = 0;
         pics.forEach(function (p) {
-            if (plDone.has(p) || plQueue.some(function (j) { return j.el === p; })) return;
+            if (plHas(p) || plQueue.some(function (j) { return j.el === p; })) return;
             const u = pictureUrl(p);
             if (!u || blocked(u)) return;
-            plQueue.push({ el: p, displayed: sizeOf(p), dist: PL_VIDEO_AHEAD + 1, gen: plGen, hover: true });
+            plQueue.push({ el: p, dist: PL_VIDEO_AHEAD + 1, gen: plGen, hover: true });
             added++;
         });
         if (added) dbg('warming ' + added + ' more in the section', { queued: plQueue.length });
@@ -9030,9 +9113,14 @@
         advanced('Advanced options');
 
         section('The slideshow');
-        num('tourWindow', 'Pictures to load ahead',
-            'How far ahead of where you are the next pictures are fetched. Deeper absorbs a ' +
-            'burst; it does not make them arrive faster. (default: 12)', 0, 40, 1);
+        num('preloadAhead', 'Pictures to load ahead',
+            'How far each way from where you are the slideshow loads. 0 loads all of it, so ' +
+            'nothing waits later. Lower it to save data on a metered connection; the browser\'s ' +
+            'data saver lowers it to 12 by itself. (default: 0)', 0, 1000, 1);
+        num('preloadMB', 'Memory for loaded pictures',
+            'In MB. Loaded pictures are held up to this much so they never download again. Lower ' +
+            'it on a computer with little memory. 0 picks it from the computer\'s memory where ' +
+            'the browser says (1/8 of it, at most 1024), else 1024. (default: 0)', 0, 16384, 64);
         num('tourWorkers', 'Loaded at once',
             'How many are fetched in parallel. This is what sets the rate. Measured at about ' +
             '5 pictures a second at 6. (default: 6)', 1, 12, 1);
