@@ -420,7 +420,7 @@ An arrow held down, or ◀ ▶ held (repeating after 500 ms at 30/s, Windows' ke
   caps it, 0 by default — and **every step shows its picture** (v0.164.0; before, nothing resolved
   until the key was still). A step whose picture is not loaded yet leaves the last one up; the
   preload buffer is what keeps up.
-- Releasing resolves whatever the anchor landed on. Any other press cancels the pending resolve.
+- Each step cancels the previous step's resolve, so releasing leaves the last picture loading.
 
 #### S15 · placed, upgrading
 Placing is a reason to keep looking, not to stop, so the search runs on.
