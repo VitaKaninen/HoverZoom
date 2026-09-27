@@ -795,6 +795,9 @@ step with 400 pictures + 20 videos). Never let a pass span a DOM write or a scro
 and every live entry is connected. Google Images, 464 pictures, 90 fast wheel ticks: 5.8 s → 1.0 s of
 blocking (64 → ~10 ms a step). The key is re-read every step, so a page that changed re-derives; the
 TTL bounds what the key cannot see (a visibility flip with no size change).
+`idlePics()` is reused the same way (`idleMemo`, v0.182.0): after a scroll `twRefresh`, `pgTick` and
+`twWarmFirst` each asked for it — three full scans per pause, now one. Its key (`pageKey()`) leaves
+out `harvest`: `twRefresh()` runs it at boot, above that `let` (the CLAUDE.md TDZ trap).
 A slow step is not just jank — Firefox scrolls the page anyway when a blocking wheel listener takes
 ~400 ms (`apz.content_response_timeout`), so wheel ticks leak through. For a tour
 pinned from a hover, `tour.had` is taken at `tourStart` and `tourGrow` adopts near the end.

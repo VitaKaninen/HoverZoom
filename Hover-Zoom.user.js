@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.181.0
+// @version     0.182.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -72,7 +72,7 @@
         lazyBehindBlocked = w(lazyBehindBlocked); tourSize = w(tourSize); postPics = w(postPics); postEnd = w(postEnd);
         mainPics = w(mainPics); sideColumnEl = w(sideColumnEl); tourScopeNow = w(tourScopeNow); tourLevels = w(tourLevels);
         tourPick = w(tourPick); tourEntriesIn = w(tourEntriesIn); tourOrder = w(tourOrder); twCount = w(twCount);
-        idlePics = w(idlePics); tourEntriesNow = w(tourEntriesNow); plHas = w(plHas); plFill = w(plFill); plPump = w(plPump);
+        idlePics = w(idlePics); pageKey = w(pageKey); tourEntriesNow = w(tourEntriesNow); plHas = w(plHas); plFill = w(plFill); plPump = w(plPump);
         tourNav = w(tourNav); twNear = w(twNear); twWheelZone = w(twWheelZone); thruSync = w(thruSync);
         videoSurfaces = w(videoSurfaces); gifLike = w(gifLike); hwFill = w(hwFill); tourSync = w(tourSync); layout = w(layout);
         showViewer = w(showViewer); upgradeViewer = w(upgradeViewer); tourLinesSync = w(tourLinesSync); atOrAfter = w(atOrAfter);
@@ -6819,15 +6819,17 @@
         return list.slice();
     }
 
+    function tourListKey() { return pageKey() + '|' + harvest.length + '|' + tourFloor(); }
+
     // Cheap reads that change when the pictures do: counts, sizes, and the length of every src.
-    function tourListKey() {
+    function pageKey() {
         const b = document.body;
         let srcs = 0, n = 0;
         [document.getElementsByTagName('img'), document.getElementsByTagName('video')].forEach(function (c) {
             for (let i = 0; i < c.length; i++) { srcs += (c[i].currentSrc || c[i].src || '').length; n++; }
         });
         return location.href + '|' + document.getElementsByTagName('*').length + '|' + n + '|' + srcs + '|' +
-            vpW() + 'x' + vpH() + '|' + (b ? b.scrollHeight : 0) + '|' + harvest.length + '|' + tourFloor();
+            vpW() + 'x' + vpH() + '|' + (b ? b.scrollHeight : 0);
     }
 
     function tourEntriesNow() {
@@ -7362,7 +7364,18 @@
     function mainPics(pics) { return pics.filter(function (p) { return !sideColumn(p); }); }
 
     // What the widget counts and ▶ starts on: the main column, down to the post end.
-    function idlePics(floor) { return inPass(function () { return postPics(mainPics(tourPics(floor))); }); }
+    // Reused like tourEntries(): the widget's count, pgTick and twWarmFirst all ask after one scroll.
+    // No `harvest` in this key — twRefresh() runs this at boot, above that `let`.
+    let idleMemo = null;
+    function idlePics(floor) {
+        const key = pageKey() + '|' + floor;
+        const m = idleMemo;
+        if (m && m.key === key && m.cfg === cfg && Date.now() - m.t < TOUR_LIST_MS &&
+            m.pics.every(function (p) { return p.isConnected; })) return m.pics.slice();
+        const pics = inPass(function () { return postPics(mainPics(tourPics(floor))); });
+        idleMemo = { key: key, cfg: cfg, t: Date.now(), pics: pics };
+        return pics.slice();
+    }
 
     // ---- the post end: where a thread's first post or an article stops and replies/comments begin. See TOUR.md §1c.
     const POST_WORD = /post|comment|message|repl|answer|comtr/i;
