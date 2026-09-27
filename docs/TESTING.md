@@ -31,6 +31,14 @@ only — no URLs, no page function names — so the user can paste it from a pri
   calls compiling a RegExp per entry per call (now compiled once per list, answers memoised per URL).
   Chrome's `long-animation-frame` scripts come back with no `sourceURL` for Tampermonkey userscripts
   (all "unattributed"), so the bucket split does not separate us from other userscripts there.
+- **Chrome sweep, 2026-09-27, v0.184.0** — fast wheel (ticks 16 ms apart) through the slideshow, blocking
+  time summed over the ticks: Google Images 464 pics ~1 s/90 ticks (was 5.8 s at v0.180.0); Daily Mail
+  home 435 pics 255 ms/60; Imgur 213 ms/40 (was 486; its feed recycles elements, so the memos miss);
+  Bing 6 ms a step; Wikipedia list 4 ms; Guardian gallery ~1 ms. Page scrolling costs us <1% everywhere
+  (`twRecount` ~0.15 ms an event); Flickr's own scripts blocked ~1 s during the same scroll. Commons (120 px
+  thumbs) and Lemmy list pages show no widget — under the 128 px `tourMinDisplayed` floor, by design.
+  Harness: dispatch `WheelEvent`s at the ⇅ button's centre from `javascript_tool`; listen for
+  `hover-zoom:perf-report`. Never take screenshots (user's global rule).
 - **Everyone's side:** a `long-animation-frame` observer (Chrome/Edge 123+; the Browser pane lacks it)
   buckets script time in frames >50 ms by source — Hover Zoom (matched against our own stack URL),
   other extension (Tampermonkey's `name=`), page, unattributed — with forced-layout time per bucket.
