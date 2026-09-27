@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.178.0
+// @version     0.179.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -76,6 +76,7 @@
         tourNav = w(tourNav); twNear = w(twNear); twWheelZone = w(twWheelZone); thruSync = w(thruSync);
         videoSurfaces = w(videoSurfaces); gifLike = w(gifLike); hwFill = w(hwFill); tourSync = w(tourSync); layout = w(layout);
         showViewer = w(showViewer); upgradeViewer = w(upgradeViewer); tourLinesSync = w(tourLinesSync); atOrAfter = w(atOrAfter);
+        postEndNow = w(postEndNow); postGroup = w(postGroup); postLead = w(postLead);
     }
 
     // Smallest step performance.now() moves in; Firefox with resistFingerprinting rounds to ~16.7 ms.
@@ -7495,8 +7496,22 @@
         return null;
     }
 
-    // { cut, how } — the first element a slideshow of the post leaves out — or null (with `why` for the debug line).
+    // postEndNow(), reused while the page's shape key is unchanged — it walks every element. See TOUR.md §1c.
+    let postEndMemo = null;
     function postEnd() {
+        const b = document.body;
+        const key = location.href + '|' + document.getElementsByTagName('*').length + '|' + vpW() + 'x' + vpH() + '|' +
+            (b ? b.scrollHeight : 0) + '|' + (cfg.tourMinDisplayed | 0);
+        const m = postEndMemo;
+        if (m && m.key === key && (!m.pe || !m.pe.cut || m.pe.cut.isConnected) &&
+            (!m.pe || !m.pe.g || m.pe.g.every(function (e) { return e.isConnected; }))) return m.pe;
+        const pe = postEndNow();
+        postEndMemo = { key: key, pe: pe };
+        return pe;
+    }
+
+    // { cut, how } — the first element a slideshow of the post leaves out — or null (with `why` for the debug line).
+    function postEndNow() {
         const floor = Math.max(0, cfg.tourMinDisplayed | 0);
         const g = postGroup();
         if (g) {

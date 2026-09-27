@@ -210,7 +210,13 @@ part of it the user asked back for; the switcher and the other sections are not 
 
 A slideshow of a thread or an article keeps to the post: its replies/comments are left out.
 `postEnd()` → `{ cut, how }`, the first element left out (everything at or after it in document
-order, `atOrAfter`), or `{ cut: null, why }`, or null. Re-derived on every call; nothing held.
+order, `atOrAfter`), or `{ cut: null, why }`, or null.
+**Memoised since v0.179.0** (`postEndMemo`): `postEndNow()` walks every element (~220 ms per call on an
+8,000-element page in Firefox, 90% of a slideshow step's cost, measured with the perf recorder). The
+answer is reused only while a key read fresh on every call matches — URL, element count, viewport
+size, `body.scrollHeight`, `tourMinDisplayed` — and the cut and group are still connected. This bends
+the "nothing cached" invariant deliberately: the key is re-read each time, so a changed page re-derives.
+Known blind spot: a change that keeps the element count and height (a class swap) keeps the old answer.
 Applied: idle start and the widget count always (`idlePics`); a pinned start only when the start
 picture is above the cut (`tour.postOnly` — begun in the comments, the comments are the tour).
 `}` at the whole page lifts it. A post-only tour is confined: no harvest, no next page.
