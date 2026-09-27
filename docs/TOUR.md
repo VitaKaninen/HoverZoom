@@ -773,7 +773,14 @@ a scope fixed at the first block misses it. `tourAdopt()` widens the scope to th
 holding the new pictures, only when that ancestor holds nothing else already on the page (no
 sidebar pulled in). **A tour started from the widget (`mainOnly`) re-derives its scope on every press**
 (`tourCommon(mainPics(...))`, the idle widget's derivation), so it never needs adopting; fixing it at
-start ended LibreWolf's tour at 50 while the widget said 150. `{`/`}` clear `mainOnly`. For a tour
+start ended LibreWolf's tour at 50 while the widget said 150. `{`/`}` clear `mainOnly`.
+**That re-derivation runs on every step, so it must stay cheap** (`inPass`, v0.173.0): `tourEntries()`
+and `idlePics()` run inside one read pass where `passRect()` and `videoSurfaces()` answer each element
+once and are dropped on return — `sideColumnEl` re-measured the same ancestors for every picture and
+`videoSurfaces` every video per picture (866 rect reads a step on the 35-picture test page; 39 → 12 ms a
+step with 400 pictures + 20 videos). Never let a pass span a DOM write or a scroll: its rects go stale.
+A slow step is not just jank — Firefox scrolls the page anyway when a blocking wheel listener takes
+~400 ms (`apz.content_response_timeout`), so wheel ticks leak through. For a tour
 pinned from a hover, `tour.had` is taken at `tourStart` and `tourGrow` adopts near the end.
 
 ---

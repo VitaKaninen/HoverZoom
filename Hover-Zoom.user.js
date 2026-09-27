@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.172.0
+// @version     0.173.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -4520,8 +4520,25 @@
         return null;
     }
 
+    // One read pass over the page (a step's list, the widget's count): shared answers, dropped when it returns.
+    let passMemo = null;
+    function inPass(fn) {
+        if (passMemo) return fn();
+        passMemo = { rects: new Map(), surfaces: null };
+        try { return fn(); } finally { passMemo = null; }
+    }
+
+    function passRect(el) {
+        if (!passMemo) return el.getBoundingClientRect();
+        let r = passMemo.rects.get(el);
+        if (!r) { r = el.getBoundingClientRect(); passMemo.rects.set(el, r); }
+        return r;
+    }
+
     function videoSurfaces() {
+        if (passMemo && passMemo.surfaces) return passMemo.surfaces;
         const out = [];
+        if (passMemo) passMemo.surfaces = out;
         const vids = document.getElementsByTagName('video');
         for (let i = 0; i < vids.length; i++) {
             const v = vids[i].getBoundingClientRect();
@@ -4553,7 +4570,7 @@
     function overVideoSurface(el) {
         const surfaces = videoSurfaces();
         if (!surfaces.length) return '';
-        const r = el.getBoundingClientRect();
+        const r = passRect(el);
         if (!r.width || !r.height) return '';
         const cx = r.left + r.width / 2;
         const cy = r.top + r.height / 2;
@@ -4964,7 +4981,7 @@
     }
 
     function bannerCheck(el) {
-        const r = el.getBoundingClientRect();
+        const r = passRect(el);
         const shape = bannerShape(r.width, r.height, r.top + (window.scrollY || 0));
         if (!shape.band) return { banner: false, why: shape.why };
         const where = shape.why;
@@ -4975,7 +4992,7 @@
             for (let i = 0; i < lists[l].length; i++) {
                 const n = lists[l][i];
                 if (n === el) continue;
-                const q = n.getBoundingClientRect();
+                const q = passRect(n);
                 if (q.width < 2 || q.height < 2) continue;
                 if (q.width < r.width * BESIDE_PEER) continue;
                 if (Math.abs(q.height - r.height) > Math.max(q.height, r.height) * PEER_HEIGHT)
@@ -6276,7 +6293,7 @@
     // image below the fold is often 0×0 until it loads and must not fall out for it. Null means
     // unknown, and unknown stays in the list: only a probe can settle it. See TOUR.md §1.
     function tourSize(el) {
-        const r = el.getBoundingClientRect();
+        const r = passRect(el);
         if (r.width >= 1 || r.height >= 1) return { w: r.width, h: r.height };
         const w = parseInt(el.getAttribute('width') || '0', 10) || 0;
         const h = parseInt(el.getAttribute('height') || '0', 10) || 0;
@@ -6429,7 +6446,9 @@
 
     // Everything in the scope a hover would preview, in reading order. Derived on every press;
     // sorted in DOCUMENT coordinates, or the order changes as the page scrolls.
-    function tourEntries() {
+    function tourEntries() { return inPass(tourEntriesNow); }
+
+    function tourEntriesNow() {
         let pics = tourPics(tourFloor());
         if (tour && tour.postOnly) pics = postPics(pics);
         // Started from the widget: the area is re-derived like the widget's own count, so batches
@@ -6445,7 +6464,7 @@
         for (let i = 0; i < pics.length; i++) {
             const el = pics[i];
             if (scope !== root && !scope.contains(el)) continue;
-            const r = el.getBoundingClientRect();
+            const r = passRect(el);
             items.push({ el: el, url: pictureUrl(el), x: r.left + sx, y: r.top + sy,
                 h: r.height, n: items.length });
         }
@@ -6928,17 +6947,17 @@
         const vw = vpW();
         let node = el, narrow = null;
         while (node && node !== document.body && node !== document.documentElement) {
-            if (node.getBoundingClientRect().width >= vw * 0.45) break;
+            if (passRect(node).width >= vw * 0.45) break;
             narrow = node;
             node = node.parentElement;
         }
         if (!narrow || !node) return null;
-        const nr = narrow.getBoundingClientRect();
+        const nr = passRect(narrow);
         if (nr.height < Math.min(600, vpH() * 0.6)) return null;      // a floated figure, not a column
         for (let i = 0; i < node.children.length; i++) {
             const c = node.children[i];
             if (c === narrow) continue;
-            const r = c.getBoundingClientRect();
+            const r = passRect(c);
             if (r.width > nr.width * 1.5 && r.top < nr.bottom && r.bottom > nr.top) return { col: narrow, main: c };
         }
         return null;
@@ -6948,7 +6967,7 @@
     function mainPics(pics) { return pics.filter(function (p) { return !sideColumn(p); }); }
 
     // What the widget counts and ▶ starts on: the main column, down to the post end.
-    function idlePics(floor) { return postPics(mainPics(tourPics(floor))); }
+    function idlePics(floor) { return inPass(function () { return postPics(mainPics(tourPics(floor))); }); }
 
     // ---- the post end: where a thread's first post or an article stops and replies/comments begin. See TOUR.md §1c.
     const POST_WORD = /post|comment|message|repl|answer|comtr/i;
