@@ -182,7 +182,9 @@ path has been touched twice ever, both times in 2021.
 
 ## Design invariants — do not regress these
 
-- **Nothing is cached that the DOM can invalidate.** Everything resolves from a read taken at the
+- **Nothing is cached that the DOM can invalidate.** (One exception, checked on arrival: the
+  slideshow's roll keeps pictures a recycling feed unmounted — [`docs/TOUR.md`](docs/TOUR.md) §1d.)
+  Everything resolves from a read taken at the
   moment it is needed — hover time for a preview, press time for next/prev. Do not add a
   MutationObserver or a pre-pass "for performance", and do not hold a reference to a page element
   across an interaction; re-derive instead. Reading the document ahead of a hover is fine, and

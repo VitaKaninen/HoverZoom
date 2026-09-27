@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.186.0
+// @version     0.187.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -6856,11 +6856,42 @@
         if (m && m.key === key && m.tour === tour && Date.now() - m.t < TOUR_LIST_MS &&
             (!tour || (m.scope === tour.scope && m.level === tour.level && m.postOnly === tour.postOnly &&
                 m.mainOnly === tour.mainOnly)) &&
-            m.cfg === cfg && m.list.every(function (e) { return !e.el || e.el.ownerDocument !== document || e.el.isConnected; })) return m.list.slice();
+            m.cfg === cfg && m.list.every(function (e) { return !e.el || e.el.ownerDocument !== document || e.el.isConnected; })) return tourRoll(m.list.slice());
         const list = inPass(tourEntriesNow);
         tourListMemo = { key: key, tour: tour, cfg: cfg, t: Date.now(), list: list, scope: tour && tour.scope,
             level: tour && tour.level, postOnly: tour && tour.postOnly, mainOnly: tour && tour.mainOnly };
-        return list.slice();
+        return tourRoll(list.slice());
+    }
+
+    // A feed that unmounts what scrolled away (Imgur) keeps it in the slideshow: an entry whose
+    // element left the document stays, by picture and position, until the page mounts that picture
+    // again or puts a different one in its place. See TOUR.md §1d.
+    function tourRoll(list) {
+        if (!tour) return list;
+        const live = [], tail = [];
+        list.forEach(function (e) { (e.el && e.el.ownerDocument === document ? live : tail).push(e); });
+        const sig = location.href + '|' + tour.level + '|' + !!tour.postOnly + '|' + !!tour.mainOnly + '|' + tourFloor();
+        if (!tour.roll || tour.rollSig !== sig) { tour.roll = []; tour.rollSig = sig; }
+        const keys = new Set(live.map(rollKey));
+        const kept = tour.roll.filter(function (g) {
+            if (g.el && g.el.isConnected) return false;         // still on the page: the live list speaks for it
+            if (keys.has(rollKey(g))) return false;             // mounted again as a new element
+            return !live.some(function (e) { return rollOver(e, g); });     // something else is there now
+        }).map(function (g) { return Object.assign({}, g, { ghost: true }); });
+        if (!kept.length) { tour.roll = live; return list; }
+        const all = live.concat(kept);
+        all.forEach(function (e, i) { e.n = i; });
+        tour.roll = tourOrder(all);
+        return tour.roll.concat(tail);
+    }
+
+    function rollKey(e) { return typeof e.pk === 'string' ? e.pk : e.url; }
+
+    // Two entries covering over half of the smaller one: the same spot on the page.
+    function rollOver(a, b) {
+        const w = Math.min(a.x + (a.w || 0), b.x + (b.w || 0)) - Math.max(a.x, b.x);
+        const h = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
+        return w > 0 && h > 0 && w * h > 0.5 * Math.min((a.w || 0) * a.h, (b.w || 0) * b.h);
     }
 
     function tourListKey() { return pageKey() + '|' + harvest.length + '|' + tourFloor(); }
@@ -6894,7 +6925,7 @@
             if (scope !== root && !scope.contains(el)) continue;
             const r = passRect(el);
             items.push({ el: el, url: pictureUrl(el), pk: plKey(el), x: r.left + sx, y: r.top + sy,
-                h: r.height, n: items.length });
+                w: r.width, h: r.height, n: items.length });
         }
         const live = tourOrder(items);
         // Pages fetched from the pager come after everything this document holds, in the order
@@ -6938,21 +6969,38 @@
     function tourRemember(entry) {
         tour.el = entry.el;
         tour.url = entry.url;
+        tour.pk = entry.pk;
+        tour.ghost = !!entry.ghost;
         tour.x = entry.x;
         tour.y = entry.y;
-        tourFollow(entry.el);
+        tour.w = entry.w || 0;
+        tour.h = entry.h || 0;
+        tourFollow(entry.el, entry);
     }
 
     // The page scrolls behind the preview to keep the anchor on screen, so a feed that empties
     // what is far from the viewport (Google in Firefox) mounts the next section as the tour walks.
     // Ahead, as a reader scrolls: the picture near the top, so the page shows what comes next.
     const FOLLOW_TOP = 0.1, FOLLOW_BAND = 0.4;      // fractions of the viewport height
-    function tourFollow(el) {
-        if (!el || el.__hzBase || !el.isConnected || !growsHere()) return;
+    function tourFollow(el, entry) {
+        if (!el || el.__hzBase || !growsHere()) return;
+        const ghost = !el.isConnected;
+        if (ghost && !(entry && entry.ghost)) return;
         const h = vpH();
         if (!(h > 0)) return;
-        const top = el.getBoundingClientRect().top;
+        const sy = window.scrollY || 0;
+        const r = ghost ? { top: entry.y - sy, bottom: entry.y + entry.h - sy } : el.getBoundingClientRect();
+        // A picture that fits the first screen: the page goes to its very top, so the scrollbar says so.
+        if (r.bottom + sy <= h) {
+            if (sy > 0) try { window.scrollTo({ left: window.scrollX || 0, top: 0, behavior: 'instant' }); } catch (e) { /* stays */ }
+            return;
+        }
+        const top = r.top;
         if (top >= h * FOLLOW_TOP - 1 && top <= h * FOLLOW_BAND) return;
+        if (ghost) {
+            try { window.scrollBy({ left: 0, top: top - h * FOLLOW_TOP, behavior: 'instant' }); } catch (e) { /* stays */ }
+            return;
+        }
         try {
             if (docHeight() > h + EXC_EDGE_PX) window.scrollBy({ left: 0, top: top - h * FOLLOW_TOP, behavior: 'instant' });
             else el.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' });    // an inner scroller
@@ -7020,10 +7068,8 @@
     let twWheelLast = 0;        // the last wheel event we took
     const TW_WHEEL_STEP_PX = 50;    // a notch is 100; a touchpad sends many small ones
     let twWheelWantAt = 0;      // the last wheel step asked for, taken or not
-    let twWheelTookAt = 0;      // the last wheel step taken
-    let twWheelRun = 0;         // wheel steps asked for in a row, each within TW_WHEEL_GAP_MS of the last
-    const TW_WHEEL_GAP_MS = 150;    // a step this soon after the last is a notch run on: dropped
-    const TW_WHEEL_FAST_RUN = 4;    // this many in a row is a deliberate spin: no gap for the rest of the slideshow
+    let twWheelRun = 0;         // wheel steps asked for in a row, each within STEP_GAP_MS of the last
+    let twWheelTimes = [];      // when each wheel step was asked for, the last FAST_WHEEL_MS
     let twWheelHush = null;     // { t0, last }: the wheel that opened the slideshow; the rest of that spin is dropped
     const TW_HUSH_QUIET_MS = 300;   // the hush ends when the wheel rests this long
     const TW_HUSH_MAX_MS = 500;     // or this long after the opening tick, still spinning
@@ -7345,14 +7391,12 @@
         if (Math.abs(twWheelAcc) < TW_WHEEL_STEP_PX) return;
         twWheelAcc = 0;
         const dir = px > 0 ? 1 : -1;
-        twWheelRun = now - twWheelWantAt < TW_WHEEL_GAP_MS ? twWheelRun + 1 : 1;
+        twWheelRun = now - twWheelWantAt < STEP_GAP_MS ? twWheelRun + 1 : 1;
         twWheelWantAt = now;
-        if (tour && !tour.wheelFast && twWheelRun >= TW_WHEEL_FAST_RUN) {
-            tour.wheelFast = true;
-            dbg('slideshow: the wheel is being spun on purpose — no gap between its steps until this slideshow closes');
-        }
-        if (tour && !tour.wheelFast && now - twWheelTookAt < TW_WHEEL_GAP_MS) return;
-        twWheelTookAt = now;
+        twWheelTimes = twWheelTimes.filter(function (t) { return now - t < FAST_WHEEL_MS; });
+        twWheelTimes.push(now);
+        if (twWheelRun >= FAST_WHEEL_RUN) tourFast(FAST_WHEEL_RUN + ' wheel steps in a row under ' + STEP_GAP_MS + ' ms apart');
+        else if (twWheelTimes.length >= FAST_WHEEL_N) tourFast(FAST_WHEEL_N + ' wheel steps within ' + FAST_WHEEL_MS + ' ms');
         if (placed && view) {
             if (!tour) { tourStart(); twWheelHush = { t0: now, last: now }; }
             tourNav(dir, false, true);
@@ -7368,6 +7412,7 @@
             if (e.button !== 0) return;
             twHoldStop();
             twHeld = false;
+            navHoldFrom = Date.now();
             twHoldT = setTimeout(function tick() {
                 twHeld = true;
                 if (placed && view && tour) tourNav(dir, true, true);
@@ -7867,6 +7912,19 @@
     let seamHoldUntil = 0;      // user steps are ignored until then, after stopping at an end
     const SEAM_HOLD_MS = 1000;
     const SEAM_NOTE_MS = 1000;
+    const STEP_GAP_MS = 150;        // a user step this soon after the last is dropped (a notch run on), until tourFast()
+    const FAST_HOLD_MS = 3000;      // a key or ◀ ▶ held this long lifts the gap
+    const FAST_WHEEL_RUN = 10;      // so do this many wheel steps in a row, each under STEP_GAP_MS apart
+    const FAST_WHEEL_N = 15, FAST_WHEEL_MS = 1500;     // or this many wheel steps within this long
+    let userStepAt = 0;             // the last user step taken
+    let navHoldFrom = 0;            // when the key or button now repeating went down
+
+    // The user is flipping fast on purpose: no gap between steps until this slideshow closes.
+    function tourFast(why) {
+        if (!tour || tour.fast) return;
+        tour.fast = true;
+        dbg('slideshow: no gap between steps until it closes — ' + why);
+    }
 
     // One press of ◀ / ▶ or a navigating arrow. A HELD key scrubs: the anchor moves at the scrub
     // rate and nothing resolves until the key has been still, because OS key repeat is ~30/s and
@@ -7875,6 +7933,13 @@
     function tourNav(dir, repeat, user) {
         if (!placed || !view || !tour) return;
         if (user && Date.now() < seamHoldUntil) return;
+        if (user) {
+            const now = Date.now();
+            if (!repeat) navHoldFrom = now;
+            else if (now - navHoldFrom >= FAST_HOLD_MS) tourFast('held ' + FAST_HOLD_MS / 1000 + ' s');
+            if (!tour.fast && now - userStepAt < STEP_GAP_MS) return;
+            userStepAt = now;
+        }
         if (repeat) {
             const rate = +cfg.tourHoldRate || 0;
             if (rate > 0 && Date.now() - scrubAt < 1000 / rate) return;
@@ -7921,6 +7986,7 @@
     // an empty frame. Nothing is requested for it until the user rests on it. See TOUR.md §6.
     function tourShow() {
         if (!placed || !view || !tour || !tour.el) return;
+        if (tour.ghost) { tourShowGhost(); return; }
         const el = tour.el;
         const displayed = sizeOf(el);
         swapSeq++;                  // a swap still loading for the last entry must not land over this one
@@ -7949,6 +8015,55 @@
             swapViewer(res);
         });
         tourRest(el, displayed, myToken);
+    }
+
+    const GHOST_LOOKS = [100, 250, 500, 1000, 1600];     // ms after arriving: is the page showing it again?
+
+    // An entry the page has unmounted: what the preloader got for it is shown straight away; once
+    // the page mounts that spot again, the slideshow binds to the live element — the same picture,
+    // or whatever the page now has there, which is then shown instead.
+    function tourShowGhost() {
+        const ghostEl = tour.el, pk = tour.pk;
+        swapSeq++;
+        if (token) token.cancelled = true;
+        clearTimeout(tourRestTimer);
+        hideSpinner();
+        const myToken = token = { cancelled: false, fresh: true };
+        const pre = plDone.get(pk);
+        if (pre && pre.res) { swapViewer(pre.res); myToken.shown = true; }
+        else if (!blanked) blankFrame();
+        GHOST_LOOKS.forEach(function (ms, i) {
+            setTimeout(function () {
+                if (myToken.cancelled || !tour || tour.el !== ghostEl || !view) return;
+                const got = tourRebind(pk, i === GHOST_LOOKS.length - 1);
+                if (got === 'other' || (got && !myToken.shown)) tourShow();
+            }, ms);
+        });
+    }
+
+    // The ghost's picture is live again (or replaced): point the anchor at the live element.
+    function tourRebind(pk, last) {
+        const list = tourEntries();
+        let hit = null;
+        for (let i = 0; i < list.length && !hit; i++) if (!list[i].ghost && list[i].el.ownerDocument === document && rollKey(list[i]) === pk) hit = list[i];
+        const was = { x: tour.x, y: tour.y, w: tour.w, h: tour.h };
+        if (!hit) for (let i = 0; i < list.length && !hit; i++) if (!list[i].ghost && rollOver(list[i], was)) hit = list[i];
+        if (!hit) {
+            if (last) dbg('slideshow: the page has not shown this picture again; showing what was loaded for it');
+            return false;
+        }
+        const same = rollKey(hit) === pk;
+        if (same) dbg('slideshow: the page shows this picture again — checked');
+        if (!same) dbg('slideshow: the page has a different picture here now — showing that', { was: tour.url.slice(-48), now: (hit.url || '').slice(-48) });
+        tour.el = hit.el;
+        tour.url = hit.url;
+        tour.pk = hit.pk;
+        tour.ghost = false;
+        tour.x = hit.x; tour.y = hit.y; tour.w = hit.w; tour.h = hit.h;
+        tour.index = tourAt(list);
+        tour.total = list.length;
+        twSync();
+        return same ? 'same' : 'other';
     }
 
     const TOUR_REST_MS = 300;       // a step held this long is one the user is looking at
@@ -8673,10 +8788,11 @@
             const d = (i - at) * dir;
             if (depth && Math.abs(d) > depth) continue;
             if (plDone.has(list[i].pk || plKey(list[i].el))) continue;     // pk: taken when the list was built
+            if (list[i].ghost) continue;        // not on the page: nothing to resolve from until it mounts
             jobs.push({ el: list[i].el, dist: d >= 0 ? d : -2 * d, gen: plGen });
         }
         for (let k = 1; k <= plVidsAhead; k++) {
-            const e = list[at + k * dir], pre = e && plGet(e.el);
+            const e = list[at + k * dir], pre = e && plDone.get(e.pk || plKey(e.el));
             if (pre && pre.res && pre.res.video) plWarmVideo(pre.res.url);
         }
         jobs.sort(function (x, y) { return x.dist - y.dist; });

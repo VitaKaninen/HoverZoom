@@ -1,0 +1,88 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Recycling feed — the slideshow's roll</title>
+<!--
+  Imgur's shape (TOUR.md §1d): tiles sit at fixed positions in a tall container, and only the ones
+  within ~1.5 viewports of the scroll position exist in the DOM. The count never rises; near the
+  bottom the container gets longer. A 350 px header with no pictures sits above the first row.
+  `?batches=N` caps the growth (default 4, 48 tiles each); `?lag=ms` delays each
+  remount, as Imgur's own loading does; `changeTile(n)` swaps tile n's picture at its next mount.
+-->
+<style>
+  body { margin: 0; background: #11111b; color: #cdd6f4; font: 14px system-ui, sans-serif; }
+  header { height: 350px; padding: 16px; box-sizing: border-box; }
+  #feed { position: relative; margin: 0 16px; }
+  #feed a { position: absolute; display: block; }
+  #feed img { display: block; width: 200px; height: 150px; }
+  #tally { position: fixed; right: 12px; top: 12px; padding: 6px 10px; background: #313244;
+           border-radius: 6px; font-variant-numeric: tabular-nums; }
+</style>
+<header><h1>Recycling feed — tiles far from the viewport are removed</h1></header>
+<div id="tally"></div>
+<div id="feed"></div>
+<script>
+  var params = new URLSearchParams(location.search);
+  var MAX_BATCHES = parseInt(params.get('batches') || '4', 10);
+  var PER_BATCH = 48, COLS = 4, ROW_H = 190, COL_W = 230;
+  var batches = 1, mounted = {};
+  // changeTile(n): the page puts a different picture at tile n the next time it mounts it.
+  var changed = {};
+  window.changeTile = function (n) { changed[n] = true; };
+  var feed = document.getElementById('feed');
+  var feedTop = function () { return feed.getBoundingClientRect().top + scrollY; };
+
+  function total() { return batches * PER_BATCH; }
+
+  function render() {
+    feed.style.height = Math.ceil(total() / COLS) * ROW_H + 'px';
+    var lo = scrollY - innerHeight * 1.5 - feedTop(), hi = scrollY + innerHeight * 2.5 - feedTop();
+    for (var n = 1; n <= total(); n++) {
+      var y = Math.floor((n - 1) / COLS) * ROW_H, want = y + ROW_H > lo && y < hi;
+      if (want && !mounted[n]) {
+        var a = document.createElement('a');
+        a.href = '/test-images/photo.jpg?n=' + n + (changed[n] ? '&v=2' : '');
+        a.style.left = ((n - 1) % COLS) * COL_W + 'px';
+        a.style.top = y + 'px';
+        var img = document.createElement('img');
+        img.src = '/test-images/photo-200x150.jpg?n=' + n + (changed[n] ? '&v=2' : '');
+        img.alt = 'tile ' + n;
+        a.appendChild(img);
+        feed.appendChild(a);
+        mounted[n] = a;
+      } else if (!want && mounted[n]) {
+        mounted[n].remove();
+        delete mounted[n];
+      }
+    }
+    if (batches < MAX_BATCHES && scrollY + innerHeight * 1.5 >= document.documentElement.scrollHeight) {
+      batches++;
+      render();
+      return;
+    }
+    document.getElementById('tally').textContent = 'batch ' + batches + ' · ' + total() + ' tiles · ' +
+      Object.keys(mounted).length + ' mounted';
+  }
+  var pending = 0;
+  addEventListener('scroll', function () { clearTimeout(pending); pending = setTimeout(render, 80 + LAG); });
+  // A hidden Browser pane fires no scroll events: notice the position changing as well.
+  var lastY = 0;
+  var LAG = parseInt(params.get('lag') || '0', 10);     // ms before the page mounts what scrolled into reach
+  setInterval(function () { if (scrollY !== lastY) { lastY = scrollY; setTimeout(render, LAG); } }, 100);
+  render();
+</script>
+
+<script>
+  var GM_getValue = function (key, dflt) {
+    var v = localStorage.getItem(key);
+    return v === null ? dflt : v;
+  };
+  var GM_setValue = function (key, val) { localStorage.setItem(key, val); };
+  var GM_addValueChangeListener = function (key, fn) {
+    window.addEventListener('storage', function (e) {
+      if (e.key === key) fn(key, e.oldValue, e.newValue, true);
+    });
+  };
+  var GM_registerMenuCommand = function () { return 'x'; };
+  var GM_unregisterMenuCommand = function () {};
+</script>
+<script src="../Hover-Zoom.user.js"></script>

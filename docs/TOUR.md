@@ -270,6 +270,32 @@ top form is why that would matter); Discourse before its posts render (null unti
 Survey notes: on thread forums the reply box is **after the last reply**, never between post and
 replies; on comment pages it is between (HN, and Reddit/Lemmy logged in).
 
+## 1d. The roll — a recycling feed keeps what it unmounted (v0.187.0, user's design)
+
+Imgur mounts only the pictures near the viewport, so the derived list was 20, then 16, then 12, then
+24 as the page scrolled, and the pictures above were gone. `tourRoll()` runs on every `tourEntries()`
+answer: an entry whose element has **left the document** stays in `tour.roll` as a *ghost* (a copy
+with `ghost: true`, its detached `el`, its `pk`, and its document `x,y,w,h`), ordered with the live
+ones by `tourOrder`. A ghost is dropped when a live entry has its key (`rollKey` = `pk`, the
+preloader's picture+link key — mounted again) or covers over half of its spot (`rollOver` — the page
+put a different picture there). A connected element missing from the live list is dropped too: the
+page still has it and says it is not a picture now. The roll resets when URL, scope level, postOnly,
+mainOnly or floor change (`rollSig`), and dies with the tour.
+
+This is a deliberate exception to "nothing is cached that the DOM can invalidate": what is kept is a
+URL and a position, never trusted. **Arriving on a ghost** (`tourShowGhost`): the preloader's answer
+for its key is shown at once (`plDone.get(pk)`; nothing resolves from a detached element), following
+has scrolled to its stored position, and at `GHOST_LOOKS` (100–1600 ms) `tourRebind()` looks for the
+live element — same key: bind to it, "checked"; a different picture in that spot: bind to that and
+show it. Measured on Imgur (Chrome, 2026-09-27): document positions of remounted pictures are
+identical, so position is a sound key for the spot. `plFill` skips ghosts it has no answer for.
+Stepping backward rarely lands on a ghost (following scrolls ahead and the page remounts first); a
+wrap to the far end always does, and that end is where the page loads more.
+
+**The top row goes to the very top** (`tourFollow`): a picture whose bottom fits the first screen
+scrolls the page to 0, so the scrollbar says "top". Following alone left Imgur at y≈258 (its first
+row starts under a 350 px header), and the user kept wheeling, crossed the seam and wrapped.
+
 ## 1a. The scope and the floor — BUILT, v0.100.0
 
 A hover may expand anything — an icon, an avatar, a sidebar picture. A tour must not: asked for

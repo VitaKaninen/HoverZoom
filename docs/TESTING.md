@@ -118,6 +118,12 @@ ancestor-link candidate ever comes back missing on a shadow-DOM site.
   Constructing the site's markup with its real cross-origin URLs inside `test-page.html` at
   runtime exercises the entire pipeline — cover walk, `UPGRADES`, the video probe — against the
   actual files. That is how gifwow was verified.
+- **`test-pages/recycling-feed.html` is Imgur's shape** (v0.187.0, TOUR.md §1d): tiles at fixed
+  positions, only those within ~1.5 viewports mounted, the page lengthening near the bottom.
+  `?lag=600` delays remounts so arrival lands on ghosts; `changeTile(n)` in the console swaps a
+  tile's picture at its next mount (the "different picture here now" path). It also watches
+  `scrollY` on a timer, because a hidden pane fires no `scroll` event — so our own `growsOnScroll`
+  learner cannot be tested hidden; seed `hoverZoomSettings` `{"scrollSites":["localhost"]}` instead.
 - **`test-pages/infinite-scroll.html` is the tour's load-more fixture** (v0.98.0; a hidden Browser pane fires no IntersectionObserver, so it only works while the pane is shown). An
   IntersectionObserver on a sentinel appends the next batch, which is the shape every real
   infinite feed uses and the reason a synthetic `scroll` event cannot make one load more.
