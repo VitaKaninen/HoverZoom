@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.188.0
+// @version     0.189.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -7275,10 +7275,9 @@
             if (tw.load.textContent) { tw.load.textContent = ''; tw.dock.sizeChanged(); }
             return;
         }
-        const els = tour ? tourEntries().map(function (e) { return e.el; })
-                         : idlePics(idleFloor());
+        const els = tour ? tourEntries() : widgetEntries();
         let n = 0;
-        els.forEach(function (el) { if (plHas(el)) n++; });
+        els.forEach(function (e) { if (plDone.has(e.pk || plKey(e.el))) n++; });
         const all = n > 0 && n >= els.length;
         const text = !n || !debugOn() ? '' : all ? 'all loaded' : n + ' loaded';
         if (tw.load.textContent === text) return;
@@ -7874,8 +7873,6 @@
     let twWarm = null;          // { el, displayed, res } — res undefined while it resolves
     function twWarmFirst() {
         if (tour || placed || !twWanted()) return;
-        const floor = idleFloor();
-        const main = idlePics(floor);
         const first = widgetEntries()[0];
         if (!first || first.ghost || (twWarm && twWarm.el === first.el)) return;
         const w = twWarm = { el: first.el, displayed: sizeOf(first.el), res: undefined };
