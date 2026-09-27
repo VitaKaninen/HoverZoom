@@ -2,6 +2,25 @@
 
 What each test-page case is for, the `debug` setting, and the long list of Browser-pane behaviours that will otherwise waste a session. The commands themselves are in [`../CLAUDE.md`](../CLAUDE.md).
 
+## Perf recorder (v0.177.0)
+
+For "the page lags / CPU is high": `document.dispatchEvent(new CustomEvent('hover-zoom:perf', {detail: true}))`
+starts, `{detail: false}` stops and prints, `{detail: 'report'}` prints without stopping. Output is totals
+only — no URLs, no page function names — so the user can paste it from a private site.
+
+- **Our side:** `setTimeout`/`setInterval`/`MutationObserver`/`ResizeObserver` are shadowed at the top of
+  the IIFE with `perfWrap`, so every timer and observer callback is timed by function name (anonymous
+  ones by their first 60 chars of source). Hot listeners (mousemove/over/out, the wheels, the scrolls)
+  are wrapped where registered. A new high-frequency listener should be registered through `perfWrap`.
+  `perfWrap` returns the same wrapper per function, so add/remove still pair.
+- **Everyone's side:** a `long-animation-frame` observer (Chrome/Edge 123+; the Browser pane lacks it)
+  buckets script time in frames >50 ms by source — Hover Zoom (matched against our own stack URL),
+  other extension (Tampermonkey's `name=`), page, unattributed — with forced-layout time per bucket.
+  Unverified: what `sourceURL` Tampermonkey's userscripts report there; if everything lands in
+  "unattributed", the bucket split is unusable and only the timer table counts.
+- **What neither sees:** compositing/paint with no script behind it (a looping clip, an animated GIF,
+  `.vctl`'s `backdrop-filter` over a moving page). Idle CPU with a near-empty timer table is that.
+
 ## Diagnostics — the `debug` setting (v0.13.0)
 
 Off by default and silent when off. It exists for the one class of bug that cannot be reasoned

@@ -63,6 +63,10 @@ fight that. They are deleted. Do not put nav controls back on the frame.
   **Lit without a move** (v0.172.0): `twPtr` is the last pointer seen (move, trusted mouseover, wheel),
   saved to sessionStorage on `pagehide` and restored on the next page in the tab if <30 s old and the
   window is the same size; `twNearAgain()` re-tests it whenever the widget is shown or docked.
+  **Unlit on leaving the window** (v0.177.0): a document `mouseout` with no `relatedTarget` calls
+  `twLeave()` — clears `twPtr`, `twWheelIn` and `tw.near`; armed stays lit. The browser sends nothing
+  outside the window, so reach cannot extend past its edge. Also fires entering an iframe (correct: our
+  wheel listener cannot see a wheel there either).
   **The opening spin is dropped** (`twWheelHush`, v0.172.0, user's call): after the tick that starts
   a slideshow, wheel events in reach are swallowed until the wheel rests 300 ms or 500 ms pass, so
   one flick opens at picture 1. The cap is what answers the earlier objection to waiting for the

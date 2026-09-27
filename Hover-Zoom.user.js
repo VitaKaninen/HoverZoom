@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.176.0
+// @version     0.177.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -36,6 +36,135 @@
 
 (function () {
     'use strict';
+
+    // ---- perf recorder: document.dispatchEvent(new CustomEvent('hover-zoom:perf', {detail: true | false | 'report'}))
+    // Prints totals only — no URLs, no page names. See docs/TESTING.md "Perf recorder".
+
+    const perf = { on: false, t0: 0, calls: new Map(), lo: null, obs: null, self: '', wrapped: new WeakMap(), labels: new WeakMap() };
+    const setTimeout = function (fn, ms, ...a) { return window.setTimeout(perfWrap(fn, 'timeout'), ms, ...a); };
+    const setInterval = function (fn, ms, ...a) { return window.setInterval(perfWrap(fn, 'interval'), ms, ...a); };
+    const MutationObserver = perfObserver(window.MutationObserver, 'mutation');
+    const ResizeObserver = perfObserver(window.ResizeObserver, 'resize-obs');
+
+    // The same wrapper for the same function, so add/removeEventListener still pair.
+    function perfWrap(fn, kind) {
+        if (typeof fn !== 'function') return fn;
+        let w = perf.wrapped.get(fn);
+        if (w) return w;
+        w = function () {
+            if (!perf.on) return fn.apply(this, arguments);
+            const t = performance.now();
+            try { return fn.apply(this, arguments); }
+            finally { perfTally(kind, fn, performance.now() - t); }
+        };
+        perf.wrapped.set(fn, w);
+        return w;
+    }
+
+    function perfObserver(C, kind) {
+        return C ? class extends C { constructor(cb) { super(perfWrap(cb, kind)); } } : C;
+    }
+
+    function perfTally(kind, fn, ms) {
+        let label = fn.name;
+        if (!label) {
+            label = perf.labels.get(fn);
+            if (!label) perf.labels.set(fn, label = 'anon{' + String(fn).replace(/\s+/g, ' ').slice(0, 60) + '}');
+        }
+        const name = kind + ' ' + label;
+        const s = perf.calls.get(name) || { n: 0, ms: 0, max: 0 };
+        s.n++; s.ms += ms; if (ms > s.max) s.max = ms;
+        perf.calls.set(name, s);
+    }
+
+    // This script's own source URL, read off our own stack; long frames are bucketed against it.
+    function perfSelfUrl() {
+        const m = /(?:\(|@|at )((?:[a-z-]+:)?[^\s()@]+?):\d+:\d+/.exec(String(new Error().stack).split('\n').slice(1).join('\n'));
+        return m ? m[1] : '';
+    }
+
+    function perfSource(url) {
+        if (url && url === perf.self) return 'Hover Zoom';
+        if (/^(chrome|moz|safari)(-web)?-extension:|^userscript/i.test(url || '')) {
+            const n = /[?&]name=([^&#]+)/.exec(url);
+            let label = 'extension';
+            try { if (n) label = 'extension "' + decodeURIComponent(n[1]) + '"'; } catch (e) { /* bad escape */ }
+            return label;
+        }
+        return url ? 'page' : 'unattributed';
+    }
+
+    function perfFrame(f) {
+        const lo = perf.lo;
+        lo.frames++; lo.ms += f.duration; lo.block += f.blockingDuration || 0;
+        if (f.renderStart) lo.render += f.startTime + f.duration - f.renderStart;
+        (f.scripts || []).forEach(function (s) {
+            const src = perfSource(s.sourceURL);
+            const b = lo.src.get(src) || { ms: 0, forced: 0 };
+            b.ms += s.duration; b.forced += s.forcedStyleAndLayoutDuration || 0;
+            lo.src.set(src, b);
+            if (src !== 'Hover Zoom') return;
+            const k = (s.sourceFunctionName || 'anonymous') + ' via ' + (s.invokerType || '?');
+            const e = lo.fn.get(k) || { n: 0, ms: 0, forced: 0 };
+            e.n++; e.ms += s.duration; e.forced += s.forcedStyleAndLayoutDuration || 0;
+            lo.fn.set(k, e);
+        });
+    }
+
+    function perfStart() {
+        perfStop();
+        perf.on = true;
+        perf.t0 = performance.now();
+        perf.calls = new Map();
+        perf.lo = { frames: 0, ms: 0, block: 0, render: 0, src: new Map(), fn: new Map() };
+        perf.self = perfSelfUrl();
+        try {
+            perf.obs = new PerformanceObserver(function (list) { list.getEntries().forEach(perfFrame); });
+            perf.obs.observe({ type: 'long-animation-frame' });
+        } catch (e) { perf.obs = null; }
+    }
+
+    function perfStop() {
+        perf.on = false;
+        if (perf.obs) { try { perf.obs.disconnect(); } catch (e) { /* gone */ } perf.obs = null; }
+    }
+
+    function perfReport() {
+        if (!perf.lo) return '[HoverZoom] perf: nothing recorded yet';
+        const f1 = function (n) { return n.toFixed(1); };
+        const secs = (performance.now() - perf.t0) / 1000;
+        const rows = Array.from(perf.calls.entries()).sort(function (a, b) { return b[1].ms - a[1].ms; });
+        const own = rows.reduce(function (t, r) { return t + r[1].ms; }, 0);
+        const out = ['[HoverZoom ' + version() + '] perf over ' + f1(secs) + ' s' + (perf.on ? ' (still recording)' : ''),
+            'Hover Zoom timers/observers/listeners: ' + f1(own) + ' ms (' + f1(own / secs / 10) + '% of one core)',
+            '  calls   total ms   max ms   /s   name'];
+        rows.slice(0, 25).forEach(function (r) {
+            const s = r[1];
+            out.push('  ' + String(s.n).padStart(5) + String(f1(s.ms)).padStart(11) + String(f1(s.max)).padStart(9) +
+                String(f1(s.n / secs)).padStart(6) + '   ' + r[0]);
+        });
+        const lo = perf.lo;
+        if (!perf.obs && !lo.frames) out.push('Long frames: not reported by this browser (Chrome/Edge 123+ only)');
+        else {
+            out.push('Long frames (>50 ms): ' + lo.frames + ', ' + f1(lo.ms) + ' ms total, ' + f1(lo.block) + ' ms blocking, ' +
+                f1(lo.render) + ' ms of it style/layout/paint');
+            Array.from(lo.src.entries()).sort(function (a, b) { return b[1].ms - a[1].ms; }).forEach(function (r) {
+                out.push('  ' + r[0] + ': ' + f1(r[1].ms) + ' ms script, ' + f1(r[1].forced) + ' ms forced layout');
+            });
+            Array.from(lo.fn.entries()).sort(function (a, b) { return b[1].ms - a[1].ms; }).slice(0, 15).forEach(function (r) {
+                out.push('    ' + r[0] + ' ×' + r[1].n + ': ' + f1(r[1].ms) + ' ms, forced layout ' + f1(r[1].forced) + ' ms');
+            });
+        }
+        return out.join('\n');
+    }
+
+    document.addEventListener('hover-zoom:perf', function (e) {
+        const d = e.detail;
+        if (d === true) perfStart();
+        else if (d === false) perfStop();
+        try { console.log(d === true ? '[HoverZoom] perf recording — dispatch again with detail false to stop and print' : perfReport()); }
+        catch (x) { /* no console */ }
+    });
 
     // ---------------------------------------------------------------- settings
 
@@ -3747,13 +3876,13 @@
     function enableWheelZoom() {
         if (wheelZoomOn) return;
         wheelZoomOn = true;
-        CAP_TARGET.addEventListener('wheel', onPinWheel, WHEEL_OPTS);
+        CAP_TARGET.addEventListener('wheel', perfWrap(onPinWheel, 'event'), WHEEL_OPTS);
     }
 
     function disableWheelZoom() {
         if (!wheelZoomOn) return;
         wheelZoomOn = false;
-        CAP_TARGET.removeEventListener('wheel', onPinWheel, WHEEL_OPTS);
+        CAP_TARGET.removeEventListener('wheel', perfWrap(onPinWheel, 'event'), WHEEL_OPTS);
     }
 
     // The ✕ buttons: gone, and a picture still under the pointer stays down until it is left.
@@ -5711,9 +5840,10 @@
         return true;
     }
 
-    document.addEventListener('mousemove', onMove, true);
-    document.addEventListener('mouseover', onOver, true);
-    document.addEventListener('mouseout', onOut, true);
+    document.addEventListener('mousemove', perfWrap(onMove, 'event'), true);
+    document.addEventListener('mouseover', perfWrap(onOver, 'event'), true);
+    document.addEventListener('mouseout', perfWrap(onOut, 'event'), true);
+    document.addEventListener('mouseout', function (e) { if (!e.relatedTarget) twLeave(); }, true);   // left the window (or into a frame)
 
     CAP_TARGET.addEventListener('mousedown', function (e) {
         swallowNextClick = false;
@@ -5795,9 +5925,9 @@
         endDrag();
         releaseSliders();
     }, true);
-    window.addEventListener('scroll', function (e) {
+    window.addEventListener('scroll', perfWrap(function onScrollCancel(e) {
         if (!placed && !twStarting && !panelOwns(e)) cancel();     // twStarting: tourFollow() scrolls
-    }, true);
+    }, 'event'), true);
     // No keyup ever comes for a modifier held through Alt+Tab or Ctrl+Tab, so blur forgets it.
     window.addEventListener('blur', function () {
         modifierDown = false; hotTap = false; hotQuiet = false;
@@ -7008,6 +7138,15 @@
         twSync();
     }
 
+    // The pointer left the window: nothing is near any more; an armed wheel stays lit.
+    function twLeave() {
+        twPtr = null;
+        if (!tw || (!twWheelIn && !tw.near)) return;
+        twWheelIn = false;
+        tw.near = false;
+        twSync();
+    }
+
     // The widget appeared or moved under a still pointer: light it as a move there would.
     function twNearAgain() {
         if (twPtr) twNear(twPtr.x, twPtr.y);
@@ -7023,8 +7162,8 @@
     }
 
     function ptrSave() {
-        if (!twPtr) return;
         try {
+            if (!twPtr) { sessionStorage.removeItem(PTR_KEY); return; }
             sessionStorage.setItem(PTR_KEY, JSON.stringify({ x: twPtr.x, y: twPtr.y, t: Date.now(),
                 w: window.innerWidth, h: window.innerHeight }));
         } catch (e) { /* storage refused */ }
@@ -7543,8 +7682,8 @@
             const t = e.target;
             if (t && (t.tagName === 'IMG' || t.tagName === 'VIDEO') && !tour) twRecount();
         }, true);
-        window.addEventListener('scroll', twRecount, { passive: true });
-        CAP_TARGET.addEventListener('wheel', twWheel, WHEEL_OPTS);
+        window.addEventListener('scroll', perfWrap(twRecount, 'event'), { passive: true });
+        CAP_TARGET.addEventListener('wheel', perfWrap(twWheel, 'event'), WHEEL_OPTS);
         window.addEventListener('pagehide', ptrSave);
         window.addEventListener('mouseup', twHoldStop, true);
         window.addEventListener('blur', twHoldStop);
@@ -7897,7 +8036,7 @@
         ['wheel', 'keydown', 'touchmove', 'mousedown'].forEach(function (t) {
             window.addEventListener(t, function () { userInputAt = Date.now(); }, { capture: true, passive: true });
         });
-        window.addEventListener('scroll', growsOnScroll, { passive: true });
+        window.addEventListener('scroll', perfWrap(growsOnScroll, 'event'), { passive: true });
     }
 
     // Watch for the batch the page loads once following has brought its bottom on screen. At the
@@ -8535,11 +8674,11 @@
         plPump();
     }
 
-    window.addEventListener('scroll', function () {
+    window.addEventListener('scroll', perfWrap(function onScrollWarm() {
         if (!hwScope) return;
         clearTimeout(hwTimer);
         hwTimer = setTimeout(hwFill, HW_SCROLL_MS);
-    }, { passive: true });
+    }, 'event'), { passive: true });
 
     // ---- hosts that pushed back
     //
