@@ -58,8 +58,15 @@ fight that. They are deleted. Do not put nav controls back on the frame.
   no key handler of its own (checked twice, 2026-09-22).
 - **The ⇅ wheel button** (`T41`, `E72`, v0.162.0): for 50+ step tours, where a pointer drifting off
   ▶ costs a click. Armed state is `twWheelArmed` = the URL it was armed on; `twRefresh` disarms on a
-  different URL, `tourEnd` on any close. Reach (`wheelReach`) is always live and measured from the
+  different URL, `tourEnd` on any close. Reach (`wheelRange`, 65) is always live and measured from the
   button, not the widget (user's call); armed means anywhere. A setting because the user tunes it.
+  **Lit without a move** (v0.172.0): `twPtr` is the last pointer seen (move, trusted mouseover, wheel),
+  saved to sessionStorage on `pagehide` and restored on the next page in the tab if <30 s old and the
+  window is the same size; `twNearAgain()` re-tests it whenever the widget is shown or docked.
+  **The opening spin is dropped** (`twWheelHush`, v0.172.0, user's call): after the tick that starts
+  a slideshow, wheel events in reach are swallowed until the wheel rests 300 ms or 500 ms pass, so
+  one flick opens at picture 1. The cap is what answers the earlier objection to waiting for the
+  wheel to stop (a free-spinning wheel would need stopping by hand).
   ◀ ▶ repeat when held (`twHoldOn`); that listener must be capture — see `../../CLAUDE.md`.
 - **One help tip, on the counter** (v0.171.0, user's call): the buttons have none; resting on the
   middle for `TW_HELP_MS` lists all three in three lines. The loaded count (`twLoadSync`) shows only
@@ -872,7 +879,7 @@ The keys in `DEFAULTS`. Remember the hoisting trap in `../CLAUDE.md`: every
 | `preloadMB` | `0` | memory for held files; 0 = automatic |
 | `tourWorkers` | `6` | concurrent preload resolves |
 | `tourHoldRate` | `0` | max steps/sec while an arrow or ◀ ▶ is held; 0 = the repeat rate. Replaced `tourScrubRate` (5), retired so a stored 5 does not survive |
-| `wheelReach` | `50` | px around the wheel button in which the wheel steps. Replaced `wheelZone` (20), retired likewise |
+| `wheelRange` | `65` | px around the wheel button in which the wheel steps. Replaced `wheelReach` (50; a stored 50 migrates to 65, other values carry over), which replaced `wheelZone` (20) |
 | `tourLoadMore` | `true` | scrolling along ahead so a feed loads more (§9) |
 | `tourCrossPage` | `true` | harvest the next page in the background |
 

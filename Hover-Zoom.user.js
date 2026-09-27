@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.171.0
+// @version     0.172.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -66,7 +66,7 @@
         preloadMB: 0,               // memory for loaded pictures; 0 = automatic
         tourWorkers: 6,             // concurrent speculative resolves
         tourHoldRate: 0,            // steps/sec ceiling while an arrow or ◀ ▶ is held; 0 = none
-        wheelReach: 50,             // px around the widget's wheel button in which the wheel steps
+        wheelRange: 65,             // px around the widget's wheel button in which the wheel steps
         tourLoadMore: true,         // the scroll excursion that makes a lazy page load more
         tourCrossPage: true,        // harvest the next page in the background
 
@@ -111,7 +111,7 @@
         'skipWhileMouseDown', 'playVideos', 'skipVideos', 'skipPageBackgrounds',
         'skipBanners', 'skipDecorative', 'enabled', 'maxDisplayed', 'cursorGap', 'noReferrer',
         'showEvenIfNotLarger', 'previewVideos', 'previewOverPlayer', 'barFade', 'showStatusBar',
-        'frameMargin', 'borderMode', 'pinButton', 'tourScrubRate', 'wheelZone', 'tourWindow', 'zoomFactor'];
+        'frameMargin', 'borderMode', 'pinButton', 'tourScrubRate', 'wheelZone', 'tourWindow', 'zoomFactor', 'wheelReach'];
 
     // The retirements that DO convert.
     function migrate(o) {
@@ -133,6 +133,10 @@
         // pair; a zero frame margin was the only way to turn the border visual off.
         if (o.barMode === undefined && (o.barFade !== undefined || o.showStatusBar !== undefined)) {
             o.barMode = o.showStatusBar === false ? 'off' : (o.barFade === false ? 'always' : 'hover');
+        }
+        // wheelReach's old default (50) becomes wheelRange's (65); a value the user chose carries over.
+        if (o.wheelRange === undefined && o.wheelReach !== undefined) {
+            o.wheelRange = o.wheelReach === 50 ? 65 : o.wheelReach;
         }
         return o;
     }
@@ -3281,6 +3285,7 @@
     function layout() {
         if (!view || !mediaEl) return;
         clampPosition();
+        if (placed && twPtr) thruSync(twPtr.x, twPtr.y);     // the window changed under a still pointer
         box.style.left = Math.round(view.left) + 'px';
         box.style.top = Math.round(view.top) + 'px';
         gripEl.style.left = Math.round(view.left - RESIZE_OUT) + 'px';
@@ -5284,6 +5289,7 @@
     }
 
     function onOver(e) {
+        if (e.isTrusted) { twNear(e.clientX, e.clientY); if (placed) thruSync(e.clientX, e.clientY); }
         if (placed || priming || hotQuiet) return;
         if (drag || twBusy()) return;
         if (ours(e.target)) return;         // on our own overlay
@@ -6562,10 +6568,16 @@
     const TW_HELP_MS = 1000;    // the widget's help waits longer than a button's tip
     let twShownOn = null;       // the URL the widget was last shown on: it stays there at any count (debugging)
     let twWheelArmed = null;    // the URL the wheel button was clicked on; the wheel then steps anywhere
-    let twWheelIn = false;      // the pointer is within wheelReach of the button
+    let twWheelIn = false;      // the pointer is within wheelRange of the button
     let twWheelAcc = 0;         // wheel travel not yet stepped on, px
     let twWheelLast = 0;        // the last wheel event we took
     const TW_WHEEL_STEP_PX = 50;    // a notch is 100; a touchpad sends many small ones
+    let twWheelHush = null;     // { t0, last }: the wheel that opened the slideshow; the rest of that spin is dropped
+    const TW_HUSH_QUIET_MS = 300;   // the hush ends when the wheel rests this long
+    const TW_HUSH_MAX_MS = 500;     // or this long after the opening tick, still spinning
+    const PTR_KEY = 'hoverZoomPointer';
+    const PTR_KEEP_MS = 30000;
+    let twPtr = ptrLoad();      // the last pointer position seen, carried over a navigation in this tab
     let twHoldT = 0;            // ◀ ▶ held down: the repeat timer
     let twHeld = false;         // this press repeated, so its click must not step again
     const TW_HOLD_DELAY_MS = 500;   // Windows' default keyboard repeat delay and rate
@@ -6659,6 +6671,7 @@
                 host.style.top = r.y + 'px';
                 host.style.right = 'auto';
                 host.style.bottom = 'auto';
+                setTimeout(twNearAgain, 0);
             },
             onDrag: function (on) { if (on) { hideTip(); cancel(); } } });
         if (typeof GM_addValueChangeListener === 'function') {
@@ -6705,6 +6718,7 @@
         if (on !== shown) {
             tw.host.style.display = on ? 'block' : 'none';
             tw.dock.show(on);
+            if (on) setTimeout(twNearAgain, 0);
         }
         twSync();
         twLoadLater();
@@ -6784,8 +6798,9 @@
 
     // The pointer near the widget lights it up.
     function twNear(x, y) {
+        twPtr = { x: x, y: y };
         if (!tw || !tw.rect || tw.host.style.display === 'none') return;
-        const inReach = twWheelZone(x, y, cfg.wheelReach);
+        const inReach = twWheelZone(x, y, cfg.wheelRange);
         if (inReach !== twWheelIn) { twWheelIn = inReach; twSync(); }
         const r = tw.rect;
         const near = x >= r.x - TW_NEAR && x <= r.x + r.w + TW_NEAR && y >= r.y - TW_NEAR && y <= r.y + r.h + TW_NEAR;
@@ -6794,6 +6809,28 @@
         // Counted at load and after scrolling; a page that changed without either is caught here.
         if (near && !tour) { twRefresh(); return; }     // a count under two hides it
         twSync();
+    }
+
+    // The widget appeared or moved under a still pointer: light it as a move there would.
+    function twNearAgain() {
+        if (twPtr) twNear(twPtr.x, twPtr.y);
+    }
+
+    // The pointer the previous page in this tab last saw, if the window is the same size.
+    function ptrLoad() {
+        try {
+            const p = JSON.parse(sessionStorage.getItem(PTR_KEY));
+            if (!p || Date.now() - p.t > PTR_KEEP_MS || p.w !== window.innerWidth || p.h !== window.innerHeight) return null;
+            return { x: p.x, y: p.y };
+        } catch (e) { return null; }
+    }
+
+    function ptrSave() {
+        if (!twPtr) return;
+        try {
+            sessionStorage.setItem(PTR_KEY, JSON.stringify({ x: twPtr.x, y: twPtr.y, t: Date.now(),
+                w: window.innerWidth, h: window.innerHeight }));
+        } catch (e) { /* storage refused */ }
     }
 
     // Is (x, y) within `pad` px of the wheel button?
@@ -6817,16 +6854,25 @@
         if (!(placed && view)) tourFromStart(1);
     }
 
-    // Window capture, bound at boot so it runs before onPinWheel: a wheel within wheelReach of the
+    // Window capture, bound at boot so it runs before onPinWheel: a wheel within wheelRange of the
     // button, or anywhere while armed, steps the slideshow instead of scrolling or zooming.
     function twWheel(e) {
         if (!e.deltaY || !tw) return;
+        twNear(e.clientX, e.clientY);
         if (twWheelArmed === location.href) { if (panelOwns(e)) return; }
-        else if (!twWheelZone(e.clientX, e.clientY, cfg.wheelReach)) return;
+        else if (!twWheelZone(e.clientX, e.clientY, cfg.wheelRange)) return;
         e.preventDefault();
         e.stopImmediatePropagation();       // the tip's own wheel listener never sees this one
         hideTip();
         const now = Date.now();
+        if (twWheelHush) {
+            if (now - twWheelHush.last < TW_HUSH_QUIET_MS && now - twWheelHush.t0 < TW_HUSH_MAX_MS) {
+                twWheelHush.last = now;
+                return;
+            }
+            twWheelHush = null;
+            twWheelAcc = 0;
+        }
         const px = e.deltaY * (e.deltaMode === 1 ? 33 : e.deltaMode === 2 ? 800 : 1);
         if (now - twWheelLast > 500 || (px > 0) !== (twWheelAcc > 0)) twWheelAcc = 0;
         twWheelLast = now;
@@ -6835,9 +6881,12 @@
         twWheelAcc = 0;
         const dir = px > 0 ? 1 : -1;
         if (placed && view) {
-            if (!tour) tourStart();
+            if (!tour) { tourStart(); twWheelHush = { t0: now, last: now }; }
             tourNav(dir, false, true);
-        } else if (!twStarting) tourFromStart(dir);
+        } else if (!twStarting) {
+            twWheelHush = { t0: now, last: now };
+            tourFromStart(dir);
+        }
     }
 
     // ◀ ▶ held: after TW_HOLD_DELAY_MS they repeat like a held arrow key, scrubbing.
@@ -7299,6 +7348,7 @@
         }, true);
         window.addEventListener('scroll', twRecount, { passive: true });
         CAP_TARGET.addEventListener('wheel', twWheel, WHEEL_OPTS);
+        window.addEventListener('pagehide', ptrSave);
         window.addEventListener('mouseup', twHoldStop, true);
         window.addEventListener('blur', twHoldStop);
         window.addEventListener('popstate', twRecount);
@@ -9258,9 +9308,9 @@
         num('tourHoldRate', 'Hold speed limit',
             'Pictures per second while an arrow key or ◀ ▶ is held down; the picture loads when ' +
             'you let go. 0 is no limit: as fast as the key repeats. (default: 0)', 0, 60, 1);
-        num('wheelReach', 'Wheel button reach',
+        num('wheelRange', 'Wheel button reach',
             'The wheel steps the slideshow while the pointer is within this many px of the wheel ' +
-            'button. Click the button to make it step anywhere. (default: 50)', 0, 500, 1);
+            'button. Click the button to make it step anywhere. (default: 65)', 0, 500, 1);
 
         section('The preview window');
         num('wheelZoomStep', 'Wheel zoom step',

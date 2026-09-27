@@ -41,9 +41,10 @@ on it.
   label, control role or another userscript's docked widget (`[data-us-dock]`, e.g. Forum Stumbler's
   ▶ next page), `thruSync()` sets `.dim.thru` (pointer-events none), so the press reaches it and the
   window-capture `mousedown` dismisses. Links and pictures are excluded — there the first click only
-  closes, since that is what a click away usually means. Decided on mousemove, because a press that
-  has already targeted the backdrop cannot be redirected (a `click` goes to the common ancestor);
-  so after a scroll under a still pointer the first press still only closes.
+  closes, since that is what a click away usually means. Decided before the press, because a press that
+  has already targeted the backdrop cannot be redirected (a `click` goes to the common ancestor): on
+  mousemove, trusted mouseover, and in `layout()` from `twPtr`. Mousemove alone missed a slideshow
+  opened by the wheel after the pointer had already come to rest on FS ▶ (v0.172.0 fix).
 
 `bottomReserve` is retired: `usableHeight()` is now just the viewport, floored at 64 px because the
 Browser pane reports `clientHeight` 0 while hidden. It survives as the single answer to "where is
