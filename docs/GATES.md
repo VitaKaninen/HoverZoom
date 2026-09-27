@@ -837,5 +837,9 @@ small pictures only for avatars and emoji; `smallKind()` sorts them in `onOver`,
 - **The emoji entries shipped in v0.174.0's block list moved to `EMOJI_HOSTS`** — blocking wins, so
   they would have made the emoji box dead on those sites. `migrate()` removes them once (only while
   `blockOffered` holds them), so one the user adds back stays.
-- The emoji label's `<img>` needs `position:static` inline: the shadow sheet's bare `img` rule is the
+- **The emoji enlargement is its own function, not the preview window** (v0.176.0, user's call): the
+  user wants only a picture beside the pointer, where their eyes are while choosing — the window's
+  bar, ✕, pinning and placement rules are all things to switch off, so it shares nothing but
+  `resolve()`. The name caption (v0.175.0) was dropped with the rest.
+- The emoji enlargement's `<img>` needs `position:static` inline: the shadow sheet's bare `img` rule is the
   preview's (`position:absolute`), and it collapsed the label to 40 px.

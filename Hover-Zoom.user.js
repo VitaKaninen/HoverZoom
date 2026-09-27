@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.175.0
+// @version     0.176.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -77,7 +77,7 @@
         minDisplayed: 16,           // ignore images displayed smaller than this, whatever they are
         smallBelow: 48,             // px: smaller pictures preview only as an avatar or an emoji
         smallAvatars: true,         // a small, square picture whose original is big
-        smallEmoji: false,          // an emoji, shown above itself at emojiSize with its name
+        smallEmoji: true,           // an emoji: a plain enlargement beside the pointer at emojiSize
         emojiSize: 200,             // px
         sizeGate: false,            // only preview when the original is minRatio times what is drawn
         minRatio: 1,                // full size must be this much bigger; below 1 previews anything
@@ -90,7 +90,7 @@
 
         // the slideshow ("tour" in the code) — next/previous through the page's pictures
         tourButtons: true,          // the widget: ◀ ▶ and the counter, in its own box
-        tourFade: true,             // the widget is faint until the pointer comes near
+        tourFade: false,            // the widget is faint until the pointer comes near
         tourFadeTo: 35,             // ...at this opacity, %
         tourKeys: true,             // arrows navigate when the picture cannot pan sideways
         tourKeyStart: true,         // → (←) with nothing open starts the slideshow at the first (last) picture
@@ -112,7 +112,7 @@
         // how to display
         maxSizeMultiple: 1.2,       // how far the frame may GROW, as a multiple of the window.
         zoomLimit: 4,               // ceiling on the opening scale; the window still fits it
-        position: 'cursor',         // 'cursor' | 'last' (where a pinned one was last dropped; the centre until then)
+        position: 'last',           // 'cursor' | 'last' (where a pinned one was last dropped; the centre until then)
         posPerSite: true,           // remembered positions (slideshow, 'last') are kept per site
         fadeMs: 200,
         borderWidth: 1,
@@ -5258,15 +5258,18 @@
     const AVATAR_MIN_PX = 96;       // the original's longer side
     const AVATAR_UPSIZE = 2.4;      // times the size on the page
     const EMOJI_ALT_RE = /^\s*(?:\p{Extended_Pictographic}|\p{Regional_Indicator})[\p{Extended_Pictographic}\p{Emoji_Component}‍️\s]*$/u;
+    const EMOJI_MAX_SHOWN = 128;    // an emoji-marked picture this big is a sticker or a picture: normal preview
     const EMOJI_CODE_RE = /^:[\w~+-]{1,64}:$/;
     const EMOJI_CLASS_RE = /(?:^|[\s_-])(?:emoji|emoticon|emote)(?:$|[\s_-])/i;
 
     // 'emoji', 'avatar', 'refuse', or null when the picture is not small.
     function smallKind(el, displayed) {
-        if (Math.max(displayed.w, displayed.h) >= cfg.smallBelow) return null;
+        const side = Math.max(displayed.w, displayed.h);
         if (cfg.activation === 'modifier') return null;     // the key asked for this one
-        const emoji = emojiSign(el);
-        if (emoji) return cfg.smallEmoji ? 'emoji' : 'refuse';
+        const emoji = side < EMOJI_MAX_SHOWN && emojiSign(el);
+        if (emoji && cfg.smallEmoji) return 'emoji';
+        if (side >= cfg.smallBelow) return null;
+        if (emoji) return 'refuse';
         const ratio = displayed.w / Math.max(1, displayed.h);
         if (cfg.smallAvatars && ratio >= 0.75 && ratio <= 1.33) return 'avatar';
         return 'refuse';
@@ -5291,36 +5294,35 @@
         return orig >= AVATAR_MIN_PX && orig >= AVATAR_UPSIZE * Math.max(displayed.w, displayed.h);
     }
 
-    // The name under an emoji: its alt text or label, colons dropped.
-    function emojiName(el) {
-        const t = (el.getAttribute('alt') || el.getAttribute('aria-label') || el.getAttribute('title') ||
-            el.getAttribute('data-emoji-name') || '').trim();
-        return t.replace(/^:(.*):$/, '$1');
-    }
-
-    let emojiEl = null, emojiImg = null, emojiLabel = null;
-    let emojiLast = 0;              // when the last emoji label went away; the next one within EMOJI_SWEEP_MS skips the delay
+    let emojiEl = null, emojiImg = null;
+    let emojiLast = 0;              // when the last emoji enlargement went away; the next within EMOJI_SWEEP_MS skips the delay
     const EMOJI_SWEEP_MS = 800;
-    const EMOJI_GAP = 8;
+    const EMOJI_OFFSET = 18;        // px from the pointer, so it is never under it
 
-    // The emoji label: a picture and its name, pointer-transparent, drawn above the emoji.
+    // The emoji enlargement: the picture on a plain backing, pointer-transparent. Nothing else.
     function buildEmoji() {
         if (emojiEl) return;
         buildViewer();
         emojiEl = document.createElement('div');
-        emojiEl.style.cssText = 'position:fixed;display:none;pointer-events:none;box-sizing:border-box;padding:8px;' +
-            'border-radius:10px;background:#1e1e2e;border:1px solid #45475a;box-shadow:0 4px 18px rgba(0,0,0,.45);' +
-            'font:12px/16px system-ui,sans-serif;color:#cdd6f4;text-align:center';
+        emojiEl.style.cssText = 'position:fixed;display:none;pointer-events:none;box-sizing:content-box;padding:6px;' +
+            'border-radius:10px;background:#1e1e2e;box-shadow:0 4px 18px rgba(0,0,0,.45)';
         emojiImg = document.createElement('img');
-        emojiImg.style.cssText = 'display:block;position:static;background:none;object-fit:contain;margin:0 auto';     // the sheet's img rule is the preview's
-        emojiLabel = document.createElement('div');
-        emojiLabel.style.cssText = 'margin-top:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+        emojiImg.style.cssText = 'display:block;position:static;background:none;object-fit:contain';     // the sheet's img rule is the preview's
         emojiEl.appendChild(emojiImg);
-        emojiEl.appendChild(emojiLabel);
         root.appendChild(emojiEl);
     }
 
-    // Hovering an emoji: after the hover delay (none mid-sweep), its label; a bigger file swaps in when found.
+    // Beside the pointer, below-right, flipped to whichever side has room.
+    function emojiPlace() {
+        if (!emojiEl || emojiEl.style.display === 'none') return;
+        const w = emojiEl.offsetWidth, h = emojiEl.offsetHeight;
+        const x = pointer.x + EMOJI_OFFSET + w <= vpW() ? pointer.x + EMOJI_OFFSET : pointer.x - EMOJI_OFFSET - w;
+        const y = pointer.y + EMOJI_OFFSET + h <= vpH() ? pointer.y + EMOJI_OFFSET : pointer.y - EMOJI_OFFSET - h;
+        emojiEl.style.left = Math.max(0, x) + 'px';
+        emojiEl.style.top = Math.max(0, y) + 'px';
+    }
+
+    // Hovering an emoji: after the hover delay (none mid-sweep), its enlargement; a bigger file swaps in when found.
     function emojiHover(el, displayed) {
         active = el;
         activeRect = el.getBoundingClientRect();
@@ -5334,15 +5336,8 @@
             const size = Math.max(32, Math.min(1000, cfg.emojiSize | 0));
             emojiImg.style.width = emojiImg.style.height = size + 'px';
             emojiImg.src = url;
-            const name = emojiName(el);
-            emojiLabel.textContent = name;
-            emojiLabel.style.display = name ? 'block' : 'none';
-            emojiEl.style.width = (size + 18) + 'px';
             emojiEl.style.display = 'block';
-            const r = el.getBoundingClientRect();
-            const w = emojiEl.offsetWidth, h = emojiEl.offsetHeight;
-            emojiEl.style.left = Math.max(4, Math.min(vpW() - w - 4, r.left + r.width / 2 - w / 2)) + 'px';
-            emojiEl.style.top = (r.top - EMOJI_GAP - h >= 4 ? r.top - EMOJI_GAP - h : r.bottom + EMOJI_GAP) + 'px';
+            emojiPlace();
             let best = 0;
             resolve(el, displayed, myToken, function (hit) {
                 if (myToken.cancelled || active !== el || hit.video) return;
@@ -5434,6 +5429,7 @@
     function onMove(e) {
         pointer.x = e.clientX;
         pointer.y = e.clientY;
+        if (emojiEl) emojiPlace();
         twNear(e.clientX, e.clientY);
         if (placed) thruSync(e.clientX, e.clientY);
         if (active && !placed && playerArrived(active)) return;
@@ -5505,14 +5501,14 @@
         if (active) selfClosed('something else took its place: ' + el.tagName, e.clientX, e.clientY);
         cancel();
         const displayed = sizeOf(el);
-        if (displayed.w < cfg.minDisplayed && displayed.h < cfg.minDisplayed) return;
         const small = smallKind(el, displayed);
+        if (small === 'emoji') { emojiHover(el, displayed); return; }     // an emoji may be tinier than minDisplayed
+        if (displayed.w < cfg.minDisplayed && displayed.h < cfg.minDisplayed) return;
         if (small === 'refuse') {
             if (debugOn()) dbg('small picture, not an avatar or emoji — no preview', { shown: displayed.w + '×' + displayed.h,
                 smallBelow: cfg.smallBelow, emoji: emojiSign(el) || 'no', smallEmoji: cfg.smallEmoji, smallAvatars: cfg.smallAvatars });
             return;
         }
-        if (small === 'emoji') { emojiHover(el, displayed); return; }
 
         active = el;
         activeSmall = small === 'avatar';
@@ -9427,8 +9423,8 @@
             AVATAR_UPSIZE + ' times its size on the page. Shown beside it, never over it, so it ' +
             'can still be clicked. (default: on)');
         check('smallEmoji', 'Small pictures: emoji',
-            'An emoji, known by its alt text, class or host, shows above itself with its name. ' +
-            '(default: off)');
+            'An emoji, known by its alt text, class or host, shows enlarged beside the pointer, ' +
+            'and nothing else: no bar, no pinning. Any emoji up to ' + EMOJI_MAX_SHOWN + ' px. (default: on)');
         num('emojiSize', 'Emoji size',
             'In px. (default: 200)', 32, 1000, 1);
         pick('videoMode', 'Play in a preview',

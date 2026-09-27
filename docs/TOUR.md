@@ -878,7 +878,7 @@ The keys in `DEFAULTS`. Remember the hoisting trap in `../CLAUDE.md`: every
 | Key | Default | What |
 |---|---|---|
 | `tourButtons` | `true` | show the widget |
-| `tourFade`, `tourFadeTo` | `true`, `35` | the widget faint until the pointer nears, at this opacity % |
+| `tourFade`, `tourFadeTo` | `false`, `35` | the widget faint until the pointer nears, at this opacity % |
 | `tourKeyStart` | `true` | → / ← with nothing open start at the first / last picture |
 | `tourKeys` | `true` | arrows navigate when the picture cannot pan horizontally |
 | `tourMinDisplayed` | `128` | the tour's floor on the longer side as drawn, px (§1a) |
