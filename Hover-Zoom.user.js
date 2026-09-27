@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.185.0
+// @version     0.186.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -7019,6 +7019,11 @@
     let twWheelAcc = 0;         // wheel travel not yet stepped on, px
     let twWheelLast = 0;        // the last wheel event we took
     const TW_WHEEL_STEP_PX = 50;    // a notch is 100; a touchpad sends many small ones
+    let twWheelWantAt = 0;      // the last wheel step asked for, taken or not
+    let twWheelTookAt = 0;      // the last wheel step taken
+    let twWheelRun = 0;         // wheel steps asked for in a row, each within TW_WHEEL_GAP_MS of the last
+    const TW_WHEEL_GAP_MS = 150;    // a step this soon after the last is a notch run on: dropped
+    const TW_WHEEL_FAST_RUN = 4;    // this many in a row is a deliberate spin: no gap for the rest of the slideshow
     let twWheelHush = null;     // { t0, last }: the wheel that opened the slideshow; the rest of that spin is dropped
     const TW_HUSH_QUIET_MS = 300;   // the hush ends when the wheel rests this long
     const TW_HUSH_MAX_MS = 500;     // or this long after the opening tick, still spinning
@@ -7340,12 +7345,20 @@
         if (Math.abs(twWheelAcc) < TW_WHEEL_STEP_PX) return;
         twWheelAcc = 0;
         const dir = px > 0 ? 1 : -1;
+        twWheelRun = now - twWheelWantAt < TW_WHEEL_GAP_MS ? twWheelRun + 1 : 1;
+        twWheelWantAt = now;
+        if (tour && !tour.wheelFast && twWheelRun >= TW_WHEEL_FAST_RUN) {
+            tour.wheelFast = true;
+            dbg('slideshow: the wheel is being spun on purpose — no gap between its steps until this slideshow closes');
+        }
+        if (tour && !tour.wheelFast && now - twWheelTookAt < TW_WHEEL_GAP_MS) return;
+        twWheelTookAt = now;
         if (placed && view) {
             if (!tour) { tourStart(); twWheelHush = { t0: now, last: now }; }
             tourNav(dir, false, true);
         } else if (!twStarting) {
             twWheelHush = { t0: now, last: now };
-            tourFromStart(dir);
+            tourFromStart(1);       // either way, the wheel starts at the first picture
         }
     }
 
@@ -8063,11 +8076,10 @@
         let last = before, still = 0, grew = false;
         while (Date.now() < until) {
             await sleep(EXC_POLL_MS);
-            const now = mediaCount();
-            if (now > last) { grew = true; last = now; still = 0; }
+            if (pageGrew(last)) { grew = true; last = pageSize(); still = 0; }
             else if (grew && ++still >= 2) break;
         }
-        return { grew: grew, now: last };
+        return { grew: grew, now: last.n, h: last.h };
     }
 
     function docHeight() {
@@ -8076,6 +8088,13 @@
     }
 
     function mediaCount() { return document.querySelectorAll('img,video').length; }
+
+    // A feed that recycles its elements (Imgur) never raises the count; it lengthens the page instead.
+    function pageSize() { return { n: mediaCount(), h: docHeight() }; }
+    function pageGrew(before) {
+        const h = vpH();
+        return mediaCount() > before.n || (h > 0 && docHeight() >= before.h + h);
+    }
 
     // The bottom of the page is on screen now, so any loader there has already fired.
     function excBottomShown() {
@@ -8098,6 +8117,7 @@
     const GROWS_SETTLE_MS = 600;
     const GROWS_LATE_MS = 2000;     // a second look, for a batch that lands after scrolling stops
     let growsBase = null, growsHad = null, growsNear = false, growsTimer = 0, userInputAt = 0, growsMoved = false;
+    let growsH = 0;         // the page's height when growsBase was taken
 
     function growsMigrate() {
         if (growsMoved) return;
@@ -8162,7 +8182,8 @@
         const now = growsPics(), n = now.length;
         // New elements, not a lazy page filling in the ones it already had.
         const added = now.some(function (p) { return !growsHad.has(p); });
-        if (n > growsBase && added && growsNear) {
+        const longer = vpH() > 0 && docHeight() >= growsH + vpH();     // a recycling feed: count flat, page longer
+        if ((n > growsBase || longer) && added && growsNear) {
             if (growsHere()) growsHit('seen again as you scrolled, ' + growsBase + ' → ' + n);
             else growsLearn(growsBase, n);
             growsBase = null;
@@ -8176,7 +8197,7 @@
     function growsOnScroll() {
         if (tour || twStarting || excBusy || Date.now() - userInputAt > GROWS_INPUT_MS) return;
         if (!cfg.tourLoadMore || !siteEnabled()) return;
-        if (growsBase === null) { const had = growsPics(); growsBase = had.length; growsHad = new Set(had); growsNear = false; }
+        if (growsBase === null) { const had = growsPics(); growsBase = had.length; growsHad = new Set(had); growsNear = false; growsH = docHeight(); }
         const h = vpH();
         if (h > 0 && (window.scrollY || 0) + 2 * h >= docHeight()) growsNear = true;
         clearTimeout(growsTimer);
@@ -8201,13 +8222,14 @@
         if (!force && !excBottomShown()) return false;
         excBusy = true;
         excAt = Date.now();
-        const before = mediaCount();
+        const before = pageSize();
         let seen;
         try {
             if (force) await excWalk(before);
             seen = await excWatch(before);
         } finally { excBusy = false; }
-        dbg('load more: watched the bottom of the page', { was: before, now: seen.now, grew: seen.grew, atWall: !!force });
+        dbg('load more: watched the bottom of the page', { was: before.n, now: seen.now, height: before.h + ' → ' + seen.h,
+            grew: seen.grew, atWall: !!force });
         if (seen.grew) { growsHit('the slideshow found more'); return true; }
         if (!excBottomShown()) return false;        // a screen further on at the next press
         excGaveNothing();
@@ -8216,7 +8238,7 @@
 
     // At the wall: on down a screen at a time, as Page Down would, until the bottom shows or pictures are added.
     async function excWalk(before) {
-        for (let i = 0; i < EXC_WALK_MAX && !excBottomShown() && mediaCount() <= before; i++) {
+        for (let i = 0; i < EXC_WALK_MAX && !excBottomShown() && !pageGrew(before); i++) {
             window.scrollBy({ left: 0, top: Math.round(vpH() * EXC_STEP), behavior: 'instant' });
             await sleep(EXC_WALK_MS);
             if (!tour) return;

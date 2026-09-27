@@ -755,7 +755,12 @@ batches, then shows a "See more images" button no scroll passes, so its slidesho
   bottom, and the widget's count (`growsCount()` = `twTotal`'s derivation, not `mediaCount()`: ads
   and pixels move the raw count) rises within 0.6 s or 2.6 s **with elements not there before**
   (`growsHad`): a lazy page filling in placeholders it already had raises the count too, and was
-  learned as a feed (v0.152.0). The user-input test excludes our own
+  learned as a feed (v0.152.0).
+  **A recycling feed (Imgur) keeps ~8-15 pictures mounted at any scroll position**, so its count
+  never rises; near the bottom it lengthens the page instead (29,755 → 52,127 px, measured Chrome
+  2026-09-27). So "grew" is `pageGrew()`: count up, **or** the page one viewport longer — in the
+  learner (`growsH`), `excWatch` and `excWalk`. Count-only, the watch logged a miss per page and
+  `GROWS_FORGET` dropped Imgur after five. The user-input test excludes our own
   scrolls and scroll restoration. No built-in list of feeds, by design: the first slideshow on
   Google Images ends at 100 until the user has scrolled once.
 - **Not a one-way gate (v0.143.0, user).** `hoverZoomScrollMisses` {host: n}: a watch at the
