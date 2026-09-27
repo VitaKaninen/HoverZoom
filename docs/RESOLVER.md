@@ -402,7 +402,8 @@ measures the result. A hit may then carry a **`display`** URL separate from its 
 
 Four things this needed that are easy to get wrong:
 
-- **`@connect *` in the header.** Without it Tampermonkey prompts per host, and a pending prompt
+- **`@connect *` in the header.** Tampermonkey still prompts per host with it; what `*` adds is the
+  dialog's "Always allow all domains" button, which the user clicks once. A pending prompt
   means GM_xhr **never calls back at all** — not an error, not a timeout. That parks the candidate
   loop on that URL and the whole hover produces nothing, on every site. `fetchBlob()` therefore also
   carries its own wall-clock `setTimeout`, because GM_xhr's `timeout` option does not cover a dialog.
