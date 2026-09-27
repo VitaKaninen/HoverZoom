@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.173.0
+// @version     0.174.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -39,6 +39,26 @@
 
     // ---------------------------------------------------------------- settings
 
+    // Site UI icons and emoji that shipped block entries cover; listed first in the user's block list, removable.
+    const DEFAULT_BLOCKS = [
+        'https://ssl.gstatic.com/ui/v1/icons/*',            // Gmail / Google apps buttons
+        'https://www.gstatic.com/images/icons/*',           // Google material icons
+        'https://www.gstatic.com/images/branding/*',        // Google product logos
+        'https://fonts.gstatic.com/s/e/notoemoji/*',        // Google emoji
+        'https://abs-0.twimg.com/emoji/*',                  // X / Twitter emoji
+        'https://static.xx.fbcdn.net/images/emoji.php/*',   // Facebook / Messenger emoji
+        'https://github.githubassets.com/images/icons/emoji/*',
+        'https://s.w.org/images/core/emoji/*',              // WordPress emoji
+    ];
+
+    // The shipped entries missing from `list`, put in front of it; the rest keeps its order.
+    function withDefaultBlocks(list, skip) {
+        const add = DEFAULT_BLOCKS.filter(function (e) {
+            return list.indexOf(e) === -1 && !(skip && skip.indexOf(e) !== -1);
+        });
+        return add.concat(list);
+    }
+
     const DEFAULTS = {
         // when to zoom
         activation: 'hover',        // 'hover' (the hotkey holds previews back) | 'modifier' (only while it is held)
@@ -53,7 +73,8 @@
         skipFurniture: true,        // never preview the page's own furniture: its background, a
         siteMode: 'blacklist',      // 'blacklist' | 'whitelist'
         siteList: [],               // hostnames, matched by suffix
-        blockList: [],              // image URLs never to preview; '*' matches anything
+        blockList: DEFAULT_BLOCKS.slice(),  // image URLs never to preview; '*' matches anything
+        blockOffered: DEFAULT_BLOCKS.slice(),   // shipped entries already put in blockList once; removing one sticks
 
         // the slideshow ("tour" in the code) — next/previous through the page's pictures
         tourButtons: true,          // the widget: ◀ ▶ and the counter, in its own box
@@ -133,6 +154,12 @@
         // pair; a zero frame margin was the only way to turn the border visual off.
         if (o.barMode === undefined && (o.barFade !== undefined || o.showStatusBar !== undefined)) {
             o.barMode = o.showStatusBar === false ? 'off' : (o.barFade === false ? 'always' : 'hover');
+        }
+        // Shipped block entries this list has never been offered go on top, once.
+        if (Array.isArray(o.blockList)) {
+            const offered = Array.isArray(o.blockOffered) ? o.blockOffered : [];
+            o.blockList = withDefaultBlocks(o.blockList, offered);
+            o.blockOffered = offered.concat(DEFAULT_BLOCKS.filter(function (e) { return offered.indexOf(e) === -1; }));
         }
         // wheelReach's old default (50) becomes wheelRange's (65); a value the user chose carries over.
         if (o.wheelRange === undefined && o.wheelReach !== undefined) {
@@ -9427,6 +9454,7 @@
             const kept = {};
             RESET_KEEPS.forEach(function (k) { kept[k] = cfg[k]; });
             cfg = Object.assign({}, DEFAULTS, kept);
+            cfg.blockList = withDefaultBlocks(cfg.blockList || []);
             saveSettings();
             probeCache.clear();
             refreshSiteMenu();

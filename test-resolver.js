@@ -969,5 +969,34 @@ eq('a top-level article about captchas is NOT one', cap('https://example.com/blo
 eq('Google Images itself is not one', cap('https://www.google.com/search?tbm=isch&q=x', true), false);
 eq('an ordinary iframe is not one', cap('https://ads.example.com/frame.html', false), false);
 
+
+// ---- the shipped block entries: each hits its icons, none hits a real picture
+const dbStart = src.indexOf('    const DEFAULT_BLOCKS');
+const dbEnd = src.indexOf('    const DEFAULTS = {');
+if (dbStart < 0 || dbEnd < 0) { console.error('DEFAULT_BLOCKS markers not found'); process.exit(1); }
+const { DEFAULT_BLOCKS, withDefaultBlocks } = new Function(src.slice(dbStart, dbEnd) +
+    '\nreturn {DEFAULT_BLOCKS, withDefaultBlocks};')();
+[
+    'https://ssl.gstatic.com/ui/v1/icons/mail/gm3/2x/double_arrow_baseline_nv700_20dp.png',
+    'https://www.gstatic.com/images/icons/material/system_gm/2x/launch_gm_grey_18dp.png',
+    'https://fonts.gstatic.com/s/e/notoemoji/17.0/2194_fe0f/72.png',
+    'https://abs-0.twimg.com/emoji/v2/svg/1f600.svg',
+    'https://static.xx.fbcdn.net/images/emoji.php/v9/t4c/1/16/1f600.png',
+    'https://github.githubassets.com/images/icons/emoji/unicode/1f600.png?v8',
+    'https://s.w.org/images/core/emoji/15.0.3/72x72/1f600.png',
+].forEach(function (u) { eq('shipped block hits ' + u, blockMatch(u, DEFAULT_BLOCKS), true); });
+[
+    'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQ&s',
+    'https://lh3.googleusercontent.com/a/photo=s96-c',
+    'https://pbs.twimg.com/media/AbCdEf.jpg?name=small',
+    'https://scontent.xx.fbcdn.net/v/t39.30808-6/123_n.jpg',
+    'https://i.imgur.com/abc123.jpg',
+    'https://example.com/wp-content/uploads/2024/01/photo.jpg',
+].forEach(function (u) { eq('shipped block spares ' + u, blockMatch(u, DEFAULT_BLOCKS), false); });
+eq('missing shipped entries go on top, the rest keeps its order',
+    withDefaultBlocks(['a', DEFAULT_BLOCKS[1], 'b']).join('|'),
+    DEFAULT_BLOCKS.filter(function (e, i) { return i !== 1; }).concat(['a', DEFAULT_BLOCKS[1], 'b']).join('|'));
+eq('an entry already offered is not added back',
+    withDefaultBlocks(['a'], [DEFAULT_BLOCKS[0]]).indexOf(DEFAULT_BLOCKS[0]), -1);
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

@@ -28,6 +28,13 @@ Then when I clicked undo changes, it did not restore them."*
   is no default that reconstructs them, and the ✕ per row (or the sound button) already undoes
   them one at a time. Everything else is a knob with a right answer, which is what "reset to
   defaults" is asking about.
+- **Shipped block entries** (`DEFAULT_BLOCKS`, v0.174.0, user's call): site UI icons and emoji — Gmail's
+  buttons were the trigger, since every picture previews by default (v0.168.0). Kept as ordinary
+  entries at the TOP of `blockList` so the user can ✕ them. `blockOffered` records which have been put
+  in once, so a removed one stays removed and a future version's new entry is still added (on top) at
+  load. Reset adds every missing one back on top and leaves the rest of the list in order. Never
+  write `*.gstatic.com*`: Google Images' results are `encrypted-tbn*.gstatic.com` — each entry names
+  its host and path, and `test-resolver.js` asserts they spare real pictures.
 
 **Undo still rolls the lists back**, because it restores the whole object — that is the
 difference between the two buttons, and both now say so in a `title`.
