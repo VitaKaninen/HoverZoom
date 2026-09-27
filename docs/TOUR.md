@@ -24,7 +24,7 @@ fight that. They are deleted. Do not put nav controls back on the frame.
   preview covers it (`buildViewer` re-appends it).
 - **Visibility is `style.display`, not `[hidden]`**: the host's inline `all:initial` out-ranks the UA
   `[hidden]` rule. `twRefresh` sets both, and `dock.show()` tells the other scripts.
-- **Shown** on pages with two drawn pictures at `tourMinDisplayed` (`twCount`, stops at 2), or while a
+- **Shown** on pages with two drawn pictures at `idleFloor()` (`twCount`, stops at 2), or while a
   tour runs. **Once shown it stays on that URL whatever the count** (`twShownOn`, v0.155.0) — the
   user's request, for debugging: a widget left at `– / 0` flags a count that dropped, to be judged
   a bug or legitimate. Temporary; restore hiding when the user says so. The `– / N` total (`tourPics`) is taken with every recount — load, scroll stopping, SPA
@@ -285,6 +285,14 @@ example of what they want**, and two things are read off it at `tourStart()`:
   in, as before. The floor is lowered to the start picture's own longer side when that is
   smaller — a tour begun on a 100px thumbnail admits 100px, or an old forum's attachment thumbs
   would give an empty tour.
+- **The idle floor** (`idleFloor()`, v0.185.0): the widget's count and every idle path use it, not the
+  setting directly. It is `tourMinDisplayed` unless that gives `idlePics()` fewer than two; then a
+  **thumbnail grid** sets it — ≥`GRID_RUN` (4) `tourPics(GRID_MIN)` pictures within ±2 px of one long
+  side, `GRID_MIN` (64) ≤ side < the setting, none linked to a profile (`PROFILE_URL`, so linked avatars
+  never form one) — floor = that side − 2. Commons (200 × 120 px) and Lemmy lists (80 px, unlinked
+  buttons, so "must be a link" was tried and fails) had no widget before. Ask `idlePics`, not raw rects:
+  Lemmy's 966×240 banner and 139×18 logo pass 128 raw and are then refused. `postEnd` keeps the setting.
+  Known risk: a page of ≥4 same-size unlinked avatars ≥64 px with no real pictures gains a widget.
 - **The scope** (`tour.scope`): an ancestor of the start picture; only pictures inside it are in
   the list. Chosen by `tourPick()` from the *levels* (`tourLevels()`): the chain of ancestors at
   which the count of floor-passing pictures grows, one level per count, holding the **outermost**

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.184.0
+// @version     0.185.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -71,7 +71,7 @@
         blocked = w(blocked); blockMatch = w(blockMatch); pictureUrl = w(pictureUrl); shownUrl = w(shownUrl);
         lazyBehindBlocked = w(lazyBehindBlocked); tourSize = w(tourSize); postPics = w(postPics); postEnd = w(postEnd);
         mainPics = w(mainPics); sideColumnEl = w(sideColumnEl); tourScopeNow = w(tourScopeNow); tourLevels = w(tourLevels);
-        tourPick = w(tourPick); tourEntriesIn = w(tourEntriesIn); tourOrder = w(tourOrder); twCount = w(twCount);
+        tourPick = w(tourPick); tourEntriesIn = w(tourEntriesIn); tourOrder = w(tourOrder); twCount = w(twCount); idleFloor = w(idleFloor);
         idlePics = w(idlePics); pageKey = w(pageKey); tourEntriesNow = w(tourEntriesNow); plHas = w(plHas); plFill = w(plFill); plPump = w(plPump);
         tourNav = w(tourNav); twNear = w(twNear); twWheelZone = w(twWheelZone); thruSync = w(thruSync);
         videoSurfaces = w(videoSurfaces); gifLike = w(gifLike); hwFill = w(hwFill); tourSync = w(tourSync); layout = w(layout);
@@ -6756,7 +6756,42 @@
         return i;
     }
 
-    function tourFloor() { return tour ? tour.floor : (cfg.tourMinDisplayed | 0); }
+    function tourFloor() { return tour ? tour.floor : idleFloor(); }
+
+    const GRID_MIN = 64;        // px, longer side: a thumbnail grid's pictures are at least this
+    const GRID_RUN = 4;         // pictures of one size that make a grid
+    let floorMemo = null;
+
+    // The widget's floor: tourMinDisplayed, or a thumbnail grid's own size when fewer than two
+    // pictures reach it. Profile-linked pictures (avatars) never form a grid. See TOUR.md §1a.
+    function idleFloor() {
+        const base = Math.max(0, cfg.tourMinDisplayed | 0);
+        const key = pageKey() + '|' + base;
+        if (floorMemo && floorMemo.key === key && Date.now() - floorMemo.t < TOUR_LIST_MS) return floorMemo.floor;
+        let floor = base;
+        if (base > GRID_MIN && idlePics(base).length < 2) {     // what the slideshow would hold, not raw sizes
+            const sizes = new Map();
+            inPass(function () {
+                tourPics(GRID_MIN).forEach(function (p) {
+                    const r = passRect(p);
+                    const long = Math.round(Math.max(r.width, r.height));
+                    if (long >= base) return;
+                    const a = p.closest('a[href]');
+                    if (a && PROFILE_URL.test(a.href)) return;
+                    sizes.set(long, (sizes.get(long) || 0) + 1);
+                });
+            });
+            let best = 0, bestN = 0;
+            sizes.forEach(function (n, s) {
+                let run = 0;
+                for (let d = -2; d <= 2; d++) run += sizes.get(s + d) || 0;
+                if (run >= GRID_RUN && (run > bestN || (run === bestN && s > best))) { best = s; bestN = run; }
+            });
+            if (best) floor = best - 2;
+        }
+        floorMemo = { key: key, t: Date.now(), floor: floor };
+        return floor;
+    }
 
     function tourStartEl() {
         if (!tour) return null;
@@ -6939,7 +6974,7 @@
     function tourStart() {
         tour = { el: active || null, start: active || null, url: activeShown || (view ? view.url : ''),
             x: 0, y: 0, index: -1, total: 0, on: false,
-            scope: null, level: -1, floor: Math.max(0, cfg.tourMinDisplayed | 0) };
+            scope: null, level: -1, floor: idleFloor() };
         if (tour.el) {
             const r = tour.el.getBoundingClientRect();
             tour.x = r.left + (window.scrollX || 0);
@@ -7095,7 +7130,7 @@
 
     // Two drawn pictures at the tour's floor are enough to show the widget; stop counting there.
     function twCount() {
-        const floor = Math.max(1, cfg.tourMinDisplayed | 0);
+        const floor = Math.max(1, idleFloor());
         const all = document.querySelectorAll('img,video');
         let n = 0;
         for (let i = 0; i < all.length && n < 2; i++) {
@@ -7119,7 +7154,7 @@
         }
         twPics = twCount();
         const was = twTotal;
-        if (!tour) twTotal = twPics >= 2 ? idlePics(Math.max(0, cfg.tourMinDisplayed | 0)).length : 0;
+        if (!tour) twTotal = twPics >= 2 ? idlePics(idleFloor()).length : 0;
         if (!tour && twTotal !== was && debugOn()) dbg('widget count ' + twTotal, twReport());
         if (twWheelArmed && twWheelArmed !== location.href) twWheelSet(false);
         const on = twWanted();
@@ -7147,7 +7182,7 @@
             return;
         }
         const els = tour ? tourEntries().map(function (e) { return e.el; })
-                         : idlePics(Math.max(0, cfg.tourMinDisplayed | 0));
+                         : idlePics(idleFloor());
         let n = 0;
         els.forEach(function (el) { if (plHas(el)) n++; });
         const all = n > 0 && n >= els.length;
@@ -7169,7 +7204,7 @@
 
     // Debug: every drawn picture and why the widget did or did not count it. No URLs, only shapes.
     function twReport() {
-        const floor = Math.max(0, cfg.tourMinDisplayed | 0);
+        const floor = idleFloor();
         const all = document.querySelectorAll('img,video');
         const urls = new Map(), out = [];
         for (let i = 0; i < all.length && out.length < 40; i++) {
@@ -7625,7 +7660,7 @@
     // The sidebars the pictures sit in, each once.
     function sidebars() {
         const out = [];
-        tourPics(Math.max(0, cfg.tourMinDisplayed | 0)).forEach(function (p) {
+        tourPics(idleFloor()).forEach(function (p) {
             const s = sideColumnEl(p);
             if (!s) return;
             const have = out.find(function (o) { return o.col === s.col; });
@@ -7721,7 +7756,7 @@
     let twWarm = null;          // { el, displayed, res } — res undefined while it resolves
     function twWarmFirst() {
         if (tour || placed || !twWanted()) return;
-        const floor = Math.max(0, cfg.tourMinDisplayed | 0);
+        const floor = idleFloor();
         const main = idlePics(floor);
         const first = tourEntriesIn(main, tourCommon(main))[0];
         if (!first || (twWarm && twWarm.el === first.el)) return;
@@ -7740,7 +7775,7 @@
         dir = dir < 0 ? -1 : 1;
         if (placed || twStarting || !siteEnabled() || CAPTCHA_HERE) return;
         cancel();
-        const floor = Math.max(0, cfg.tourMinDisplayed | 0);
+        const floor = idleFloor();
         tour = { el: null, start: null, url: '', x: 0, y: 0, index: -1, total: 0, on: true,
             scope: null, mainOnly: true, postOnly: true, level: -1, floor: floor, had: new Set(tourPics(floor)) };
         const list = tourEntries();
@@ -8082,7 +8117,7 @@
         return (cfg.scrollSites || []).some(function (k) { return entryCovers(k, host); });
     }
 
-    function growsPics() { return mainPics(tourPics(Math.max(0, cfg.tourMinDisplayed | 0))); }
+    function growsPics() { return mainPics(tourPics(idleFloor())); }
     function growsCount() { return growsPics().length; }
 
     function growsMisses() {
@@ -8703,7 +8738,7 @@
         pgHovered = window.scrollY || 0;
         if (pointer.y > vpH() * PG_LOW) pgWant(2);
         if (!(hwScope && hwScope.isConnected && hwScope.contains(el))) {
-            const pics = tourPics(cfg.tourMinDisplayed | 0);
+            const pics = tourPics(idleFloor());
             const levels = tourLevels(el, pics);
             hwScope = levels[tourPick(levels, pics)].el;
             dbg('warming the section: ' + describeEl(hwScope));
@@ -8719,7 +8754,7 @@
     // Queue the section's on-screen pictures; queued ones that scrolled away are dropped.
     function hwFill() {
         if (!cfg.hoverPreload || tour || !hwScope || !hwScope.isConnected) { hwScope = null; return; }
-        const pics = tourPics(cfg.tourMinDisplayed | 0).filter(function (p) {
+        const pics = tourPics(idleFloor()).filter(function (p) {
             return hwScope.contains(p) && onScreen(p);
         });
         const want = new Set(pics);
@@ -8771,7 +8806,7 @@
         const h = vpH();
         if (!(h > 0)) return;
         const want = [];
-        idlePics(Math.max(0, cfg.tourMinDisplayed | 0)).forEach(function (p) {
+        idlePics(idleFloor()).forEach(function (p) {
             const r = p.getBoundingClientRect();
             if (!r.width || !r.height) return;
             if (level < 3 && (r.bottom <= 0 || r.top >= h * level)) return;
