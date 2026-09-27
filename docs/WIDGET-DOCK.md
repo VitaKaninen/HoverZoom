@@ -20,9 +20,9 @@ folder: the `monkey-root` launch entry, `python -m http.server 8740 --directory 
   from its edge; a centre-anchored one grows both ways.
 - **Snap 8px** to window edges, the window's centre, and other widgets' edges. **Ctrl** held during a
   drag disables it (read from the move event; no key listener). **Not Alt** — Firefox reserves it.
-- **Status line**: one more window snap, `STATUS_BAND` (25 px) above the bottom, so a widget can sit
-  clear of the browser's link-URL bubble — the page can never draw over that bubble. A guess, not
-  measured; the bubble is browser UI in screen px, so it does not scale with page zoom.
+- **Status line**: one more window snap, `STATUS_BAND` (21 px) above the bottom, so a widget can sit
+  clear of the browser's link-URL bubble — the page can never draw over that bubble. Set by eye
+  (25 sat 4 px high); the bubble is browser UI in screen px, so it does not scale with page zoom.
 - **Widget anchor**: a widget dropped against another's edge attaches to that edge; on the other
   axis it takes a window edge it also touches, else the other widget's nearest left/centre/right.
   Only the DROPPED widget attaches.

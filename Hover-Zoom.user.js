@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.190.0
+// @version     0.191.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -6102,7 +6102,7 @@
     // `node dock/sync-dock.js` from HoverZoom. The design is HoverZoom/docs/WIDGET-DOCK.md.
     const usDock = (function () {
         const SNAP = 8;                 // px: window edges, the window's centre, other widgets
-        const STATUS_BAND = 25;         // px: the browser's link-URL bubble along the window's bottom
+        const STATUS_BAND = 21;         // px: the browser's link-URL bubble along the window's bottom
         const TOUCH = 1;                // px: how close two edges must be to count as attached at a drop
         const PASSES = 4;               // overlap sweeps; three widgets settle in two
         const SHADOW_REACH = 40;        // px: how far THEME.shadow spreads past a widget

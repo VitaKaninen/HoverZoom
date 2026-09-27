@@ -95,7 +95,7 @@ eq(s.ov, ['fs'], 'a drop overlapping another records it');
 eq(usDock.snap(805, 485, 120, 30, V, [fsR]), { x: 800, y: 490 }, 'snaps to FS top and its left edge');
 eq(usDock.snap(300, 548, 120, 30, V, []).y, 600 - usDock.STATUS_BAND - 30, 'snaps above the status bubble');
 eq(usDock.snap(300, 566, 120, 30, V, []).y, 570, 'still snaps to the window bottom');
-eq(usDock.makeSpec({ x: 300, y: 545, w: 120, h: 30 }, { x: 'c', y: 'e' }, [], V).fy, { r: 'win', m: 'e', t: 'e', o: -usDock.STATUS_BAND },
+eq(usDock.makeSpec({ x: 300, y: 600 - usDock.STATUS_BAND - 30, w: 120, h: 30 }, { x: 'c', y: 'e' }, [], V).fy, { r: 'win', m: 'e', t: 'e', o: -usDock.STATUS_BAND },
     'a drop on the status line keeps its distance from the bottom');
 
 console.log(pass + ' passed, ' + fail + ' failed');
