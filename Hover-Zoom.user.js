@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.187.0
+// @version     0.188.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -6868,21 +6868,58 @@
     // again or puts a different one in its place. See TOUR.md §1d.
     function tourRoll(list) {
         if (!tour) return list;
+        if (tourIsWidget()) return rollMerge(list, pageRoll, widgetSig());
+        return rollMerge(list, tour, location.href + '|' + tour.level + '|' + !!tour.postOnly + '|' + !!tour.mainOnly + '|' + tourFloor());
+    }
+
+    // The widget's list, tracked whether a slideshow is open or not, so the count and the position
+    // hold across scrolling, closing and reopening, and a pinned start lands on the same list.
+    const pageRoll = { roll: null, rollSig: '', recycles: false };
+    function widgetSig() { return location.href + '|' + idleFloor(); }
+    function tourIsWidget() { return !!tour && !!tour.mainOnly && !!tour.postOnly && tour.floor === idleFloor(); }
+
+    // What the widget counts and ▶ opens on: the main column down to the post end, plus what the page unmounted.
+    function widgetEntries() {
+        const floor = idleFloor();
+        const main = idlePics(floor);
+        return rollMerge(inPass(function () { return tourEntriesIn(main, tourCommon(main), true); }), pageRoll, widgetSig());
+    }
+
+    function rollMerge(list, holder, sig) {
         const live = [], tail = [];
         list.forEach(function (e) { (e.el && e.el.ownerDocument === document ? live : tail).push(e); });
-        const sig = location.href + '|' + tour.level + '|' + !!tour.postOnly + '|' + !!tour.mainOnly + '|' + tourFloor();
-        if (!tour.roll || tour.rollSig !== sig) { tour.roll = []; tour.rollSig = sig; }
+        if (!holder.roll || holder.rollSig !== sig) { holder.roll = []; holder.rollSig = sig; holder.recycles = false; }
         const keys = new Set(live.map(rollKey));
-        const kept = tour.roll.filter(function (g) {
+        const kept = holder.roll.filter(function (g) {
             if (g.el && g.el.isConnected) return false;         // still on the page: the live list speaks for it
             if (keys.has(rollKey(g))) return false;             // mounted again as a new element
             return !live.some(function (e) { return rollOver(e, g); });     // something else is there now
         }).map(function (g) { return Object.assign({}, g, { ghost: true }); });
-        if (!kept.length) { tour.roll = live; return list; }
+        if (!kept.length) { holder.roll = live; return list; }
+        holder.recycles = true;
         const all = live.concat(kept);
         all.forEach(function (e, i) { e.n = i; });
-        tour.roll = tourOrder(all);
-        return tour.roll.concat(tail);
+        holder.roll = tourOrder(all);
+        return holder.roll.concat(tail);
+    }
+
+    // The live entry for a remembered one: the same picture remounted, else whatever now fills its spot.
+    function rollFind(list, pk, spot) {
+        const liveOf = function (e) { return !e.ghost && e.el && e.el.ownerDocument === document; };
+        for (let i = 0; i < list.length; i++) if (liveOf(list[i]) && rollKey(list[i]) === pk) return list[i];
+        for (let i = 0; i < list.length; i++) if (liveOf(list[i]) && rollOver(list[i], spot)) return list[i];
+        return null;
+    }
+
+    // Wait for the page to mount a remembered entry after following scrolled to it.
+    async function ghostLive(entry, myToken) {
+        for (let i = 0; i < GHOST_LOOKS.length; i++) {
+            await sleep(GHOST_LOOKS[i] - (i ? GHOST_LOOKS[i - 1] : 0));
+            if (myToken.cancelled || !tour) return null;
+            const hit = rollFind(tourEntries(), entry.pk, entry);
+            if (hit) return hit;
+        }
+        return null;
     }
 
     function rollKey(e) { return typeof e.pk === 'string' ? e.pk : e.url; }
@@ -6916,7 +6953,7 @@
         return tourEntriesIn(pics, tourScopeNow(pics));
     }
 
-    function tourEntriesIn(pics, scope) {
+    function tourEntriesIn(pics, scope, noTail) {
         const root = document.documentElement;
         const sx = window.scrollX || 0, sy = window.scrollY || 0;
         const items = [];
@@ -6930,6 +6967,7 @@
         const live = tourOrder(items);
         // Pages fetched from the pager come after everything this document holds, in the order
         // they were harvested — they have no document coordinates to be sorted by. See §10.
+        if (noTail) return live;
         return harvest.length && scope === root && !tourConfined() ? live.concat(harvest) : live;
     }
 
@@ -7027,11 +7065,16 @@
             const r = tour.el.getBoundingClientRect();
             tour.x = r.left + (window.scrollX || 0);
             tour.y = r.top + (window.scrollY || 0);
-            const s = tourSize(tour.el);
-            const long = s ? Math.max(s.w, s.h) : 0;
-            if (long >= 1 && long < tour.floor) tour.floor = Math.floor(long);
-            const pe = postEnd();       // begun in the post: its replies stay out; begun in them, they are the tour
-            tour.postOnly = !!pe && !!pe.cut && !atOrAfter(pe.cut, tour.el);
+            if (idlePics(tour.floor).indexOf(tour.el) >= 0) {
+                tour.mainOnly = true;   // one of the widget's pictures: the widget's list and count, from here
+                tour.postOnly = true;
+            } else {
+                const s = tourSize(tour.el);
+                const long = s ? Math.max(s.w, s.h) : 0;
+                if (long >= 1 && long < tour.floor) tour.floor = Math.floor(long);
+                const pe = postEnd();       // begun in the post: its replies stay out; begun in them, they are the tour
+                tour.postOnly = !!pe && !!pe.cut && !atOrAfter(pe.cut, tour.el);
+            }
         }
         tour.had = new Set(tourPics(tour.floor));   // at the final floor, or tourAdopt() sees old pictures as new
     }
@@ -7205,7 +7248,7 @@
         }
         twPics = twCount();
         const was = twTotal;
-        if (!tour) twTotal = twPics >= 2 ? idlePics(idleFloor()).length : 0;
+        if (!tour) twTotal = twPics >= 2 ? widgetEntries().length : 0;
         if (!tour && twTotal !== was && debugOn()) dbg('widget count ' + twTotal, twReport());
         if (twWheelArmed && twWheelArmed !== location.href) twWheelSet(false);
         const on = twWanted();
@@ -7278,9 +7321,26 @@
         return out;
     }
 
+    // Debounced, but never past TW_RECOUNT_MAX_MS: a feed loading pictures as it goes would otherwise put it off indefinitely.
+    const TW_RECOUNT_MAX_MS = 1000;
+    let twRecountSince = 0;
     function twRecount() {
         clearTimeout(twRecountTimer);
-        twRecountTimer = setTimeout(twRefresh, TW_RECOUNT_MS);
+        const now = Date.now();
+        if (!twRecountSince) twRecountSince = now;
+        twRecountTimer = setTimeout(function () { twRecountSince = 0; twRefresh(); },
+            Math.max(0, Math.min(TW_RECOUNT_MS, twRecountSince + TW_RECOUNT_MAX_MS - now)));
+        if (pageRoll.recycles && !twTrackTimer) twTrackTimer = setTimeout(twTrack, TW_TRACK_MS);
+    }
+
+    // A feed that unmounts as it scrolls is read while the scroll goes on, or pictures passed without stopping are never seen.
+    const TW_TRACK_MS = 250;
+    let twTrackTimer = 0;
+    function twTrack() {
+        twTrackTimer = 0;
+        if (!tw || twStarting) return;
+        if (tour) { if (tourIsWidget()) { tourSync(); twSync(); } return; }
+        if (twPics >= 2) { twTotal = widgetEntries().length; twSync(); }
     }
 
     // Counter and buttons: the slideshow's position (`–` when its picture is not in the list), else the page's total.
@@ -7816,8 +7876,8 @@
         if (tour || placed || !twWanted()) return;
         const floor = idleFloor();
         const main = idlePics(floor);
-        const first = tourEntriesIn(main, tourCommon(main))[0];
-        if (!first || (twWarm && twWarm.el === first.el)) return;
+        const first = widgetEntries()[0];
+        if (!first || first.ghost || (twWarm && twWarm.el === first.el)) return;
         const w = twWarm = { el: first.el, displayed: sizeOf(first.el), res: undefined };
         primeLink(w.el);
         resolve(w.el, w.displayed, { cancelled: false, fresh: false }, null).then(function (res) {
@@ -7844,11 +7904,23 @@
         let res = null, el = null, displayed = null, fromPage = false;
         try {
             for (let tries = 0; tries < TOUR_START_TRIES && at >= 0 && at < list.length; tries++, at += dir) {
-                tourRemember(list[at]);
+                let entry = list[at];
+                tourRemember(entry);
                 tour.index = at;
                 tour.total = list.length;
                 twSync();
-                el = list[at].el;
+                if (entry.ghost) {
+                    const live = await ghostLive(entry, myToken);
+                    if (myToken.cancelled || !tour) break;
+                    if (!live) {
+                        const pre = plDone.get(entry.pk);
+                        if (pre && pre.res) { el = entry.el; displayed = pre.displayed; res = pre.res; fromPage = true; break; }
+                        continue;
+                    }
+                    entry = live;
+                    tourRemember(entry);
+                }
+                el = entry.el;
                 displayed = sizeOf(el);
                 active = el;
                 activeShown = shownUrl(el);
@@ -7876,7 +7948,7 @@
         showViewer(res, pointer);
         place();
         twSync();
-        if (fromPage) tourRest(el, displayed, myToken);
+        if (fromPage && el.isConnected) tourRest(el, displayed, myToken);
         const now = tourEntries();
         plFill(now, tour.index, dir);
         if (now.length - 1 - tour.index < TOUR_AHEAD) tourGrow(dir, false);
@@ -8044,10 +8116,7 @@
     // The ghost's picture is live again (or replaced): point the anchor at the live element.
     function tourRebind(pk, last) {
         const list = tourEntries();
-        let hit = null;
-        for (let i = 0; i < list.length && !hit; i++) if (!list[i].ghost && list[i].el.ownerDocument === document && rollKey(list[i]) === pk) hit = list[i];
-        const was = { x: tour.x, y: tour.y, w: tour.w, h: tour.h };
-        if (!hit) for (let i = 0; i < list.length && !hit; i++) if (!list[i].ghost && rollOver(list[i], was)) hit = list[i];
+        const hit = rollFind(list, pk, { x: tour.x, y: tour.y, w: tour.w, h: tour.h });
         if (!hit) {
             if (last) dbg('slideshow: the page has not shown this picture again; showing what was loaded for it');
             return false;

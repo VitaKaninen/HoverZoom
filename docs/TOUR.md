@@ -196,8 +196,9 @@ not in the tour — enumerating them needs `getComputedStyle` on every node in t
 
 ## 1b. Sidebars, by width — v0.130.0
 
-A slideshow started from idle (▶/→/← with nothing open) skips pictures in a side column; one started
-from a pinned picture does not (`tour.mainOnly`, off after `{`/`}` too). `sideColumn(el)`: the widest
+A slideshow started from idle (▶/→/← with nothing open) skips pictures in a side column; so does one
+pinned on a picture the widget counts (§1d); one pinned on a sidebar picture does not (`tour.mainOnly`,
+off after `{`/`}` too). `sideColumn(el)`: the widest
 ancestor still under 45% of the window, if it is at least min(600 px, 60% of the window) tall and has a
 sibling 1.5× wider beside it (overlapping vertically). The height test keeps floated figures and grid
 cards out. Width only, no markup: the user's rule is "the wide middle column is the content".
@@ -279,8 +280,27 @@ with `ghost: true`, its detached `el`, its `pk`, and its document `x,y,w,h`), or
 ones by `tourOrder`. A ghost is dropped when a live entry has its key (`rollKey` = `pk`, the
 preloader's picture+link key — mounted again) or covers over half of its spot (`rollOver` — the page
 put a different picture there). A connected element missing from the live list is dropped too: the
-page still has it and says it is not a picture now. The roll resets when URL, scope level, postOnly,
-mainOnly or floor change (`rollSig`), and dies with the tour.
+page still has it and says it is not a picture now.
+
+**One roll per page, for the widget's list** (`pageRoll`, v0.188.0, user: "the widget needs to track
+the page even if the slideshow is not active"). `widgetEntries()` = the idle derivation
+(`idlePics` → `tourEntriesIn(…, tourCommon, noTail)`) through `rollMerge`, and it is the idle count;
+a tour whose list is the widget's (`tourIsWidget`: mainOnly + postOnly + the idle floor) merges into
+the same `pageRoll`, so closing and reopening, or switching between ▶ and a pin, keeps count and
+position. It resets on a new URL or idle floor (`widgetSig`). A tour on any other list (a `{`/`}`
+rescope, a pin outside the widget's list) keeps its own roll on `tour`, dying with it.
+**A pin on one of the widget's pictures IS the widget's slideshow** (`tourStart`: in
+`idlePics(floor)` → mainOnly + postOnly). The §1a area rule now applies only to a pin the widget does
+not count — a reply below the post end, a sidebar, a picture under the idle floor. On
+`test-pages/forum-thread.html` at 1280 px: pin on the post → `2 / 12` (was the post's 11 via §1a; the
+widget's 12 adds the signature), pin on a reply → `14 / 15` (§1a, unchanged).
+**Idle tracking while scrolling:** once a page is seen to unmount (`pageRoll.recycles`), `twRecount`
+also reads the list every `TW_TRACK_MS` (250) during a scroll (`twTrack`), or pictures passed without
+stopping are never seen. `twRecount`'s debounce has a ceiling (`TW_RECOUNT_MAX_MS`, 1 s): every `<img>`
+`load` re-arms it, so on a feed that keeps loading the recount was put off for screens at a time.
+**▶/◀ from idle on a ghost** (`tourFromStart`): following scrolls to it, `ghostLive()` waits
+`GHOST_LOOKS` for the page to mount it and starts on the live element; failing that, on the
+preloaded answer, else the next entry. `twWarmFirst` skips a ghost (nothing to resolve from).
 
 This is a deliberate exception to "nothing is cached that the DOM can invalidate": what is kept is a
 URL and a position, never trusted. **Arriving on a ghost** (`tourShowGhost`): the preloader's answer
@@ -297,6 +317,9 @@ scrolls the page to 0, so the scrollbar says "top". Following alone left Imgur a
 row starts under a 350 px header), and the user kept wheeling, crossed the seam and wrapped.
 
 ## 1a. The scope and the floor — BUILT, v0.100.0
+
+**Since v0.188.0 this applies only to a pin on a picture the widget does not count** (§1d); a pin on
+one it counts opens the widget's list. The post end (§1c) now does the "post's ten" job for that case.
 
 A hover may expand anything — an icon, an avatar, a sidebar picture. A tour must not: asked for
 2026-09-11 with the forum case — one post carrying ten pictures, dressed with an avatar, badges,
