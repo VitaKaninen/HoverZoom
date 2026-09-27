@@ -789,6 +789,12 @@ and `idlePics()` run inside one read pass where `passRect()` and `videoSurfaces(
 once and are dropped on return — `sideColumnEl` re-measured the same ancestors for every picture and
 `videoSurfaces` every video per picture (866 rect reads a step on the 35-picture test page; 39 → 12 ms a
 step with 400 pictures + 20 videos). Never let a pass span a DOM write or a scroll: its rects go stale.
+**And between steps the list is reused** (`tourListMemo`, v0.181.0): for `TOUR_LIST_MS` (1.5 s) while
+`tourListKey()` — URL, element and picture counts, the summed length of every `src`, viewport,
+`body.scrollHeight`, harvest size, floor — and the tour's scope/level/postOnly/mainOnly are unchanged
+and every live entry is connected. Google Images, 464 pictures, 90 fast wheel ticks: 5.8 s → 1.0 s of
+blocking (64 → ~10 ms a step). The key is re-read every step, so a page that changed re-derives; the
+TTL bounds what the key cannot see (a visibility flip with no size change).
 A slow step is not just jank — Firefox scrolls the page anyway when a blocking wheel listener takes
 ~400 ms (`apz.content_response_timeout`), so wheel ticks leak through. For a tour
 pinned from a hover, `tour.had` is taken at `tourStart` and `tourGrow` adopts near the end.

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.180.0
+// @version     0.181.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -6803,7 +6803,32 @@
 
     // Everything in the scope a hover would preview, in reading order. Derived on every press;
     // sorted in DOCUMENT coordinates, or the order changes as the page scrolls.
-    function tourEntries() { return inPass(tourEntriesNow); }
+    // tourEntriesNow(), reused for TOUR_LIST_MS while the page's shape key is unchanged. See TOUR.md §3.
+    const TOUR_LIST_MS = 1500;
+    let tourListMemo = null;
+    function tourEntries() {
+        const key = tourListKey();
+        const m = tourListMemo;
+        if (m && m.key === key && m.tour === tour && Date.now() - m.t < TOUR_LIST_MS &&
+            (!tour || (m.scope === tour.scope && m.level === tour.level && m.postOnly === tour.postOnly &&
+                m.mainOnly === tour.mainOnly)) &&
+            m.cfg === cfg && m.list.every(function (e) { return !e.el || e.el.ownerDocument !== document || e.el.isConnected; })) return m.list.slice();
+        const list = inPass(tourEntriesNow);
+        tourListMemo = { key: key, tour: tour, cfg: cfg, t: Date.now(), list: list, scope: tour && tour.scope,
+            level: tour && tour.level, postOnly: tour && tour.postOnly, mainOnly: tour && tour.mainOnly };
+        return list.slice();
+    }
+
+    // Cheap reads that change when the pictures do: counts, sizes, and the length of every src.
+    function tourListKey() {
+        const b = document.body;
+        let srcs = 0, n = 0;
+        [document.getElementsByTagName('img'), document.getElementsByTagName('video')].forEach(function (c) {
+            for (let i = 0; i < c.length; i++) { srcs += (c[i].currentSrc || c[i].src || '').length; n++; }
+        });
+        return location.href + '|' + document.getElementsByTagName('*').length + '|' + n + '|' + srcs + '|' +
+            vpW() + 'x' + vpH() + '|' + (b ? b.scrollHeight : 0) + '|' + harvest.length + '|' + tourFloor();
+    }
 
     function tourEntriesNow() {
         let pics = tourPics(tourFloor());
