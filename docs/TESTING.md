@@ -5,7 +5,9 @@ What each test-page case is for, the `debug` setting, and the long list of Brows
 ## Perf recorder (v0.177.0)
 
 For "the page lags / CPU is high": `document.dispatchEvent(new CustomEvent('hover-zoom:perf', {detail: true}))`
-starts, `{detail: false}` stops and prints, `{detail: 'report'}` prints without stopping. Output is totals
+starts, `{detail: false}` stops and prints, `{detail: 'report'}` prints without stopping. The report is also
+dispatched as `hover-zoom:perf-report` (`detail` = the text) — some sites (Daily Mail, Imgur) swallow
+the console, so a harness listens for that instead. Output is totals
 only — no URLs, no page function names — so the user can paste it from a private site.
 
 - **Our side:** `setTimeout`/`setInterval`/`MutationObserver`/`ResizeObserver` are shadowed at the top of

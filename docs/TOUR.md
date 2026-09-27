@@ -798,6 +798,9 @@ TTL bounds what the key cannot see (a visibility flip with no size change).
 `idlePics()` is reused the same way (`idleMemo`, v0.182.0): after a scroll `twRefresh`, `pgTick` and
 `twWarmFirst` each asked for it — three full scans per pause, now one. Its key (`pageKey()`) leaves
 out `harvest`: `twRefresh()` runs it at boot, above that `let` (the CLAUDE.md TDZ trap).
+`tourPics()` too (`picsMemo`, v0.184.0): one step asked for it 3x (the list, `postLead`, `tourGrow`).
+`postGroup()` skips an element with fewer than two post-like children before `cardList`/`sibGroups` —
+exact, since every group needs two post-like members (Imgur's recycling feed re-runs it each step).
 A slow step is not just jank — Firefox scrolls the page anyway when a blocking wheel listener takes
 ~400 ms (`apz.content_response_timeout`), so wheel ticks leak through. For a tour
 pinned from a hover, `tour.had` is taken at `tourStart` and `tourGrow` adopts near the end.

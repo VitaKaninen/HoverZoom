@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.183.0
+// @version     0.184.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -204,8 +204,10 @@
         const d = e.detail;
         if (d === true) perfStart();
         else if (d === false) perfStop();
-        try { console.log(d === true ? '[HoverZoom] perf recording — dispatch again with detail false to stop and print' : perfReport()); }
-        catch (x) { /* no console */ }
+        const text = d === true ? '[HoverZoom] perf recording — dispatch again with detail false to stop and print' : perfReport();
+        try { console.log(text); } catch (x) { /* no console */ }
+        // Also as an event, for a test harness on a page that swallows console output.
+        if (d !== true) document.dispatchEvent(new CustomEvent('hover-zoom:perf-report', { detail: text }));
     });
 
     // ---------------------------------------------------------------- settings
@@ -6692,11 +6694,18 @@
         return Math.max(s.w, s.h) >= floor;
     }
 
+    // Reused while the page key holds, like tourEntries(): one step asks several times. See TOUR.md §3.
+    let picsMemo = null;
     function tourPics(floor) {
+        const key = pageKey() + '|' + floor;
+        const m = picsMemo;
+        if (m && m.key === key && m.cfg === cfg && Date.now() - m.t < TOUR_LIST_MS &&
+            m.pics.every(function (p) { return p.isConnected; })) return m.pics.slice();
         const all = document.querySelectorAll('img,video');
         const pics = [];
         for (let i = 0; i < all.length; i++) if (tourWorthy(all[i], floor)) pics.push(all[i]);
-        return pics;
+        picsMemo = { key: key, cfg: cfg, t: Date.now(), pics: pics };
+        return pics.slice();
     }
 
     function countIn(node, pics) {
@@ -7440,7 +7449,9 @@
             const p = all[i];
             if (p.childElementCount < 2) continue;
             // judged on every post-like child, or two cards sharing a category class pass as a thread
-            if (cardList([].filter.call(p.children, postishDeep))) continue;
+            const posty = [].filter.call(p.children, postishDeep);
+            if (posty.length < 2) continue;     // every group below needs two post-like members
+            if (cardList(posty)) continue;
             sibGroups(p).forEach(function (m, key) {
                 m = m.filter(function (e) {        // vBulletin's empty div#lastpost anchor goes, not the group
                     if (!postishDeep(e)) return false;
