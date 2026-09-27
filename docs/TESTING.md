@@ -24,6 +24,11 @@ only — no URLs, no page function names — so the user can paste it from a pri
   (19 for 5 steps) — each a full `tourPics` pass through `refusal()` per picture.
   User's site, Firefox, v0.177.0: `twWheel` 81 calls / 18.3 s, `pgTick`/`twLoadSync`/`twWarmFirst`
   ~250 ms per call — the scan is what costs there; idle with a slideshow open was 0.0 ms of ours.
+  Fixed by `postEnd` memo (v0.179.0). Google Images in Chrome, v0.179.0: `twLoadSync` 36 full scans in
+  20 steps for a debug-only label (now returns early without `debug`, v0.180.0); `blockMatch` 40k
+  calls compiling a RegExp per entry per call (now compiled once per list, answers memoised per URL).
+  Chrome's `long-animation-frame` scripts come back with no `sourceURL` for Tampermonkey userscripts
+  (all "unattributed"), so the bucket split does not separate us from other userscripts there.
 - **Everyone's side:** a `long-animation-frame` observer (Chrome/Edge 123+; the Browser pane lacks it)
   buckets script time in frames >50 ms by source — Hover Zoom (matched against our own stack URL),
   other extension (Tampermonkey's `name=`), page, unattributed — with forced-layout time per bucket.

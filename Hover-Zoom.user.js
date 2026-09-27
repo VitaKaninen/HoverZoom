@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.179.0
+// @version     0.180.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -674,22 +674,29 @@
         return out;
     }
 
-    // Images the user has said never to preview.
+    // Images the user has said never to preview. Compiled once per list; answers memoised per URL.
+    const blockCompiled = new WeakMap();
     function blockMatch(url, list) {
         if (!url || !list || !list.length) return false;
-        for (let i = 0; i < list.length; i++) {
-            const entry = String(list[i]).trim();
-            if (!entry) continue;
-            if (entry.indexOf('*') === -1) {
-                if (entry === url) return true;
-                continue;
+        let c = blockCompiled.get(list);
+        if (!c || c.len !== list.length) {      // the ⊘ menu pushes onto cfg.blockList in place
+            c = { len: list.length, exact: new Set(), rx: [], seen: new Map() };
+            for (let i = 0; i < list.length; i++) {
+                const entry = String(list[i]).trim();
+                if (!entry) continue;
+                if (entry.indexOf('*') === -1) { c.exact.add(entry); continue; }
+                c.rx.push(new RegExp('^' + entry.split('*').map(function (part) {
+                    return part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                }).join('.*') + '$'));
             }
-            const rx = new RegExp('^' + entry.split('*').map(function (part) {
-                return part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            }).join('.*') + '$');
-            if (rx.test(url)) return true;
+            blockCompiled.set(list, c);
         }
-        return false;
+        let hit = c.seen.get(url);
+        if (hit !== undefined) return hit;
+        hit = c.exact.has(url) || c.rx.some(function (rx) { return rx.test(url); });
+        if (c.seen.size > 5000) c.seen.clear();
+        c.seen.set(url, hit);
+        return hit;
     }
 
     // Site-agnostic rewrites that turn a thumbnail URL into its original.
@@ -7099,6 +7106,10 @@
     function twLoadSync() {
         twLoadTimer = 0;
         if (!tw || tw.host.style.display === 'none') return;
+        if (!debugOn()) {       // the label is debug-only; the count costs a full scan
+            if (tw.load.textContent) { tw.load.textContent = ''; tw.dock.sizeChanged(); }
+            return;
+        }
         const els = tour ? tourEntries().map(function (e) { return e.el; })
                          : idlePics(Math.max(0, cfg.tourMinDisplayed | 0));
         let n = 0;
