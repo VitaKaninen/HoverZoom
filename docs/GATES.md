@@ -817,3 +817,25 @@ cannot know about — a watermark, a sprite sheet, one specific image simply not
 Blocking is checked in two places, both needed: `eligible()` (so no spinner even flashes) and
 `collectCandidates`' `add()` (so a blocked URL is never *probed*). It was three until v0.43.0
 deleted `resolve()`'s fallback probe of the shown URL.
+
+## Small pictures: avatars and emoji only · `P14` · `E73` · v0.175.0
+
+Under `smallBelow` (48) a picture is mostly a button or an icon, and v0.168.0 made every picture
+preview, so Gmail's buttons popped up and ate clicks (the press pinned the preview). The user wants
+small pictures only for avatars and emoji; `smallKind()` sorts them in `onOver`, after `minDisplayed`.
+
+- **Emoji first** (`emojiSign()`): alt is an emoji or `:shortcode:` (Discord, YouTube, Steam, Twitch),
+  an `emoji`/`emoticon`/`emote` class on it or its parent, or an `EMOJI_HOSTS` URL. An emoji never
+  falls through to the avatar test — Discord's big emoji originals would pass it. "Small picture in a
+  line of text" is deliberately NOT a sign: button icons beside a label look the same.
+- **Avatar = shown tiny, file big** (`avatarBig()`, checked on each resolve hit, so the ring and the
+  page's-own-picture fallback are suppressed until one qualifies). Square-ish (0.75–1.33) to be a
+  candidate; every hover resolved anyway before this, so there is no extra cost. Thresholds 96 px /
+  2.4× come from 120 YouTube commenter avatars (`=s88` → `=s0`, originals 96–4230 px; 128/3× failed
+  two users' 96 and 111 px uploads) against the icon cases they must refuse: a 2× icon is 2×, a 72 px
+  emoji or 4× icon is under 96. A YouTube avatar renders at 40 (24 for replies).
+- **The emoji entries shipped in v0.174.0's block list moved to `EMOJI_HOSTS`** — blocking wins, so
+  they would have made the emoji box dead on those sites. `migrate()` removes them once (only while
+  `blockOffered` holds them), so one the user adds back stays.
+- The emoji label's `<img>` needs `position:static` inline: the shadow sheet's bare `img` rule is the
+  preview's (`position:absolute`), and it collapsed the label to 40 px.

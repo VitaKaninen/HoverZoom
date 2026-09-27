@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.174.0
+// @version     0.175.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -44,12 +44,20 @@
         'https://ssl.gstatic.com/ui/v1/icons/*',            // Gmail / Google apps buttons
         'https://www.gstatic.com/images/icons/*',           // Google material icons
         'https://www.gstatic.com/images/branding/*',        // Google product logos
+    ];
+
+    // Emoji hosts: an emoji sign (smallEmoji decides), no longer shipped as blocks; v0.174.0 offered them.
+    const EMOJI_HOSTS = [
         'https://fonts.gstatic.com/s/e/notoemoji/*',        // Google emoji
         'https://abs-0.twimg.com/emoji/*',                  // X / Twitter emoji
         'https://static.xx.fbcdn.net/images/emoji.php/*',   // Facebook / Messenger emoji
         'https://github.githubassets.com/images/icons/emoji/*',
         'https://s.w.org/images/core/emoji/*',              // WordPress emoji
+        'https://cdn.discordapp.com/emojis/*',
+        'https://static-cdn.jtvnw.net/emoticons/*',         // Twitch
+        '*/economy/emoticon/*',                             // Steam
     ];
+    const RETIRED_BLOCKS = EMOJI_HOSTS.slice(0, 5);
 
     // The shipped entries missing from `list`, put in front of it; the rest keeps its order.
     function withDefaultBlocks(list, skip) {
@@ -66,7 +74,11 @@
         hotkeyToggle: false,        // 'hover': a lone tap turns previews off in this tab until the next
         hoverDelay: 120,            // ms before resolving
         hoverPreload: true,         // load the page's pictures ahead of the user, as far as they show interest
-        minDisplayed: 16,           // ignore images displayed smaller than this — the only size gate
+        minDisplayed: 16,           // ignore images displayed smaller than this, whatever they are
+        smallBelow: 48,             // px: smaller pictures preview only as an avatar or an emoji
+        smallAvatars: true,         // a small, square picture whose original is big
+        smallEmoji: false,          // an emoji, shown above itself at emojiSize with its name
+        emojiSize: 200,             // px
         sizeGate: false,            // only preview when the original is minRatio times what is drawn
         minRatio: 1,                // full size must be this much bigger; below 1 previews anything
         videoMode: 'clips',         // 'none' | 'clips' (animated clips) | 'all' (+ links to a video page)
@@ -157,7 +169,13 @@
         }
         // Shipped block entries this list has never been offered go on top, once.
         if (Array.isArray(o.blockList)) {
-            const offered = Array.isArray(o.blockOffered) ? o.blockOffered : [];
+            let offered = Array.isArray(o.blockOffered) ? o.blockOffered : [];
+            // The emoji entries v0.174.0 shipped come out once; one the user adds back stays.
+            const gone = RETIRED_BLOCKS.filter(function (e) { return offered.indexOf(e) !== -1; });
+            if (gone.length) {
+                o.blockList = o.blockList.filter(function (e) { return gone.indexOf(e) === -1; });
+                offered = offered.filter(function (e) { return gone.indexOf(e) === -1; });
+            }
             o.blockList = withDefaultBlocks(o.blockList, offered);
             o.blockOffered = offered.concat(DEFAULT_BLOCKS.filter(function (e) { return offered.indexOf(e) === -1; }));
         }
@@ -2255,6 +2273,23 @@
 
     const REACH_INSET = 10;
 
+    // A small picture's preview never covers it: beside it on the roomier side, else above or below.
+    function besidePicture(ow, oh, m) {
+        const r = activeRect;
+        if (!r) return;
+        const GAP = 8;
+        const overlaps = view.left < r.right && view.left + ow > r.left && view.top < r.bottom && view.top + oh > r.top;
+        if (!overlaps) return;
+        const right = m.vw - r.right - GAP, left = r.left - GAP;
+        if (Math.max(right, left) >= ow) {
+            view.left = right >= ow ? r.right + GAP : r.left - GAP - ow;
+            view.top = Math.max(0, Math.min(m.vh - oh, r.top + r.height / 2 - oh / 2));
+        } else {
+            view.left = Math.max(0, Math.min(m.vw - ow, r.left + r.width / 2 - ow / 2));
+            view.top = m.vh - r.bottom - GAP >= r.top - GAP ? r.bottom + GAP : r.top - GAP - oh;
+        }
+    }
+
     function nudgeIntoReach() {
         const ow = outerW();
         const oh = outerH();
@@ -3426,6 +3461,7 @@
     }
 
     function showSpinner() {
+        if (activeSmall) return;
         clearTimeout(spinTimer);
         buildViewer();
         applySpinTheme();           // per hover: the page may have flipped light/dark since
@@ -3553,8 +3589,9 @@
             const rightRoom = m.vw - pointer.x;
             view.left = rightRoom >= ow ? pointer.x : pointer.x - ow;
             view.top = pointer.y - oh / 2;
-            nudgeIntoReach();
+            if (!activeSmall) nudgeIntoReach();
         }
+        if (activeSmall) besidePicture(ow, oh, m);
 
         setMedia(res);
         layout();
@@ -4344,6 +4381,7 @@
     // ------------------------------------------------------------- interaction
 
     let active = null;      // element currently zoomed or pending
+    let activeSmall = false; // it is an avatar under smallBelow: shown only when big, never over it
     let activeShown = null; // what that element was displaying — the second URL ⊘ blocks
     let token = null;       // cancellation token for the in-flight resolve
     let timer = null;
@@ -4426,7 +4464,7 @@
     function pressPinsPreview(e) {
         if (!view || !box || !box.classList.contains('on')) return false;
         if (pointInPreview(e.clientX, e.clientY)) return true;
-        if (!active) return false;
+        if (!active || activeSmall) return false;
         return e.target === active || (active.contains && active.contains(e.target));
     }
 
@@ -5216,6 +5254,111 @@
         return { w: Math.round(r.width), h: Math.round(r.height) };
     }
 
+    // ---- small pictures: under smallBelow, only an avatar or an emoji previews
+    const AVATAR_MIN_PX = 96;       // the original's longer side
+    const AVATAR_UPSIZE = 2.4;      // times the size on the page
+    const EMOJI_ALT_RE = /^\s*(?:\p{Extended_Pictographic}|\p{Regional_Indicator})[\p{Extended_Pictographic}\p{Emoji_Component}‍️\s]*$/u;
+    const EMOJI_CODE_RE = /^:[\w~+-]{1,64}:$/;
+    const EMOJI_CLASS_RE = /(?:^|[\s_-])(?:emoji|emoticon|emote)(?:$|[\s_-])/i;
+
+    // 'emoji', 'avatar', 'refuse', or null when the picture is not small.
+    function smallKind(el, displayed) {
+        if (Math.max(displayed.w, displayed.h) >= cfg.smallBelow) return null;
+        if (cfg.activation === 'modifier') return null;     // the key asked for this one
+        const emoji = emojiSign(el);
+        if (emoji) return cfg.smallEmoji ? 'emoji' : 'refuse';
+        const ratio = displayed.w / Math.max(1, displayed.h);
+        if (cfg.smallAvatars && ratio >= 0.75 && ratio <= 1.33) return 'avatar';
+        return 'refuse';
+    }
+
+    // Why this picture is an emoji — its alt text, its class, its host — or ''.
+    function emojiSign(el) {
+        if (el.tagName !== 'IMG') return '';
+        const alt = (el.getAttribute('alt') || '').trim();
+        if (alt && alt.length <= 24 && EMOJI_ALT_RE.test(alt)) return 'alt is an emoji';
+        if (EMOJI_CODE_RE.test(alt)) return 'alt is a :shortcode:';
+        for (let n = el, up = 0; n && up < 2; up++, n = n.parentElement) {
+            if (EMOJI_CLASS_RE.test(typeof n.className === 'string' ? n.className : '')) return 'class names an emoji';
+        }
+        if (blockMatch(shownUrl(el), EMOJI_HOSTS)) return 'an emoji host';
+        return '';
+    }
+
+    // An avatar: the original found is big, and much bigger than the page draws it.
+    function avatarBig(hit, displayed) {
+        const orig = Math.max(hit.w || 0, hit.h || 0);
+        return orig >= AVATAR_MIN_PX && orig >= AVATAR_UPSIZE * Math.max(displayed.w, displayed.h);
+    }
+
+    // The name under an emoji: its alt text or label, colons dropped.
+    function emojiName(el) {
+        const t = (el.getAttribute('alt') || el.getAttribute('aria-label') || el.getAttribute('title') ||
+            el.getAttribute('data-emoji-name') || '').trim();
+        return t.replace(/^:(.*):$/, '$1');
+    }
+
+    let emojiEl = null, emojiImg = null, emojiLabel = null;
+    let emojiLast = 0;              // when the last emoji label went away; the next one within EMOJI_SWEEP_MS skips the delay
+    const EMOJI_SWEEP_MS = 800;
+    const EMOJI_GAP = 8;
+
+    // The emoji label: a picture and its name, pointer-transparent, drawn above the emoji.
+    function buildEmoji() {
+        if (emojiEl) return;
+        buildViewer();
+        emojiEl = document.createElement('div');
+        emojiEl.style.cssText = 'position:fixed;display:none;pointer-events:none;box-sizing:border-box;padding:8px;' +
+            'border-radius:10px;background:#1e1e2e;border:1px solid #45475a;box-shadow:0 4px 18px rgba(0,0,0,.45);' +
+            'font:12px/16px system-ui,sans-serif;color:#cdd6f4;text-align:center';
+        emojiImg = document.createElement('img');
+        emojiImg.style.cssText = 'display:block;position:static;background:none;object-fit:contain;margin:0 auto';     // the sheet's img rule is the preview's
+        emojiLabel = document.createElement('div');
+        emojiLabel.style.cssText = 'margin-top:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+        emojiEl.appendChild(emojiImg);
+        emojiEl.appendChild(emojiLabel);
+        root.appendChild(emojiEl);
+    }
+
+    // Hovering an emoji: after the hover delay (none mid-sweep), its label; a bigger file swaps in when found.
+    function emojiHover(el, displayed) {
+        active = el;
+        activeRect = el.getBoundingClientRect();
+        const myToken = token = { cancelled: false, fresh: true };
+        const wait = Date.now() - emojiLast < EMOJI_SWEEP_MS ? 0 : cfg.hoverDelay;
+        timer = setTimeout(function () {
+            if (myToken.cancelled || active !== el) return;
+            const url = shownUrl(el);
+            if (!url) return;
+            buildEmoji();
+            const size = Math.max(32, Math.min(1000, cfg.emojiSize | 0));
+            emojiImg.style.width = emojiImg.style.height = size + 'px';
+            emojiImg.src = url;
+            const name = emojiName(el);
+            emojiLabel.textContent = name;
+            emojiLabel.style.display = name ? 'block' : 'none';
+            emojiEl.style.width = (size + 18) + 'px';
+            emojiEl.style.display = 'block';
+            const r = el.getBoundingClientRect();
+            const w = emojiEl.offsetWidth, h = emojiEl.offsetHeight;
+            emojiEl.style.left = Math.max(4, Math.min(vpW() - w - 4, r.left + r.width / 2 - w / 2)) + 'px';
+            emojiEl.style.top = (r.top - EMOJI_GAP - h >= 4 ? r.top - EMOJI_GAP - h : r.bottom + EMOJI_GAP) + 'px';
+            let best = 0;
+            resolve(el, displayed, myToken, function (hit) {
+                if (myToken.cancelled || active !== el || hit.video) return;
+                const s = Math.max(hit.w || 0, hit.h || 0);
+                if (s > best) { best = s; emojiImg.src = hit.url; }
+            }).catch(function () { /* the page's own file stays */ });
+        }, wait);
+    }
+
+    function emojiHide() {
+        if (!emojiEl || emojiEl.style.display === 'none') return;
+        emojiEl.style.display = 'none';
+        emojiImg.removeAttribute('src');
+        emojiLast = Date.now();
+    }
+
     function cancel() {
         if (placed) return;         // a placed viewer outlives hover entirely
         pinOnShow = null;
@@ -5237,9 +5380,11 @@
         if (token) token.cancelled = true;
         token = null;
         active = null;
+        activeSmall = false;
         activeCovered = false;
         activeShown = null;
         drag = null;
+        emojiHide();
         disableWheelZoom();
         resetBar();
         hideSpinner();
@@ -5361,8 +5506,16 @@
         cancel();
         const displayed = sizeOf(el);
         if (displayed.w < cfg.minDisplayed && displayed.h < cfg.minDisplayed) return;
+        const small = smallKind(el, displayed);
+        if (small === 'refuse') {
+            if (debugOn()) dbg('small picture, not an avatar or emoji — no preview', { shown: displayed.w + '×' + displayed.h,
+                smallBelow: cfg.smallBelow, emoji: emojiSign(el) || 'no', smallEmoji: cfg.smallEmoji, smallAvatars: cfg.smallAvatars });
+            return;
+        }
+        if (small === 'emoji') { emojiHover(el, displayed); return; }
 
         active = el;
+        activeSmall = small === 'avatar';
         activeCovered = (el !== e.target);
         activeShown = shownUrl(el);
         hoverAt = Date.now();
@@ -5410,6 +5563,7 @@
                 await resolve(el, displayed, myToken,
                     function (hit) {
                         if (myToken.cancelled || active !== el || playerArrived(el)) return;
+                        if (activeSmall && !avatarBig(hit, displayed)) return;
                         got = true;
                         if (holding) { heldHit = hit; return; }
                         paint(hit);
@@ -5502,6 +5656,7 @@
     // Sized from the probe, never nativeSize(): a srcset <img> reports a density-divided size,
     // and verifyMedia() closes the window on the real one. See E45.
     async function showFallback(el, token, why) {
+        if (activeSmall) return;            // a small picture with no big original is not an avatar
         const url = shownUrl(el);
         if (!url || blocked(url) || placeholder(el, url)) return;
         const dim = await probe(url);       // resolve() already tried the displayed src; cached
@@ -9263,8 +9418,19 @@
             'Used only with the box above. Original ÷ the image on the page. 1 previews anything ' +
             'larger; below 1 previews smaller originals too. (default: 1)', 0.1, 100, 0.1);
         num('minDisplayed', 'Ignore images smaller than',
-            'As drawn on the page, in px. Lower it for icons and avatars; a YouTube avatar is ' +
-            'about 24. (default: 16)', 0, 2000, 1);
+            'As drawn on the page, in px. Nothing smaller ever previews. (default: 16)', 0, 2000, 1);
+        num('smallBelow', 'Small pictures: under',
+            'As drawn on the page, in px. Pictures this small are mostly buttons and icons, so ' +
+            'they preview only as an avatar or an emoji (the boxes below). (default: 48)', 0, 2000, 1);
+        check('smallAvatars', 'Small pictures: avatars',
+            'A small, square picture whose original is at least ' + AVATAR_MIN_PX + ' px and ' +
+            AVATAR_UPSIZE + ' times its size on the page. Shown beside it, never over it, so it ' +
+            'can still be clicked. (default: on)');
+        check('smallEmoji', 'Small pictures: emoji',
+            'An emoji, known by its alt text, class or host, shows above itself with its name. ' +
+            '(default: off)');
+        num('emojiSize', 'Emoji size',
+            'In px. (default: 200)', 32, 1000, 1);
         pick('videoMode', 'Play in a preview',
             'A clip is short, muted and looping; a video is anything a thumbnail links to.', [
                 ['clips', 'Looping clips only'],

@@ -28,7 +28,8 @@ Then when I clicked undo changes, it did not restore them."*
   is no default that reconstructs them, and the ✕ per row (or the sound button) already undoes
   them one at a time. Everything else is a knob with a right answer, which is what "reset to
   defaults" is asking about.
-- **Shipped block entries** (`DEFAULT_BLOCKS`, v0.174.0, user's call): site UI icons and emoji — Gmail's
+- **Shipped block entries** (`DEFAULT_BLOCKS`, v0.174.0, user's call): site UI icons (the emoji moved to
+  `EMOJI_HOSTS` in v0.175.0 — see [`GATES.md`](GATES.md) `P14`) — Gmail's
   buttons were the trigger, since every picture previews by default (v0.168.0). Kept as ordinary
   entries at the TOP of `blockList` so the user can ✕ them. `blockOffered` records which have been put
   in once, so a removed one stays removed and a future version's new entry is still added (on top) at

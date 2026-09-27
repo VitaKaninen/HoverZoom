@@ -974,17 +974,42 @@ eq('an ordinary iframe is not one', cap('https://ads.example.com/frame.html', fa
 const dbStart = src.indexOf('    const DEFAULT_BLOCKS');
 const dbEnd = src.indexOf('    const DEFAULTS = {');
 if (dbStart < 0 || dbEnd < 0) { console.error('DEFAULT_BLOCKS markers not found'); process.exit(1); }
-const { DEFAULT_BLOCKS, withDefaultBlocks } = new Function(src.slice(dbStart, dbEnd) +
-    '\nreturn {DEFAULT_BLOCKS, withDefaultBlocks};')();
+const { DEFAULT_BLOCKS, withDefaultBlocks, EMOJI_HOSTS } = new Function(src.slice(dbStart, dbEnd) +
+    '\nreturn {DEFAULT_BLOCKS, withDefaultBlocks, EMOJI_HOSTS};')();
 [
     'https://ssl.gstatic.com/ui/v1/icons/mail/gm3/2x/double_arrow_baseline_nv700_20dp.png',
     'https://www.gstatic.com/images/icons/material/system_gm/2x/launch_gm_grey_18dp.png',
+].forEach(function (u) { eq('shipped block hits ' + u, blockMatch(u, DEFAULT_BLOCKS), true); });
+[
     'https://fonts.gstatic.com/s/e/notoemoji/17.0/2194_fe0f/72.png',
     'https://abs-0.twimg.com/emoji/v2/svg/1f600.svg',
     'https://static.xx.fbcdn.net/images/emoji.php/v9/t4c/1/16/1f600.png',
     'https://github.githubassets.com/images/icons/emoji/unicode/1f600.png?v8',
     'https://s.w.org/images/core/emoji/15.0.3/72x72/1f600.png',
-].forEach(function (u) { eq('shipped block hits ' + u, blockMatch(u, DEFAULT_BLOCKS), true); });
+    'https://cdn.discordapp.com/emojis/123456789012345678.webp?size=48',
+    'https://static-cdn.jtvnw.net/emoticons/v2/25/default/dark/1.0',
+    'https://community.fastly.steamstatic.com/economy/emoticon/steamhappy',
+].forEach(function (u) {
+    eq('emoji host ' + u, blockMatch(u, EMOJI_HOSTS), true);
+    eq('emoji is not blocked ' + u, blockMatch(u, DEFAULT_BLOCKS), false);
+});
+[
+    'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQ&s',
+    'https://yt3.ggpht.com/ytc/AIdro_abc=s88-c-k-c0x00ffffff-no-rj',
+    'https://cdn.discordapp.com/avatars/1/abc.webp?size=80',
+    'https://avatars.steamstatic.com/abc_medium.jpg',
+].forEach(function (u) { eq('not an emoji host ' + u, blockMatch(u, EMOJI_HOSTS), false); });
+
+// ---- which alt text and class names make a small picture an emoji
+const emStart = src.indexOf('    const EMOJI_ALT_RE');
+const emEnd = src.indexOf('    const EMOJI_CLASS_RE');
+if (emStart < 0 || emEnd < 0) { console.error('emoji markers not found'); process.exit(1); }
+const { EMOJI_ALT_RE, EMOJI_CODE_RE } = new Function(src.slice(emStart, emEnd) +
+    '\nreturn {EMOJI_ALT_RE, EMOJI_CODE_RE};')();
+['😀', '👍🏽', '🇫🇮', '❤️', '👨‍👩‍👧'].forEach(function (a) { eq('emoji alt ' + a, EMOJI_ALT_RE.test(a), true); });
+['Reply', 'avatar', 'A', '1', 'Close ✕', '😀 Like'].forEach(function (a) { eq('not an emoji alt ' + a, EMOJI_ALT_RE.test(a), false); });
+[':steamhappy:', ':face-blue-smiling:', ':+1:'].forEach(function (a) { eq('shortcode ' + a, EMOJI_CODE_RE.test(a), true); });
+['steamhappy', ':two words:', 'http://x.test/a:b:'].forEach(function (a) { eq('not a shortcode ' + a, EMOJI_CODE_RE.test(a), false); });
 [
     'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQ&s',
     'https://lh3.googleusercontent.com/a/photo=s96-c',

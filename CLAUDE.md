@@ -201,8 +201,9 @@ path has been touched twice ever, both times in 2021.
   `zoomLimit` (4); with `sizeGate` on, "is it `minRatio` times what is displayed". A candidate the
   linked page *declares* skips the guessing checks but **not** that gate (v0.40.0 — see
   [`docs/RESOLVER.md`](docs/RESOLVER.md)), and the page's own file beats it when bigger.
-- **No hardcoded size caps.** `minDisplayed` / `minRatio` are settings; the defaults are 16 / 1,
-  and `minDisplayed` is the ONLY size gate — nothing separately singles out icons or avatars.
+- **No hardcoded size caps.** `minDisplayed` / `minRatio` / `smallBelow` are settings (16 / 1 / 48).
+  Under `smallBelow` only avatars and emoji preview (v0.175.0, user's call — see `P14` in
+  [`docs/GATES.md`](docs/GATES.md)); that replaced "nothing singles out icons or avatars".
 - **Per-element probe state.** No shared lock, no `.one()`. `probeCache` is keyed by URL and
   every probe has both `onload` and `onerror`.
 - **Build UI with `createElement` + `textContent`.** Trusted Types CSP sites (YouTube, Google)
