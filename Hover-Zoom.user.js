@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.177.0
+// @version     0.178.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -40,7 +40,8 @@
     // ---- perf recorder: document.dispatchEvent(new CustomEvent('hover-zoom:perf', {detail: true | false | 'report'}))
     // Prints totals only — no URLs, no page names. See docs/TESTING.md "Perf recorder".
 
-    const perf = { on: false, t0: 0, calls: new Map(), lo: null, obs: null, self: '', wrapped: new WeakMap(), labels: new WeakMap() };
+    const perf = { on: false, t0: 0, calls: new Map(), lo: null, obs: null, self: '', wrapped: new WeakMap(), labels: new WeakMap(),
+        orig: new WeakMap(), hot: false, step: 0 };
     const setTimeout = function (fn, ms, ...a) { return window.setTimeout(perfWrap(fn, 'timeout'), ms, ...a); };
     const setInterval = function (fn, ms, ...a) { return window.setInterval(perfWrap(fn, 'interval'), ms, ...a); };
     const MutationObserver = perfObserver(window.MutationObserver, 'mutation');
@@ -58,7 +59,34 @@
             finally { perfTally(kind, fn, performance.now() - t); }
         };
         perf.wrapped.set(fn, w);
+        perf.orig.set(w, fn);
         return w;
+    }
+
+    // Rebinds the scan's hot function declarations to timed wrappers while recording (inclusive times).
+    function perfHot(w) {
+        tourPics = w(tourPics); tourWorthy = w(tourWorthy); shownMedia = w(shownMedia); eligibleDirect = w(eligibleDirect);
+        refusal = w(refusal); playerSurfaceReason = w(playerSurfaceReason); videoLinkRefused = w(videoLinkRefused);
+        decorativeReason = w(decorativeReason); bannerReason = w(bannerReason); pinnedWallpaperReason = w(pinnedWallpaperReason);
+        blocked = w(blocked); blockMatch = w(blockMatch); pictureUrl = w(pictureUrl); shownUrl = w(shownUrl);
+        lazyBehindBlocked = w(lazyBehindBlocked); tourSize = w(tourSize); postPics = w(postPics); postEnd = w(postEnd);
+        mainPics = w(mainPics); sideColumnEl = w(sideColumnEl); tourScopeNow = w(tourScopeNow); tourLevels = w(tourLevels);
+        tourPick = w(tourPick); tourEntriesIn = w(tourEntriesIn); tourOrder = w(tourOrder); twCount = w(twCount);
+        idlePics = w(idlePics); tourEntriesNow = w(tourEntriesNow); plHas = w(plHas); plFill = w(plFill); plPump = w(plPump);
+        tourNav = w(tourNav); twNear = w(twNear); twWheelZone = w(twWheelZone); thruSync = w(thruSync);
+        videoSurfaces = w(videoSurfaces); gifLike = w(gifLike); hwFill = w(hwFill); tourSync = w(tourSync); layout = w(layout);
+        showViewer = w(showViewer); upgradeViewer = w(upgradeViewer); tourLinesSync = w(tourLinesSync); atOrAfter = w(atOrAfter);
+    }
+
+    // Smallest step performance.now() moves in; Firefox with resistFingerprinting rounds to ~16.7 ms.
+    function perfStep() {
+        let a = performance.now(), b = a, best = Infinity;
+        for (let i = 0; i < 3; i++) {
+            while ((b = performance.now()) === a) { /* spin to the next tick */ }
+            if (i) best = Math.min(best, b - a);
+            a = b;
+        }
+        return best;
     }
 
     function perfObserver(C, kind) {
@@ -118,14 +146,20 @@
         perf.calls = new Map();
         perf.lo = { frames: 0, ms: 0, block: 0, render: 0, src: new Map(), fn: new Map() };
         perf.self = perfSelfUrl();
+        perf.step = perfStep();
+        perfHot(function (f) { return perfWrap(f, 'fn'); });
+        perf.hot = true;
         try {
-            perf.obs = new PerformanceObserver(function (list) { list.getEntries().forEach(perfFrame); });
-            perf.obs.observe({ type: 'long-animation-frame' });
+            if ((PerformanceObserver.supportedEntryTypes || []).indexOf('long-animation-frame') >= 0) {
+                perf.obs = new PerformanceObserver(function (list) { list.getEntries().forEach(perfFrame); });
+                perf.obs.observe({ type: 'long-animation-frame' });
+            }
         } catch (e) { perf.obs = null; }
     }
 
     function perfStop() {
         perf.on = false;
+        if (perf.hot) { perfHot(function (f) { return perf.orig.get(f) || f; }); perf.hot = false; }
         if (perf.obs) { try { perf.obs.disconnect(); } catch (e) { /* gone */ } perf.obs = null; }
     }
 
@@ -133,19 +167,26 @@
         if (!perf.lo) return '[HoverZoom] perf: nothing recorded yet';
         const f1 = function (n) { return n.toFixed(1); };
         const secs = (performance.now() - perf.t0) / 1000;
-        const rows = Array.from(perf.calls.entries()).sort(function (a, b) { return b[1].ms - a[1].ms; });
+        const all = Array.from(perf.calls.entries()).sort(function (a, b) { return b[1].ms - a[1].ms; });
+        const rows = all.filter(function (r) { return r[0].indexOf('fn ') !== 0; });
+        const fns = all.filter(function (r) { return r[0].indexOf('fn ') === 0; });
         const own = rows.reduce(function (t, r) { return t + r[1].ms; }, 0);
-        const out = ['[HoverZoom ' + version() + '] perf over ' + f1(secs) + ' s' + (perf.on ? ' (still recording)' : ''),
-            'Hover Zoom timers/observers/listeners: ' + f1(own) + ' ms (' + f1(own / secs / 10) + '% of one core)',
-            '  calls   total ms   max ms   /s   name'];
-        rows.slice(0, 25).forEach(function (r) {
+        const line = function (r) {
             const s = r[1];
-            out.push('  ' + String(s.n).padStart(5) + String(f1(s.ms)).padStart(11) + String(f1(s.max)).padStart(9) +
-                String(f1(s.n / secs)).padStart(6) + '   ' + r[0]);
-        });
+            out.push('  ' + String(s.n).padStart(6) + String(f1(s.ms)).padStart(11) + String(f1(s.max)).padStart(9) +
+                String(f1(s.n / secs)).padStart(7) + '   ' + r[0]);
+        };
+        const out = ['[HoverZoom ' + version() + '] perf over ' + f1(secs) + ' s' + (perf.on ? ' (still recording)' : ''),
+            'Page: ' + document.querySelectorAll('img,video').length + ' img/video, ' +
+                document.getElementsByTagName('*').length + ' elements; timer step ' + f1(perf.step) + ' ms',
+            'Entry points (timers/observers/listeners): ' + f1(own) + ' ms (' + f1(own / secs / 10) + '% of one core)',
+            '   calls   total ms   max ms     /s   name'];
+        rows.slice(0, 25).forEach(line);
+        out.push('Inside them, inclusive (a caller’s time holds its callees’):',
+            '   calls   total ms   max ms     /s   name');
+        fns.slice(0, 30).forEach(line);
         const lo = perf.lo;
-        if (!perf.obs && !lo.frames) out.push('Long frames: not reported by this browser (Chrome/Edge 123+ only)');
-        else {
+        if (perf.obs || lo.frames) {
             out.push('Long frames (>50 ms): ' + lo.frames + ', ' + f1(lo.ms) + ' ms total, ' + f1(lo.block) + ' ms blocking, ' +
                 f1(lo.render) + ' ms of it style/layout/paint');
             Array.from(lo.src.entries()).sort(function (a, b) { return b[1].ms - a[1].ms; }).forEach(function (r) {

@@ -13,6 +13,17 @@ only — no URLs, no page function names — so the user can paste it from a pri
   ones by their first 60 chars of source). Hot listeners (mousemove/over/out, the wheels, the scrolls)
   are wrapped where registered. A new high-frequency listener should be registered through `perfWrap`.
   `perfWrap` returns the same wrapper per function, so add/remove still pair.
+- **Inside them:** `perfHot()` rebinds ~45 top-level function declarations (the scan, the gates, the
+  tour's steps) to timed wrappers while recording and restores them on stop — declarations are
+  assignable bindings, so every internal call goes through the wrapper. Times are inclusive. Add a
+  function there to see it; a function captured as a value before recording starts is not counted.
+- **Firefox rounds `performance.now()`** (16.7 ms steps with resistFingerprinting — the user's
+  browser, 2026-09-27); the report prints the measured step. Per-call max is meaningless then;
+  totals over many calls still hold.
+- **Measured on the test page (v0.178.0): a slideshow step runs `tourEntriesNow` ~4 times**
+  (19 for 5 steps) — each a full `tourPics` pass through `refusal()` per picture.
+  User's site, Firefox, v0.177.0: `twWheel` 81 calls / 18.3 s, `pgTick`/`twLoadSync`/`twWarmFirst`
+  ~250 ms per call — the scan is what costs there; idle with a slideshow open was 0.0 ms of ours.
 - **Everyone's side:** a `long-animation-frame` observer (Chrome/Edge 123+; the Browser pane lacks it)
   buckets script time in frames >50 ms by source — Hover Zoom (matched against our own stack URL),
   other extension (Tampermonkey's `name=`), page, unattributed — with forced-layout time per bucket.
