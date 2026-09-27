@@ -292,7 +292,8 @@ example of what they want**, and two things are read off it at `tourStart()`:
   never form one) — floor = that side − 2. Commons (200 × 120 px) and Lemmy lists (80 px, unlinked
   buttons, so "must be a link" was tried and fails) had no widget before. Ask `idlePics`, not raw rects:
   Lemmy's 966×240 banner and 139×18 logo pass 128 raw and are then refused. `postEnd` keeps the setting.
-  Known risk: a page of ≥4 same-size unlinked avatars ≥64 px with no real pictures gains a widget.
+  A page of ≥4 same-size unlinked avatars ≥64 px with no real pictures gains a widget — accepted
+  (user, 2026-09-27): the block list is the answer for those, not a tighter rule here.
 - **The scope** (`tour.scope`): an ancestor of the start picture; only pictures inside it are in
   the list. Chosen by `tourPick()` from the *levels* (`tourLevels()`): the chain of ancestors at
   which the count of floor-passing pictures grows, one level per count, holding the **outermost**
