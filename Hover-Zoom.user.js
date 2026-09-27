@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.189.0
+// @version     0.190.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -6102,6 +6102,7 @@
     // `node dock/sync-dock.js` from HoverZoom. The design is HoverZoom/docs/WIDGET-DOCK.md.
     const usDock = (function () {
         const SNAP = 8;                 // px: window edges, the window's centre, other widgets
+        const STATUS_BAND = 25;         // px: the browser's link-URL bubble along the window's bottom
         const TOUCH = 1;                // px: how close two edges must be to count as attached at a drop
         const PASSES = 4;               // overlap sweeps; three widgets settle in two
         const SHADOW_REACH = 40;        // px: how far THEME.shadow spreads past a widget
@@ -6445,13 +6446,13 @@
             return { id: d.id, left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height };
         }
 
-        // Snap a dragged rect to the window's edges and centre, and to other widgets' edges.
+        // Snap a dragged rect to the window's edges and centre, the top of the status bubble, and other widgets' edges.
         function snap(x, y, w, h, V, others) {
             let bx = null, by = null;
             function tx(v) { const d = Math.abs(v - x); if (d <= SNAP && (!bx || d < bx.d)) bx = { d: d, v: v }; }
             function ty(v) { const d = Math.abs(v - y); if (d <= SNAP && (!by || d < by.d)) by = { d: d, v: v }; }
             tx(0); tx(V.w - w); tx((V.w - w) / 2);
-            ty(0); ty(V.h - h); ty((V.h - h) / 2);
+            ty(0); ty(V.h - h); ty((V.h - h) / 2); ty(V.h - STATUS_BAND - h);
             others.forEach(function (r) {
                 const nearY = y < r.bottom + SNAP && y + h > r.top - SNAP;
                 const nearX = x < r.right + SNAP && x + w > r.left - SNAP;
@@ -6630,7 +6631,7 @@
             };
         }
 
-        return { create: create, solve: solve, makeSpec: makeSpec, snap: snap, zone: zone, SNAP: SNAP,
+        return { create: create, solve: solve, makeSpec: makeSpec, snap: snap, zone: zone, SNAP: SNAP, STATUS_BAND: STATUS_BAND,
             THEME: THEME, FONT: FONT, pageIsDark: pageIsDark, theme: theme };
     })();
     // ==== us-dock end ====
