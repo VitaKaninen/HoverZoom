@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.182.0
+// @version     0.183.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -6849,7 +6849,7 @@
             const el = pics[i];
             if (scope !== root && !scope.contains(el)) continue;
             const r = passRect(el);
-            items.push({ el: el, url: pictureUrl(el), x: r.left + sx, y: r.top + sy,
+            items.push({ el: el, url: pictureUrl(el), pk: plKey(el), x: r.left + sx, y: r.top + sy,
                 h: r.height, n: items.length });
         }
         const live = tourOrder(items);
@@ -8604,7 +8604,7 @@
         for (let i = 0; i < list.length; i++) {
             const d = (i - at) * dir;
             if (depth && Math.abs(d) > depth) continue;
-            if (plHas(list[i].el)) continue;
+            if (plDone.has(list[i].pk || plKey(list[i].el))) continue;     // pk: taken when the list was built
             jobs.push({ el: list[i].el, dist: d >= 0 ? d : -2 * d, gen: plGen });
         }
         for (let k = 1; k <= plVidsAhead; k++) {
