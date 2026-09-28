@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.193.0
+// @version     0.194.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -275,6 +275,7 @@
         wheelRange: 65,             // px around the widget's wheel button in which the wheel steps
         tourLoadMore: true,         // the scroll excursion that makes a lazy page load more
         tourCrossPage: true,        // harvest the next page in the background
+        tourSkipDupes: true,        // the slideshow shows each picture once
 
         // placed mode
         wheelZoomStep: 15,          // % per wheel notch
@@ -6875,15 +6876,99 @@
     // Drops every later copy of a picture already in the list; the first stays. Counts what it dropped.
     let tourDupes = 0, widgetDupes = 0;
     function tourDedupe(list, isTour) {
+        if (!cfg.tourSkipDupes) { if (isTour) tourDupes = 0; else widgetDupes = 0; return list; }
         const seen = new Set(), out = [];
         list.forEach(function (e) {
-            const k = typeof e.pk === 'string' ? e.pk : e.pk === undefined && e.url ? e.url : null;     // a placeholder is never a duplicate
+            let k = typeof e.pk === 'string' ? e.pk : e.pk === undefined && e.url ? e.url : null;     // a placeholder is never a duplicate
+            if (dupOf.size) {       // plDone is declared below the boot call: untouched until a copy is found
+                const pre = plDone.get(e.pk !== undefined ? e.pk : plKey(e.el)), r = pre && pre.res;
+                if (r && !r.video) k = 'same\n' + dupRoot(r.url);
+            }
             if (k && seen.has(k)) return;
             if (k) seen.add(k);
             out.push(e);
         });
         if (isTour) tourDupes = list.length - out.length; else widgetDupes = list.length - out.length;
         return out;
+    }
+
+    // ---- same picture at two addresses: preloaded originals re-read in CORS mode (from the HTTP cache), sampled, confirmed pixel for pixel
+    const FP_SIDE = 16, FP_CHECK = 1024, FP_LOAD_MS = 8000, FP_STRIKES = 3;
+    const fpOf = new Map();         // original url -> 'w×h|hash' of its sample; '' while unread or unreadable
+    const dupOf = new Map();        // original url -> the url it was confirmed to be a copy of
+    const fpFails = new Map();      // host -> unreadable pictures so far; FP_STRIKES turns it off there
+
+    function dupRoot(url) { let u = url, n = 0; while (dupOf.has(u) && n++ < 50) u = dupOf.get(u); return u; }
+
+    // A picture opened in readable (CORS) mode, or null.
+    function fpImage(url) {
+        return new Promise(function (res) {
+            const im = new Image();
+            let done = false, t = 0;
+            const fin = function (v) { if (!done) { done = true; clearTimeout(t); res(v); } };
+            t = setTimeout(function () { fin(null); }, FP_LOAD_MS);
+            im.crossOrigin = 'anonymous';
+            if (noReferrerHere()) im.referrerPolicy = 'no-referrer';
+            im.onload = function () { fin(im); };
+            im.onerror = function () { fin(null); };
+            im.src = url;
+        });
+    }
+
+    // The picture's pixels with its long side at most `side`, or null when the browser refuses.
+    function fpPixels(im, side) {
+        const w = im.naturalWidth, h = im.naturalHeight;
+        if (!w || !h) return null;
+        const s = Math.min(1, side / Math.max(w, h));
+        const c = document.createElement('canvas');
+        c.width = Math.max(1, Math.round(w * s));
+        c.height = Math.max(1, Math.round(h * s));
+        try {
+            const g = c.getContext('2d', { willReadFrequently: true });
+            g.drawImage(im, 0, 0, c.width, c.height);
+            return g.getImageData(0, 0, c.width, c.height).data;
+        } catch (e) { return null; }
+    }
+
+    function fpHash(d) {
+        let h = 0x811c9dc5;
+        for (let i = 0; i < d.length; i++) { h ^= d[i]; h = Math.imul(h, 0x01000193); }
+        return (h >>> 0).toString(36);
+    }
+
+    function fpSame(a, b) {
+        if (!a || !b || a.length !== b.length) return false;
+        for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+        return true;
+    }
+
+    // Samples a preloaded original; a sample matching an earlier one is compared in full, and a match drops it from the slideshow.
+    async function fpTake(res) {
+        if (!cfg.tourSkipDupes || !res || res.video || !res.url || fpOf.has(res.url)) return;
+        const host = hostOf(res.url);
+        if ((fpFails.get(host) || 0) >= FP_STRIKES) return;
+        fpOf.set(res.url, '');
+        const im = await fpImage(res.url);
+        const px = im && fpPixels(im, FP_SIDE);
+        if (!px) {
+            const n = (fpFails.get(host) || 0) + 1;
+            fpFails.set(host, n);
+            if (n === FP_STRIKES) dbg('duplicates: pictures on ' + host + ' cannot be read, so copies there are found by address only');
+            return;
+        }
+        const key = im.naturalWidth + '×' + im.naturalHeight + '|' + fpHash(px);
+        fpOf.set(res.url, key);
+        for (const [u, k] of fpOf) {
+            if (u === res.url || k !== key || dupRoot(u) === dupRoot(res.url)) continue;
+            const other = await fpImage(u);
+            if (!fpSame(fpPixels(im, FP_CHECK), other && fpPixels(other, FP_CHECK))) continue;
+            dupOf.set(res.url, dupRoot(u));
+            dbg('duplicates: the same picture at two addresses', { first: u.slice(-60), copy: res.url.slice(-60) });
+            if (tour) tourSync();
+            else if (tw) twTotal = widgetEntries().length;
+            twSync();
+            return;
+        }
     }
 
     // A feed that unmounts what scrolled away (Imgur) keeps it in the slideshow: an entry whose
@@ -8866,7 +8951,7 @@
         // Probing an image leaves it in the HTTP cache; probing a clip does not, because
         // probeVideo() aborts the fetch the moment it has the dimensions.
         if (hit.video) { if (!job.hover && job.dist <= plVidsAhead) plWarmVideo(hit.url); }
-        else plKeepImage(hit);
+        else { plKeepImage(hit); fpTake(hit); }
     }
 
     // Queue every entry not yet answered, nearest first and ahead before behind. Nothing running
@@ -9996,6 +10081,8 @@
             'Scrolls the page ahead of the slideshow. Only on sites listed under Per-site fixes.');
         check('tourCrossPage', 'Carry on onto the next page',
             'Fetches the next page in the background; you stay on this one.');
+        check('tourSkipDupes', 'Skip duplicate pictures',
+            'Shows each picture once, even when it was uploaded twice under different addresses. The first copy stays.');
 
         section('Where it runs');
         pick('siteMode', 'Site list', null, [

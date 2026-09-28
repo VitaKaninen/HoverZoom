@@ -198,8 +198,20 @@ pictures (the test page does this — 19 dropped by URL, 12 by `pk`). Applied la
 list (live + roll ghosts + harvest), so the roll still remembers every copy. Placeholders (`pk` is
 the element) are never deduped — they all share one URL. The widget counter's tip says how many
 were skipped (`tourDupes`/`widgetDupes`). Hovering a dropped copy still previews; a slideshow
-started on one lands on the first copy via `tourAt()`'s URL fallback. Same picture at two sizes
-(different URLs) is not caught.
+started on one lands on the first copy via `tourAt()`'s URL fallback. Setting `tourSkipDupes`.
+
+**By content too** (v0.194.0 — a re-upload gets a new URL, same bytes; the user's site does this):
+`fpTake()` runs on every original the preloader keeps. The kept `Image` is unreadable (loaded
+without CORS; taint is stamped at download), so it re-opens the URL with `crossOrigin` — served
+from the HTTP cache, network only on a `no-store` server — samples it at 16 px (`w×h|FNV`), and
+on a sample match compares both at 1024 px pixel for pixel. A confirmed copy goes in `dupOf`; from
+then on `tourDedupe` keys every resolved entry by `dupRoot(original url)`, so pictures resolving to
+the same original also merge. Found as the preloader reaches them: the total shrinks during the
+first seconds. A host that cannot be read `FP_STRIKES` (3) times is left to the URL check.
+`dupOf.size` gates the `plDone` read — `plDone` sits below the boot call (TDZ). Byte-range hashing
+and a dimensions pre-filter were rejected: extra server requests, and popular sizes match too often.
+**Test fixtures reuse `photo.jpg?n=…`**: pager-1 counts 1 and test-page 12 with this on — turn it
+off to walk them.
 
 **Never drop an entry for failing to resolve.** The user's stated reason: a page with 50 images
 must give a tour of 50, and a picture they spotted half way down is their landmark for "half
