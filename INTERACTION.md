@@ -395,7 +395,7 @@ the current picture on screen (`T35`).
   opacity); shown on pages with
   two pictures at the slideshow's floor, or while a slideshow runs. It floats over the picture.
   After the count: a yellow `(N)` for skipped duplicates, then an orange ⚠ when most pictures looked
-  up on this site preview as enlarged small files (TOUR.md "Low-resolution ⚠").
+  up on this site had links to a larger file that all failed to load (TOUR.md "Dead-link ⚠").
 - **The list is derived on every press and kept nowhere** (`E54`). Lazy-loaded and newly appended
   images are picked up for free, and a virtualised feed deleting the picture under you is
   survivable — the anchor is the element, then its URL, then the place it was last seen.

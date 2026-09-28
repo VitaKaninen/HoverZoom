@@ -1152,19 +1152,23 @@ imgur mp4, four clips: **1.0–9.6 MB** (images on the same run were 40 KB–1.3
   corner captured on entry, which belong to a picture that is no longer in the frame: the window
   came back 111 px off the right edge at the wrong zoom. A tour step is the only way to reach it.
 
-## Low-resolution ⚠ · v0.202.0
+## Dead-link ⚠ · v0.203.0
 
-The widget's counter ends in an orange ⚠ when **most pictures looked up on this site would preview
-enlarged past their own pixels** — the user's "the script can't find higher quality here". Asked
-for as a per-site signal, never per image.
+The widget's counter ends in an orange ⚠ when **most pictures looked up on this site point at a
+larger file that never loads** — "the links are dead here, find out why". Asked for per site, never
+per image, and deliberately **not** a quality measure: v0.202.0 judged by how much the preview had
+to enlarge the result, which fired on sites that simply only have small pictures and depended on
+screen size. The user rejected that; do not bring resolution back into it.
 
-- `noteLowres()` runs at the end of every **full** `resolve()` (hover, slideshow arrival). A
-  speculative preload passes `guesses`, is capped, and is not counted. Keyed by the displayed URL,
-  so re-hovering one picture counts once; in memory for the tab, cleared when `pageHost()` changes.
-- "Low" = the best file found (or the page's own, if none) opens at more than `LOWRES_UPSCALE` (1.5)
-  × its pixels, by `bigEnough()`'s arithmetic: `min(zoomLimit, viewport / file)`. It is judged on
-  the result, not on whether an upgrade happened — a 24 px thumbnail upgraded to 480 px is still low.
-- Shown at `LOWRES_MIN` (5) pictures and more than half low. Top frame only; icons/avatars under
-  `smallBelow` are not counted.
-- **Test with a pinned viewport.** The measure depends on the window: in a 471 px-wide pane a 480 px
-  file is not enlarged at all, and the ⚠ correctly never appears.
+- **A lead** is a candidate that claims to be the larger file: `data-*`, `srcset`, `<picture>`, the
+  ancestor link, a URL in a link's or the src's query, the linked page's answers, and a rule with
+  `report: true`. Not a lead: a generic rule's guess (they 404 routinely on healthy sites) or the
+  displayed src itself. Set in `collectCandidates()`'s `add` (`c.lead`).
+- **Per picture** (`noteLeads()`, end of every full `resolve()`): any lead returned a picture, of
+  ANY size → fine (a Google `imgurl=` smaller than its thumbnail is a success); leads tried and all
+  failed (4xx, error, not a picture, timeout, CSP with no byte fallback) → dead; no lead tried → not
+  counted. Speculative preloads (`guesses` set) are not counted.
+- Shown at `DEAD_MIN` (5) counted pictures and more than half dead. Keyed by displayed URL, in memory
+  for the tab, cleared when `pageHost()` changes. Top frame only; under `smallBelow` not counted.
+- The tooltip points at the settings panel's rule-health box when that box has entries (RESOLVER.md
+  "Rule health").

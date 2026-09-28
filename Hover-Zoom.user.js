@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.202.0
+// @version     0.203.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -1059,31 +1059,26 @@
             .sort(function (a, b) { return b.fails - a.fails; });
     }
 
-    // ---- low-resolution site: the widget's ⚠ when most pictures here have no larger file. See TOUR.md "Low-resolution ⚠".
-    const LOWRES_MIN = 5;           // pictures resolved before the widget may warn
-    const LOWRES_UPSCALE = 1.5;     // the preview enlarging the best file past this counts as low resolution
-    const lowres = new Map();       // displayed url -> true when the best file found is still enlarged
-    let lowresHost = '';
+    // ---- dead links: the widget's ⚠ when most pictures here point at a larger file that never loads. See TOUR.md "Dead-link ⚠".
+    const DEAD_MIN = 5;             // pictures with a lead before the widget may warn
+    const deadLinks = new Map();    // displayed url -> true when every lead it had failed to load
+    let deadHost = '';
 
-    // Record one finished full search: would the preview have to enlarge the best file it found?
-    function noteLowres(el, displayed, shown, hit, native) {
-        if (!shown || !isTopFrame) return;
+    // Record one finished full search: did any lead to a larger file return a picture, of any size?
+    function noteLeads(displayed, shown, leads) {
+        if (!shown || !isTopFrame || !leads.tried) return;
         if (displayed.w < cfg.smallBelow && displayed.h < cfg.smallBelow) return;     // icons, emoji, avatars
-        const dim = hit || native;
-        if (!dim || !dim.w || !dim.h || (hit && hit.video)) return;
-        if (lowresHost !== pageHost()) { lowres.clear(); lowresHost = pageHost(); }
-        const m = viewportBox();
-        const s = Math.min(fromShown(cfg.zoomLimit), m.w / dim.w, m.h / dim.h);
-        lowres.set(shown, s > LOWRES_UPSCALE);
+        if (deadHost !== pageHost()) { deadLinks.clear(); deadHost = pageHost(); }
+        deadLinks.set(shown, !leads.ok);
         twSync();
     }
 
-    // { low, of } when most pictures resolved on this page are low resolution, else null.
-    function lowresSite() {
-        if (lowresHost !== pageHost() || lowres.size < LOWRES_MIN) return null;
-        let low = 0;
-        lowres.forEach(function (v) { if (v) low++; });
-        return low * 2 > lowres.size ? { low: low, of: lowres.size } : null;
+    // { dead, of } when most pictures looked up on this page had only dead leads, else null.
+    function deadLinkSite() {
+        if (deadHost !== pageHost() || deadLinks.size < DEAD_MIN) return null;
+        let dead = 0;
+        deadLinks.forEach(function (v) { if (v) dead++; });
+        return dead * 2 > deadLinks.size ? { dead: dead, of: deadLinks.size } : null;
     }
 
     const SRCSET_KEEP = 2;      // per list: the widest, and one behind it in case that 404s. See E46.
@@ -1107,8 +1102,10 @@
             if (blocked(abs)) return;       // never probe something the user has ruled out
             if (unstable.has(abs)) return;  // it has already been caught changing under us
             if (!videoPreviewsOn() && isVideoUrl(abs)) return;
-            if (seen.has(abs)) { if (keep) seen.get(abs).keep = true; return; }
-            const c = { url: abs, from: from, keep: !!keep };
+            // A lead points at the larger file: anything but a generic rule's guess or the picture itself.
+            const lead = r ? !!r.rule.report : from !== 'the displayed src itself';
+            if (seen.has(abs)) { if (keep) seen.get(abs).keep = true; if (lead) seen.get(abs).lead = true; return; }
+            const c = { url: abs, from: from, keep: !!keep, lead: lead };
             if (r) { c.rule = r.rule; c.ruleHost = r.host; }
             seen.set(abs, c);
             out.push(c);
@@ -1728,6 +1725,7 @@
         const shown = shownUrl(el);
         const native = nativeSize(el);      // the bytes on screen, for the stability test
         const full = guesses === undefined;      // a speculative search is capped, so says nothing about the site
+        const leads = { tried: 0, ok: false };
         dbg('candidates', candidates);
         let best = null;
         let trusted = null;
@@ -1765,6 +1763,8 @@
                 if (token.cancelled) break;
                 if (blocked(t.url)) continue;
                 const dim = await probe(t.url, token.fresh);
+                leads.tried++;
+                if (dim) leads.ok = true;
                 if (!dim) { failure = failure || failureText(t.url); continue; }
                 if (token.cancelled) continue;
                 // A matching filename already proves identity; the thumbnail may be a fixed-shape crop.
@@ -1801,6 +1801,7 @@
             if (trusted) break;             // the authoritative answer landed; stop guessing
             const dim = await probe(url, token.fresh);
             if (c.rule) ruleOutcome(c, dim);
+            if (c.lead && url !== shown) { leads.tried++; if (dim) leads.ok = true; }
             if (!dim) { failure = failure || failureText(url); continue; }
             const isSameAsShown = (url === shown);
             if (isSameAsShown && native && !samePicture(native, dim)) {
@@ -1838,16 +1839,16 @@
                 const hit = { url: shown, w: own.w, h: own.h, display: own.display, from: 'the page\'s own picture, bigger than the linked page\'s' };
                 dbg('hit', hit);
                 emit(hit);
-                if (full) noteLowres(el, displayed, shown, hit, native);
+                if (full) noteLeads(displayed, shown, leads);
                 return hit;
             }
-            if (full) noteLowres(el, displayed, shown, trusted, native);
+            if (full) noteLeads(displayed, shown, leads);
             return trusted;
         }
         // Nothing loaded AND something actually failed — the caller shows the reason. A run
         // that only rejected candidates for being too small leaves this null on purpose.
         if (!best && failure) token.failure = failure;
-        if (full && !token.cancelled) noteLowres(el, displayed, shown, best, native);
+        if (full && !token.cancelled) noteLeads(displayed, shown, leads);
         return best;
     }
 
@@ -7454,8 +7455,8 @@
             '.load.done{color:var(--done)}',
             '.dup{margin-left:3px;font-size:9px;color:var(--dup)}',
             '.dup:empty{display:none}',
-            '.lowres{margin-left:3px;font-size:10px;color:var(--lowres)}',
-            '.lowres:empty{display:none}',
+            '.dead{margin-left:3px;font-size:10px;color:var(--dead)}',
+            '.dead:empty{display:none}',
             '.load:empty{display:none}',
         ].concat(vbtnCss(), [
             '.tw .vbtn{color:var(--text)}',
@@ -7472,11 +7473,11 @@
         const num = document.createTextNode('');
         const dup = document.createElement('span');
         dup.className = 'dup';
-        const lowresEl = document.createElement('span');
-        lowresEl.className = 'lowres';
+        const deadEl = document.createElement('span');
+        deadEl.className = 'dead';
         count.appendChild(num);
         count.appendChild(dup);
-        count.appendChild(lowresEl);
+        count.appendChild(deadEl);
         setTip(count, TW_HELP, TW_HELP_MS);
         const next = mkVBtn(ICON_NEXT, null, function () { if (!twHeld) twPress(1); });
         twHoldOn(prev, -1);
@@ -7491,7 +7492,7 @@
         box.appendChild(wheel);
         box.appendChild(load);
         sr.appendChild(box);
-        tw = { host: host, box: box, prev: prev, count: count, num: num, dup: dup, lowres: lowresEl, next: next, wheel: wheel, load: load, dock: null, rect: null, near: false };
+        tw = { host: host, box: box, prev: prev, count: count, num: num, dup: dup, dead: deadEl, next: next, wheel: wheel, load: load, dock: null, rect: null, near: false };
         // A pointer already resting where the widget appears sends no mousemove, only this.
         host.addEventListener('mouseover', function (e) { twNear(e.clientX, e.clientY); });
         document.body.appendChild(host);
@@ -7593,7 +7594,7 @@
         ['bg', 'bg3', 'border', 'text', 'muted', 'shadow'].forEach(function (k) { tw.box.style.setProperty('--' + k, t[k]); });
         tw.box.style.setProperty('--done', t.scheme === 'dark' ? '#a6e3a1' : '#40a02b');
         tw.box.style.setProperty('--dup', t.scheme === 'dark' ? '#f9e2af' : '#df8e1d');
-        tw.box.style.setProperty('--lowres', t.scheme === 'dark' ? '#fab387' : '#fe640b');
+        tw.box.style.setProperty('--dead', t.scheme === 'dark' ? '#fab387' : '#fe640b');
         tw.box.style.colorScheme = t.scheme;
     }
 
@@ -7652,10 +7653,10 @@
         tw.num.nodeValue = (at >= 0 ? at + 1 : '–') + ' / ' + (n >= 0 ? n : '–');
         const dupes = tour ? tourDupes : widgetDupes;
         tw.dup.textContent = dupes ? '(' + dupes + ')' : '';
-        const lr = lowresSite();
-        tw.lowres.textContent = lr ? '⚠' : '';
-        tw.count.__tip = (lr ? '⚠ Only small files found for ' + lr.low + ' of the ' + lr.of +
-                ' pictures looked up on this site — their previews are enlarged\n' : '') +
+        const dl = deadLinkSite();
+        tw.dead.textContent = dl ? '⚠' : '';
+        tw.count.__tip = (dl ? '⚠ Links to the full-size picture failed for ' + dl.dead + ' of ' + dl.of +
+                ' pictures on this site' + (brokenRules().length ? ' — the settings panel names the rule' : '') + '\n' : '') +
             (dupes ? 'Skipped ' + dupes + ' duplicate' + (dupes === 1 ? '' : 's') + '\n' : '') + TW_HELP;
         tw.prev.classList.toggle('faint', !n);      // faint only with nothing to show; at either end a press wraps
         tw.next.classList.toggle('faint', !n);
