@@ -200,18 +200,24 @@ the element) are never deduped — they all share one URL. The widget counter's 
 were skipped (`tourDupes`/`widgetDupes`). Hovering a dropped copy still previews; a slideshow
 started on one lands on the first copy via `tourAt()`'s URL fallback. Setting `tourSkipDupes`.
 
-**By content too** (v0.194.0 — a re-upload gets a new URL, same bytes; the user's site does this):
-`fpTake()` runs on every original the preloader keeps. The kept `Image` is unreadable (loaded
-without CORS; taint is stamped at download), so it re-opens the URL with `crossOrigin` — served
-from the HTTP cache, network only on a `no-store` server — samples it at 16 px (`w×h|FNV`), and
-on a sample match compares both at 1024 px pixel for pixel. A confirmed copy goes in `dupOf`; from
-then on `tourDedupe` keys every resolved entry by `dupRoot(original url)`, so pictures resolving to
-the same original also merge. Found as the preloader reaches them: the total shrinks during the
-first seconds. A host that cannot be read `FP_STRIKES` (3) times is left to the URL check.
-`dupOf.size` gates the `plDone` read — `plDone` sits below the boot call (TDZ). Byte-range hashing
-and a dimensions pre-filter were rejected: extra server requests, and popular sizes match too often.
-**Test fixtures reuse `photo.jpg?n=…`**: pager-1 counts 1 and test-page 12 with this on — turn it
-off to walk them.
+**By content too** (v0.195.0 — a re-upload gets a new URL, same bytes; the user's site does this).
+`fpTake(el, res)` runs per entry the preloader resolves:
+1. Re-open the entry's **thumbnail** (shown URL, ≤ `FP_THUMB_PX`) with `crossOrigin` and sample it
+   at 16 px → `w×h|FNV`. Free: small files come back from the HTTP cache.
+2. Sample match → the two thumbnails compared pixel for pixel (small decode).
+3. Then the **originals** by one ranged GET each (`fpHead`: total size + FNV of first 64 KB). Needed:
+   identical thumbnails can stand for different originals (test-page's `photo-200x150.jpg` cases).
+Confirmed → `dupOf` (plKey → plKey); `tourDedupe` keys by `dupRoot(pk)`. The total shrinks as the
+preloader goes. A host unreadable `FP_STRIKES` (3) times is left to the URL check.
+Do not go back to (measured on `test-pages/perf-dupes.html`, 12 MP photos):
+- **Re-reading the originals in CORS mode:** the kept `Image` is unreadable (taint is stamped at
+  download, not by the server's answer), the CORS re-open is a different mode from the memory cache,
+  and the pane's HTTP cache does not store 7 MB files → a full second download per picture.
+- **Comparing originals by pixels:** decoding a 12 MP photo blocks the main thread ~250 ms per pair,
+  even through `createImageBitmap(img)`.
+- **`img.decode()`:** never settles while the pane is hidden.
+Cost now, 24 entries / 4 copies: 0 long tasks, 0 extra full downloads, 8 × 64 KB, all found in ~3 s.
+**Test fixtures reuse `photo.jpg?n=…`**: pager-1 counts 1 with this on — turn it off to walk them.
 
 **Never drop an entry for failing to resolve.** The user's stated reason: a page with 50 images
 must give a tour of 50, and a picture they spotted half way down is their landmark for "half

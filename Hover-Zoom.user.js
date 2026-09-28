@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.194.0
+// @version     0.195.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -6880,10 +6880,7 @@
         const seen = new Set(), out = [];
         list.forEach(function (e) {
             let k = typeof e.pk === 'string' ? e.pk : e.pk === undefined && e.url ? e.url : null;     // a placeholder is never a duplicate
-            if (dupOf.size) {       // plDone is declared below the boot call: untouched until a copy is found
-                const pre = plDone.get(e.pk !== undefined ? e.pk : plKey(e.el)), r = pre && pre.res;
-                if (r && !r.video) k = 'same\n' + dupRoot(r.url);
-            }
+            if (k && dupOf.size) k = dupRoot(k);
             if (k && seen.has(k)) return;
             if (k) seen.add(k);
             out.push(e);
@@ -6892,10 +6889,11 @@
         return out;
     }
 
-    // ---- same picture at two addresses: preloaded originals re-read in CORS mode (from the HTTP cache), sampled, confirmed pixel for pixel
-    const FP_SIDE = 16, FP_CHECK = 1024, FP_LOAD_MS = 8000, FP_STRIKES = 3;
-    const fpOf = new Map();         // original url -> 'w×h|hash' of its sample; '' while unread or unreadable
-    const dupOf = new Map();        // original url -> the url it was confirmed to be a copy of
+    // ---- same picture at two addresses: the page's thumbnail re-read in CORS mode and sampled; a match is confirmed on the originals' bytes
+    const FP_SIDE = 16, FP_HEAD = 65536, FP_LOAD_MS = 8000, FP_STRIKES = 3;
+    const FP_THUMB_PX = 1500000;    // a shown picture bigger than this is not re-read: only small files come back from the cache
+    const fpOf = new Map();         // entry key (plKey) -> { key: 'w×h|hash' of the thumbnail sample, thumb, orig }
+    const dupOf = new Map();        // entry key -> the entry key it was confirmed to be a copy of
     const fpFails = new Map();      // host -> unreadable pictures so far; FP_STRIKES turns it off there
 
     function dupRoot(url) { let u = url, n = 0; while (dupOf.has(u) && n++ < 50) u = dupOf.get(u); return u; }
@@ -6915,8 +6913,8 @@
         });
     }
 
-    // The picture's pixels with its long side at most `side`, or null when the browser refuses.
-    function fpPixels(im, side) {
+    // The picture's pixels with its long side at most `side`, or null when the browser refuses. Decoded and scaled off the main thread.
+    async function fpPixels(im, side) {
         const w = im.naturalWidth, h = im.naturalHeight;
         if (!w || !h) return null;
         const s = Math.min(1, side / Math.max(w, h));
@@ -6924,8 +6922,10 @@
         c.width = Math.max(1, Math.round(w * s));
         c.height = Math.max(1, Math.round(h * s));
         try {
+            const bmp = await createImageBitmap(im, { resizeWidth: c.width, resizeHeight: c.height, resizeQuality: 'medium' });
             const g = c.getContext('2d', { willReadFrequently: true });
-            g.drawImage(im, 0, 0, c.width, c.height);
+            g.drawImage(bmp, 0, 0);
+            bmp.close();
             return g.getImageData(0, 0, c.width, c.height).data;
         } catch (e) { return null; }
     }
@@ -6942,28 +6942,61 @@
         return true;
     }
 
-    // Samples a preloaded original; a sample matching an earlier one is compared in full, and a match drops it from the slideshow.
-    async function fpTake(res) {
-        if (!cfg.tourSkipDupes || !res || res.video || !res.url || fpOf.has(res.url)) return;
-        const host = hostOf(res.url);
-        if ((fpFails.get(host) || 0) >= FP_STRIKES) return;
-        fpOf.set(res.url, '');
-        const im = await fpImage(res.url);
-        const px = im && fpPixels(im, FP_SIDE);
-        if (!px) {
-            const n = (fpFails.get(host) || 0) + 1;
-            fpFails.set(host, n);
-            if (n === FP_STRIKES) dbg('duplicates: pictures on ' + host + ' cannot be read, so copies there are found by address only');
-            return;
+    function fpFail(url) {
+        const host = hostOf(url), n = (fpFails.get(host) || 0) + 1;
+        fpFails.set(host, n);
+        if (n === FP_STRIKES) dbg('duplicates: pictures on ' + host + ' cannot be read, so copies there are found by address only');
+    }
+
+    // Two small pictures read in full and compared pixel for pixel.
+    async function fpSameThumb(a, b) {
+        const ia = await fpImage(a), ib = ia && await fpImage(b);
+        if (!ia || !ib) { fpFail(a); return false; }
+        return fpSame(await fpPixels(ia, Infinity), await fpPixels(ib, Infinity));
+    }
+
+    // A file's total size and a hash of its first FP_HEAD bytes, from one ranged request; '' when unreadable.
+    async function fpHead(url) {
+        let r = null;
+        if (typeof GM_xmlhttpRequest === 'function') r = await rangeGet(url, FP_HEAD, FP_LOAD_MS);
+        else {      // the test pages, which have no GM_xhr
+            try {
+                const f = await fetch(url, { headers: { Range: 'bytes=0-' + (FP_HEAD - 1) } });
+                let h = '';
+                f.headers.forEach(function (v, k) { h += k + ': ' + v + '\n'; });
+                const b = await f.arrayBuffer();
+                r = { status: f.status, headers: h, bytes: new Uint8Array(b, 0, Math.min(FP_HEAD, b.byteLength)) };
+            } catch (e) { r = null; }
         }
-        const key = im.naturalWidth + '×' + im.naturalHeight + '|' + fpHash(px);
-        fpOf.set(res.url, key);
-        for (const [u, k] of fpOf) {
-            if (u === res.url || k !== key || dupRoot(u) === dupRoot(res.url)) continue;
-            const other = await fpImage(u);
-            if (!fpSame(fpPixels(im, FP_CHECK), other && fpPixels(other, FP_CHECK))) continue;
-            dupOf.set(res.url, dupRoot(u));
-            dbg('duplicates: the same picture at two addresses', { first: u.slice(-60), copy: res.url.slice(-60) });
+        if (!r || !r.bytes || r.status < 200 || r.status >= 300) return '';
+        const size = sizeFromHeaders(r.headers, r.status) || '?';
+        return size + '|' + fpHash(r.bytes);
+    }
+
+    async function fpSameFile(a, b) {
+        const ha = await fpHead(a), hb = ha && await fpHead(b);
+        if (!ha || !hb) { fpFail(a); return false; }
+        return ha === hb;
+    }
+
+    // Samples a preloaded entry's thumbnail; one matching an earlier thumbnail is checked on the originals, and a match drops it from the slideshow.
+    async function fpTake(el, res) {
+        if (!cfg.tourSkipDupes || !el || el.tagName !== 'IMG' || !res || res.video || !res.url) return;
+        const pk = plKey(el), thumb = pictureUrl(el);
+        if (typeof pk !== 'string' || !thumb || fpOf.has(pk) || dupOf.has(pk)) return;
+        if (!(el.naturalWidth * el.naturalHeight <= FP_THUMB_PX) || (fpFails.get(hostOf(thumb)) || 0) >= FP_STRIKES) return;
+        fpOf.set(pk, null);
+        const im = await fpImage(thumb);
+        const px = im && await fpPixels(im, FP_SIDE);
+        if (!px) { fpFail(thumb); return; }
+        const me = { key: im.naturalWidth + '×' + im.naturalHeight + '|' + fpHash(px), thumb: thumb, orig: res.url };
+        fpOf.set(pk, me);
+        for (const [k, o] of fpOf) {
+            if (k === pk || !o || o.key !== me.key || dupRoot(k) === dupRoot(pk)) continue;
+            if (o.thumb !== me.thumb && !await fpSameThumb(o.thumb, me.thumb)) continue;
+            if (o.orig !== me.orig && !await fpSameFile(o.orig, me.orig)) continue;
+            dupOf.set(pk, dupRoot(k));
+            dbg('duplicates: the same picture at two addresses', { first: o.orig.slice(-60), copy: me.orig.slice(-60) });
             if (tour) tourSync();
             else if (tw) twTotal = widgetEntries().length;
             twSync();
@@ -8951,7 +8984,7 @@
         // Probing an image leaves it in the HTTP cache; probing a clip does not, because
         // probeVideo() aborts the fetch the moment it has the dimensions.
         if (hit.video) { if (!job.hover && job.dist <= plVidsAhead) plWarmVideo(hit.url); }
-        else { plKeepImage(hit); fpTake(hit); }
+        else { plKeepImage(hit); fpTake(job.el, hit); }
     }
 
     // Queue every entry not yet answered, nearest first and ahead before behind. Nothing running

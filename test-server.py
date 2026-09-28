@@ -4,6 +4,7 @@
     ?csp=<policy>      send that Content-Security-Policy on the response
     /rotate.php        a forum's "random image" endpoint: what it returns depends on
                        the query, so dropping the query asks a different question
+    Range: bytes=a-b   answered with 206, as an image CDN does (the duplicate check's ranged GET)
 
 `python -m http.server` cannot stall a response, and without stalling one there is no
 way to see the resolve spinner locally: every probe against localhost finishes in
@@ -46,7 +47,31 @@ class SlowHandler(SimpleHTTPRequestHandler):
     def do_GET(self):
         if urlparse(self.path).path == "/rotate.php":
             return self.serve_rotating()
+        if self.headers.get("Range", "").startswith("bytes="):
+            return self.serve_range()
         return SimpleHTTPRequestHandler.do_GET(self)
+
+    def serve_range(self):
+        # A single "bytes=a-b" range answered with 206, as an image CDN does.
+        path = self.translate_path(self.path)
+        if not os.path.isfile(path):
+            return SimpleHTTPRequestHandler.do_GET(self)
+        size = os.path.getsize(path)
+        a, _, b = self.headers["Range"][6:].partition("-")
+        try:
+            start = int(a or 0)
+            end = min(int(b) if b else size - 1, size - 1)
+        except ValueError:
+            return SimpleHTTPRequestHandler.do_GET(self)
+        with open(path, "rb") as fh:
+            fh.seek(start)
+            body = fh.read(max(0, end - start + 1))
+        self.send_response(206)
+        self.send_header("Content-Type", self.guess_type(path))
+        self.send_header("Content-Range", "bytes %d-%d/%d" % (start, end, size))
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def do_HEAD(self):
         if urlparse(self.path).path == "/rotate.php":

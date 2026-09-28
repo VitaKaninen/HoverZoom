@@ -1,0 +1,55 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Duplicate-skip cost</title>
+<!--
+  Cost of the content duplicate check (TOUR.md "Membership"). Needs `python make-perf-images.py`.
+  20 photos of 4032x3024 plus 4 byte-identical re-uploads (re*.jpg). ?dupes=1 / ?dupes=0 sets
+  tourSkipDupes before the script loads. Expected with it on: 24 counted, 20 once preloaded.
+-->
+<style>
+  body { font: 14px sans-serif; margin: 20px; }
+  .grid { display: flex; flex-wrap: wrap; gap: 10px; }
+  .grid img { width: 300px; height: 225px; display: block; }
+</style>
+<h1>Duplicate-skip cost</h1>
+<div class="grid" id="grid"></div>
+<script>
+  var order = [];
+  for (var i = 1; i <= 20; i++) {
+    order.push('p' + (i < 10 ? '0' : '') + i);
+    if (i === 5) order.push('re03');
+    if (i === 10) order.push('re07');
+    if (i === 15) order.push('re12');
+  }
+  order.push('re18');
+  var grid = document.getElementById('grid');
+  order.forEach(function (n) {
+    var a = document.createElement('a');
+    a.href = '../test-images/perf/' + n + '.jpg';
+    var img = document.createElement('img');
+    img.src = '../test-images/perf/' + n + '_t.jpg';
+    img.alt = n;
+    a.appendChild(img);
+    grid.appendChild(a);
+  });
+  var m = /[?&]dupes=([01])/.exec(location.search);
+  if (m) {
+    var s = {};
+    try { s = JSON.parse(localStorage.getItem('hoverZoomSettings') || '{}'); } catch (e) {}
+    s.tourSkipDupes = m[1] === '1';
+    localStorage.setItem('hoverZoomSettings', JSON.stringify(s));
+  }
+  var GM_getValue = function (key, dflt) {
+    var v = localStorage.getItem(key);
+    return v === null ? dflt : v;
+  };
+  var GM_setValue = function (key, val) { localStorage.setItem(key, val); };
+  var GM_addValueChangeListener = function (key, fn) {
+    window.addEventListener('storage', function (e) {
+      if (e.key === key) fn(key, e.oldValue, e.newValue, true);
+    });
+  };
+  var GM_registerMenuCommand = function () { return 'x'; };
+  var GM_unregisterMenuCommand = function () {};
+</script>
+<script src="../Hover-Zoom.user.js"></script>
