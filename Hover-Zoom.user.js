@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.197.0
+// @version     0.198.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -8169,7 +8169,7 @@
     let scrubAt = 0, scrubDir = 1;
     let wallBusy = false;       // ▶ at the last picture is asking the page for more
     let seamDir = 0;            // the end the last step stopped at; the next one wraps
-    let seamHoldUntil = 0;      // user steps are ignored until then, after stopping at an end
+    let seamHoldUntil = 0;      // user steps toward seamDir are ignored until then; away from it pass
     const SEAM_HOLD_MS = 1000;
     const SEAM_NOTE_MS = 1000;
     const STEP_GAP_MS = 150;        // a user step this soon after the last is dropped (a notch run on), until tourFast()
@@ -8192,7 +8192,7 @@
     // `user`: a key, click, hold or wheel — paced by the picture on screen and stopped once at each end.
     function tourNav(dir, repeat, user) {
         if (!placed || !view || !tour) return;
-        if (user && Date.now() < seamHoldUntil) return;
+        if (user && dir === seamDir && Date.now() < seamHoldUntil) return;
         if (user) {
             const now = Date.now();
             if (!repeat) navHoldFrom = now;
@@ -8877,7 +8877,7 @@
         if (tourExhausted()) tourSeam(1, user);
     }
 
-    // Past an end: user input stops there once (note, SEAM_HOLD_MS deaf); the next step wraps.
+    // Past an end: user input stops there once (note, SEAM_HOLD_MS deaf that way only); the next step wraps.
     function tourSeam(dir, user) {
         if (!tour || !placed) return;
         if (user && seamDir !== dir) {

@@ -871,7 +871,7 @@ from a busy source, or from "scrolled on, not at the bottom yet", is not an end.
 presses while it runs, or each would step/wrap when it resolves.
 Wrapping is the user's call: a wheel spun to the end should not close anything. A note that stayed up
 was rejected (it hides the picture); so was ignoring the wheel until it stops (a free-spinning wheel
-must then be stopped by hand) — hence the fixed 1 s hold at the seam, for every input alike (`E72`;
+must then be stopped by hand) — hence the fixed 1 s hold at the seam, for every input alike, and only toward that end (a step back is taken at once — user's call, v0.198.0) (`E72`;
 the user expects all modes to behave the same and differ only in how they are started). The wall
 also re-reads the page first (`tourAdopt(tour.had)`), for a batch that landed after the watch ended.
 
