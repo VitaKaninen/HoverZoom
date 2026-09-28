@@ -209,11 +209,12 @@ the search** — the candidate loop breaks the moment `trusted` is set. It does 
   does exactly this: `/pictures/X.htm` declares `og:image` = `/thumbs/X_s.jpg`, the 140×140 already on
   screen, while the 1001px original is only in `<img id="mainpic">`. The og answer then fails the
   upsize gate and the site previewed nothing at all. So `pageMediaFrom()` returns **both** what the
-  page declares and `pageBodyMedia()` — its same-origin `<img>`/`<video>` srcs — and `resolve()` tries
+  page declares and `pageBodyMedia()` — its `<img>`/`<video>` srcs and `<a href>`s to media files, any
+  host (v0.200.0; the filename match below is the guard, not the host) — and `resolve()` tries
   them together, capped at `LINKED_TRIES` (4).
   - **A body image is only tried when `sameStem()` says it names the same picture** as the thumbnail:
     identical filename stems, or one stem plus a short separator-led tail (`_s`, `-150x150`,
-    `_thumbnail`). Without that filter this path would happily pick a banner ad off the item page —
+    `_thumbnail`), or a short size head carrying a digit (`250px-`, MediaWiki). Without that filter this path would happily pick a banner ad off the item page —
     and it is the one path that gets called authoritative. The tail is capped at 10 characters so
     `X_The_Sequel` is not read as a size variant of `X`.
   - **Resolve against the FETCHED page, not this one.** The document comes from `DOMParser`, so
@@ -589,9 +590,10 @@ Two that were looked at and deliberately left alone:
   size, free and site-agnostic. Not used: nothing in the resolver wants a declared size it has not
   measured, and trusting one would weaken `samePicture()`. Noted because it looks useful and is not.
 - **Wikimedia's thumbnail host moved** to `thumb.wikimedia.org` (seen 2026-09-28), which 404s every
-  original. The MediaWiki rule swaps it to `upload.wikimedia.org` and drops the `utm_` query. The
-  linked `File:` page cannot rescue it: its og:image is the article's own share card for the lead
-  image (E48 rejects it), and its body media is cross-origin to `en.wikipedia.org`.
+  original. The MediaWiki rule swaps it to `upload.wikimedia.org` and drops the `utm_` query. Since
+  v0.200.0 the linked `File:` page also rescues it without the rule: its "Original file" `<a href>`
+  matches by `250px-` size head (case 43). Its og:image cannot — for the lead image that is the
+  article's own share card, which E48 rejects.
 
 Danbooru, Unsplash, Pexels, ArtStation, Fandom and phpbb.com all answered **403** to a plain fetch;
 they need a real browser session, and are unsurveyed rather than uninteresting.

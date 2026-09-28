@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.199.0
+// @version     0.200.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -628,6 +628,9 @@
         } catch (e) { return ''; }
     }
 
+    // ...or a short size-led head that carries a digit: MediaWiki's `250px-`.
+    const SIZE_HEAD_RE = /^(?=[^_.-]*\d)[A-Za-z0-9]{1,9}[-_.]$/;
+
     // Do two media URLs name the same picture at different sizes?
     function sameStem(a, b) {
         const x = urlStem(a), y = urlStem(b);
@@ -635,7 +638,8 @@
         if (x === y) return true;
         const long = x.length > y.length ? x : y;
         const short = x.length > y.length ? y : x;
-        return long.indexOf(short) === 0 && SIZE_TAIL_RE.test(long.slice(short.length));
+        if (long.indexOf(short) === 0 && SIZE_TAIL_RE.test(long.slice(short.length))) return true;
+        return long.slice(-short.length) === short && SIZE_HEAD_RE.test(long.slice(0, -short.length));
     }
 
     const THUMB_PARAM = /(?:^|[_-])(?:thumb|thumbnail|tn|small|preview|icon|avatar)(?:$|[_-])/i;
@@ -1520,15 +1524,15 @@
         return null;
     }
 
-    // Same-origin media in the fetched page's own markup — resolved against that page, not this one.
+    // Media in the fetched page's own markup and links to media files, any host — resolved against that page.
     function pageBodyMedia(doc, pageUrl) {
         const out = [], seen = new Set();
-        doc.querySelectorAll('img[src], video[src], video source[src]').forEach(function (n) {
-            const raw = n.getAttribute('src');
+        doc.querySelectorAll('img[src], video[src], video source[src], a[href]').forEach(function (n) {
+            const raw = n.getAttribute(n.tagName === 'A' ? 'href' : 'src');
             if (!raw) return;
             let u;
             try { u = new URL(raw, pageUrl.href); } catch (e) { return; }
-            if (u.origin !== pageUrl.origin || seen.has(u.href)) return;
+            if (!/^https?:$/.test(u.protocol) || seen.has(u.href)) return;
             if (!looksLikeImage(u.href) && !(videoPreviewsOn() && isVideoUrl(u.href))) return;
             seen.add(u.href);
             out.push(u.href);

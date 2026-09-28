@@ -129,6 +129,12 @@ def main():
     save(make(1200, 125, "BANNER", 2), "banner-1200x125.jpg")
     save(make(600, 600, "SIDEBAR", 5), "sidebar-600x600.jpg")
 
+    # Wikipedia's shape (case 43): a size-headed thumbnail whose original is only reachable
+    # through a link on the file page, served from another host.
+    wiki = make(1400, 1050, "WIKI", 6)
+    save(wiki, "wiki", "Wiki_file.jpg")
+    save(wiki.resize((250, 188)), "250px-Wiki_file.jpg")
+
     make_clip()
     # The letterbox thumbnail that clip hides behind (case 42).
     save(make(160, 70, "strip", 5), "letterbox.jpg")

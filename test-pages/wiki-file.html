@@ -1,0 +1,13 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>File page whose original is a link to another host</title>
+<!--
+  Wikipedia's File: page shape (case 43): og:image is the thumbnail (Wikipedia's is the article's
+  own share card, which E48 rejects), and the original is only an <a href> on ANOTHER host.
+  127.0.0.1 is a different origin from localhost; the port is fixed because DOMParser runs no script.
+-->
+<meta property="og:url" content="/test-pages/wiki-file.html">
+<meta property="og:image" content="/test-images/250px-Wiki_file.jpg">
+<h1>File:Wiki_file.jpg</h1>
+<img src="/test-images/250px-Wiki_file.jpg" alt="preview">
+<p><a href="http://127.0.0.1:8899/test-images/wiki/Wiki_file.jpg?utm_content=original">Original file</a> (1,400 × 1,050 pixels)</p>

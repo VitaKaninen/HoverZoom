@@ -694,6 +694,19 @@ eq('unrelated names do not match', sameStem('/a/dog.jpg', '/a/cat.jpg'), false);
 
 eq('a bare directory url has no stem to match', sameStem('/a/', '/a/cat.jpg'), false);
 
+eq('a MediaWiki size head names the same picture',
+    sameStem('https://thumb.wikimedia.org/w/c/thumb/3/3e/Raccoon_%2835264%29.jpg/250px-Raccoon_%2835264%29.jpg?utm_source=x',
+        'https://upload.wikimedia.org/w/c/3/3e/Raccoon_%2835264%29.jpg?utm_content=original'), true);
+
+eq('two different size heads are not matched to each other',
+    sameStem('/t/960px-Cat.jpg', '/t/250px-Cat.jpg'), false);
+
+eq('a word head with no digit is a different picture',
+    sameStem('/a/black-cat.jpg', '/a/cat.jpg'), false);
+
+eq('a long head is a different picture',
+    sameStem('/a/2024summer-cat.jpg', '/a/cat.jpg'), false);
+
 eq('urlStem strips the directory and the extension',
     urlStem('https://www.evilmilk.com/pictures/I_Am_An_Expert.jpg'), 'I_Am_An_Expert');
 

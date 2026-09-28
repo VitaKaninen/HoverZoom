@@ -334,6 +334,16 @@
     </a>
   </div>
 
+  <!-- 43 is Wikipedia: the original is only a link on the file page, on another host. -->
+  <div class="case" data-expect="1400">
+    <h2>43. the linked page links to the original on another host</h2>
+    <p class="hz bad">HZ+: a per-site plugin only. Here no URL rule applies, so a host change
+      on the site cannot break it</p>
+    <a href="test-pages/wiki-file.html">
+      <img id="c43" src="test-images/250px-Wiki_file.jpg" style="width:250px">
+    </a>
+  </div>
+
   <!--
     27 and 28 are the imgur gallery shape: THE THING UNDER THE POINTER IS THE CLIP. There is
     no <img> here at all, which is what made "hovering a gif does nothing" — <video> was
