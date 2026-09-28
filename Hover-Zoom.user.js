@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.196.0
+// @version     0.197.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -6116,8 +6116,9 @@
         const PASSES = 4;               // overlap sweeps; three widgets settle in two
         const SHADOW_REACH = 40;        // px: how far THEME.shadow spreads past a widget
         const A_ID = 'data-us-dock', A_SPEC = 'data-us-dock-a', A_SIZE = 'data-us-dock-s',
-            A_GREW = 'data-us-dock-t', A_DRAG = 'data-us-dock-d', A_STRETCH = 'data-us-dock-st';
-        const WATCHED = [A_ID, A_SPEC, A_SIZE, A_GREW, A_DRAG, A_STRETCH, 'hidden'];
+            A_GREW = 'data-us-dock-t', A_DRAG = 'data-us-dock-d', A_STRETCH = 'data-us-dock-st',
+            A_FILL = 'data-us-dock-f', A_RADIUS = 'data-us-dock-r';
+        const WATCHED = [A_ID, A_SPEC, A_SIZE, A_GREW, A_DRAG, A_STRETCH, A_FILL, A_RADIUS, 'hidden'];
         const AXES = ['x', 'y'];
         const LEN = { x: 'w', y: 'h' };
 
@@ -6237,7 +6238,8 @@
                 out.push({ id: id, el: el, spec: spec, w: size[0], h: size[1],
                     grew: Number(el.getAttribute(A_GREW)) || 0,
                     drag: drag ? { x: drag[0], y: drag[1] } : null,
-                    minH: st ? st[0] : null });
+                    minH: st ? st[0] : null, fill: el.hasAttribute(A_FILL),
+                    radius: Number(el.getAttribute(A_RADIUS)) || 0 });
             }
             out.sort(function (a, b) { return a.id < b.id ? -1 : a.id > b.id ? 1 : 0; });
             return out;
@@ -6281,6 +6283,20 @@
                 return (d.pos[ax] = pt(plo, p[LEN[ax]], a.t) + a.o - pt(0, len, a.m));
             }
             AXES.forEach(function (ax) { docks.forEach(function (d) { place(d, ax); }); });
+
+            // A widget that fills takes the width of a wider one stacked on or under it, and moves with it.
+            function stacked(a, b) { return a.a.y.r === b.id && a.a.y.m !== a.a.y.t; }
+            docks.forEach(function (d) {
+                if (!d.fill || d.drag) return;
+                const p = docks.find(function (k) {
+                    return k !== d && k.w > d.w && (stacked(d, k) || (stacked(k, d) && !k.drag));
+                });
+                if (!p) return;
+                const old = d.root.x;
+                d.pos.x = p.pos.x;
+                d.w = p.w;
+                docks.forEach(function (k) { if (k.root.x === old) k.root.x = p.root.x; });
+            });
 
             function group(d, ax) { return docks.filter(function (k) { return k.root[ax] === d.root[ax]; }); }
             function span(g, ax) {
@@ -6398,6 +6414,15 @@
                 l = cent(l - o.x); t = cent(t - o.y); r = cent(r - o.x); b = cent(b - o.y);
                 return 'M' + l + ' ' + t + 'H' + r + 'V' + b + 'H' + l + 'Z';
             };
+            // The hole has the other widget's rounded corners, or the shadow is cut where its body is not.
+            const round = function (l, t, r, b, k) {
+                if (!k) return box(l, t, r, b);
+                l = cent(l - o.x); t = cent(t - o.y); r = cent(r - o.x); b = cent(b - o.y);
+                k = Math.min(k, (r - l) / 2, (b - t) / 2);
+                const arc = function (x, y) { return 'A' + k + ' ' + k + ' 0 0 1 ' + cent(x) + ' ' + cent(y); };
+                return 'M' + cent(l + k) + ' ' + t + 'H' + cent(r - k) + arc(r, t + k) + 'V' + cent(b - k) + arc(r - k, b) +
+                    'H' + cent(l + k) + arc(l, b - k) + 'V' + cent(t + k) + arc(l + k, t) + 'Z';
+            };
             const holes = [];
             docks.forEach(function (k) {
                 if (k === d || !k.out) return;
@@ -6406,7 +6431,7 @@
                 if (r.x < o.x + o.w && r.x + r.w > o.x && r.y < o.y + o.h && r.y + r.h > o.y) return;
                 const l = Math.max(r.x, o.x - SHADOW_REACH), t = Math.max(r.y, o.y - SHADOW_REACH);
                 const rr = Math.min(r.x + r.w, o.x + o.w + SHADOW_REACH), b = Math.min(r.y + r.h, o.y + o.h + SHADOW_REACH);
-                if (rr - l > 0.5 && b - t > 0.5) holes.push(box(l, t, rr, b));
+                if (rr - l > 0.5 && b - t > 0.5) holes.push(round(r.x, r.y, r.x + r.w, r.y + r.h, k.radius));
             });
             const want = holes.length ? "path(evenodd, '" + box(0, 0, V.w, V.h) + holes.join('') + "')" : '';
             if (w.clip === want) return;
@@ -6511,7 +6536,8 @@
         }
 
         // o: { id, el, load() -> spec|null, save(spec), initial() -> spec, size() -> [w, h] natural,
-        //      stretchMin() -> px|null, apply(rect), handle(target) -> may a press here drag, onDrag(on) }
+        //      stretchMin() -> px|null, apply(rect), handle(target) -> may a press here drag, onDrag(on),
+        //      radius: px of its rounded corners, fill: take a wider stacked widget's width (apply gets rect.w) }
         function create(o) {
             const el = o.el;
             const w = { o: o, el: el, spec: null, dragging: false, size: null };
@@ -6540,6 +6566,8 @@
             }
 
             el.setAttribute(A_ID, o.id);
+            if (o.radius) el.setAttribute(A_RADIUS, String(o.radius));
+            if (o.fill) el.setAttribute(A_FILL, '');
             setSpec(o.load());
             sizeChanged();
             const ro = window.ResizeObserver ? new ResizeObserver(sizeChanged) : null;
@@ -6635,7 +6663,7 @@
                     if (i >= 0) mine.splice(i, 1);
                     if (ro) ro.disconnect();
                     mo.disconnect();
-                    [A_ID, A_SPEC, A_SIZE, A_GREW, A_DRAG, A_STRETCH].forEach(function (a) { el.removeAttribute(a); });
+                    [A_ID, A_SPEC, A_SIZE, A_GREW, A_DRAG, A_STRETCH, A_FILL, A_RADIUS].forEach(function (a) { el.removeAttribute(a); });
                 },
             };
         }
@@ -7308,7 +7336,7 @@
         const style = document.createElement('style');
         style.textContent = [
             ':host{all:initial}',
-            '.tw{display:flex;align-items:center;gap:' + NAV_GAP + 'px;box-sizing:border-box;',
+            '.tw{display:flex;align-items:center;justify-content:center;gap:' + NAV_GAP + 'px;box-sizing:border-box;',
             'height:' + VCTL_H + 'px;padding:0 ' + VCTL_PAD + 'px;border-radius:8px;',
             'background:var(--bg);border:1px solid var(--border);box-shadow:var(--shadow);',
             'font:13px/16px ' + usDock.FONT + ';color:var(--text);white-space:nowrap;cursor:move;',
@@ -7355,8 +7383,18 @@
         host.addEventListener('mouseover', function (e) { twNear(e.clientX, e.clientY); });
         document.body.appendChild(host);
         tw.dock = usDock.create({ id: 'hover-zoom', el: host, load: dockLoad, save: dockSave, initial: dockInitial,
+            radius: 8, fill: true,
+            // The natural size: the width a stacked wider widget lends is an output.
+            size: function () {
+                const mw = box.style.minWidth;
+                box.style.minWidth = '';
+                const r = host.getBoundingClientRect();
+                box.style.minWidth = mw;
+                return [r.width, r.height];
+            },
             apply: function (r) {
                 tw.rect = r;
+                box.style.minWidth = r.w + 'px';
                 host.style.left = r.x + 'px';
                 host.style.top = r.y + 'px';
                 host.style.right = 'auto';

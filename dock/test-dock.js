@@ -75,6 +75,23 @@ eq(out([dock('a', 100, 50, alignE('b'), above('b')), dock('b', 100, 50, alignE('
 eq(out([dock('fs', 200, 80, win('e'), win('e'), { drag: { x: 100, y: 200 } }), dock('hz', 120, 30, alignE('fs'), above('fs'))]),
     { fs: [100, 200, 80], hz: [180, 170, 30] }, 'group follows a drag');
 
+// ---- fill: a filling widget takes a wider stacked one's width and left edge
+function outW(docks) {
+    const r = {};
+    usDock.solve(docks, V).forEach(d => { r[d.id] = [d.out.x, d.out.w]; });
+    return r;
+}
+eq(outW([dock('fs', 200, 80, win('e'), win('e', -40)), dock('hz', 120, 30, alignE('fs'), above('fs'), { fill: true })]),
+    { fs: [800, 200], hz: [800, 200] }, 'fill: HZ on top of a wider FS matches it');
+eq(outW([dock('hz', 120, 30, win('c'), win('e', -40), { fill: true }), dock('fs', 200, 80, { r: 'hz', m: 'c', t: 'c', o: 0 }, above('hz'))]),
+    { hz: [400, 200], fs: [400, 200] }, 'fill: FS stacked on HZ, HZ matches it');
+eq(outW([dock('fs', 100, 80, win('e'), win('e')), dock('hz', 120, 30, alignE('fs'), above('fs'), { fill: true })]),
+    { fs: [900, 100], hz: [880, 120] }, 'fill: never narrows');
+eq(outW([dock('fs', 200, 80, win('e'), win('e')), dock('hz', 120, 30, { r: 'fs', m: 'e', t: 's', o: 0 }, alignE('fs'), { fill: true })]),
+    { fs: [800, 200], hz: [680, 120] }, 'fill: side by side is not stacked');
+eq(outW([dock('fs', 200, 80, win('e'), win('e')), dock('hz', 120, 30, alignE('fs'), above('fs'), { fill: true, drag: { x: 50, y: 50 } })]),
+    { fs: [800, 200], hz: [50, 120] }, 'fill: not while dragged');
+
 // ---- zones: hysteresis is half the widget's size
 eq(usDock.zone('e', 0, 60, 600), 's', 'bottom-anchored, dragged to the top');
 eq(usDock.zone('e', 340, 60, 600), 'c', 'bottom edge above the 2/3 line → centre');

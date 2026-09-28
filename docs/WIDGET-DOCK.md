@@ -35,6 +35,12 @@ folder: the `monkey-root` launch entry, `python -m http.server 8740 --directory 
   unattached ones away; if they cannot move without leaving the screen, the grower is pushed back.
 - **Kept inside the viewport** always; the clamp is display-only, the stored anchor is kept.
 - **Memory**: FS and HZ store per site; a new site uses the last drop anywhere.
+- **Fill** (`fill: true`, only Hover Zoom): stacked on or under a WIDER widget (y-attached either
+  way, not side by side), it takes that widget's width and left edge and joins its x-group. Never
+  narrows, never makes the other widget wider, off while it is being dragged. The script gets the
+  width as `rect.w` in `apply` and must report its natural size through `size()` (HZ clears the
+  `min-width` it applies, measures, restores it), or the lent width feeds back. Known wrinkle: a
+  widget dropped against a filled one is aligned against its natural rect, so it may shift once.
 - **RNFP** stretches: its top stays; its bottom gives way to the window and to widgets below it,
   down to its minimum height, before it moves (`stretchMin`).
 
@@ -67,6 +73,7 @@ folder: the `monkey-root` launch entry, `python -m http.server 8740 --directory 
 - **A widget's shadow passes under the others** (`clipShadow`, every relayout): all widgets sit at
   the top z-index, so DOM order decided whose shadow painted over whom. Each docked element gets an
   evenodd `clip-path` — the viewport minus every other widget's rect within `SHADOW_REACH` (40 px) of
-  it. Rects come from the solver's `out`, identical in every script. Bodies overlapping mid-drag cut
+  it. Rects come from the solver's `out`, identical in every script. Each hole is rounded by the other
+  widget's published `radius` (`-r`); a square hole left light spots where its corners fall outside the body. Bodies overlapping mid-drag cut
   nothing, or the body itself would be clipped. Don't set `clip-path` on a docked element elsewhere.
 - **A widget that is thrown away calls `destroy()`** (FS rebuilds its bar; RNFP closes its panel).
