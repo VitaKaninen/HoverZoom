@@ -182,6 +182,15 @@ An entry is eligible if `eligibleDirect(el)` returns it. That guarantees the lis
 only hold things that would preview if hovered, and it inherits every existing gate — `videoMode`,
 the block list, banner/furniture rules — with no new code. Clips and images share one list.
 
+**A picture a learned late-player rule covers is out too** (`latePlayerArea()`, v0.192.0 — GATES.md
+`E62`). Hovering it plays the page's own clip and our preview withdraws, so the slideshow must show
+nothing for it either; a video site's listing page then counts under two and the widget hides.
+`eligibleDirect()` cannot see this — the clip only exists during a hover — so the learned record is
+the only evidence. A **user** entry does not exclude: it covers the whole site, photo pages
+included, and says only "wait", not "nothing previews here". Before three flashes have taught a
+rule the cards still count; nothing static tells them apart. `vdApply()` calls `twRefresh()` so the
+count drops the moment a rule is learned or forgotten.
+
 **Never drop an entry for failing to resolve.** The user's stated reason: a page with 50 images
 must give a tour of 50, and a picture they spotted half way down is their landmark for "half
 done". A failure shows the thumbnail and a reason (§8); it does not vanish.

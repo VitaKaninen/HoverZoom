@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.191.0
+// @version     0.192.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -5122,6 +5122,13 @@
         return '/' + String(location.pathname || '').split('/').filter(Boolean).join('/');
     }
 
+    // A learned rule covers this picture: hovering it plays the page's own clip, so the slideshow skips it.
+    function latePlayerArea(el) {
+        const e = vdEntryFor(pageHost());
+        if (!e || e.user || !(e.rules && e.rules.length)) return false;
+        return !!vdRuleFor(e, domChain(el), pagePath());
+    }
+
     // How long this hover waits for the page's own player before previewing. 0 = no wait.
     function vdHoldFor(chain, path) {
         return vdWaitOf(vdEntryFor(pageHost()), chain, path);
@@ -5141,6 +5148,7 @@
         cfg.videoDelays = all;
         saveSettings();
         refreshPanel();
+        twRefresh();
         dbg('late player: ' + r.change, { host: host, after: elapsed != null ? elapsed + ' ms' : '-',
             chain: chain, path: path, entry: r.entry });
     }
@@ -6688,7 +6696,7 @@
     // Unknown size stays in — a lazy image below the fold is often 0×0 until it loads.
     function tourWorthy(el, floor) {
         if (!el.getClientRects().length || !shownMedia(el)) return false;
-        if (!eligibleDirect(el)) return false;
+        if (!eligibleDirect(el) || latePlayerArea(el)) return false;
         const s = tourSize(el);
         if (!s) return true;
         if (s.w && s.w < cfg.minDisplayed && s.h && s.h < cfg.minDisplayed) return false;

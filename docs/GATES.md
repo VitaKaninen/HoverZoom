@@ -472,6 +472,9 @@ arithmetic on that object and is asserted in `test-resolver.js`:
 - **Entries from before v0.112.0** (`{ms, region}`) are not migrated; the one user relearned. An
   old entry has no `rules`, so it covers nothing and fills in from samples like a fresh one.
 
+**The slideshow reads the same rules** (v0.192.0): a picture a learned rule covers leaves the
+widget's list — see [`TOUR.md`](TOUR.md) Membership.
+
 **The chain is taken once, at hover time (`activeChain`, `activePath`).** Computed at close it is
 a different chain — the card now contains the `<video>` — and the rule never matches. Found in the
 first browser run of v0.106.0.
