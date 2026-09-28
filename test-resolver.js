@@ -131,6 +131,10 @@ has('mediawiki thumb path',
     upgradeCandidates('https://upload.wikimedia.org/wikipedia/commons/thumb/a/ab/Cat.jpg/220px-Cat.jpg'),
     'https://upload.wikimedia.org/wikipedia/commons/a/ab/Cat.jpg');
 
+has('mediawiki thumb host moves to the upload host',
+    upgradeCandidates('https://thumb.wikimedia.org/wikipedia/commons/thumb/a/ab/Cat.jpg/250px-Cat.jpg?utm_source=en.wikipedia.org&utm_content=thumbnail'),
+    'https://upload.wikimedia.org/wikipedia/commons/a/ab/Cat.jpg');
+
 has('squarespace format bump',
     upgradeCandidates('https://images.squarespace-cdn.com/content/x/pic?format=500w'),
     'https://images.squarespace-cdn.com/content/x/pic?format=2500w');

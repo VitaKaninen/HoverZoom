@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.198.0
+// @version     0.199.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -853,6 +853,8 @@
             const m = u.pathname.match(/^(.*)\/thumb(\/[a-f0-9]\/[a-f0-9]{2}\/[^/]+)\/[^/]+$/i);
             if (!m) return null;
             u.pathname = m[1] + m[2];
+            // Wikimedia: thumb.wikimedia.org serves no originals; upload.wikimedia.org does
+            if (u.hostname === 'thumb.wikimedia.org') { u.hostname = 'upload.wikimedia.org'; u.search = ''; }
             return u.href;
         },
         // Reddit preview host -> direct host. The id is the last alphanumeric run before the

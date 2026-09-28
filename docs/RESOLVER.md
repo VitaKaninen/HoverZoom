@@ -588,6 +588,10 @@ Two that were looked at and deliberately left alone:
 - **Wikimedia** exposes `data-file-width`/`data-file-height` on the thumbnail — the original's true
   size, free and site-agnostic. Not used: nothing in the resolver wants a declared size it has not
   measured, and trusting one would weaken `samePicture()`. Noted because it looks useful and is not.
+- **Wikimedia's thumbnail host moved** to `thumb.wikimedia.org` (seen 2026-09-28), which 404s every
+  original. The MediaWiki rule swaps it to `upload.wikimedia.org` and drops the `utm_` query. The
+  linked `File:` page cannot rescue it: its og:image is the article's own share card for the lead
+  image (E48 rejects it), and its body media is cross-origin to `en.wikipedia.org`.
 
 Danbooru, Unsplash, Pexels, ArtStation, Fandom and phpbb.com all answered **403** to a plain fetch;
 they need a real browser session, and are unsurveyed rather than uninteresting.
