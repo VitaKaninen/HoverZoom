@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.195.0
+// @version     0.196.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -7316,6 +7316,8 @@
             '.count{flex:none;padding:0 4px;font-variant-numeric:tabular-nums;color:var(--text)}',
             '.load{flex:none;padding:0 2px;font-size:11px;font-variant-numeric:tabular-nums;color:var(--muted)}',
             '.load.done{color:var(--done)}',
+            '.dup{margin-left:3px;font-size:9px;color:var(--dup)}',
+            '.dup:empty{display:none}',
             '.load:empty{display:none}',
         ].concat(vbtnCss(), [
             '.tw .vbtn{color:var(--text)}',
@@ -7329,6 +7331,11 @@
         const prev = mkVBtn(ICON_PREV, null, function () { if (!twHeld) twPress(-1); });
         const count = document.createElement('span');
         count.className = 'count';
+        const num = document.createTextNode('');
+        const dup = document.createElement('span');
+        dup.className = 'dup';
+        count.appendChild(num);
+        count.appendChild(dup);
         setTip(count, TW_HELP, TW_HELP_MS);
         const next = mkVBtn(ICON_NEXT, null, function () { if (!twHeld) twPress(1); });
         twHoldOn(prev, -1);
@@ -7343,7 +7350,7 @@
         box.appendChild(wheel);
         box.appendChild(load);
         sr.appendChild(box);
-        tw = { host: host, box: box, prev: prev, count: count, next: next, wheel: wheel, load: load, dock: null, rect: null, near: false };
+        tw = { host: host, box: box, prev: prev, count: count, num: num, dup: dup, next: next, wheel: wheel, load: load, dock: null, rect: null, near: false };
         // A pointer already resting where the widget appears sends no mousemove, only this.
         host.addEventListener('mouseover', function (e) { twNear(e.clientX, e.clientY); });
         document.body.appendChild(host);
@@ -7434,6 +7441,7 @@
         const t = usDock.theme();
         ['bg', 'bg3', 'border', 'text', 'muted', 'shadow'].forEach(function (k) { tw.box.style.setProperty('--' + k, t[k]); });
         tw.box.style.setProperty('--done', t.scheme === 'dark' ? '#a6e3a1' : '#40a02b');
+        tw.box.style.setProperty('--dup', t.scheme === 'dark' ? '#f9e2af' : '#df8e1d');
         tw.box.style.colorScheme = t.scheme;
     }
 
@@ -7489,8 +7497,9 @@
         if (!tw) return;
         const on = !!tour && tour.on;
         const at = on ? tour.index : -1, n = on ? tour.total : twTotal;
-        tw.count.textContent = (at >= 0 ? at + 1 : '–') + ' / ' + (n >= 0 ? n : '–');
+        tw.num.nodeValue = (at >= 0 ? at + 1 : '–') + ' / ' + (n >= 0 ? n : '–');
         const dupes = tour ? tourDupes : widgetDupes;
+        tw.dup.textContent = dupes ? '(' + dupes + ')' : '';
         tw.count.__tip = (dupes ? 'Skipped ' + dupes + ' duplicate' + (dupes === 1 ? '' : 's') + '\n' : '') + TW_HELP;
         tw.prev.classList.toggle('faint', !n);      // faint only with nothing to show; at either end a press wraps
         tw.next.classList.toggle('faint', !n);
