@@ -1151,3 +1151,20 @@ imgur mp4, four clips: **1.0–9.6 MB** (images on the same run were 40 KB–1.3
 - **Leaving fullscreen after a step needed `E57`.** `restoreFull()` put back the zoom and top-left
   corner captured on entry, which belong to a picture that is no longer in the frame: the window
   came back 111 px off the right edge at the wrong zoom. A tour step is the only way to reach it.
+
+## Low-resolution ⚠ · v0.202.0
+
+The widget's counter ends in an orange ⚠ when **most pictures looked up on this site would preview
+enlarged past their own pixels** — the user's "the script can't find higher quality here". Asked
+for as a per-site signal, never per image.
+
+- `noteLowres()` runs at the end of every **full** `resolve()` (hover, slideshow arrival). A
+  speculative preload passes `guesses`, is capped, and is not counted. Keyed by the displayed URL,
+  so re-hovering one picture counts once; in memory for the tab, cleared when `pageHost()` changes.
+- "Low" = the best file found (or the page's own, if none) opens at more than `LOWRES_UPSCALE` (1.5)
+  × its pixels, by `bigEnough()`'s arithmetic: `min(zoomLimit, viewport / file)`. It is judged on
+  the result, not on whether an upgrade happened — a 24 px thumbnail upgraded to 480 px is still low.
+- Shown at `LOWRES_MIN` (5) pictures and more than half low. Top frame only; icons/avatars under
+  `smallBelow` are not counted.
+- **Test with a pinned viewport.** The measure depends on the window: in a 471 px-wide pane a 480 px
+  file is not enlarged at all, and the ⚠ correctly never appears.
