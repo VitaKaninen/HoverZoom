@@ -112,6 +112,9 @@ ancestor-link candidate ever comes back missing on a shadow-DOM site.
   background (must not reach through to it). 35 lives **outside** the `.grid`, because the whole
   point of it is spanning the window — inside a `.case` box its padding put it at 98.26 % of the
   viewport, passing the 98 % test by 0.3 % and proving nothing.
+- **The test page has no `GM_xmlhttpRequest` stand-in**, so `diagnose()` answers `unknown` and a 404
+  is never classified — rule-health failures (RESOLVER.md "Rule health") never count there. Define a
+  fetch-backed `window.GM_xmlhttpRequest` from the console after load; it is looked up at call time.
 - **To test a real site's card shape without installing anything, rebuild it in the test page.**
   The Browser pane blocks `http://localhost` requests from an `https` origin
   (`ERR_BLOCKED_BY_CLIENT`), so the script cannot be injected into a live site from here.

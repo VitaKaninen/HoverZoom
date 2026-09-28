@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.200.0
+// @version     0.201.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -755,11 +755,18 @@
         } catch (e) { return null; }
     }
 
+    // Names a URL rule; `report` marks one whose failure means the site changed, not a missing size.
+    function rule(name, report, fn) {
+        fn.ruleName = name;
+        fn.report = report;
+        return fn;
+    }
+
     const UPGRADES = [
         // A proxy carrying its source base64url-encoded in the path: imgproxy and everything
         // shaped like it, Brave image search included. Self-validating — the segments either
         // decode to an absolute URL or they do not, so this cannot match by accident. See E51.
-        function (u) {
+        rule('image proxy', false, function (u) {
             const segs = u.pathname.split('/').filter(Boolean)
                 .filter(function (s) { return s.indexOf(':') === -1; });   // processing options
             for (let i = 0; i < segs.length; i++) {
@@ -767,19 +774,19 @@
                 if (dec && /^https?:\/\/[^\s]+$/i.test(dec)) return dec;
             }
             return null;
-        },
-        function (u) {
+        }),
+        rule('imgur clip', false, function (u) {
             const hit = imgurId(u);
             if (!hit) return null;
             const url = 'https://i.imgur.com/' + hit.id + '.mp4';
             return url === u.href ? null : url;
-        },
-        function (u) {
+        }),
+        rule('gifwow clip', true, function (u) {
             if (!/(^|\.)gifwow\.com$/.test(u.hostname)) return null;
             const m = u.pathname.match(/^\/gifs\/([A-Za-z0-9_-]+)\.(?:jpe?g|png|webp|gif)$/i);
             return m ? u.origin + '/gifs/' + m[1] + '.mp4' : null;
-        },
-        function (u) {
+        }),
+        rule('imgur original', true, function (u) {
             const hit = imgurId(u);
             if (!hit) return null;
             const was = u.href;
@@ -788,42 +795,42 @@
             u.pathname = '/' + hit.id + ext;
             u.search = '';      // ?maxwidth= and ?tb both just ask for a smaller picture
             return u.href === was ? null : u.href;
-        },
-        function (u) {
+        }),
+        rule('size query', false, function (u) {
             if (!MEDIA_RE.test(u.pathname) && !VIDEO_EXT_RE.test(u.pathname)) return null;
             return dropSizeParams(u);
-        },
+        }),
         // The same, for a CDN whose path carries an opaque id and no extension:
         // th.bing.com/th/id/OIP.<id>?w=89&h=89 -> 474x711, measured. See E50.
-        function (u) {
+        rule('size query, no extension', false, function (u) {
             if (MEDIA_RE.test(u.pathname) || VIDEO_EXT_RE.test(u.pathname)) return null;
             if (SCRIPT_EXT_RE.test(u.pathname)) return null;
             const last = u.pathname.split('/').filter(Boolean).pop() || '';
             if (last.length < 12 || !/[A-Za-z]/.test(last) || !/\d/.test(last)) return null;
             return dropSizeParams(u);
-        },
+        }),
         // Twitter / X: ?name=small -> ?name=orig
-        function (u) {
+        rule('Twitter original', true, function (u) {
             if (!/(^|\.)(twimg\.com)$/.test(u.hostname)) return null;
             if (u.searchParams.get('name') === 'orig') return null;
             u.searchParams.set('name', 'orig');
             return u.href;
-        },
+        }),
         // WordPress and friends: image-150x150.jpg -> image.jpg
-        function (u) {
+        rule('WordPress size suffix', false, function (u) {
             const p = u.pathname.replace(/-\d{2,5}x\d{2,5}(\.[a-z0-9]+)$/i, '$1');
             if (p === u.pathname) return null;
             u.pathname = p;
             return u.href;
-        },
+        }),
         // Shopify: image_400x400.jpg / image_400x.jpg -> image.jpg
-        function (u) {
+        rule('Shopify size suffix', false, function (u) {
             const p = u.pathname.replace(/_(\d{2,5}x\d{0,5}|x\d{2,5})(?:@\dx)?(\.[a-z0-9]+)$/i, '$2');
             if (p === u.pathname) return null;
             u.pathname = p;
             return u.href;
-        },
-        function (u) {
+        }),
+        rule('resize path segment', false, function (u) {
             const KEYS = /^(?:w|h|c|q|f|g|e|b|o|r|x|y|z|a|d|t|ar|dpr|fl|bo|cs|vc)$/;
             const segs = u.pathname.split('/');
             let touched = false;
@@ -842,8 +849,8 @@
             if (!touched) return null;
             u.pathname = kept.join('/');
             return u.href;
-        },
-        function (u) {
+        }),
+        rule('Google size token', true, function (u) {
             // usercontent.google.com is Google Photos, same size-token syntax on a different host.
             if (!/(^|\.)(googleusercontent\.com|usercontent\.google\.com|ggpht\.com|blogspot\.com)$/.test(u.hostname)) return null;
             const p = u.pathname.replace(
@@ -851,44 +858,44 @@
             if (p !== u.pathname) { u.pathname = p; return u.href; }
             if (!/[=/]s0(\/|$)/.test(u.pathname)) return u.href + '=s0';
             return null;
-        },
+        }),
         // MediaWiki: /thumb/a/ab/File.jpg/220px-File.jpg -> /a/ab/File.jpg
-        function (u) {
+        rule('MediaWiki thumbnail', true, function (u) {
             const m = u.pathname.match(/^(.*)\/thumb(\/[a-f0-9]\/[a-f0-9]{2}\/[^/]+)\/[^/]+$/i);
             if (!m) return null;
             u.pathname = m[1] + m[2];
             // Wikimedia: thumb.wikimedia.org serves no originals; upload.wikimedia.org does
             if (u.hostname === 'thumb.wikimedia.org') { u.hostname = 'upload.wikimedia.org'; u.search = ''; }
             return u.href;
-        },
+        }),
         // Reddit preview host -> direct host. The id is the last alphanumeric run before the
         // extension, which covers both the bare form and the slug form preview.redd.it now uses.
-        function (u) {
+        rule('Reddit preview', true, function (u) {
             if (!/(^|\.)redd\.it$/.test(u.hostname)) return null;
             if (u.hostname === 'i.redd.it') return null;
             const m = u.pathname.match(/([a-z0-9]+)(\.(?:jpe?g|png|gif|webp))$/i);
             if (!m) return null;
             return 'https://i.redd.it/' + m[1] + m[2];
-        },
+        }),
         // Flickr size suffix: _n is 320, _b is 1024, _k is 2048 where it exists (else a 410,
         // which costs one probe). _o needs a secret and is not guessable.
-        function (u) {
+        rule('Flickr large', true, function (u) {
             return flickrSize(u, 'b');
-        },
-        function (u) {
+        }),
+        rule('Flickr 2048', false, function (u) {
             return flickrSize(u, 'k');
-        },
+        }),
         // A thumbnail marker leads the filename as often as it trails it: thumbnail_<hash>.jpg.
-        function (u) {
+        rule('thumbnail prefix', false, function (u) {
             const p = u.pathname.replace(
                 /\/(?:thumb|thumbs|thumbnail|thumbnails|small|tn|preview)[_-]([^/]+)$/i, '/$1');
             if (p === u.pathname) return null;
             u.pathname = p;
             return u.href;
-        },
+        }),
         // The Gelbooru family, which safebooru/rule34/konachan all descend from:
         // /thumbnails/<dir>/thumbnail_<sha1>.jpg -> /images/<dir>/<sha1>.jpg
-        function (u) {
+        rule('booru thumbnail', true, function (u) {
             if (u.pathname.indexOf('/thumbnails/') === -1) return null;
             const p = u.pathname.replace('/thumbnails/', '/images/')
                 .replace(/\/(?:thumbnail|thumb)[_-]([^/]+)$/i, '/$1');
@@ -896,69 +903,74 @@
             u.pathname = p;
             u.search = '';      // the ?<post id> cache-buster names nothing on the image host
             return u.href;
-        },
+        }),
         // Squarespace: ?format=500w -> ?format=2500w
-        function (u) {
+        rule('Squarespace format', true, function (u) {
             const f = u.searchParams.get('format');
             if (!f || !/^\d+w$/.test(f)) return null;
             u.searchParams.set('format', '2500w');
             return u.href;
-        },
+        }),
         // Etsy: the size is a prefix on the filename, il_510x638.<id>_<code>.jpg, and the top of
         // the ladder is named rather than numbered.
-        function (u) {
+        rule('Etsy full size', true, function (u) {
             if (!/(^|\.)etsystatic\.com$/.test(u.hostname)) return null;
             const p = u.pathname.replace(/\/il_\d+x[\dN]+\./, '/il_fullxfull.');
             if (p === u.pathname) return null;
             u.pathname = p;
             return u.href;
-        },
+        }),
         // Pinterest: the first path segment is the size. /originals/ is the true top but 403s on
         // some pins, and /1200x/ answers where it does, so both are offered and the biggest wins.
-        function (u) {
+        rule('Pinterest original', false, function (u) {
             if (!/(^|\.)pinimg\.com$/.test(u.hostname)) return null;
             const p = u.pathname.replace(/^\/(?:\d+x\d*|originals)\//, '/originals/');
             if (p === u.pathname) return null;
             u.pathname = p;
             return u.href;
-        },
-        function (u) {
+        }),
+        rule('Pinterest 1200', true, function (u) {
             if (!/(^|\.)pinimg\.com$/.test(u.hostname)) return null;
             const p = u.pathname.replace(/^\/(?:\d+x\d*|originals)\//, '/1200x/');
             if (p === u.pathname) return null;
             u.pathname = p;
             return u.href;
-        },
+        }),
         // generic path markers
-        function (u) {
+        rule('thumbnail path marker', false, function (u) {
             const p = u.pathname
                 .replace(/\/(thumb|thumbs|thumbnail|thumbnails|small|medium|preview|resized|tiny|mini|micro|square)\//i, '/')
                 .replace(/(_|-)(thumb|thumbnail|small|medium|preview|min|tn|tiny|mini|micro|square)(\.[a-z0-9]+)$/i, '$3');
             if (p === u.pathname) return null;
             u.pathname = p;
             return u.href;
-        },
+        }),
         // An opaque size code on the stem: photo_t3.jpg -> photo.jpg. Two chars minimum.
-        function (u) {
+        rule('size code', false, function (u) {
             const m = u.pathname.match(
                 /^(.*\/[^/]{3,})[_-](?:[a-z]{2}\d{0,2}|[a-z]\d{1,2})(\.[a-z0-9]+)$/i);
             if (!m) return null;
             u.pathname = m[1] + m[2];
             return u.href;
-        },
+        }),
     ];
 
-    function upgradeCandidates(src) {
+    // Every rule's rewrite of `src`, as `{ url, rule, host }` — host is the one the rule was applied to.
+    function upgradeRules(src) {
         const out = [];
         let base;
         try { base = new URL(src, location.href); } catch (e) { return out; }
         UPGRADES.forEach(function (fn) {
             try {
                 const r = fn(new URL(base.href));
-                if (r && r !== base.href) out.push(r);
+                if (r && r !== base.href) out.push({ url: r, rule: fn, host: base.hostname });
             } catch (e) { /* a rule that throws is just a rule that doesn't apply */ }
         });
         return out;
+    }
+
+    function upgradeCandidates(src) {
+        return upgradeRules(src).map(function (r) { return r.url; });
     }
 
     const ANIM_EXT_RE = /\.(gif|webp|png|apng)(?=$|[?#])/i;
@@ -992,6 +1004,61 @@
         'data-lazy', 'data-lazy-src', 'data-defer-src', 'data-echo', 'data-url',
         'data-hoverzoom', 'data-actualsrc'];
 
+    // ---- rule health: per rule and image host, whether its guesses load. See RESOLVER.md "Rule health".
+    const RULE_HEALTH_KEY = 'ruleHealth';
+    const RULE_DEAD_AFTER = 10;     // 404s in a row before a rule counts as not working on a host
+    const RULE_RETRY_EVERY = 10;    // a skipped rule is still tried once in this many hovers
+    const RULE_HEALTH_MAX = 300;
+
+    function ruleHealth() {
+        try { return JSON.parse(GM_getValue(RULE_HEALTH_KEY, '') || '{}') || {}; }
+        catch (e) { console.warn('[Hover Zoom] unreadable rule health, starting fresh', e); return {}; }
+    }
+
+    function saveRuleHealth(m) {
+        const keys = Object.keys(m);
+        if (keys.length > RULE_HEALTH_MAX) {
+            keys.sort(function (a, b) { return m[a].t - m[b].t; })
+                .slice(0, keys.length - RULE_HEALTH_MAX).forEach(function (k) { delete m[k]; });
+        }
+        try { GM_setValue(RULE_HEALTH_KEY, JSON.stringify(m)); } catch (e) { /* storage unavailable */ }
+    }
+
+    // Leave out a rule that has never worked on this host and keeps 404ing there, bar the odd retry.
+    function ruleSkipped(r) {
+        const m = ruleHealth(), k = r.rule.ruleName + '|' + r.host, e = m[k];
+        if (!e || e.h > 0 || e.f < RULE_DEAD_AFTER) return false;
+        e.s = (e.s || 0) + 1;
+        saveRuleHealth(m);
+        if (e.s % RULE_RETRY_EVERY === 0) return false;
+        dbg('skipped — this rule has never worked here', { rule: r.rule.ruleName, host: r.host, url: r.url });
+        return true;
+    }
+
+    // Tally one probe of a rule's guess: loaded, or a 4xx. Anything less certain is not counted.
+    function ruleOutcome(c, dim) {
+        const d = dim ? null : diagValue.get(c.url);
+        if (!dim && !(d && d.kind === 'gone')) return;
+        const m = ruleHealth(), k = c.rule.ruleName + '|' + c.ruleHost, now = Date.now();
+        const e = m[k] || (m[k] = { h: 0, f: 0, s: 0, since: 0 });
+        if (dim) { e.h++; e.f = 0; e.since = 0; }
+        else { if (!e.f) e.since = now; e.f++; }
+        e.s = 0; e.t = now;
+        saveRuleHealth(m);
+    }
+
+    // Site rules that have stopped working: [{ rule, host, fails, since, hits }], worst first.
+    function brokenRules() {
+        const m = ruleHealth(), report = new Set();
+        UPGRADES.forEach(function (fn) { if (fn.report) report.add(fn.ruleName); });
+        return Object.keys(m).map(function (k) {
+            const i = k.lastIndexOf('|');
+            return { rule: k.slice(0, i), host: k.slice(i + 1), fails: m[k].f, since: m[k].since, hits: m[k].h };
+        })
+            .filter(function (b) { return report.has(b.rule) && b.fails >= RULE_DEAD_AFTER; })
+            .sort(function (a, b) { return b.fails - a.fails; });
+    }
+
     const SRCSET_KEEP = 2;      // per list: the widest, and one behind it in case that 404s. See E46.
 
     // Ordered best-first list of candidates worth trying for this element, each as `{ url, from, keep }`.
@@ -1005,7 +1072,7 @@
         const seen = new Map();
         const out = [];
         const at = baseOf(el);
-        const add = function (u, from, keep) {
+        const add = function (u, from, keep, r) {
             if (!u) return;
             let abs;
             try { abs = new URL(u, at).href; } catch (e) { return; }
@@ -1015,10 +1082,14 @@
             if (!videoPreviewsOn() && isVideoUrl(abs)) return;
             if (seen.has(abs)) { if (keep) seen.get(abs).keep = true; return; }
             const c = { url: abs, from: from, keep: !!keep };
+            if (r) { c.rule = r.rule; c.ruleHost = r.host; }
             seen.set(abs, c);
             out.push(c);
         };
         const adder = function (from) { return function (u) { add(u, from); }; };
+        const ruled = function (from) {
+            return function (r) { if (!ruleSkipped(r)) add(r.url, from, false, r); };
+        };
 
         // 1. explicit high-res attributes
         DATA_ATTRS.forEach(function (a) {
@@ -1047,7 +1118,7 @@
         }
 
         // 2b. the widest srcset entry is itself often a resized derivative
-        if (bestSrcset) upgradeCandidates(bestSrcset).forEach(adder('url rule on the widest srcset entry'));
+        if (bestSrcset) upgradeRules(bestSrcset).forEach(ruled('url rule on the widest srcset entry'));
 
         const a = el.closest && el.closest('a[href]');
         if (a && a.href && anchorOwns(el, a)) {
@@ -1057,9 +1128,8 @@
                 linkParamCandidates(a.href).forEach(function (u) {
                     add(u, 'a url inside the ancestor link\'s query', true);
                 });
-                upgradeCandidates(a.href).forEach(function (u) {
-                    if (looksLikeImage(u)) add(u, 'url rule on the ancestor link');
-                });
+                upgradeRules(a.href).filter(function (r) { return looksLikeImage(r.url); })
+                    .forEach(ruled('url rule on the ancestor link'));
             }
         }
 
@@ -1067,7 +1137,7 @@
         const shown = shownUrl(el);
         // An image proxy carries its source in its own query: ?url=, ?piurl=, ?imgurl=. See E48.
         if (shown) linkParamCandidates(shown).forEach(adder('a url inside the displayed src\'s query'));
-        if (shown) upgradeCandidates(shown).forEach(adder('url rule on the displayed src'));
+        if (shown) upgradeRules(shown).forEach(ruled('url rule on the displayed src'));
 
         // 5. the displayed src itself, last — it is the fallback, never the upgrade
         if (shown) add(shown, 'the displayed src itself', true);
@@ -1702,6 +1772,7 @@
             if (token.cancelled) return trusted || best;
             if (trusted) break;             // the authoritative answer landed; stop guessing
             const dim = await probe(url, token.fresh);
+            if (c.rule) ruleOutcome(c, dim);
             if (!dim) { failure = failure || failureText(url); continue; }
             const isSameAsShown = (url === shown);
             if (isSameAsShown && native && !samePicture(native, dim)) {
@@ -9270,7 +9341,7 @@
     // -------------------------------------------------------------- settings UI
 
     const C = { base: '#1e1e2e', surface: '#313244', surface2: '#45475a', text: '#cdd6f4',
-        sub: '#a6adc8', blue: '#89b4fa', green: '#a6e3a1', red: '#f38ba8' };
+        sub: '#a6adc8', blue: '#89b4fa', green: '#a6e3a1', red: '#f38ba8', yellow: '#f9e2af' };
 
     let panelHost = null;
     let panelFlush = null;      // commits an open "edit as text" box, whatever closes the panel
@@ -9390,6 +9461,8 @@
             'button.danger{color:' + C.red + '}',
             '.listbtns{display:flex;gap:8px;justify-content:flex-end;margin-top:6px}',
             '.listwrap{margin-top:4px}',
+            '.alert{margin:6px 0 4px;padding:10px 12px;border:1px solid ' + C.yellow + ';border-radius:8px}',
+            '.alert .listhead{color:' + C.yellow + '}',
             '.listwrap + .listwrap{margin-top:18px}',
             '.listhead{font-size:12.5px;font-weight:600;color:' + C.text + ';margin-bottom:3px}',
             '.listdesc{font-size:12px;color:#9399b2;line-height:1.45}',
@@ -9551,6 +9624,49 @@
         }
 
         let mount = body;
+
+        // A yellow box listing site rules whose guesses have stopped loading; nothing when all is well.
+        function brokenRulesNotice() {
+            const list = brokenRules();
+            if (!list.length) return;
+            const wrap = document.createElement('div');
+            wrap.className = 'alert';
+            const hd = document.createElement('div');
+            hd.className = 'listhead';
+            hd.textContent = 'A site may have changed how it serves pictures';
+            wrap.appendChild(hd);
+            const desc = document.createElement('div');
+            desc.className = 'listdesc';
+            desc.textContent = 'These rules for finding the full-size picture keep getting “not found”, ' +
+                'so previews from these hosts may stay small until the script is updated.';
+            wrap.appendChild(desc);
+            const entries = document.createElement('div');
+            entries.className = 'entries';
+            list.forEach(function (b) {
+                const en = document.createElement('div');
+                en.className = 'entry';
+                const t = document.createElement('span');
+                t.textContent = b.rule + ' on ' + b.host + ' — ' + b.fails + ' not found in a row since ' +
+                    new Date(b.since).toLocaleDateString() + (b.hits ? ' (worked ' + b.hits + ' times before)' : '');
+                en.appendChild(t);
+                entries.appendChild(en);
+            });
+            wrap.appendChild(entries);
+            const btns = document.createElement('div');
+            btns.className = 'listbtns';
+            const clear = document.createElement('button');
+            clear.textContent = 'Clear';
+            setTip(clear, 'Forget these counts; a rule still failing will be listed again');
+            clear.addEventListener('click', function () {
+                const m = ruleHealth();
+                list.forEach(function (b) { delete m[b.rule + '|' + b.host]; });
+                saveRuleHealth(m);
+                wrap.remove();
+            });
+            btns.appendChild(clear);
+            wrap.appendChild(btns);
+            mount.appendChild(wrap);
+        }
 
         function section(title) {
             const s = document.createElement('h3');
@@ -10057,6 +10173,7 @@
         body.appendChild(guideBtn);
         body.appendChild(guide);
 
+        brokenRulesNotice();
         section('The preview');
         const act = pick('activation', 'Show a preview', ' ', [
                 ['hover', 'On hover — the hotkey holds them back'],

@@ -910,3 +910,24 @@ unstable for the tab and calls `cancel()` — the window opens and closes in one
 picture is refused for the rest of the tab. Shipped that way in v0.88.0, reported as "the preview
 flashes and goes away" (the pre-v0.10.0 symptom, back through a different door), fixed in
 v0.103.0. Case D in `test-pages/failure-and-timeout.html` is the regression: A with a 2× `srcset`.
+
+## Rule health · v0.201.0
+
+Every `UPGRADES` entry is wrapped in `rule(name, report, fn)`. `ruleOutcome()` tallies, per
+`name|image host` in GM key `ruleHealth`, whether the rule's guess loaded (`h`) or got a 4xx
+(`f` = 4xx in a row, `since` = first of them). Timeouts, 5xx, 429 and "no GM_xhr" are **not
+counted** — only a `diagValue` of `gone` is proof the guess is wrong. The tour's speculative
+resolves count too.
+
+- **Skip** (`ruleSkipped()`): a rule with `h === 0` and `f >= 10` on a host is left out of the
+  candidates, except every 10th time (`s`). Never skipped once it has worked there — Flickr 2048 and
+  imgur's `.mp4` fail for many pictures on hosts where they also succeed, and skipping them would
+  lose real upgrades.
+- **Report** (`brokenRules()`, the yellow box at the top of the settings panel): only rules with
+  `report: true`, at `f >= 10`, whatever `h` is. `report` means "a 404 here is abnormal": site rules
+  whose target always exists. Generic rules (size suffixes, path markers, size code) and optional
+  sizes (Flickr 2048, Pinterest originals, imgur clip) are `false`, or the box fills with noise.
+  The flag is read from the current `UPGRADES`, not stored, so changing it takes effect at once.
+- Capped at 300 entries, oldest-touched evicted. Clear in the panel deletes the listed entries.
+- It detects, it does not repair. The repair for a site whose thumbnail links to a page is the
+  linked-page fallback (v0.200.0, case 43).

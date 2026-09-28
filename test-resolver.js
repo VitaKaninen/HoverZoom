@@ -46,8 +46,8 @@ const sizeFromHeaders = new Function(
 const location = { href: 'https://example.com/page/index.html' };
 const body = src.slice(start, end);
 const exported = new Function('location', body +
-    '\nreturn {parseSrcset, looksLikeImage, isVideoUrl, upgradeCandidates, linkParamCandidates, blockMatch, sameStem, urlStem, betterHit, sniffAnimated};')(location);
-const { parseSrcset, looksLikeImage, isVideoUrl, upgradeCandidates, linkParamCandidates, blockMatch, sameStem, urlStem, betterHit, sniffAnimated } = exported;
+    '\nreturn {parseSrcset, looksLikeImage, isVideoUrl, upgradeCandidates, upgradeRules, linkParamCandidates, blockMatch, sameStem, urlStem, betterHit, sniffAnimated};')(location);
+const { parseSrcset, looksLikeImage, isVideoUrl, upgradeCandidates, upgradeRules, linkParamCandidates, blockMatch, sameStem, urlStem, betterHit, sniffAnimated } = exported;
 
 let pass = 0, fail = 0;
 const NL = String.fromCharCode(10);
@@ -134,6 +134,14 @@ has('mediawiki thumb path',
 has('mediawiki thumb host moves to the upload host',
     upgradeCandidates('https://thumb.wikimedia.org/wikipedia/commons/thumb/a/ab/Cat.jpg/250px-Cat.jpg?utm_source=en.wikipedia.org&utm_content=thumbnail'),
     'https://upload.wikimedia.org/wikipedia/commons/a/ab/Cat.jpg');
+
+{
+    const rs = upgradeRules('https://thumb.wikimedia.org/wikipedia/commons/thumb/a/ab/Cat.jpg/250px-Cat.jpg');
+    const mw = rs.find(r => r.url === 'https://upload.wikimedia.org/wikipedia/commons/a/ab/Cat.jpg');
+    eq('a rule candidate names its rule, report flag and source host',
+        mw && [mw.rule.ruleName, mw.rule.report, mw.host], ['MediaWiki thumbnail', true, 'thumb.wikimedia.org']);
+    eq('every rule candidate is named', rs.every(r => typeof r.rule.ruleName === 'string'), true);
+}
 
 has('squarespace format bump',
     upgradeCandidates('https://images.squarespace-cdn.com/content/x/pic?format=500w'),
