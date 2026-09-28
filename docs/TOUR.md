@@ -191,6 +191,16 @@ included, and says only "wait", not "nothing previews here". Before three flashe
 rule the cards still count; nothing static tells them apart. `vdApply()` calls `twRefresh()` so the
 count drops the moment a rule is learned or forgotten.
 
+**A repeat of a picture already in the list is out** (`tourDedupe()`, v0.193.0, user's request): same
+`pk` (`plKey`: shown URL + link href; harvest entries: URL) = same picture; the **first** copy
+stays, later ones go. Not the URL alone: one thumbnail linking to different originals is several
+pictures (the test page does this — 19 dropped by URL, 12 by `pk`). Applied last, on the finished
+list (live + roll ghosts + harvest), so the roll still remembers every copy. Placeholders (`pk` is
+the element) are never deduped — they all share one URL. The widget counter's tip says how many
+were skipped (`tourDupes`/`widgetDupes`). Hovering a dropped copy still previews; a slideshow
+started on one lands on the first copy via `tourAt()`'s URL fallback. Same picture at two sizes
+(different URLs) is not caught.
+
 **Never drop an entry for failing to resolve.** The user's stated reason: a page with 50 images
 must give a tour of 50, and a picture they spotted half way down is their landmark for "half
 done". A failure shows the thumbnail and a reason (§8); it does not vanish.

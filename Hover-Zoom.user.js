@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.192.0
+// @version     0.193.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -6865,11 +6865,25 @@
         if (m && m.key === key && m.tour === tour && Date.now() - m.t < TOUR_LIST_MS &&
             (!tour || (m.scope === tour.scope && m.level === tour.level && m.postOnly === tour.postOnly &&
                 m.mainOnly === tour.mainOnly)) &&
-            m.cfg === cfg && m.list.every(function (e) { return !e.el || e.el.ownerDocument !== document || e.el.isConnected; })) return tourRoll(m.list.slice());
+            m.cfg === cfg && m.list.every(function (e) { return !e.el || e.el.ownerDocument !== document || e.el.isConnected; })) return tourDedupe(tourRoll(m.list.slice()), true);
         const list = inPass(tourEntriesNow);
         tourListMemo = { key: key, tour: tour, cfg: cfg, t: Date.now(), list: list, scope: tour && tour.scope,
             level: tour && tour.level, postOnly: tour && tour.postOnly, mainOnly: tour && tour.mainOnly };
-        return tourRoll(list.slice());
+        return tourDedupe(tourRoll(list.slice()), true);
+    }
+
+    // Drops every later copy of a picture already in the list; the first stays. Counts what it dropped.
+    let tourDupes = 0, widgetDupes = 0;
+    function tourDedupe(list, isTour) {
+        const seen = new Set(), out = [];
+        list.forEach(function (e) {
+            const k = typeof e.pk === 'string' ? e.pk : e.pk === undefined && e.url ? e.url : null;     // a placeholder is never a duplicate
+            if (k && seen.has(k)) return;
+            if (k) seen.add(k);
+            out.push(e);
+        });
+        if (isTour) tourDupes = list.length - out.length; else widgetDupes = list.length - out.length;
+        return out;
     }
 
     // A feed that unmounts what scrolled away (Imgur) keeps it in the slideshow: an entry whose
@@ -6891,7 +6905,7 @@
     function widgetEntries() {
         const floor = idleFloor();
         const main = idlePics(floor);
-        return rollMerge(inPass(function () { return tourEntriesIn(main, tourCommon(main), true); }), pageRoll, widgetSig());
+        return tourDedupe(rollMerge(inPass(function () { return tourEntriesIn(main, tourCommon(main), true); }), pageRoll, widgetSig()), false);
     }
 
     function rollMerge(list, holder, sig) {
@@ -7113,6 +7127,9 @@
     let twRecountTimer = 0;
     let twLoadTimer = 0;
     const TW_HELP_MS = 1000;    // the widget's help waits longer than a button's tip
+    const TW_HELP = '◀ ▶  previous / next; hold to repeat\n' +
+        '⇅  wheel near it flips; click: wheel flips anywhere\n' +
+        'Drag to move; Ctrl: no snapping';
     let twShownOn = null;       // the URL the widget was last shown on: it stays there at any count (debugging)
     let twWheelArmed = null;    // the URL the wheel button was clicked on; the wheel then steps anywhere
     let twWheelIn = false;      // the pointer is within wheelRange of the button
@@ -7194,9 +7211,7 @@
         const prev = mkVBtn(ICON_PREV, null, function () { if (!twHeld) twPress(-1); });
         const count = document.createElement('span');
         count.className = 'count';
-        setTip(count, '◀ ▶  previous / next; hold to repeat\n' +
-            '⇅  wheel near it flips; click: wheel flips anywhere\n' +
-            'Drag to move; Ctrl: no snapping', TW_HELP_MS);
+        setTip(count, TW_HELP, TW_HELP_MS);
         const next = mkVBtn(ICON_NEXT, null, function () { if (!twHeld) twPress(1); });
         twHoldOn(prev, -1);
         twHoldOn(next, 1);
@@ -7357,6 +7372,8 @@
         const on = !!tour && tour.on;
         const at = on ? tour.index : -1, n = on ? tour.total : twTotal;
         tw.count.textContent = (at >= 0 ? at + 1 : '–') + ' / ' + (n >= 0 ? n : '–');
+        const dupes = tour ? tourDupes : widgetDupes;
+        tw.count.__tip = (dupes ? 'Skipped ' + dupes + ' duplicate' + (dupes === 1 ? '' : 's') + '\n' : '') + TW_HELP;
         tw.prev.classList.toggle('faint', !n);      // faint only with nothing to show; at either end a press wraps
         tw.next.classList.toggle('faint', !n);
         tw.wheel.classList.toggle('faint', !n);
