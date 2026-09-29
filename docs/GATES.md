@@ -755,7 +755,10 @@ an ordinary card picture that must still preview.
 `decorativeReason()` is a separate test under the same `skipFurniture` switch and **does** apply to
 `<img>`: `aria-hidden="true"` and `role="presentation"`/`"none"` are the page stating outright that
 something is not content. **Read on the element itself, never inherited** — carousels routinely mark
-cloned slides `aria-hidden` and those are real pictures on screen. **`alt=""` is deliberately NOT
+cloned slides `aria-hidden` and those are real pictures on screen. **`aria-hidden` is ignored on an
+`<img>` with non-empty `alt`** (`describedImg()`, v0.204.0): Amazon's search results mark 71 of 79
+product thumbnails `aria-hidden` only so a screen reader does not read the product twice beside its
+title link — a described picture is content by the page's own account. **`alt=""` is deliberately NOT
 used** even though it is the same convention: YouTube ships `alt=""` on its banner *and* on all 23
 content thumbnails, so it separates nothing, and being wrong here is silent.
 

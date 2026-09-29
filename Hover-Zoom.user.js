@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.203.0
+// @version     0.204.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -5381,10 +5381,15 @@
         return c.banner ? c.why : null;
     }
 
+    // An <img> with real alt text: aria-hidden on it only stops a screen reader repeating a caption.
+    function describedImg(el) {
+        return el.tagName === 'IMG' && !!(el.getAttribute('alt') || '').trim();
+    }
+
     // What the page itself says is not content.
     function decorativeReason(el) {
         if (!el.getAttribute) return null;
-        if (el.getAttribute('aria-hidden') === 'true') return 'aria-hidden="true"';
+        if (el.getAttribute('aria-hidden') === 'true' && !describedImg(el)) return 'aria-hidden="true"';
         const role = (el.getAttribute('role') || '').toLowerCase();
         if (role === 'presentation' || role === 'none') return 'role="' + role + '"';
         return null;
