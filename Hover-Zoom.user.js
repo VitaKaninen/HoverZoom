@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.204.0
+// @version     0.205.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -5386,6 +5386,50 @@
         return el.tagName === 'IMG' && !!(el.getAttribute('alt') || '').trim();
     }
 
+    const SPRITE_OVER = 1.5;        // drawn background / box, in BOTH axes, that makes it a sheet of icons
+    const SPRITE_MAX_SHOWN = 128;   // px: a negative offset on a box bigger than this is a crop, not a sprite
+
+    // Why this element's background is a sprite sheet it shows one slice of, or null.
+    function spriteReason(el) {
+        const cs = getComputedStyle(el);
+        const size = cs.backgroundSize.split(',')[0].trim();
+        if (/cover|contain/.test(size)) return null;
+        const r = el.getBoundingClientRect();
+        const part = size.split(/\s+/);
+        const len = function (v, box) {
+            return /px$/.test(v) ? parseFloat(v) : /%$/.test(v) ? parseFloat(v) * box / 100 : NaN;
+        };
+        const w = len(part[0], r.width), h = len(part[1] || 'auto', r.height);
+        if (w > SPRITE_OVER * r.width && h > SPRITE_OVER * r.height) {
+            return 'its background is drawn ' + Math.round(w) + '×' + Math.round(h) + ' in a ' +
+                Math.round(r.width) + '×' + Math.round(r.height) + ' box';
+        }
+        const pos = cs.backgroundPosition.split(',')[0].trim();
+        if (Math.max(r.width, r.height) <= SPRITE_MAX_SHOWN && /(^|\s)-\d*\.?\d+px/.test(pos)) {
+            return 'a ' + Math.round(r.width) + '×' + Math.round(r.height) + ' box offset into its background at ' + pos;
+        }
+        return null;
+    }
+
+    // Resolves to why this small box shows a corner of a sheet drawn at natural size, or ''.
+    function sheetCheck(el, displayed) {
+        if (el.tagName === 'IMG' || el.tagName === 'VIDEO') return Promise.resolve('');
+        if (Math.max(displayed.w, displayed.h) > SPRITE_MAX_SHOWN) return Promise.resolve('');
+        if (!/^auto( auto)?$/.test(getComputedStyle(el).backgroundSize.split(',')[0].trim())) return Promise.resolve('');
+        const url = shownUrl(el);
+        if (!url) return Promise.resolve('');
+        return new Promise(function (done) {
+            const im = new Image();
+            im.onload = function () {
+                const w = im.naturalWidth, h = im.naturalHeight;
+                done(w > SPRITE_OVER * displayed.w && h > SPRITE_OVER * displayed.h
+                    ? 'a ' + displayed.w + '×' + displayed.h + ' box showing a corner of a ' + w + '×' + h + ' file' : '');
+            };
+            im.onerror = function () { done(''); };
+            im.src = url;
+        });
+    }
+
     // What the page itself says is not content.
     function decorativeReason(el) {
         if (!el.getAttribute) return null;
@@ -5479,6 +5523,7 @@
         const bg = backgroundUrl(el);
         if (!bg) return 'not an <img> and has no background image';
         if (blocked(bg)) return 'its background URL matches the block list';
+        if ((why = spriteReason(el))) return 'spriteGate: ' + why;
         if (cfg.skipFurniture && (why = wallpaperReason(el))) return 'backgroundGate (skipFurniture is on): ' + why;
         return null;
     }
@@ -5855,6 +5900,9 @@
             if (myToken.failure) await showFallback(el, myToken, myToken.failure);
         }, holdMs);
         timer = setTimeout(async function () {
+            const sheet = await sheetCheck(el, displayed);
+            if (myToken.cancelled || active !== el) return;
+            if (sheet) { dbg('spriteGate: ' + sheet); dismiss(); return; }
             resolving = true;
             if (!holding) showSpinner();
             let got = false;

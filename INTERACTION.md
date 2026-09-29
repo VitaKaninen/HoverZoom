@@ -121,7 +121,8 @@ arrives — nothing is decided in advance.
 | `P6` | The hotkey (`modifierKey`). Under `activation: modifier` it must be held — **either order**, hold then point or point then press (`E28`). Under `hover` the reverse: held, or tapped off for the tab with `hotkeyToggle`, it holds previews back (`E66`) | activation = hover |
 | `P7` | Not page furniture — a CSS background that is part of the page rather than a picture on it (`E17`) | `skipFurniture` on |
 | `P8` | Neither the displayed URL nor any candidate is on the never-preview list | `blockList` empty |
-| `P9` | Not marked decoration by the page itself: no `aria-hidden="true"`, no `role="presentation"`/`"none"` on the element | `skipFurniture` on |
+| `P9` | Not marked decoration by the page itself: no `aria-hidden="true"` (ignored on an `<img>` with non-empty `alt`), no `role="presentation"`/`"none"` on the element | `skipFurniture` on |
+| `P15` | A CSS background is not a **sprite sheet** — one slice of a sheet of icons: drawn over 1.5× the box in both axes, or a box ≤ 128 px offset into it by negative px, or (checked by loading the file, before resolving) a box ≤ 128 px drawing it at natural size when the file is over 1.5× the box in both axes. `cover`/`contain` never are ([`docs/GATES.md`](docs/GATES.md)) | — |
 | `P11` | Not a thumbnail leading AWAY to a video page: no ancestor `a[href]` matching the video-URL shapes. A different question from `P4` and a different setting since v0.59.0 — that one is about where you are standing, this one about where the picture goes (`E31`). Under `all` it still refuses when the page holds a dormant `<video>` — a site that previews its own videos, remembered per site from then on (`E61`) | `videoMode` = `clips` |
 | `P12` | Anything that moves is allowed to reach the frame at all — a video file by its URL, an animated GIF/WebP/APNG by sniffing its first 4 KB (`E27`, `E31`, `E32`) | `videoMode` ≠ `none` |
 | `P13` | The frame is not a captcha — reCAPTCHA, hCaptcha, Cloudflare, Arkose, Google's `/sorry/` page — judged by the frame's own URL, once, at load ([`docs/GATES.md`](docs/GATES.md)) | — |
@@ -627,6 +628,7 @@ this table is a table.
 |---|---|
 | Eligibility (`P1`–`P6`, `P11`, `P12`) | `eligible`, `playerSurfaceReason`, `videoLinkReason`, `overVideoSurface`, `videoPreviewsOn`, `siteEnabled` |
 | The captcha gate (`P13`) | `CAPTCHA_HERE`, the `onOver` gate beside `siteEnabled()` |
+| The sprite gate (`P15`) | `spriteReason` (in `refusal`), `sheetCheck` (awaited in `onOver`'s resolve timer), `SPRITE_OVER`, `SPRITE_MAX_SHOWN` |
 | A late player, and the learned wait (`E61`, `E62`) | `selfClosed` (the trigger), `lastUserAct`/`USER_QUIET_MS`, `playerArrived`, `lateCover`, `playerReplaced`, `withdrawn`, `watchTimer`/`VDELAY_POLL_MS`, `PLAYER_GRACE_MS`, `holdMs`/`ruleMs`/`holding`/`holdTimer`, `domChain`/`pagePath`, `sharedHead`/`chainPrefix`/`chainMatches`/`pathPrefix`/`pathMatches`, `vdRuleFor`/`vdNearRule`, `vdLearn`/`vdForget`/`vdWorked`, `vdWaitOf`/`vdHoldFor`, `vdApply`/`vdRecord`, `videoOver`/`VDELAY_EVIDENCE_MS`, `vdEntryFor`, the panel's `delayList` |
 | Hover state machine (`R1`, `R2`, `S01`–`S06`, `S16`, `E44`) | `onOver`, `onOut`, `cancel`, `dismiss`, `stillUnderPointer`, `suppressed`/`suppressedCovered` |
 | Press / click ownership (`E1`) | `pointInPreview`, `onBoxDown`, `onBoxClick`, the document `mousedown` and `click` listeners |

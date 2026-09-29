@@ -1,0 +1,44 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Sprite sheets drawn as CSS backgrounds</title>
+<!--
+  Amazon's icons, reduced: a small <i> draws one slice of a big sheet with background-size and a
+  negative background-position. Previewing it shows the whole sheet. Reported 2026-09-29.
+
+  Expect: #s1–#s4 preview NOTHING (#s4 only after its file loads). #c1 (cover) and #c2 (a big box offset into a photo)
+  preview normally — they are the controls that stop the gate refusing every background.
+-->
+<style>
+  body { font: 14px system-ui, sans-serif; background: #1e1e2e; color: #cdd6f4; padding: 20px; }
+  .row { display: flex; gap: 24px; align-items: center; margin: 18px 0; }
+  i { display: inline-block; background-image: url(/test-images/photo-800x600.jpg); background-repeat: no-repeat; }
+  #s1 { width: 40px; height: 40px; background-size: 400px 300px; background-position: -120px -80px; }
+  #s2 { width: 90px; height: 18px; background-size: 400px 300px; background-position: -2px -200px; }
+  #s3 { width: 40px; height: 40px; background-position: -300px -200px; }
+  #s4 { width: 40px; height: 40px; background-position: 0 0; }
+  #c1 { width: 240px; height: 120px; background: url(/test-images/photo-800x600.jpg) center / cover no-repeat; }
+  #c2 { width: 300px; height: 200px; background: url(/test-images/photo-800x600.jpg) -60px -40px no-repeat; }
+</style>
+
+<div class="row"><i id="s1"></i> sheet drawn 400×300 in a 40×40 box — no preview</div>
+<div class="row"><i id="s2"></i> a star-rating strip, 90×18 — no preview</div>
+<div class="row"><i id="s3"></i> natural-size sheet, 40×40 offset -300px -200px — no preview</div>
+<div class="row"><i id="s4"></i> natural-size sheet at 0 0 — nothing in the CSS says so; refused once the file loads</div>
+<div class="row"><div id="c1"></div> cover — previews</div>
+<div class="row"><div id="c2"></div> 300×200 box offset into a photo — previews</div>
+
+<script>
+  var GM_getValue = function (key, dflt) {
+    var v = localStorage.getItem(key);
+    return v === null ? dflt : v;
+  };
+  var GM_setValue = function (key, val) { localStorage.setItem(key, val); };
+  var GM_addValueChangeListener = function (key, fn) {
+    window.addEventListener('storage', function (e) {
+      if (e.key === key) fn(key, e.oldValue, e.newValue, true);
+    });
+  };
+  var GM_registerMenuCommand = function () { return 'x'; };
+  var GM_unregisterMenuCommand = function () {};
+</script>
+<script src="../Hover-Zoom.user.js"></script>

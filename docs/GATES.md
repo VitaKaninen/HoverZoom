@@ -849,3 +849,26 @@ small pictures only for avatars and emoji; `smallKind()` sorts them in `onOver`,
   `resolve()`. The name caption (v0.175.0) was dropped with the rest.
 - The emoji enlargement's `<img>` needs `position:static` inline: the shadow sheet's bare `img` rule is the
   preview's (`position:absolute`), and it collapsed the label to 40 px.
+
+## Sprite sheets · `P15` · v0.205.0
+
+A sprite is one slice of a sheet of icons, drawn as a CSS background. Previewing it shows the whole
+sheet (Amazon: a 16×16 `<i>` drawing a 512×512 sheet), and a small square one passes the avatar test
+(`P14`) because the file is big. Unconditional, not under `skipFurniture` — a whole sheet is never
+what was hovered. Judged from geometry, never URLs:
+
+- **`spriteReason()`, sync, in `refusal()`:** the background is drawn over `SPRITE_OVER` (1.5×) the
+  box in **both** axes (explicit `background-size`), or a box ≤ `SPRITE_MAX_SHOWN` (128) is offset
+  into it by a negative px `background-position`. `cover`/`contain` are exempt — a cropped photo.
+  Both axes, because `cover` and 2-state hover sprites exceed in one. The 128 px cap on the offset
+  test keeps a large box framing a photo with a negative offset previewable.
+- **`sheetCheck()`, async, before `resolve()`:** the first slice sits at `0 0` with `auto` size, so
+  the CSS says nothing; the file's natural size decides (same 1.5× both axes, box ≤ 128). It loads
+  the **shown** file itself — a resolve hit cannot be used, because a URL rule may upgrade the sheet
+  (`._CB…_` on Amazon) and an upgrade's size says nothing about what the box shows. A cached image is
+  NOT readable synchronously (`complete` false, measured on Amazon).
+
+Measured on an Amazon search page: 16 sprite uses flagged, one missed by the sync test
+(`clothingcolorsprite` at `0px 0px`, auto) — the reason for `sheetCheck()`. `test-page.html`'s five
+backgrounds are all `cover`, unaffected. Regression page: `test-pages/sprite.html` (#s1–#s4 refused,
+#c1/#c2 controls preview).
