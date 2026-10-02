@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.212.0
+// @version     0.213.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -3567,6 +3567,7 @@
     }
 
     let swapSeq = 0;            // bumped by anything that puts media in the frame; a staged swap checks it
+    let swapHold = 0;           // the swapSeq whose <img> is still loading; the frame keeps the old geometry
     let blanked = false;        // a slideshow step with nothing to show yet: the frame is empty
     let tourRestTimer = 0;
     let spinCentred = false;
@@ -3608,7 +3609,7 @@
 
     // WHAT LOADED IS NOT WHAT WAS MEASURED.
     function verifyMedia() {
-        if (!view || !mediaEl) return;
+        if (!view || !mediaEl || swapHold === swapSeq) return;   // a held swap verifies on commit
         const w = mediaEl === vidEl ? vidEl.videoWidth : imgEl.naturalWidth;
         const h = mediaEl === vidEl ? vidEl.videoHeight : imgEl.naturalHeight;
         if (!w || !h) return;
@@ -3958,26 +3959,26 @@
 
     // A DIFFERENT picture into the same window, at the slideshow's spot. A hand-set size stays; zoom and pan
     // reset, because a pan offset means nothing carried into another picture. See TOUR.md.
-    // Stages an image off-screen first: the frame must not resize around the old picture. See TOUR.md §2.
+    // Sets the window's own <img> first; the frame resizes only once THAT element holds the new picture. See TOUR.md §2.
     function swapViewer(res) {
         if (!view) return;
-        const seq = ++swapSeq;
         if (res.video) { commitSwap(res); return; }
-        const im = new Image();
-        if (noReferrerHere()) im.referrerPolicy = 'no-referrer';
-        im.src = res.display || res.url;
-        if (im.complete && im.naturalWidth) { commitSwap(res); return; }
+        setMedia(res);
+        const seq = swapSeq;
+        if (imgEl.complete && imgEl.naturalWidth) { commitSwap(res, true); return; }
+        swapHold = seq;
         showSpinner();
         dockSpinner();
         const done = function () {
             if (seq !== swapSeq || !view || !tourActive()) return;
+            swapHold = 0;
             hideSpinner();
-            commitSwap(res);
+            commitSwap(res, true);
         };
-        im.decode().then(done, done);
+        imgEl.decode().then(done, done);
     }
 
-    function commitSwap(res) {
+    function commitSwap(res, staged) {
         view.url = res.url;
         view.natW = res.w;
         view.natH = res.h;
@@ -3994,8 +3995,9 @@
         reflow();
         posApply(posLoad('tour'));
 
-        setMedia(res);
+        if (!staged) setMedia(res);
         layout();
+        if (staged) verifyMedia();
         deferredCaption(res.url);
     }
 

@@ -432,14 +432,16 @@ different picture is meaningless. Borrow the centre-preserving arithmetic from `
 It must also update `active` and `activeShown`, or ⊘ blocks the wrong image and unpinning
 misbehaves.
 
-**An image is staged before the frame changes** (v0.161.0). The probe having loaded a URL does not
-mean `imgEl` can paint it at once: a no-store response or an evicted preload is fetched again, and
-while it loads the browser keeps painting the OLD picture, stretched into the new frame size.
-`swapViewer()` loads it into an off-screen `Image`, `decode()`s it (the spinner shows meanwhile),
-and only then does `commitSwap()` resize and set `src`. A decode failure still commits, so the
-frame's own error handling runs. `swapSeq` is bumped by `setMedia()` and at the top of
-`tourShow()`, so a staged swap that finishes after the user has moved on is dropped. Videos commit
-directly.
+**The frame resizes only once `imgEl` itself holds the new picture** (v0.213.0). While a new `src`
+loads, the browser keeps painting the OLD picture (the element's pending request), so resizing
+first stretches it. `swapViewer()` sets `imgEl.src` via `setMedia()` with the geometry untouched;
+if `imgEl.complete` it commits at once, else it waits on `imgEl.decode()` (spinner meanwhile,
+`swapHold` set so `verifyMedia()` does not compare against the old size), then `commitSwap(res,
+true)` changes the geometry and verifies. A decode failure still commits. `swapSeq` drops a swap the
+user has moved past. Videos commit directly.
+Do not go back to decoding an off-screen `new Image()` and then setting `src` (v0.161.0–v0.212.0):
+the window's element can still re-fetch (no-store, evicted, different request), and ~1 in 15 steps
+stretched.
 
 ### Growing and shrinking — already free
 
