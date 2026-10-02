@@ -432,18 +432,19 @@ different picture is meaningless. Borrow the centre-preserving arithmetic from `
 It must also update `active` and `activeShown`, or ⊘ blocks the wrong image and unpinning
 misbehaves.
 
-**The frame resizes only once `imgEl` itself holds the new picture** (v0.213.0). While a new `src`
-loads, the browser keeps painting the OLD picture (the element's pending request), so resizing
-first stretches it. `swapViewer()` sets `imgEl.src` via `setMedia()` with the geometry untouched;
-it always waits on `imgEl.decode()` (spinner meanwhile,
-`swapHold` set so `verifyMedia()` does not compare against the old size), then `commitSwap(res,
-true)` changes the geometry and verifies. A decode failure still commits. `swapSeq` drops a swap the
-user has moved past. Videos commit directly.
-Do not go back to decoding an off-screen `new Image()` and then setting `src` (v0.161.0–v0.212.0):
-the window's element can still re-fetch (no-store, evicted, different request), and ~1 in 15 steps
-stretched. Nor skip the decode when `imgEl.complete` is true (v0.213.0): a memory-cached file is
-complete synchronously but not yet decoded, and LibreWolf (Gecko) painted the old picture in the new
-frame for ~3 frames at 60 fps (filmed by the user on v0.213.0).
+**Frame size and picture change in one paint, via `coverEl`** (v0.215.0). When `imgEl` paints a new
+`src` is up to the browser and no event reports it: LibreWolf (Gecko) painted the OLD picture in the new
+frame for ~3 frames after a synchronous `src` swap (v0.213.0), and the NEW picture in the old frame
+before `imgEl.decode()` resolved (v0.214.0, which set `src` first and committed on decode). Both
+filmed by the user at 60 fps. So `swapViewer()` decodes an off-screen `Image` (old picture and frame
+stay, spinner shows), then in one task `commitSwap()` sets geometry + `src` and `showCover()` draws
+the staged picture onto `coverEl`, a canvas laid exactly over `imgEl` (layout() copies `imgEl`'s
+rect onto it). A canvas shows what was drawn on the next paint, so whatever `imgEl` paints underneath
+is hidden. `coverEl` drops `COVER_HOLD_MS` after `imgEl.decode()` (3 s backstop), on any
+`setMedia()`, and on any later swap. Its fill is the `img` background so a transparent picture does
+not show the old one through it. `swapSeq` drops a swap the user has moved past. Videos commit directly.
+Do not go back to waiting on any `imgEl` signal (`complete`, `load`, `decode()`) to time the resize —
+both directions were filmed failing.
 
 ### Growing and shrinking — already free
 

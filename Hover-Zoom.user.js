@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.214.0
+// @version     0.215.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -1874,7 +1874,7 @@
         return best;
     }
 
-    let host = null, root = null, box = null, imgEl = null, vidEl = null, mediaEl = null;
+    let host = null, root = null, box = null, imgEl = null, vidEl = null, mediaEl = null, coverEl = null;
     let dimEl = null;
     let xEl = null, cornerXEl = null;
     let capEl = null, capNameEl = null, capHintEl = null, capMetaEl = null, blockEl = null;
@@ -2040,6 +2040,8 @@
             '.box.full:not(.pan){cursor:default}',
             'img,video{display:block;position:absolute;background:#1e1e2e;-webkit-user-drag:none;user-select:none}',
             'img[hidden],video[hidden]{display:none}',
+            'canvas.cover{display:block;position:absolute;pointer-events:none}',
+            'canvas.cover[hidden]{display:none}',
             '.cap{position:absolute;left:0;right:0;bottom:0;height:' + BAR_MIN_H + 'px;',
             'display:flex;align-items:center;gap:' + BAR_GAP + 'px;box-sizing:border-box;',
             'padding:0 ' + BAR_PAD + 'px;font:11px/16px system-ui,sans-serif;color:#cdd6f4;',
@@ -2334,6 +2336,10 @@
 
         box.appendChild(imgEl);
         box.appendChild(vidEl);
+        coverEl = document.createElement('canvas');
+        coverEl.className = 'cover';
+        coverEl.hidden = true;
+        box.appendChild(coverEl);
         box.appendChild(vctlEl);
         box.appendChild(capEl);
         box.addEventListener('mousedown', onBoxDown, true);
@@ -3566,8 +3572,8 @@
         applyIdle(barNoDelay() && !barWanted());
     }
 
+    const COVER_HOLD_MS = 150;  // coverEl stays this long past imgEl's decode: LibreWolf paints imgEl late
     let swapSeq = 0;            // bumped by anything that puts media in the frame; a staged swap checks it
-    let swapHold = 0;           // the swapSeq whose <img> is still loading; the frame keeps the old geometry
     let blanked = false;        // a slideshow step with nothing to show yet: the frame is empty
     let tourRestTimer = 0;
     let spinCentred = false;
@@ -3575,6 +3581,7 @@
     // Point the frame at a resolved candidate, picking the face that can display it.
     function setMedia(res) {
         swapSeq++;
+        dropCover();
         if (blanked) unblank();
         const wantsVideo = !!res.video;
         mediaEl = wantsVideo ? vidEl : imgEl;
@@ -3609,7 +3616,7 @@
 
     // WHAT LOADED IS NOT WHAT WAS MEASURED.
     function verifyMedia() {
-        if (!view || !mediaEl || swapHold === swapSeq) return;   // a held swap verifies on commit
+        if (!view || !mediaEl) return;
         const w = mediaEl === vidEl ? vidEl.videoWidth : imgEl.naturalWidth;
         const h = mediaEl === vidEl ? vidEl.videoHeight : imgEl.naturalHeight;
         if (!w || !h) return;
@@ -3677,6 +3684,7 @@
         mediaEl.style.height = Math.round(view.imgH) + 'px';
         mediaEl.style.left = Math.round(view.ox) + 'px';
         mediaEl.style.top = Math.round(view.oy) + 'px';
+        if (coverEl && !coverEl.hidden) coverEl.style.cssText = mediaEl.style.cssText;
         box.classList.toggle('hot', placed);
         box.classList.toggle('pan', placed && pannable());
         if (spinDocked) moveSpinner();      // the dock rides with the frame
@@ -3959,25 +3967,26 @@
 
     // A DIFFERENT picture into the same window, at the slideshow's spot. A hand-set size stays; zoom and pan
     // reset, because a pan offset means nothing carried into another picture. See TOUR.md.
-    // Sets the window's own <img> first; the frame resizes only once THAT element holds the new picture. See TOUR.md §2.
+    // Stages an image off-screen; the commit paints it on coverEl so frame size and picture change in one paint. See TOUR.md §2.
     function swapViewer(res) {
         if (!view) return;
+        const seq = ++swapSeq;
         if (res.video) { commitSwap(res); return; }
-        setMedia(res);
-        const seq = swapSeq;
-        swapHold = seq;     // never skip the decode on imgEl.complete — loaded is not decoded, and the old picture paints meanwhile
+        const im = new Image();
+        if (noReferrerHere()) im.referrerPolicy = 'no-referrer';
+        im.src = res.display || res.url;
         showSpinner();
         dockSpinner();
         const done = function () {
             if (seq !== swapSeq || !view || !tourActive()) return;
-            swapHold = 0;
             hideSpinner();
-            commitSwap(res, true);
+            commitSwap(res);
+            showCover(im);
         };
-        imgEl.decode().then(done, done);
+        im.decode().then(done, done);
     }
 
-    function commitSwap(res, staged) {
+    function commitSwap(res) {
         view.url = res.url;
         view.natW = res.w;
         view.natH = res.h;
@@ -3994,10 +4003,40 @@
         reflow();
         posApply(posLoad('tour'));
 
-        if (!staged) setMedia(res);
+        setMedia(res);
         layout();
-        if (staged) verifyMedia();
         deferredCaption(res.url);
+    }
+
+    // Draws the staged picture over imgEl until imgEl itself has painted it.
+    function showCover(im) {
+        if (!im.naturalWidth || mediaEl !== imgEl) return;
+        const seq = swapSeq;
+        const dpr = window.devicePixelRatio || 1;
+        const k = Math.min(dpr, Math.sqrt(8e6 / Math.max(1, view.imgW * view.imgH)));
+        const w = Math.max(1, Math.round(view.imgW * k));
+        const h = Math.max(1, Math.round(view.imgH * k));
+        try {
+            coverEl.width = w;
+            coverEl.height = h;
+            const g = coverEl.getContext('2d');
+            g.fillStyle = '#1e1e2e';
+            g.fillRect(0, 0, w, h);
+            g.imageSmoothingEnabled = smoothingMode() !== 'pixelated';
+            g.imageSmoothingQuality = 'high';
+            g.drawImage(im, 0, 0, w, h);
+        } catch (e) { dropCover(); return; }
+        coverEl.style.cssText = imgEl.style.cssText;
+        coverEl.hidden = false;
+        const lift = function () { setTimeout(function () { if (seq === swapSeq) dropCover(); }, COVER_HOLD_MS); };
+        imgEl.decode().then(lift, lift);
+        setTimeout(function () { if (seq === swapSeq) dropCover(); }, 3000);
+    }
+
+    function dropCover() {
+        if (!coverEl || coverEl.hidden) return;
+        coverEl.hidden = true;
+        coverEl.width = coverEl.height = 0;
     }
 
     function deferredCaption(url) {
