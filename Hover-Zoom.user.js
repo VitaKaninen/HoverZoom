@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.207.0
+// @version     0.208.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -5194,7 +5194,6 @@
         return !e.user && e.fixes && e.fixes.length ? 0 : e.ms;
     }
 
-    const AV_AREA_MAX = 40;         // avatar areas one site may hold — YouTube alone has 15+
     const AV_SAMPLE_MAX = 30;       // samples kept across all areas still being learned
 
     // A confirmed avatar, folded into a site's avatar areas: three sharing an area make it a rule,
@@ -5213,7 +5212,7 @@
         if (!dom) return { entry: e, change: 'sampled' };
         e.samples = samples.filter(function (x) { return used.indexOf(x) === -1; });
         if (!e.samples.length) delete e.samples;
-        e.rules = (e.rules || []).concat([{ dom: dom, path: pathPrefix(used.map(function (x) { return x.path; })) }]).slice(-AV_AREA_MAX);
+        e.rules = (e.rules || []).concat([{ dom: dom, path: pathPrefix(used.map(function (x) { return x.path; })) }]);
         return { entry: e, change: e.rules.length === 1 ? 'learned' : 'another area' };
     }
 
