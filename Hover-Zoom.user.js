@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.210.0
+// @version     0.211.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -5041,7 +5041,6 @@
     const CHAIN_DEPTH = 8;          // ancestors read into a picture's chain
     const RULE_DEPTH = 4;           // levels a rule may pin; deeper is per-row noise
     const RULE_MIN = 2;             // fewer shared levels is not the same area
-    const RULE_MAX = 6;             // areas one site may hold
 
     function vdRound(ms) {
         return Math.min(VDELAY_MAX, Math.max(VDELAY_STEP, Math.ceil(ms / 50) * 50));
@@ -5139,7 +5138,7 @@
     // One flash, folded into a site's entry. Under a rule that covers it: three make the wait
     // longer. Under none: three from one area make that area a rule — the head its chains share,
     // on the page-path they share — and a site may hold several. Nothing is ever site-wide.
-    function vdLearn(entry, elapsed, chain, path) {
+    function vdLearn(entry, elapsed, chain, path, today) {
         const e = entry ? JSON.parse(JSON.stringify(entry)) : {};
         if (e.user) return { entry: e, change: null };
         const covering = vdRuleFor(e, chain, path);
@@ -5155,18 +5154,9 @@
         // Measured against the grace, not the wait, so it says nothing about ms.
         const near = vdNearRule(e, chain, path);
         if (near) { near.dom = sharedHead([near.dom, chain]).join('>'); return { entry: e, change: 'widened' }; }
-        // Samples that share no area with the newest belong to another area, or were noise.
-        const samples = (e.samples || []).concat([{ ms: elapsed, chain: chain, path: path }])
-            .filter(function (x) { return chainPrefix([x.chain, chain]) !== ''; });
-        e.samples = samples;
-        if (samples.length < VDELAY_SAMPLES) return { entry: e, change: 'sampled' };
-        // Each shares an area with the newest; all three together may still not. Drop the oldest.
-        const dom = chainPrefix(samples.map(function (x) { return x.chain; }));
-        if (!dom) { e.samples = samples.slice(1); return { entry: e, change: 'sampled' }; }
-        const slowest = Math.max.apply(null, samples.map(function (x) { return x.ms; }));
-        const rule = { dom: dom, path: pathPrefix(samples.map(function (x) { return x.path; })) };
-        delete e.samples;
-        e.rules = (e.rules || []).concat([rule]).slice(-RULE_MAX);
+        const used = areaSample(e, { ms: elapsed, chain: chain, path: path }, today);
+        if (!used) return { entry: e, change: 'sampled' };
+        const slowest = Math.max.apply(null, used.map(function (x) { return x.ms; }));
         const ms = vdRound(slowest * VDELAY_MARGIN);
         e.ms = e.ms == null ? ms : Math.max(e.ms, ms);
         return { entry: e, change: e.rules.length === 1 ? 'learned' : 'another area' };
@@ -5289,7 +5279,7 @@
             return true;
         });
         if (!changed) return { entry: entry, change: null };
-        if (!e.rules.length && !(e.samples && e.samples.length) && e.ms == null) return { entry: null, change: 'deleted' };
+        if (!e.rules.length && !(e.samples && e.samples.length)) return { entry: null, change: 'deleted' };
         return { entry: e, change: 'aged' };
     }
 
@@ -5349,8 +5339,8 @@
         const host = pageHost();
         if (!host) return;
         reloadSettings();
-        const r = step === vdLearn ? vdLearn(vdEntryFor(host), elapsed, chain, path)
-            : step(vdEntryFor(host), chain, path);
+        const r = step === vdLearn ? vdLearn(vdEntryFor(host), elapsed, chain, path, areaDay())
+            : step(vdEntryFor(host), chain, path, areaDay());
         if (!r.change) return;
         const all = Object.assign({}, cfg.videoDelays);
         if (r.entry) all[host] = r.entry;
@@ -5365,7 +5355,7 @@
 
     function vdRecord(chain, path, elapsed) { vdApply(vdLearn, chain, path, elapsed); }
 
-    const AREA_STORES = ['avatarAreas', 'ownPlayerAreas', 'linkAreas'];
+    const AREA_STORES = ['avatarAreas', 'ownPlayerAreas', 'linkAreas', 'videoDelays'];
 
     // The learned rule in cfg[key] covering this chain on this site, or null.
     function areaRule(key, chain, path) {
@@ -6040,7 +6030,7 @@
             else { showViewer(hit, pointer); dockSpinner(); hwStart(el); }
             if (pinOnShow === el) { pinOnShow = null; place(); }
         }
-        if (ruleMs) dbg('waiting ' + holdMs + ' ms for the page\'s own player before previewing');
+        if (ruleMs) { dbg('waiting ' + holdMs + ' ms for the page\'s own player before previewing'); vdApply(areaTouch, chain, path); }
         holdTimer = setTimeout(async function () {
             if (myToken.cancelled || active !== el || playerArrived(el)) return;
             // A learned wait ran out and nothing came: one strike against the rule.

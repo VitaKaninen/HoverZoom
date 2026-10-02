@@ -444,14 +444,16 @@ arithmetic on that object and is asserted in `test-resolver.js`:
   (`vdNearRule`, change `widened`) and is NOT a `fixes` sample — it was measured against the
   grace, not the wait, so it says nothing about `ms`. Three same-row samples that all carried a
   state class are thus corrected by the first flash in the next row.
-- **Nothing is ever site-wide.** A flash no rule covers is a sample for *another area*; samples
-  that share no head with the newest are dropped (another area, or noise); three of one area add
-  a rule (up to `RULE_MAX`, 6) and raise `ms` to the new area's figure if it is higher. v0.106.0–
+- **Nothing is ever site-wide.** A flash no rule covers is a sample for *another area*. Since
+  v0.211.0 sampling is `areaSample()` (the learned-areas pattern in `../CLAUDE.md`): samples from
+  other areas are kept (≤ 30), three of one area add a rule — **no cap per site** — and raise `ms`
+  to the new area's figure if it is higher. Rules carry `seen`, stamped when a wait is used, and
+  age with the other stores (`AREA_STORES`; user entries never age). v0.106.0–
   v0.111.0 widened to the whole site on the first uncovered flash, which on a site with a photo
   section is exactly wrong; only a user's own entry covers a whole site now. Two guards keep it
   so (v0.117.0): a rule with an empty `dom` matches nothing (`chainMatches`), and three samples
   that each share a head with the newest but none jointly (`a.x`, `a.y`, `a.x.y`) write no rule —
-  the oldest is dropped and sampling goes on.
+  sampling goes on, and the next matching sample forms the rule from the ones that agree.
 - **Correcting.** A flash on a covered picture is sampled (`fixes`, the panel says
   `updating, n of 3, no wait meanwhile`); the third makes `ms`
   `max(ms + 250, slowest × 1.25)`. One `ms` per site, shared by its areas — the slowest wins.
@@ -865,11 +867,10 @@ window, with today's behaviour kept until a site's avatars are known. So the sit
 - **Learning** (`areaLearn`, pure, asserted in `test-resolver.js`): every hit passing `avatarBig()` on
   an uncovered small hover is a sample `{chain, path}`; three sharing a `chainPrefix` become a rule,
   near-misses widen it (`vdNearRule`). Same area arithmetic as the learned wait (`E62`), no `ms`,
-  but **no cap on areas per site** (not `RULE_MAX` 6 — YouTube may have 50; a rule is ~100 chars and
+  and **no cap on areas per site** (YouTube may have 50; a rule is ~100 chars and
   lookup is a linear string compare, so nothing needs bounding; a cap would evict live areas). Dead
   areas after a redesign are never hovered so never struck — ageing handles them (below). Samples
-  from other areas are **kept** (up to `AV_SAMPLE_MAX` 30), not dropped as `vdLearn` does, so
-  interleaved hovers across areas still learn each. Areas sharing ≥ 2 levels (e.g. YouTube's
+  from other areas are **kept** (up to `AREA_SAMPLE_MAX` 30), so interleaved hovers across areas still learn each. Areas sharing ≥ 2 levels (e.g. YouTube's
   `img>yt-img-shadow.avatar`) merge into one rule — intended: a rule only affects small square
   pictures, so breadth costs at most a strike.
   Stored in `cfg.avatarAreas` (host → `{rules, samples}`), kept across Reset.

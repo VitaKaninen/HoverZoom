@@ -921,12 +921,18 @@ eq('  the site now holds two rules and the longer wait', side.entry,
     { rules: [{ dom: 'img>a.thumb>div.card.item-#>div.grid', path: '/videos' }, { dom: 'img>a>li.related>ul.sidebar', path: '/watch' }], ms: 1250 });
 
 let noise = vd.vdLearn(vd.vdLearn(null, 800, C1, '/v').entry, 700, SIDE, '/v');
-eq('a sample from a different area drops the earlier one', noise.entry.samples.length, 1);
+eq('a sample from a different area keeps the earlier one', noise.entry.samples.length, 2);
 
 // Each of two older samples shares a head with the newest, but the three share none jointly.
 let joint = vd.vdLearn(vd.vdLearn(vd.vdLearn(null, 700, 'img>a.x>div.p', '/v').entry, 700, 'img>a.y>div.p', '/v').entry, 700, 'img>a.x.y>div.p', '/v');
 eq('three samples with no joint head do not write a rule', joint.entry.rules, undefined);
-eq('  the oldest is dropped and sampling goes on', joint.entry.samples.length, 2);
+eq('  all three are kept and sampling goes on', joint.entry.samples.length, 3);
+eq('  a fourth matching two of them makes the rule', vd.vdLearn(joint.entry, 700, 'img>a.x>div.p', '/v').entry.rules[0].dom, 'img>a.x>div.p');
+let sev = { ms: 500, rules: [] };
+for (let i = 0; i < 8; i++) sev.rules.push({ dom: 'img>a.area' + i + '>div.x', path: '/' });
+sev = vd.vdLearn(vd.vdLearn(vd.vdLearn(sev, 700, C1, '/v').entry, 700, C2, '/v').entry, 700, C3, '/v');
+eq('a site holds more than six waiting areas', sev.entry.rules.length, 9);
+eq('a new waiting area carries its day', vd.vdLearn(vd.vdLearn(vd.vdLearn(null, 700, C1, '/v', 20000).entry, 700, C2, '/v', 20000).entry, 700, C3, '/v', 20000).entry.rules[0].seen, 20000);
 
 let late = vd.vdLearn(e.entry, 1400, C1, '/videos/page/4');
 eq('a flash under a rule starts an update', late.change, 'resampled');
@@ -1031,7 +1037,7 @@ eq('marked and unused a year past the span: deleted', vd.areaAge(TWO_AV, D + 10 
 eq('  the older goes first', vd.areaAge(TWO_AV, D + 90 + 365 + 1).entry.rules.map(function (r) { return r.dom; }), ['img>a.y']);
 eq('an area from before ageing gets today', vd.areaAge({ rules: [{ dom: 'img>a.x', path: '/' }] }, D).entry.rules[0].seen, D);
 eq('a user entry never ages', vd.areaAge({ ms: 900, user: true }, D).change, null);
-eq('a wait with no rules left keeps its entry', vd.areaAge({ ms: 900, rules: [{ dom: 'img>a.x', path: '/', seen: D }] }, D + 900).entry.ms, 900);
+eq('a wait whose last area ages out goes with it', vd.areaAge({ ms: 900, rules: [{ dom: 'img>a.x', path: '/', seen: D }] }, D + 900).change, 'deleted');
 let dr = vd.areaDrop({ rules: [{ dom: 'img>a.thumb>div.card.item-#', path: '/' }], samples: [{ chain: C1, path: '/' }, { chain: SIDE, path: '/' }] }, C1, '/v');
 eq('a drop removes the covering rule and its area\'s samples', dr.change + ' ' + dr.entry.rules.length + ' ' + dr.entry.samples.length, 'dropped an area 0 1');
 eq('  and with nothing left, the site', vd.areaDrop({ rules: [{ dom: 'img>a.thumb', path: '/' }] }, C1, '/v').change, 'forgot the site');
