@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.205.0
+// @version     0.206.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -304,6 +304,7 @@
         scrollSites: [],            // sites that load more when scrolled: learned, or the user's
         videoDelays: {},            // host -> {ms, rules, samples, fixes, user}: wait for the page's
                                     // own player before previewing; learned, or set by the user
+        avatarAreas: {},            // host -> {rules, samples}: small pictures there preview as ordinary ones
         siteAudio: {},              // host -> {muted, volume}; absent means muted, which is the
                                     // only default a first visit may have — see AUDIO_DEFAULT
 
@@ -5193,6 +5194,23 @@
         return !e.user && e.fixes && e.fixes.length ? 0 : e.ms;
     }
 
+    // A confirmed avatar, folded into a site's avatar areas: three sharing an area make it a rule. See P16.
+    function avLearn(entry, chain, path) {
+        const e = entry ? JSON.parse(JSON.stringify(entry)) : {};
+        if (vdRuleFor(e, chain, path)) return vdWorked(e, chain, path);
+        const near = vdNearRule(e, chain, path);
+        if (near) { near.dom = sharedHead([near.dom, chain]).join('>'); return { entry: e, change: 'widened' }; }
+        const samples = (e.samples || []).concat([{ chain: chain, path: path }])
+            .filter(function (x) { return chainPrefix([x.chain, chain]) !== ''; });
+        e.samples = samples;
+        if (samples.length < VDELAY_SAMPLES) return { entry: e, change: 'sampled' };
+        const dom = chainPrefix(samples.map(function (x) { return x.chain; }));
+        if (!dom) { e.samples = samples.slice(1); return { entry: e, change: 'sampled' }; }
+        delete e.samples;
+        e.rules = (e.rules || []).concat([{ dom: dom, path: pathPrefix(samples.map(function (x) { return x.path; })) }]).slice(-RULE_MAX);
+        return { entry: e, change: e.rules.length === 1 ? 'learned' : 'another area' };
+    }
+
     // The entry for a host: its own, else the most specific user entry covering it.
     function vdEntryFor(host) {
         const all = cfg.videoDelays || {};
@@ -5264,6 +5282,28 @@
     }
 
     function vdRecord(chain, path, elapsed) { vdApply(vdLearn, chain, path, elapsed); }
+
+    // The learned avatar area covering this chain on this site, or null.
+    function avatarArea(chain, path) {
+        const e = (cfg.avatarAreas || {})[pageHost()];
+        return e && e.rules ? vdRuleFor(e, chain, path) : null;
+    }
+
+    // Read-modify-write of cfg.avatarAreas. `step` is avLearn, vdWorked or vdForget.
+    function avApply(step, chain, path) {
+        const host = pageHost();
+        if (!host) return;
+        reloadSettings();
+        const r = step((cfg.avatarAreas || {})[host] || null, chain, path);
+        if (!r.change) return;
+        const all = Object.assign({}, cfg.avatarAreas);
+        if (r.entry) all[host] = r.entry;
+        else delete all[host];
+        cfg.avatarAreas = all;
+        saveSettings();
+        refreshPanel();
+        dbg('avatar area: ' + r.change, { host: host, chain: chain, path: path, entry: r.entry });
+    }
 
     const VDELAY_EVIDENCE_MS = 400;     // players land a beat after the close they cause
 
@@ -5859,13 +5899,16 @@
         }
 
         active = el;
-        activeSmall = small === 'avatar';
         activeCovered = (el !== e.target);
         activeShown = shownUrl(el);
         hoverAt = Date.now();
         activeRect = el.getBoundingClientRect();
         activeChain = domChain(el);     // taken now: at close the card holds the player too
         activePath = pagePath();
+        const chain = activeChain, path = activePath;
+        const avArea = small === 'avatar' && !!avatarArea(chain, path);     // a learned area previews as ordinary. See P16.
+        activeSmall = small === 'avatar' && !avArea;
+        let avSeen = false;     // a hit here proved an avatar
         const keyed = cfg.activation === 'modifier';     // the user asked for it: no grace, no learned wait
         ruleMs = keyed ? 0 : vdHoldFor(activeChain, activePath);
         holdMs = keyed ? 0 : Math.max(ruleMs, PLAYER_GRACE_MS);
@@ -5910,12 +5953,17 @@
                 await resolve(el, displayed, myToken,
                     function (hit) {
                         if (myToken.cancelled || active !== el || playerArrived(el)) return;
+                        if (small === 'avatar' && !avSeen && avatarBig(hit, displayed)) {
+                            avSeen = true;
+                            avApply(avLearn, chain, path);
+                        }
                         if (activeSmall && !avatarBig(hit, displayed)) return;
                         got = true;
                         if (holding) { heldHit = hit; return; }
                         paint(hit);
                     });
                 myToken.done = true;
+                if (avArea && !myToken.cancelled && !avSeen) avApply(vdForget, chain, path);
                 if (holding) return;            // the wait's timer paints, or shows the failure
                 if (!got && !myToken.cancelled && active === el && myToken.failure)
                     await showFallback(el, myToken, myToken.failure);
@@ -9445,7 +9493,7 @@
     let panelOpened = null;     // Undo's snapshot — see openPanel(); MUST outlive a re-render
 
     // What the user entered per site, not knobs: `Reset to defaults` leaves these alone.
-    const RESET_KEEPS = ['siteList', 'blockList', 'referrerSites', 'siteAudio', 'videoDelays', 'scrollSites'];
+    const RESET_KEEPS = ['siteList', 'blockList', 'referrerSites', 'siteAudio', 'videoDelays', 'avatarAreas', 'scrollSites'];
 
     // Open/closed, the fold, scroll and position for this TAB — sessionStorage is per tab and
     // per origin, so it follows a same-site link or a refresh and dies with the tab.

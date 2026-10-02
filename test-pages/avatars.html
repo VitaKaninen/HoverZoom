@@ -1,0 +1,41 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Learned avatar areas</title>
+<!--
+  P16: 40 px comment avatars whose files are big. The first three hovers behave as today (no ring,
+  opens beside the avatar, a press on it goes to the page) and teach an area; from the fourth on,
+  every avatar in a .comment previews as an ordinary picture. #icon is a 40 px square in another
+  structure: never covered. Clear localStorage to start over.
+-->
+<style>
+  body { font: 14px system-ui, sans-serif; background: #1e1e2e; color: #cdd6f4; padding: 20px; }
+  .thread { display: flex; flex-direction: column; gap: 18px; max-width: 600px; }
+  .comment { display: flex; gap: 12px; align-items: center; }
+  .comment img, #icon img { width: 40px; height: 40px; border-radius: 50%; }
+  a { color: #89b4fa; }
+</style>
+
+<div class="thread">
+  <div class="comment comment-1"><a class="author-thumb" href="#u1"><img src="/test-images/sidebar-600x600.jpg"></a><a href="#u1">user one</a> first</div>
+  <div class="comment comment-2"><a class="author-thumb" href="#u2"><img src="/test-images/sidebar-600x600.jpg?2"></a><a href="#u2">user two</a> second</div>
+  <div class="comment comment-3 reply"><a class="author-thumb" href="#u3"><img src="/test-images/sidebar-600x600.jpg?3"></a><a href="#u3">user three</a> third</div>
+  <div class="comment comment-4"><a class="author-thumb" href="#u4"><img src="/test-images/sidebar-600x600.jpg?4"></a><a href="#u4">user four</a> fourth — previews as ordinary once learned</div>
+  <div class="comment comment-5"><a class="author-thumb" href="#u5"><img src="/test-images/sidebar-600x600.jpg?5"></a><a href="#u5">user five</a> fifth</div>
+</div>
+<p id="icon"><span class="toolbar"><button class="tool"><img src="/test-images/sidebar-600x600.jpg?9"></button></span> a 40 px square elsewhere — not in the area</p>
+
+<script>
+  var GM_getValue = function (key, dflt) {
+    var v = localStorage.getItem(key);
+    return v === null ? dflt : v;
+  };
+  var GM_setValue = function (key, val) { localStorage.setItem(key, val); };
+  var GM_addValueChangeListener = function (key, fn) {
+    window.addEventListener('storage', function (e) {
+      if (e.key === key) fn(key, e.oldValue, e.newValue, true);
+    });
+  };
+  var GM_registerMenuCommand = function () { return 'x'; };
+  var GM_unregisterMenuCommand = function () {};
+</script>
+<script src="../Hover-Zoom.user.js"></script>

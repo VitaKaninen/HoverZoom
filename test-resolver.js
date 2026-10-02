@@ -876,7 +876,7 @@ const vdStart = src.indexOf('    const VDELAY_SAMPLES');
 const vdEnd = src.indexOf('    // The entry for a host');
 if (vdStart < 0 || vdEnd < 0) { console.error('vdLearn markers not found'); process.exit(1); }
 const vd = new Function(src.slice(vdStart, vdEnd) +
-    NL + 'return {vdLearn, vdRound, vdRuleFor, chainPrefix, pathPrefix, chainMatches, pathMatches, sharedHead, vdWaitOf, vdForget, vdWorked, VDELAY_SAMPLES, VDELAY_FORGET};')();
+    NL + 'return {vdLearn, vdRound, vdRuleFor, chainPrefix, pathPrefix, chainMatches, pathMatches, sharedHead, vdWaitOf, vdForget, vdWorked, avLearn, VDELAY_SAMPLES, VDELAY_FORGET};')();
 
 eq('vdRound rounds up to 50 ms', vd.vdRound(1001), 1050);
 eq('vdRound never goes under one step', vd.vdRound(10), 250);
@@ -978,6 +978,23 @@ f = vd.vdForget(vd.vdForget(vd.vdForget(TWO, C1, '/videos').entry, C1, '/videos'
 eq('with another area left, only that rule goes', f.change + ' ' + f.entry.rules.length, 'forgot an area 1');
 eq('an uncovered hover is no strike', vd.vdForget(ONE, SIDE, '/videos').change, null);
 eq('a user entry is never forgotten', vd.vdForget({ ms: 900, user: true }, C1, '/v').change, null);
+
+// ---- learned avatar areas (P16): the same areas, with no wait attached.
+const AV1 = 'img>yt-img-shadow.avatar.style-scope>a.author-thumb>div.comment-#>div.thread';
+const AV2 = 'img>yt-img-shadow.avatar.style-scope.loaded>a.author-thumb>div.comment-#>div.thread';
+const AV3 = 'img>yt-img-shadow.avatar.style-scope>a.author-thumb>div.comment-#.reply>div.thread';
+let av = vd.avLearn(null, AV1, '/watch');
+eq('one avatar is a sample', av.change, 'sampled');
+av = vd.avLearn(vd.avLearn(av.entry, AV2, '/watch').entry, AV3, '/watch');
+eq('three in one area make a rule', av.change, 'learned');
+eq('  on the structure they share', av.entry.rules[0].dom, 'img>yt-img-shadow.avatar.style-scope>a.author-thumb>div.comment-#');
+eq('  with no wait', av.entry.ms, undefined);
+eq('a covered avatar changes nothing', vd.avLearn(av.entry, AV1, '/watch').change, null);
+let avf = vd.vdForget(vd.vdForget(av.entry, AV1, '/watch').entry, AV1, '/watch');
+eq('two misses are strikes', avf.entry.rules[0].idle, 2);
+eq('  a confirmed avatar clears them', vd.avLearn(avf.entry, AV2, '/watch').entry.rules[0].idle, undefined);
+eq('  a third removes the area and the site', vd.vdForget(avf.entry, AV1, '/watch').change, 'forgot the site');
+eq('an avatar elsewhere is not covered', vd.vdRuleFor(av.entry, SIDE, '/watch'), null);
 
 // ---- the captcha gate reads only the frame's own URL and whether it is the top frame.
 const cStart = src.indexOf('    const CAPTCHA_HERE');

@@ -850,6 +850,29 @@ small pictures only for avatars and emoji; `smallKind()` sorts them in `onOver`,
 - The emoji enlargement's `<img>` needs `position:static` inline: the shadow sheet's bare `img` rule is the
   preview's (`position:absolute`), and it collapsed the label to 40 px.
 
+## Learned avatar areas · `P16` · v0.206.0
+
+`P14` cannot tell an avatar from a square icon until the file arrives, so an avatar gets no ring and
+the `E73` treatment (beside it, press goes to the page). The user wants avatars to get the ordinary
+window, with today's behaviour kept until a site's avatars are known. So the site's avatar
+*structure* is learned, never URLs:
+
+- **Learning** (`avLearn`, pure, asserted in `test-resolver.js`): every hit passing `avatarBig()` on
+  an uncovered small hover is a sample `{chain, path}`; three sharing a `chainPrefix` become a rule,
+  near-misses widen it (`vdNearRule`). Same area arithmetic as the learned wait (`E62`), no `ms`.
+  Stored in `cfg.avatarAreas` (host → `{rules, samples}`), kept across Reset.
+- **Under a rule** `activeSmall` is false, so the hover is an ordinary one: ring, regular placement,
+  press pins, `showFallback`. Press pins by the user's call — the user name beside an avatar is the
+  link, or dismiss first.
+- **Self-repair is every covered hover, not a periodic check**: the file is downloaded anyway, so
+  `avatarBig()` on its hits is free. A covered hover that ends with none is a strike (`vdForget`, 3 in
+  a row drop the rule); a confirmed one clears them (`vdWorked` via `avLearn`). A hover left before
+  the resolve finished is no evidence.
+- No settings-panel list yet; a wrong area costs three hovers.
+
+Regression page: `test-pages/avatars.html` — hover avatars 1–3 (beside, no ring), then 4–5 preview
+as ordinary; `#icon` stays uncovered.
+
 ## Sprite sheets · `P15` · v0.205.0
 
 A sprite is one slice of a sheet of icons, drawn as a CSS background. Previewing it shows the whole
