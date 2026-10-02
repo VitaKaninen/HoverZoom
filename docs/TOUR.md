@@ -442,8 +442,8 @@ user has moved past. Videos commit directly.
 Do not go back to decoding an off-screen `new Image()` and then setting `src` (v0.161.0–v0.212.0):
 the window's element can still re-fetch (no-store, evicted, different request), and ~1 in 15 steps
 stretched. Nor skip the decode when `imgEl.complete` is true (v0.213.0): a memory-cached file is
-complete synchronously but not yet decoded, and Chrome paints the old picture in the new frame for
-~3 frames at 60 fps (filmed by the user).
+complete synchronously but not yet decoded, and LibreWolf (Gecko) painted the old picture in the new
+frame for ~3 frames at 60 fps (filmed by the user on v0.213.0).
 
 ### Growing and shrinking — already free
 
