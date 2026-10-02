@@ -435,13 +435,15 @@ misbehaves.
 **The frame resizes only once `imgEl` itself holds the new picture** (v0.213.0). While a new `src`
 loads, the browser keeps painting the OLD picture (the element's pending request), so resizing
 first stretches it. `swapViewer()` sets `imgEl.src` via `setMedia()` with the geometry untouched;
-if `imgEl.complete` it commits at once, else it waits on `imgEl.decode()` (spinner meanwhile,
+it always waits on `imgEl.decode()` (spinner meanwhile,
 `swapHold` set so `verifyMedia()` does not compare against the old size), then `commitSwap(res,
 true)` changes the geometry and verifies. A decode failure still commits. `swapSeq` drops a swap the
 user has moved past. Videos commit directly.
 Do not go back to decoding an off-screen `new Image()` and then setting `src` (v0.161.0–v0.212.0):
 the window's element can still re-fetch (no-store, evicted, different request), and ~1 in 15 steps
-stretched.
+stretched. Nor skip the decode when `imgEl.complete` is true (v0.213.0): a memory-cached file is
+complete synchronously but not yet decoded, and Chrome paints the old picture in the new frame for
+~3 frames at 60 fps (filmed by the user).
 
 ### Growing and shrinking — already free
 
