@@ -347,10 +347,15 @@ things were true and each cost a version:
   `all`. Narrow, and the debug line names it.
 - **The dormant player may not exist yet** (v0.154.0). YouTube's feed holds no `<video>` until the
   first thumbnail hover builds its inline player, so at load every thumbnail passed and the widget
-  counted them (exposed by v0.150.0's recount on image load). The first time the dormant-player
-  refusal fires, the host is stored in `hoverZoomOwnPlayer` (GM, top frame only) and its video-link
-  thumbnails are refused from then on, dormant player or not. No panel UI; clear it from the
-  manager's storage tab. A learned host never un-learns.
+  counted them (exposed by v0.150.0's recount on image load). **Learned per area** (v0.210.0,
+  `cfg.ownPlayerAreas`, the learned-areas pattern in `../CLAUDE.md`), replacing v0.154.0's
+  `hoverZoomOwnPlayer` host list — one dormant `<video>` anywhere made a whole site refuse its
+  video-link thumbnails forever. Evidence is the site's player landing on a video-link thumbnail:
+  `withdrawn()` and `selfClosed()`'s player check for a previewed one, and `opWatch()` for a refused
+  one (polls `videoOver(rect)` for `OP_WATCH_MS` 3 s + any learned wait while the pointer stays).
+  `opSeen()` → `areaLearn`. A covered refused hover that watches the full time with no player is a
+  strike; 3 drop the area. The dormant-player refusal itself stays live (a fact of this page).
+  `test-pages/own-player.html`: cards 1–3 teach, 4–5 refused, `#ctl` previews.
 
 v0.104.0 shipped the opposite — holding the preview *over* the arrived player — and the user's
 first look said it: "since the video is playing behind it, the preview should not be showing at
@@ -857,7 +862,7 @@ the `E73` treatment (beside it, press goes to the page). The user wants avatars 
 window, with today's behaviour kept until a site's avatars are known. So the site's avatar
 *structure* is learned, never URLs:
 
-- **Learning** (`avLearn`, pure, asserted in `test-resolver.js`): every hit passing `avatarBig()` on
+- **Learning** (`areaLearn`, pure, asserted in `test-resolver.js`): every hit passing `avatarBig()` on
   an uncovered small hover is a sample `{chain, path}`; three sharing a `chainPrefix` become a rule,
   near-misses widen it (`vdNearRule`). Same area arithmetic as the learned wait (`E62`), no `ms`,
   but **no cap on areas per site** (not `RULE_MAX` 6 — YouTube may have 50; a rule is ~100 chars and
@@ -873,10 +878,10 @@ window, with today's behaviour kept until a site's avatars are known. So the sit
   link, or dismiss first.
 - **Self-repair is every covered hover, not a periodic check**: the file is downloaded anyway, so
   `avatarBig()` on its hits is free. A covered hover that ends with none is a strike (`vdForget`, 3 in
-  a row drop the rule); a confirmed one clears them (`vdWorked` via `avLearn`). A hover left before
+  a row drop the rule); a confirmed one clears them (`areaLearn`). A hover left before
   the resolve finished is no evidence.
 - **Ageing, learned per site** (user's design, v0.209.0): each rule's `seen` day is stamped by
-  `avTouch` on a covered hover (≤ 1 write/rule/day). `avAgeAll()` runs once a day at boot (top frame,
+  `areaTouch` on a covered hover (≤ 1 write/rule/day). `areaAgeAll()` runs once a day at boot (top frame,
   deferred): unused past the site's span (`idleDays`, default `AV_IDLE_DAYS` 90) a rule is **marked
   `stale`, not removed, and keeps working** — it must, or a revival could never be observed. A marked
   rule used again clears the mark and sets the span to gap × `AV_IDLE_MARGIN` (1.5); a longer span

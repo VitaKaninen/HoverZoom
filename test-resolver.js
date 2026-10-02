@@ -876,7 +876,7 @@ const vdStart = src.indexOf('    const VDELAY_SAMPLES');
 const vdEnd = src.indexOf('    // The entry for a host');
 if (vdStart < 0 || vdEnd < 0) { console.error('vdLearn markers not found'); process.exit(1); }
 const vd = new Function(src.slice(vdStart, vdEnd) +
-    NL + 'return {vdLearn, vdRound, vdRuleFor, chainPrefix, pathPrefix, chainMatches, pathMatches, sharedHead, vdWaitOf, vdForget, vdWorked, avLearn, avTouch, avAge, VDELAY_SAMPLES, VDELAY_FORGET};')();
+    NL + 'return {vdLearn, vdRound, vdRuleFor, chainPrefix, pathPrefix, chainMatches, pathMatches, sharedHead, vdWaitOf, vdForget, vdWorked, areaLearn, areaTouch, areaAge, areaDrop, VDELAY_SAMPLES, VDELAY_FORGET};')();
 
 eq('vdRound rounds up to 50 ms', vd.vdRound(1001), 1050);
 eq('vdRound never goes under one step', vd.vdRound(10), 250);
@@ -983,53 +983,61 @@ eq('a user entry is never forgotten', vd.vdForget({ ms: 900, user: true }, C1, '
 const AV1 = 'img>yt-img-shadow.avatar.style-scope>a.author-thumb>div.comment-#>div.thread';
 const AV2 = 'img>yt-img-shadow.avatar.style-scope.loaded>a.author-thumb>div.comment-#>div.thread';
 const AV3 = 'img>yt-img-shadow.avatar.style-scope>a.author-thumb>div.comment-#.reply>div.thread';
-let av = vd.avLearn(null, AV1, '/watch');
+let av = vd.areaLearn(null, AV1, '/watch');
 eq('one avatar is a sample', av.change, 'sampled');
-av = vd.avLearn(vd.avLearn(av.entry, AV2, '/watch').entry, AV3, '/watch');
+av = vd.areaLearn(vd.areaLearn(av.entry, AV2, '/watch').entry, AV3, '/watch');
 eq('three in one area make a rule', av.change, 'learned');
 eq('  on the structure they share', av.entry.rules[0].dom, 'img>yt-img-shadow.avatar.style-scope>a.author-thumb>div.comment-#');
 eq('  with no wait', av.entry.ms, undefined);
-eq('a covered avatar changes nothing', vd.avLearn(av.entry, AV1, '/watch').change, null);
+eq('a covered avatar the same day changes nothing', vd.areaLearn(av.entry, AV1, '/watch', undefined).change, null);
 let avf = vd.vdForget(vd.vdForget(av.entry, AV1, '/watch').entry, AV1, '/watch');
 eq('two misses are strikes', avf.entry.rules[0].idle, 2);
-eq('  a confirmed avatar clears them', vd.avLearn(avf.entry, AV2, '/watch').entry.rules[0].idle, undefined);
+eq('  a confirmed avatar clears them', vd.areaLearn(avf.entry, AV2, '/watch').entry.rules[0].idle, undefined);
 eq('  a third removes the area and the site', vd.vdForget(avf.entry, AV1, '/watch').change, 'forgot the site');
 eq('an avatar elsewhere is not covered', vd.vdRuleFor(av.entry, SIDE, '/watch'), null);
 const SB1 = 'img>span.chan-icon>a.channel>div.sidebar-item-#>div.sidebar';
 const SB2 = 'img>span.chan-icon>a.channel>div.sidebar-item-#.watched>div.sidebar';
 let mix = null;
-[AV1, SB1, AV2, SB2, AV3].forEach(function (c) { mix = vd.avLearn(mix && mix.entry, c, '/watch'); });
+[AV1, SB1, AV2, SB2, AV3].forEach(function (c) { mix = vd.areaLearn(mix && mix.entry, c, '/watch'); });
 eq('interleaved areas: the third comment avatar makes its rule', mix.change, 'learned');
 eq('  the sidebar samples survive it', mix.entry.samples.length, 2);
-mix = vd.avLearn(mix.entry, SB1, '/watch');
+mix = vd.areaLearn(mix.entry, SB1, '/watch');
 eq('  and the third sidebar avatar makes a second area', mix.change + ' ' + mix.entry.rules.length, 'another area 2');
 eq('  leaving no samples behind', mix.entry.samples, undefined);
 let many = { rules: [] };
 for (let i = 0; i < 20; i++) many.rules.push({ dom: 'img>a.area' + i + '>div.x', path: '/' });
-many = vd.avLearn(vd.avLearn(vd.avLearn(many, SB1, '/w').entry, SB2, '/w').entry, SB1, '/w');
+many = vd.areaLearn(vd.areaLearn(vd.areaLearn(many, SB1, '/w').entry, SB2, '/w').entry, SB1, '/w');
 eq('a site holds more than six avatar areas', many.entry.rules.length, 21);
 const SH = 'img>yt-img-shadow.avatar>a.channel>div.sidebar-item-#>div.sidebar';
-let one = vd.avLearn(vd.avLearn(vd.avLearn(null, AV1, '/watch').entry, SH, '/watch').entry, AV2, '/watch');
+let one = vd.areaLearn(vd.areaLearn(vd.areaLearn(null, AV1, '/watch').entry, SH, '/watch').entry, AV2, '/watch');
 eq('two areas sharing the avatar wrapper become one rule on it', one.entry.rules[0].dom, 'img>yt-img-shadow.avatar');
 
 // ---- ageing: unused areas are marked, not deleted; a marked area used again lengthens the site's span.
 const D = 20000;
-let ag = vd.avLearn(vd.avLearn(vd.avLearn(null, AV1, '/watch', D).entry, AV2, '/watch', D).entry, AV3, '/watch', D);
+let ag = vd.areaLearn(vd.areaLearn(vd.areaLearn(null, AV1, '/watch', D).entry, AV2, '/watch', D).entry, AV3, '/watch', D);
 eq('a new area carries the day it was learned', ag.entry.rules[0].seen, D);
-eq('a second use the same day writes nothing', vd.avTouch(ag.entry, AV1, '/watch', D).change, null);
-eq('a use on a later day stamps it', vd.avTouch(ag.entry, AV1, '/watch', D + 5).entry.rules[0].seen, D + 5);
-eq('within the span nothing ages', vd.avAge(ag.entry, D + 90).change, null);
-let st = vd.avAge(ag.entry, D + 91);
+eq('a second use the same day writes nothing', vd.areaTouch(ag.entry, AV1, '/watch', D).change, null);
+eq('a use on a later day stamps it', vd.areaTouch(ag.entry, AV1, '/watch', D + 5).entry.rules[0].seen, D + 5);
+eq('within the span nothing ages', vd.areaAge(ag.entry, D + 90).change, null);
+let st = vd.areaAge(ag.entry, D + 91);
 eq('past the span it is marked, not removed', st.entry.rules.length + ' ' + st.entry.rules[0].stale, '1 true');
 eq('  and still covers its avatars', !!vd.vdRuleFor(st.entry, AV1, '/watch'), true);
-let back = vd.avTouch(st.entry, AV1, '/watch', D + 120);
+let back = vd.areaTouch(st.entry, AV1, '/watch', D + 120);
 eq('used again after 120 days: the span becomes 180', back.entry.idleDays, 180);
 eq('  and the mark is gone', back.entry.rules[0].stale, undefined);
 const TWO_AV = { idleDays: 90, rules: [{ dom: 'img>a.x', path: '/', seen: D, stale: true }, { dom: 'img>a.y', path: '/', seen: D + 10 }] };
-eq('a longer span unmarks what it now covers', vd.avAge(Object.assign({}, TWO_AV, { idleDays: 180 }), D + 150).entry.rules[0].stale, undefined);
-eq('marked and unused a year past the span: deleted', vd.avAge(TWO_AV, D + 10 + 90 + 365 + 1).change, 'deleted');
-eq('  the older goes first', vd.avAge(TWO_AV, D + 90 + 365 + 1).entry.rules.map(function (r) { return r.dom; }), ['img>a.y']);
-eq('an area from before ageing gets today', vd.avAge({ rules: [{ dom: 'img>a.x', path: '/' }] }, D).entry.rules[0].seen, D);
+eq('a longer span unmarks what it now covers', vd.areaAge(Object.assign({}, TWO_AV, { idleDays: 180 }), D + 150).entry.rules[0].stale, undefined);
+eq('marked and unused a year past the span: deleted', vd.areaAge(TWO_AV, D + 10 + 90 + 365 + 1).change, 'deleted');
+eq('  the older goes first', vd.areaAge(TWO_AV, D + 90 + 365 + 1).entry.rules.map(function (r) { return r.dom; }), ['img>a.y']);
+eq('an area from before ageing gets today', vd.areaAge({ rules: [{ dom: 'img>a.x', path: '/' }] }, D).entry.rules[0].seen, D);
+eq('a user entry never ages', vd.areaAge({ ms: 900, user: true }, D).change, null);
+eq('a wait with no rules left keeps its entry', vd.areaAge({ ms: 900, rules: [{ dom: 'img>a.x', path: '/', seen: D }] }, D + 900).entry.ms, 900);
+let dr = vd.areaDrop({ rules: [{ dom: 'img>a.thumb>div.card.item-#', path: '/' }], samples: [{ chain: C1, path: '/' }, { chain: SIDE, path: '/' }] }, C1, '/v');
+eq('a drop removes the covering rule and its area\'s samples', dr.change + ' ' + dr.entry.rules.length + ' ' + dr.entry.samples.length, 'dropped an area 0 1');
+eq('  and with nothing left, the site', vd.areaDrop({ rules: [{ dom: 'img>a.thumb', path: '/' }] }, C1, '/v').change, 'forgot the site');
+eq('  uncovered with no samples, nothing', vd.areaDrop({ rules: [] }, C1, '/v').change, null);
+let cf = vd.areaLearn({ rules: [{ dom: 'img>a.thumb', path: '/', seen: D, idle: 2 }] }, C1, '/v', D);
+eq('a verdict under a struck rule clears its strikes', cf.change + ' ' + cf.entry.rules[0].idle, 'confirmed undefined');
 
 // ---- the captcha gate reads only the frame's own URL and whether it is the top frame.
 const cStart = src.indexOf('    const CAPTCHA_HERE');

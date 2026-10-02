@@ -1,0 +1,66 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Own-player areas</title>
+<!--
+  E61, learned per area. No <video> at rest; each .card creates the site's player over its thumbnail
+  250 ms into a hover and removes it on leave, so there is never a dormant player. Cards 1–3 open and
+  are withdrawn (each teaches ownPlayerAreas); from then on the cards are refused up front. #ctl is
+  a /watch? link in another structure with no player: always previews.
+  Sets videoMode 'all' in localStorage on load. Clear localStorage to start over.
+-->
+<style>
+  body { font: 14px system-ui, sans-serif; margin: 24px; background: #1e1e2e; color: #cdd6f4; }
+  .grid { display: flex; flex-wrap: wrap; gap: 24px; }
+  .card { position: relative; width: 200px; }
+  .card img, #ctl img { display: block; width: 200px; height: 150px; }
+  .cover { position: absolute; left: 0; top: 0; width: 200px; height: 150px; }
+  .cover video { width: 200px; height: 150px; background: #000; display: block; }
+</style>
+
+<div class="grid">
+  <div class="card"><a href="/watch?v=1"><img src="/test-images/photo-200x150.jpg?1" alt=""></a>1</div>
+  <div class="card"><a href="/watch?v=2"><img src="/test-images/photo-200x150.jpg?2" alt=""></a>2</div>
+  <div class="card"><a href="/watch?v=3"><img src="/test-images/photo-200x150.jpg?3" alt=""></a>3</div>
+  <div class="card"><a href="/watch?v=4"><img src="/test-images/photo-200x150.jpg?4" alt=""></a>4 — refused once learned</div>
+  <div class="card"><a href="/watch?v=5"><img src="/test-images/photo-200x150.jpg?5" alt=""></a>5</div>
+</div>
+<section id="ctl"><span class="other"><a href="/watch?v=9"><img src="/test-images/photo-200x150.jpg?9" alt=""></a></span>control</section>
+
+<script>
+  (function () {
+    var s = {};
+    try { s = JSON.parse(localStorage.getItem('hoverZoomSettings') || '{}'); } catch (e) {}
+    if (s.videoMode !== 'all') { s.videoMode = 'all'; localStorage.setItem('hoverZoomSettings', JSON.stringify(s)); }
+  })();
+  document.querySelectorAll('.card').forEach(function (card) {
+    var timer = 0, cv = null;
+    card.addEventListener('mouseenter', function () {
+      timer = setTimeout(function () {
+        cv = document.createElement('div');
+        cv.className = 'cover';
+        var v = document.createElement('video');
+        v.muted = true;
+        v.src = '/test-images/clip-2s.mp4';
+        cv.appendChild(v);
+        card.appendChild(cv);
+      }, 250);
+    });
+    card.addEventListener('mouseleave', function () {
+      clearTimeout(timer);
+      if (cv) { cv.remove(); cv = null; }
+    });
+  });
+  var GM_getValue = function (key, dflt) {
+    var v = localStorage.getItem(key);
+    return v === null ? dflt : v;
+  };
+  var GM_setValue = function (key, val) { localStorage.setItem(key, val); };
+  var GM_addValueChangeListener = function (key, fn) {
+    window.addEventListener('storage', function (e) {
+      if (e.key === key) fn(key, e.oldValue, e.newValue, true);
+    });
+  };
+  var GM_registerMenuCommand = function () { return 'x'; };
+  var GM_unregisterMenuCommand = function () {};
+</script>
+<script src="../Hover-Zoom.user.js"></script>

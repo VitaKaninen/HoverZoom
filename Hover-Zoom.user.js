@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.209.0
+// @version     0.210.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -305,7 +305,9 @@
         videoDelays: {},            // host -> {ms, rules, samples, fixes, user}: wait for the page's
                                     // own player before previewing; learned, or set by the user
         avatarAreas: {},            // host -> {rules, samples, idleDays}: small pictures there preview as ordinary ones
-        avatarAgedOn: 0,            // the day avAgeAll() last ran
+        ownPlayerAreas: {},         // host -> {rules, samples, idleDays}: video-link thumbnails the site's own player lands on
+        linkAreas: {},              // host -> {rules, samples, idleDays}: thumbnails whose linked page never holds the original
+        areasAgedOn: 0,             // the day areaAgeAll() last ran
         siteAudio: {},              // host -> {muted, volume}; absent means muted, which is the
                                     // only default a first visit may have — see AUDIO_DEFAULT
 
@@ -315,7 +317,7 @@
 
     const KEY = 'hoverZoomSettings';
 
-    const RETIRED = ['maxWidthPct', 'maxHeightPct', 'dimOpacity', 'bottomReserve',
+    const RETIRED = ['avatarAgedOn', 'maxWidthPct', 'maxHeightPct', 'dimOpacity', 'bottomReserve',
         'sameShapeOnly', 'keepSearching', 'followLinks', 'hoverThroughOverlays',
         'skipWhileMouseDown', 'playVideos', 'skipVideos', 'skipPageBackgrounds',
         'skipBanners', 'skipDecorative', 'enabled', 'maxDisplayed', 'cursorGap', 'noReferrer',
@@ -4985,38 +4987,46 @@
         return false;
     }
 
-    // Even under 'all', a video-link thumbnail on a page with a dormant player is the SITE's to
-    // preview — its player will land on the thumbnail and win. See E61.
+    // Even under 'all', a video-link thumbnail is the SITE's to preview when its player will land on
+    // it: the page holds a dormant one now, or thumbnails shaped like this have had one land. See E61.
     function videoLinkRefused(el) {
         const why = videoLinkReason(el);
         if (!why) return null;
         if (cfg.videoMode !== 'all') return why;
-        if (dormantPlayer()) { ownPlayerLearn(); return why + ' — and this page holds a dormant player'; }
-        return ownPlayerHosts().indexOf(pageHost()) >= 0 ? why + ' — and this site has held one before' : null;
+        if (dormantPlayer()) return why + ' — and this page holds a dormant player';
+        return areaRule('ownPlayerAreas', domChain(el), pagePath()) ? why + ' — the site\'s own player has landed on thumbnails like this' : null;
     }
 
-    const OWN_PLAYER_KEY = 'hoverZoomOwnPlayer';    // GM: [host] sites seen with a dormant player beside video links
-    let ownPlayerList = null;
+    const OP_WATCH_MS = 3000;       // how long a refused video-link hover watches for the site's player
+    let opWatchEl = null, opWatchTimer = 0;
 
-    function ownPlayerHosts() {
-        if (ownPlayerList) return ownPlayerList;
-        try {
-            const v = JSON.parse(GM_getValue(OWN_PLAYER_KEY, '[]'));
-            ownPlayerList = Array.isArray(v) ? v : [];
-        } catch (e) { console.warn('[Hover Zoom] own-player sites unreadable', e); ownPlayerList = []; }
-        return ownPlayerList;
+    // A player landed on a video-link thumbnail: evidence for its area. Recounts when the rules change.
+    function opSeen(chain, path) {
+        const c = areaApply('ownPlayerAreas', areaLearn, chain, path);
+        if (c && c !== 'sampled' && c !== 'used') setTimeout(twRecount, 0);
     }
 
-    // A site that builds its player on the first hover is refused from the next load on. See E61.
-    function ownPlayerLearn() {
-        const host = pageHost();
-        if (!isTopFrame || !host || ownPlayerHosts().indexOf(host) >= 0) return;
-        ownPlayerList = null;
-        const all = ownPlayerHosts().concat(host);
-        GM_setValue(OWN_PLAYER_KEY, JSON.stringify(all));
-        ownPlayerList = all;
-        dbg('this site previews its own videos; its video-link thumbnails are refused from now on', host);
-        setTimeout(twRecount, 0);
+    function opStop() { clearInterval(opWatchTimer); opWatchTimer = 0; opWatchEl = null; }
+
+    // A video-link thumbnail we refused: watch whether the site's own player lands on it. Under a rule,
+    // a full watch with no player is a strike. The pointer leaving is no evidence.
+    function opWatch(el) {
+        if (opWatchEl === el || el.tagName === 'VIDEO' || cfg.videoMode !== 'all' || !videoLinkReason(el)) return;
+        opStop();
+        opWatchEl = el;
+        const rect = el.getBoundingClientRect(), chain = domChain(el), path = pagePath(), t0 = Date.now();
+        const limit = OP_WATCH_MS + vdHoldFor(chain, path);
+        opWatchTimer = setInterval(function () {
+            if (!holds(rect, pointer.x, pointer.y)) { opStop(); return; }
+            if (videoOver(rect)) { opStop(); opSeen(chain, path); return; }
+            if (!el.isConnected) { opStop(); return; }
+            if (Date.now() - t0 < limit) return;
+            opStop();
+            if (areaRule('ownPlayerAreas', chain, path)) {
+                const c = areaApply('ownPlayerAreas', vdForget, chain, path);
+                if (c && c.indexOf('forgot') === 0) setTimeout(twRecount, 0);
+            }
+        }, VDELAY_POLL_MS);
     }
 
     // ---- the learned wait for a player that lands late. See E62.
@@ -5195,41 +5205,68 @@
         return !e.user && e.fixes && e.fixes.length ? 0 : e.ms;
     }
 
-    const AV_SAMPLE_MAX = 30;       // samples kept across all areas still being learned
+    // ---- learned areas: a verdict cached per page structure, self-repairing and ageing. See ../CLAUDE.md.
+    const AREA_SAMPLE_MAX = 30;     // samples kept across all areas still being learned
+    const AREA_IDLE_DAYS = 90;      // unused this long, an area is marked; each site learns its own span
+    const AREA_GRACE_DAYS = 365;    // marked and unused this much longer, it is deleted
+    const AREA_IDLE_MARGIN = 1.5;   // a marked area used again: the site's span becomes its gap × this
 
-    // A confirmed avatar, folded into a site's avatar areas: three sharing an area make it a rule,
-    // whatever was hovered in between. See P16.
-    function avLearn(entry, chain, path, today) {
-        const e = entry ? JSON.parse(JSON.stringify(entry)) : {};
-        if (vdRuleFor(e, chain, path)) return vdWorked(e, chain, path);
-        const near = vdNearRule(e, chain, path);
-        if (near) { near.dom = sharedHead([near.dom, chain]).join('>'); return { entry: e, change: 'widened' }; }
-        const samples = (e.samples || []).concat([{ chain: chain, path: path }]).slice(-AV_SAMPLE_MAX);
+    // Adds a sample; when VDELAY_SAMPLES share an area, appends a rule on it. The samples used, or null.
+    function areaSample(e, sample, today) {
+        const samples = (e.samples || []).concat([sample]).slice(-AREA_SAMPLE_MAX);
         e.samples = samples;
-        const mates = samples.filter(function (x) { return chainPrefix([x.chain, chain]) !== ''; });
-        if (mates.length < VDELAY_SAMPLES) return { entry: e, change: 'sampled' };
+        const mates = samples.filter(function (x) { return chainPrefix([x.chain, sample.chain]) !== ''; });
+        if (mates.length < VDELAY_SAMPLES) return null;
         let used = mates, dom = chainPrefix(mates.map(function (x) { return x.chain; }));
         if (!dom) { used = mates.slice(-VDELAY_SAMPLES); dom = chainPrefix(used.map(function (x) { return x.chain; })); }
-        if (!dom) return { entry: e, change: 'sampled' };
+        if (!dom) return null;
         e.samples = samples.filter(function (x) { return used.indexOf(x) === -1; });
         if (!e.samples.length) delete e.samples;
         e.rules = (e.rules || []).concat([{ dom: dom, path: pathPrefix(used.map(function (x) { return x.path; })), seen: today }]);
+        return used;
+    }
+
+    // One verdict for this chain: under a rule it confirms it (strikes cleared, day stamped); else a
+    // near rule widens, or it is a sample — three sharing an area make a rule, whatever came between.
+    function areaLearn(entry, chain, path, today) {
+        const e = entry ? JSON.parse(JSON.stringify(entry)) : {};
+        const rule = vdRuleFor(e, chain, path);
+        if (rule) {
+            const t = areaTouch(e, chain, path, today);
+            const r = vdRuleFor(t.entry, chain, path);
+            if (!r.idle) return t;
+            delete r.idle;
+            return { entry: t.entry, change: t.change || 'confirmed' };
+        }
+        const near = vdNearRule(e, chain, path);
+        if (near) { near.dom = sharedHead([near.dom, chain]).join('>'); return { entry: e, change: 'widened' }; }
+        if (!areaSample(e, { chain: chain, path: path }, today)) return { entry: e, change: 'sampled' };
         return { entry: e, change: e.rules.length === 1 ? 'learned' : 'another area' };
     }
 
-    const AV_IDLE_DAYS = 90;        // unused this long, an area is marked; each site learns its own span
-    const AV_GRACE_DAYS = 365;      // marked and unused this much longer, it is deleted
-    const AV_IDLE_MARGIN = 1.5;     // a marked area used again: the site's span becomes its gap × this
+    // Counter-evidence that must not wait for strikes: the covering rule goes, and samples sharing its area.
+    function areaDrop(entry, chain, path) {
+        if (!entry) return { entry: null, change: null };
+        const e = JSON.parse(JSON.stringify(entry));
+        const rule = vdRuleFor(e, chain, path);
+        const before = (e.samples || []).length;
+        if (e.samples) e.samples = e.samples.filter(function (x) { return chainPrefix([x.chain, chain]) === ''; });
+        if (e.samples && !e.samples.length) delete e.samples;
+        if (rule) e.rules = e.rules.filter(function (r) { return r !== rule; });
+        if (!rule && (e.samples || []).length === before) return { entry: e, change: null };
+        if (!(e.rules && e.rules.length) && !(e.samples && e.samples.length)) return { entry: null, change: 'forgot the site' };
+        return { entry: e, change: rule ? 'dropped an area' : 'dropped samples' };
+    }
 
     // A hover this area covered: stamp the day. A marked area used again proves the site's span too short.
-    function avTouch(entry, chain, path, today) {
+    function areaTouch(entry, chain, path, today) {
         const e = entry ? JSON.parse(JSON.stringify(entry)) : null;
         const rule = e && e.rules ? vdRuleFor(e, chain, path) : null;
-        if (!rule || rule.seen === today) return { entry: e, change: null };
+        if (!rule || rule === e || rule.seen === today) return { entry: e, change: null };
         let change = 'used';
         if (rule.stale && rule.seen != null) {
             const gap = today - rule.seen;
-            e.idleDays = Math.max(e.idleDays || AV_IDLE_DAYS, Math.ceil(gap * AV_IDLE_MARGIN));
+            e.idleDays = Math.max(e.idleDays || AREA_IDLE_DAYS, Math.ceil(gap * AREA_IDLE_MARGIN));
             change = 'marked area used again after ' + gap + ' days; span now ' + e.idleDays;
         }
         delete rule.stale;
@@ -5238,20 +5275,21 @@
     }
 
     // Once a day per site: mark areas idle past the span, unmark any the span now covers, delete the long-dead.
-    function avAge(entry, today) {
+    function areaAge(entry, today) {
+        if (entry.user) return { entry: entry, change: null };
         const e = JSON.parse(JSON.stringify(entry));
-        const span = e.idleDays || AV_IDLE_DAYS;
+        const span = e.idleDays || AREA_IDLE_DAYS;
         let changed = false;
         e.rules = (e.rules || []).filter(function (r) {
             if (r.seen == null) { r.seen = today; changed = true; return true; }
             const idle = today - r.seen;
-            if (idle > span + AV_GRACE_DAYS) { changed = true; return false; }
+            if (idle > span + AREA_GRACE_DAYS) { changed = true; return false; }
             if (idle > span && !r.stale) { r.stale = true; changed = true; }
             if (idle <= span && r.stale) { delete r.stale; changed = true; }
             return true;
         });
         if (!changed) return { entry: entry, change: null };
-        if (!e.rules.length && !(e.samples && e.samples.length)) return { entry: null, change: 'deleted' };
+        if (!e.rules.length && !(e.samples && e.samples.length) && e.ms == null) return { entry: null, change: 'deleted' };
         return { entry: e, change: 'aged' };
     }
 
@@ -5327,44 +5365,49 @@
 
     function vdRecord(chain, path, elapsed) { vdApply(vdLearn, chain, path, elapsed); }
 
-    // The learned avatar area covering this chain on this site, or null.
-    function avatarArea(chain, path) {
-        const e = (cfg.avatarAreas || {})[pageHost()];
+    const AREA_STORES = ['avatarAreas', 'ownPlayerAreas', 'linkAreas'];
+
+    // The learned rule in cfg[key] covering this chain on this site, or null.
+    function areaRule(key, chain, path) {
+        const e = (cfg[key] || {})[pageHost()];
         return e && e.rules ? vdRuleFor(e, chain, path) : null;
     }
 
-    function avDay() { return Math.floor(Date.now() / 86400000); }
+    function areaDay() { return Math.floor(Date.now() / 86400000); }
 
-    // Read-modify-write of cfg.avatarAreas. `step` is avLearn, avTouch, vdWorked or vdForget.
-    function avApply(step, chain, path) {
+    // Read-modify-write of cfg[key] for this site. `step` is areaLearn, areaTouch, areaDrop, vdWorked or vdForget.
+    function areaApply(key, step, chain, path) {
         const host = pageHost();
-        if (!host) return;
+        if (!host || !isTopFrame) return null;
         reloadSettings();
-        const r = step((cfg.avatarAreas || {})[host] || null, chain, path, avDay());
-        if (!r.change) return;
-        const all = Object.assign({}, cfg.avatarAreas);
+        const r = step((cfg[key] || {})[host] || null, chain, path, areaDay());
+        if (!r.change) return null;
+        const all = Object.assign({}, cfg[key]);
         if (r.entry) all[host] = r.entry;
         else delete all[host];
-        cfg.avatarAreas = all;
+        cfg[key] = all;
         saveSettings();
         refreshPanel();
-        dbg('avatar area: ' + r.change, { host: host, chain: chain, path: path, entry: r.entry });
+        dbg(key + ': ' + r.change, { host: host, chain: chain, path: path, entry: r.entry });
+        return r.change;
     }
 
-    // Ages every site's avatar areas, at most once a day.
-    function avAgeAll() {
-        const today = avDay();
-        if (cfg.avatarAgedOn === today) return;
+    // Ages every learned store, at most once a day.
+    function areaAgeAll() {
+        const today = areaDay();
+        if (cfg.areasAgedOn === today) return;
         reloadSettings();
-        if (cfg.avatarAgedOn === today) return;
-        const all = {};
-        Object.keys(cfg.avatarAreas || {}).forEach(function (host) {
-            const r = avAge(cfg.avatarAreas[host], today);
-            if (r.entry) all[host] = r.entry;
-            if (r.change) dbg('avatar areas ' + r.change, { host: host, entry: r.entry });
+        if (cfg.areasAgedOn === today) return;
+        AREA_STORES.forEach(function (key) {
+            const all = {};
+            Object.keys(cfg[key] || {}).forEach(function (host) {
+                const r = areaAge(cfg[key][host], today);
+                if (r.entry) all[host] = r.entry;
+                if (r.change) dbg(key + ' ' + r.change, { host: host, entry: r.entry });
+            });
+            cfg[key] = all;
         });
-        cfg.avatarAreas = all;
-        cfg.avatarAgedOn = today;
+        cfg.areasAgedOn = today;
         saveSettings();
     }
 
@@ -5937,6 +5980,7 @@
 
         const el = eligible(e.target, e.clientX, e.clientY);
         if (debugOn()) dbg('hover', hoverReport(e.target, el, e));
+        if (!el && e.target.tagName === 'IMG' && /^videoLinkGate/.test(refusal(e.target) || '')) opWatch(e.target);
         if (!el) {
             if (!active || active.contains(e.target)) return;
             if (activeCovered && stillUnderPointer(active, e.clientX, e.clientY)) return;
@@ -5969,9 +6013,9 @@
         activeChain = domChain(el);     // taken now: at close the card holds the player too
         activePath = pagePath();
         const chain = activeChain, path = activePath;
-        const avArea = small === 'avatar' && !!avatarArea(chain, path);     // a learned area previews as ordinary. See P16.
+        const avArea = small === 'avatar' && !!areaRule('avatarAreas', chain, path);     // a learned area previews as ordinary. See P16.
         activeSmall = small === 'avatar' && !avArea;
-        if (avArea) avApply(avTouch, chain, path);
+        if (avArea) areaApply('avatarAreas', areaTouch, chain, path);
         let avSeen = false;     // a hit here proved an avatar
         const keyed = cfg.activation === 'modifier';     // the user asked for it: no grace, no learned wait
         ruleMs = keyed ? 0 : vdHoldFor(activeChain, activePath);
@@ -6019,7 +6063,7 @@
                         if (myToken.cancelled || active !== el || playerArrived(el)) return;
                         if (small === 'avatar' && !avSeen && avatarBig(hit, displayed)) {
                             avSeen = true;
-                            avApply(avLearn, chain, path);
+                            areaApply('avatarAreas', areaLearn, chain, path);
                         }
                         if (activeSmall && !avatarBig(hit, displayed)) return;
                         got = true;
@@ -6027,7 +6071,7 @@
                         paint(hit);
                     });
                 myToken.done = true;
-                if (avArea && !myToken.cancelled && !avSeen) avApply(vdForget, chain, path);
+                if (avArea && !myToken.cancelled && !avSeen) areaApply('avatarAreas', vdForget, chain, path);
                 if (holding) return;            // the wait's timer paints, or shows the failure
                 if (!got && !myToken.cancelled && active === el && myToken.failure)
                     await showFallback(el, myToken, myToken.failure);
@@ -6051,6 +6095,7 @@
         dbg('a player arrived over the picture — preview withdrawn' + (holding ? ' before it opened' : ''),
             { after: (Date.now() - hoverAt) + ' ms', why: why });
         if (holding && ruleMs && active) vdApply(vdWorked, activeChain, activePath);
+        if (active && active.tagName !== 'VIDEO' && videoLinkReason(active)) opSeen(activeChain, activePath);
         selfClosed(why, pointer.x, pointer.y, true);
         cancel();
     }
@@ -6079,10 +6124,12 @@
         }
         const elapsed = Date.now() - hoverAt;
         const chain = activeChain, path = activePath, rect = activeRect, waited = ruleMs;
+        const vlink = active.tagName !== 'VIDEO' && !!videoLinkReason(active);
         const record = function () {
             dbg('the page took the preview away — ' + why,
                 { after: elapsed + ' ms', waited: waited ? waited + ' ms, learned' : 'the grace only' });
             vdRecord(chain, path, elapsed);
+            if (vlink && !seen) opSeen(chain, path);      // the player paths reported it already
         };
         // Only a close a player caused teaches a wait. The player paths saw one; the rest look.
         if (seen) { record(); return; }
@@ -9557,7 +9604,7 @@
     let panelOpened = null;     // Undo's snapshot — see openPanel(); MUST outlive a re-render
 
     // What the user entered per site, not knobs: `Reset to defaults` leaves these alone.
-    const RESET_KEEPS = ['siteList', 'blockList', 'referrerSites', 'siteAudio', 'videoDelays', 'avatarAreas', 'avatarAgedOn', 'scrollSites'];
+    const RESET_KEEPS = ['siteList', 'blockList', 'referrerSites', 'siteAudio', 'videoDelays', 'avatarAreas', 'ownPlayerAreas', 'linkAreas', 'areasAgedOn', 'scrollSites'];
 
     // Open/closed, the fold, scroll and position for this TAB — sessionStorage is per tab and
     // per origin, so it follows a same-site link or a refresh and dies with the tab.
@@ -10685,7 +10732,7 @@
         savePanelState();
     }
 
-    if (isTopFrame) setTimeout(avAgeAll, 0);
+    if (isTopFrame) setTimeout(areaAgeAll, 0);
 
     if (isTopFrame && typeof GM_registerMenuCommand === 'function') {
         GM_registerMenuCommand('Hover Zoom settings', showPanel);
