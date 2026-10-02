@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.208.0
+// @version     0.209.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -304,7 +304,8 @@
         scrollSites: [],            // sites that load more when scrolled: learned, or the user's
         videoDelays: {},            // host -> {ms, rules, samples, fixes, user}: wait for the page's
                                     // own player before previewing; learned, or set by the user
-        avatarAreas: {},            // host -> {rules, samples}: small pictures there preview as ordinary ones
+        avatarAreas: {},            // host -> {rules, samples, idleDays}: small pictures there preview as ordinary ones
+        avatarAgedOn: 0,            // the day avAgeAll() last ran
         siteAudio: {},              // host -> {muted, volume}; absent means muted, which is the
                                     // only default a first visit may have — see AUDIO_DEFAULT
 
@@ -5198,7 +5199,7 @@
 
     // A confirmed avatar, folded into a site's avatar areas: three sharing an area make it a rule,
     // whatever was hovered in between. See P16.
-    function avLearn(entry, chain, path) {
+    function avLearn(entry, chain, path, today) {
         const e = entry ? JSON.parse(JSON.stringify(entry)) : {};
         if (vdRuleFor(e, chain, path)) return vdWorked(e, chain, path);
         const near = vdNearRule(e, chain, path);
@@ -5212,8 +5213,46 @@
         if (!dom) return { entry: e, change: 'sampled' };
         e.samples = samples.filter(function (x) { return used.indexOf(x) === -1; });
         if (!e.samples.length) delete e.samples;
-        e.rules = (e.rules || []).concat([{ dom: dom, path: pathPrefix(used.map(function (x) { return x.path; })) }]);
+        e.rules = (e.rules || []).concat([{ dom: dom, path: pathPrefix(used.map(function (x) { return x.path; })), seen: today }]);
         return { entry: e, change: e.rules.length === 1 ? 'learned' : 'another area' };
+    }
+
+    const AV_IDLE_DAYS = 90;        // unused this long, an area is marked; each site learns its own span
+    const AV_GRACE_DAYS = 365;      // marked and unused this much longer, it is deleted
+    const AV_IDLE_MARGIN = 1.5;     // a marked area used again: the site's span becomes its gap × this
+
+    // A hover this area covered: stamp the day. A marked area used again proves the site's span too short.
+    function avTouch(entry, chain, path, today) {
+        const e = entry ? JSON.parse(JSON.stringify(entry)) : null;
+        const rule = e && e.rules ? vdRuleFor(e, chain, path) : null;
+        if (!rule || rule.seen === today) return { entry: e, change: null };
+        let change = 'used';
+        if (rule.stale && rule.seen != null) {
+            const gap = today - rule.seen;
+            e.idleDays = Math.max(e.idleDays || AV_IDLE_DAYS, Math.ceil(gap * AV_IDLE_MARGIN));
+            change = 'marked area used again after ' + gap + ' days; span now ' + e.idleDays;
+        }
+        delete rule.stale;
+        rule.seen = today;
+        return { entry: e, change: change };
+    }
+
+    // Once a day per site: mark areas idle past the span, unmark any the span now covers, delete the long-dead.
+    function avAge(entry, today) {
+        const e = JSON.parse(JSON.stringify(entry));
+        const span = e.idleDays || AV_IDLE_DAYS;
+        let changed = false;
+        e.rules = (e.rules || []).filter(function (r) {
+            if (r.seen == null) { r.seen = today; changed = true; return true; }
+            const idle = today - r.seen;
+            if (idle > span + AV_GRACE_DAYS) { changed = true; return false; }
+            if (idle > span && !r.stale) { r.stale = true; changed = true; }
+            if (idle <= span && r.stale) { delete r.stale; changed = true; }
+            return true;
+        });
+        if (!changed) return { entry: entry, change: null };
+        if (!e.rules.length && !(e.samples && e.samples.length)) return { entry: null, change: 'deleted' };
+        return { entry: e, change: 'aged' };
     }
 
     // The entry for a host: its own, else the most specific user entry covering it.
@@ -5294,12 +5333,14 @@
         return e && e.rules ? vdRuleFor(e, chain, path) : null;
     }
 
-    // Read-modify-write of cfg.avatarAreas. `step` is avLearn, vdWorked or vdForget.
+    function avDay() { return Math.floor(Date.now() / 86400000); }
+
+    // Read-modify-write of cfg.avatarAreas. `step` is avLearn, avTouch, vdWorked or vdForget.
     function avApply(step, chain, path) {
         const host = pageHost();
         if (!host) return;
         reloadSettings();
-        const r = step((cfg.avatarAreas || {})[host] || null, chain, path);
+        const r = step((cfg.avatarAreas || {})[host] || null, chain, path, avDay());
         if (!r.change) return;
         const all = Object.assign({}, cfg.avatarAreas);
         if (r.entry) all[host] = r.entry;
@@ -5308,6 +5349,23 @@
         saveSettings();
         refreshPanel();
         dbg('avatar area: ' + r.change, { host: host, chain: chain, path: path, entry: r.entry });
+    }
+
+    // Ages every site's avatar areas, at most once a day.
+    function avAgeAll() {
+        const today = avDay();
+        if (cfg.avatarAgedOn === today) return;
+        reloadSettings();
+        if (cfg.avatarAgedOn === today) return;
+        const all = {};
+        Object.keys(cfg.avatarAreas || {}).forEach(function (host) {
+            const r = avAge(cfg.avatarAreas[host], today);
+            if (r.entry) all[host] = r.entry;
+            if (r.change) dbg('avatar areas ' + r.change, { host: host, entry: r.entry });
+        });
+        cfg.avatarAreas = all;
+        cfg.avatarAgedOn = today;
+        saveSettings();
     }
 
     const VDELAY_EVIDENCE_MS = 400;     // players land a beat after the close they cause
@@ -5913,6 +5971,7 @@
         const chain = activeChain, path = activePath;
         const avArea = small === 'avatar' && !!avatarArea(chain, path);     // a learned area previews as ordinary. See P16.
         activeSmall = small === 'avatar' && !avArea;
+        if (avArea) avApply(avTouch, chain, path);
         let avSeen = false;     // a hit here proved an avatar
         const keyed = cfg.activation === 'modifier';     // the user asked for it: no grace, no learned wait
         ruleMs = keyed ? 0 : vdHoldFor(activeChain, activePath);
@@ -9498,7 +9557,7 @@
     let panelOpened = null;     // Undo's snapshot — see openPanel(); MUST outlive a re-render
 
     // What the user entered per site, not knobs: `Reset to defaults` leaves these alone.
-    const RESET_KEEPS = ['siteList', 'blockList', 'referrerSites', 'siteAudio', 'videoDelays', 'avatarAreas', 'scrollSites'];
+    const RESET_KEEPS = ['siteList', 'blockList', 'referrerSites', 'siteAudio', 'videoDelays', 'avatarAreas', 'avatarAgedOn', 'scrollSites'];
 
     // Open/closed, the fold, scroll and position for this TAB — sessionStorage is per tab and
     // per origin, so it follows a same-site link or a refresh and dies with the tab.
@@ -10625,6 +10684,8 @@
         body.scrollTop = keepScroll;
         savePanelState();
     }
+
+    if (isTopFrame) setTimeout(avAgeAll, 0);
 
     if (isTopFrame && typeof GM_registerMenuCommand === 'function') {
         GM_registerMenuCommand('Hover Zoom settings', showPanel);

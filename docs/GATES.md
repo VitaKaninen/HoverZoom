@@ -862,7 +862,7 @@ window, with today's behaviour kept until a site's avatars are known. So the sit
   near-misses widen it (`vdNearRule`). Same area arithmetic as the learned wait (`E62`), no `ms`,
   but **no cap on areas per site** (not `RULE_MAX` 6 — YouTube may have 50; a rule is ~100 chars and
   lookup is a linear string compare, so nothing needs bounding; a cap would evict live areas). Dead
-  areas after a redesign are never hovered so never struck — they stay, harmless. Samples
+  areas after a redesign are never hovered so never struck — ageing handles them (below). Samples
   from other areas are **kept** (up to `AV_SAMPLE_MAX` 30), not dropped as `vdLearn` does, so
   interleaved hovers across areas still learn each. Areas sharing ≥ 2 levels (e.g. YouTube's
   `img>yt-img-shadow.avatar`) merge into one rule — intended: a rule only affects small square
@@ -875,6 +875,12 @@ window, with today's behaviour kept until a site's avatars are known. So the sit
   `avatarBig()` on its hits is free. A covered hover that ends with none is a strike (`vdForget`, 3 in
   a row drop the rule); a confirmed one clears them (`vdWorked` via `avLearn`). A hover left before
   the resolve finished is no evidence.
+- **Ageing, learned per site** (user's design, v0.209.0): each rule's `seen` day is stamped by
+  `avTouch` on a covered hover (≤ 1 write/rule/day). `avAgeAll()` runs once a day at boot (top frame,
+  deferred): unused past the site's span (`idleDays`, default `AV_IDLE_DAYS` 90) a rule is **marked
+  `stale`, not removed, and keeps working** — it must, or a revival could never be observed. A marked
+  rule used again clears the mark and sets the span to gap × `AV_IDLE_MARGIN` (1.5); a longer span
+  unmarks what it now covers. Marked and unused `AV_GRACE_DAYS` (365) past the span: deleted.
 - No settings-panel list yet; a wrong area costs three hovers.
 
 Regression page: `test-pages/avatars.html` — hover avatars 1–3 (beside, no ring), then 4–5 preview

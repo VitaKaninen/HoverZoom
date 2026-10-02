@@ -876,7 +876,7 @@ const vdStart = src.indexOf('    const VDELAY_SAMPLES');
 const vdEnd = src.indexOf('    // The entry for a host');
 if (vdStart < 0 || vdEnd < 0) { console.error('vdLearn markers not found'); process.exit(1); }
 const vd = new Function(src.slice(vdStart, vdEnd) +
-    NL + 'return {vdLearn, vdRound, vdRuleFor, chainPrefix, pathPrefix, chainMatches, pathMatches, sharedHead, vdWaitOf, vdForget, vdWorked, avLearn, VDELAY_SAMPLES, VDELAY_FORGET};')();
+    NL + 'return {vdLearn, vdRound, vdRuleFor, chainPrefix, pathPrefix, chainMatches, pathMatches, sharedHead, vdWaitOf, vdForget, vdWorked, avLearn, avTouch, avAge, VDELAY_SAMPLES, VDELAY_FORGET};')();
 
 eq('vdRound rounds up to 50 ms', vd.vdRound(1001), 1050);
 eq('vdRound never goes under one step', vd.vdRound(10), 250);
@@ -1011,6 +1011,25 @@ eq('a site holds more than six avatar areas', many.entry.rules.length, 21);
 const SH = 'img>yt-img-shadow.avatar>a.channel>div.sidebar-item-#>div.sidebar';
 let one = vd.avLearn(vd.avLearn(vd.avLearn(null, AV1, '/watch').entry, SH, '/watch').entry, AV2, '/watch');
 eq('two areas sharing the avatar wrapper become one rule on it', one.entry.rules[0].dom, 'img>yt-img-shadow.avatar');
+
+// ---- ageing: unused areas are marked, not deleted; a marked area used again lengthens the site's span.
+const D = 20000;
+let ag = vd.avLearn(vd.avLearn(vd.avLearn(null, AV1, '/watch', D).entry, AV2, '/watch', D).entry, AV3, '/watch', D);
+eq('a new area carries the day it was learned', ag.entry.rules[0].seen, D);
+eq('a second use the same day writes nothing', vd.avTouch(ag.entry, AV1, '/watch', D).change, null);
+eq('a use on a later day stamps it', vd.avTouch(ag.entry, AV1, '/watch', D + 5).entry.rules[0].seen, D + 5);
+eq('within the span nothing ages', vd.avAge(ag.entry, D + 90).change, null);
+let st = vd.avAge(ag.entry, D + 91);
+eq('past the span it is marked, not removed', st.entry.rules.length + ' ' + st.entry.rules[0].stale, '1 true');
+eq('  and still covers its avatars', !!vd.vdRuleFor(st.entry, AV1, '/watch'), true);
+let back = vd.avTouch(st.entry, AV1, '/watch', D + 120);
+eq('used again after 120 days: the span becomes 180', back.entry.idleDays, 180);
+eq('  and the mark is gone', back.entry.rules[0].stale, undefined);
+const TWO_AV = { idleDays: 90, rules: [{ dom: 'img>a.x', path: '/', seen: D, stale: true }, { dom: 'img>a.y', path: '/', seen: D + 10 }] };
+eq('a longer span unmarks what it now covers', vd.avAge(Object.assign({}, TWO_AV, { idleDays: 180 }), D + 150).entry.rules[0].stale, undefined);
+eq('marked and unused a year past the span: deleted', vd.avAge(TWO_AV, D + 10 + 90 + 365 + 1).change, 'deleted');
+eq('  the older goes first', vd.avAge(TWO_AV, D + 90 + 365 + 1).entry.rules.map(function (r) { return r.dom; }), ['img>a.y']);
+eq('an area from before ageing gets today', vd.avAge({ rules: [{ dom: 'img>a.x', path: '/' }] }, D).entry.rules[0].seen, D);
 
 // ---- the captcha gate reads only the frame's own URL and whether it is the top frame.
 const cStart = src.indexOf('    const CAPTCHA_HERE');
