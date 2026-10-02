@@ -995,6 +995,22 @@ eq('two misses are strikes', avf.entry.rules[0].idle, 2);
 eq('  a confirmed avatar clears them', vd.avLearn(avf.entry, AV2, '/watch').entry.rules[0].idle, undefined);
 eq('  a third removes the area and the site', vd.vdForget(avf.entry, AV1, '/watch').change, 'forgot the site');
 eq('an avatar elsewhere is not covered', vd.vdRuleFor(av.entry, SIDE, '/watch'), null);
+const SB1 = 'img>span.chan-icon>a.channel>div.sidebar-item-#>div.sidebar';
+const SB2 = 'img>span.chan-icon>a.channel>div.sidebar-item-#.watched>div.sidebar';
+let mix = null;
+[AV1, SB1, AV2, SB2, AV3].forEach(function (c) { mix = vd.avLearn(mix && mix.entry, c, '/watch'); });
+eq('interleaved areas: the third comment avatar makes its rule', mix.change, 'learned');
+eq('  the sidebar samples survive it', mix.entry.samples.length, 2);
+mix = vd.avLearn(mix.entry, SB1, '/watch');
+eq('  and the third sidebar avatar makes a second area', mix.change + ' ' + mix.entry.rules.length, 'another area 2');
+eq('  leaving no samples behind', mix.entry.samples, undefined);
+let many = { rules: [] };
+for (let i = 0; i < 20; i++) many.rules.push({ dom: 'img>a.area' + i + '>div.x', path: '/' });
+many = vd.avLearn(vd.avLearn(vd.avLearn(many, SB1, '/w').entry, SB2, '/w').entry, SB1, '/w');
+eq('a site holds more than six avatar areas', many.entry.rules.length, 21);
+const SH = 'img>yt-img-shadow.avatar>a.channel>div.sidebar-item-#>div.sidebar';
+let one = vd.avLearn(vd.avLearn(vd.avLearn(null, AV1, '/watch').entry, SH, '/watch').entry, AV2, '/watch');
+eq('two areas sharing the avatar wrapper become one rule on it', one.entry.rules[0].dom, 'img>yt-img-shadow.avatar');
 
 // ---- the captcha gate reads only the frame's own URL and whether it is the top frame.
 const cStart = src.indexOf('    const CAPTCHA_HERE');

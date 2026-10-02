@@ -859,7 +859,12 @@ window, with today's behaviour kept until a site's avatars are known. So the sit
 
 - **Learning** (`avLearn`, pure, asserted in `test-resolver.js`): every hit passing `avatarBig()` on
   an uncovered small hover is a sample `{chain, path}`; three sharing a `chainPrefix` become a rule,
-  near-misses widen it (`vdNearRule`). Same area arithmetic as the learned wait (`E62`), no `ms`.
+  near-misses widen it (`vdNearRule`). Same area arithmetic as the learned wait (`E62`), no `ms`,
+  but **many areas per site** (`AV_AREA_MAX` 40, not `RULE_MAX` 6 — YouTube has 15+) and samples
+  from other areas are **kept** (up to `AV_SAMPLE_MAX` 30), not dropped as `vdLearn` does, so
+  interleaved hovers across areas still learn each. Areas sharing ≥ 2 levels (e.g. YouTube's
+  `img>yt-img-shadow.avatar`) merge into one rule — intended: a rule only affects small square
+  pictures, so breadth costs at most a strike.
   Stored in `cfg.avatarAreas` (host → `{rules, samples}`), kept across Reset.
 - **Under a rule** `activeSmall` is false, so the hover is an ordinary one: ring, regular placement,
   press pins, `showFallback`. Press pins by the user's call — the user name beside an avatar is the

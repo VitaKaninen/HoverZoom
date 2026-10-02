@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.206.0
+// @version     0.207.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -5194,20 +5194,26 @@
         return !e.user && e.fixes && e.fixes.length ? 0 : e.ms;
     }
 
-    // A confirmed avatar, folded into a site's avatar areas: three sharing an area make it a rule. See P16.
+    const AV_AREA_MAX = 40;         // avatar areas one site may hold — YouTube alone has 15+
+    const AV_SAMPLE_MAX = 30;       // samples kept across all areas still being learned
+
+    // A confirmed avatar, folded into a site's avatar areas: three sharing an area make it a rule,
+    // whatever was hovered in between. See P16.
     function avLearn(entry, chain, path) {
         const e = entry ? JSON.parse(JSON.stringify(entry)) : {};
         if (vdRuleFor(e, chain, path)) return vdWorked(e, chain, path);
         const near = vdNearRule(e, chain, path);
         if (near) { near.dom = sharedHead([near.dom, chain]).join('>'); return { entry: e, change: 'widened' }; }
-        const samples = (e.samples || []).concat([{ chain: chain, path: path }])
-            .filter(function (x) { return chainPrefix([x.chain, chain]) !== ''; });
+        const samples = (e.samples || []).concat([{ chain: chain, path: path }]).slice(-AV_SAMPLE_MAX);
         e.samples = samples;
-        if (samples.length < VDELAY_SAMPLES) return { entry: e, change: 'sampled' };
-        const dom = chainPrefix(samples.map(function (x) { return x.chain; }));
-        if (!dom) { e.samples = samples.slice(1); return { entry: e, change: 'sampled' }; }
-        delete e.samples;
-        e.rules = (e.rules || []).concat([{ dom: dom, path: pathPrefix(samples.map(function (x) { return x.path; })) }]).slice(-RULE_MAX);
+        const mates = samples.filter(function (x) { return chainPrefix([x.chain, chain]) !== ''; });
+        if (mates.length < VDELAY_SAMPLES) return { entry: e, change: 'sampled' };
+        let used = mates, dom = chainPrefix(mates.map(function (x) { return x.chain; }));
+        if (!dom) { used = mates.slice(-VDELAY_SAMPLES); dom = chainPrefix(used.map(function (x) { return x.chain; })); }
+        if (!dom) return { entry: e, change: 'sampled' };
+        e.samples = samples.filter(function (x) { return used.indexOf(x) === -1; });
+        if (!e.samples.length) delete e.samples;
+        e.rules = (e.rules || []).concat([{ dom: dom, path: pathPrefix(used.map(function (x) { return x.path; })) }]).slice(-AV_AREA_MAX);
         return { entry: e, change: e.rules.length === 1 ? 'learned' : 'another area' };
     }
 
