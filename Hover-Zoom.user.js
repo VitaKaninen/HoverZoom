@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.215.0
+// @version     0.216.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -7105,7 +7105,28 @@
         const s = tourSize(el);
         if (!s) return true;
         if (s.w && s.w < cfg.minDisplayed && s.h && s.h < cfg.minDisplayed) return false;
+        if (stripShaped(s.w, s.h) || siteLogo(el)) return false;
         return Math.max(s.w, s.h) >= floor;
+    }
+
+    const STRIP_SHORT = 32;     // px: thinner than this...
+    const STRIP_RATIO = 10;     // ...and this many times longer is a divider rule, not a picture
+
+    // A thin rule between posts, drawn as an image.
+    function stripShaped(w, h) {
+        const lo = Math.min(w, h), hi = Math.max(w, h);
+        return lo > 0 && lo < STRIP_SHORT && hi >= lo * STRIP_RATIO;
+    }
+
+    // The site's own logo: near the top, linking to this site's home page.
+    function siteLogo(el) {
+        const a = el.closest && el.closest('a[href]');
+        if (!a) return false;
+        let u;
+        try { u = new URL(a.href); } catch (e) { return false; }
+        if (u.hostname.toLowerCase().replace(/^www\./, '') !== pageHost().replace(/^www\./, '')) return false;
+        if (!/^\/(index\.\w+)?$/.test(u.pathname) || u.search) return false;
+        return passRect(el).top + (window.scrollY || 0) < BANNER_TOP;
     }
 
     // Reused while the page key holds, like tourEntries(): one step asks several times. See TOUR.md §3.
@@ -8082,8 +8103,10 @@
         const vw = vpW();
         let node = el, narrow = null;
         while (node && node !== document.body && node !== document.documentElement) {
-            if (passRect(node).width >= vw * 0.45) break;
-            narrow = node;
+            if (passRect(node).width >= vw * 0.45) {
+                const p = node.parentElement;      // a carousel track overflowing its narrow frame is not the page
+                if (!p || p === document.body || p === document.documentElement || passRect(p).width >= vw * 0.45) break;
+            } else narrow = node;
             node = node.parentElement;
         }
         if (!narrow || !node) return null;

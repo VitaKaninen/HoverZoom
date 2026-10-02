@@ -228,6 +228,11 @@ That extends to the size gate. `sizeOf(el)` reads the layout rect, and a below-t
 order: layout rect → `width`/`height` attributes → probed dimensions. Only something that is
 genuinely not a picture leaves the list.
 
+**Never furniture** (`tourWorthy`, v0.216.0, tour/widget only — a hover still previews them):
+`stripShaped` — shorter side < 32 px and ≥ 10× longer (acidcow's 580×15 `cut.gif` between posts; a
+468×60 signature still passes); `siteLogo` — linked to this site's home page and within `BANNER_TOP` of
+the top (acidcow's 220×77 logo is 2.86:1, under the banner gate's 3:1).
+
 **Scope limit:** `img`/`video` only. Elements with a CSS background image stay hoverable but are
 not in the tour — enumerating them needs `getComputedStyle` on every node in the document.
 
@@ -238,7 +243,10 @@ pinned on a picture the widget counts (§1d); one pinned on a sidebar picture do
 off after `{`/`}` too). `sideColumn(el)`: the widest
 ancestor still under 45% of the window, if it is at least min(600 px, 60% of the window) tall and has a
 sibling 1.5× wider beside it (overlapping vertically). The height test keeps floated figures and grid
-cards out. Width only, no markup: the user's rule is "the wide middle column is the content".
+cards out.
+A node at least 45% wide whose parent is narrower is overflow (a carousel track in a clipped frame) and is
+walked past, not taken as the page (v0.216.0, acidcow's sticky 300 px Owl carousel: the 4,700 px track
+stopped the walk at a 285 px slide). Width only, no markup: the user's rule is "the wide middle column is the content".
 
 v0.129.0's named sections (Main/Replies/Comments/…, with a switcher) were reverted in v0.130.0 —
 **shelved, not rejected** (user): pulled only so other slideshow issues could settle first. §1c is the
