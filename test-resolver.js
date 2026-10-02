@@ -1044,6 +1044,10 @@ eq('  and with nothing left, the site', vd.areaDrop({ rules: [{ dom: 'img>a.thum
 eq('  uncovered with no samples, nothing', vd.areaDrop({ rules: [] }, C1, '/v').change, null);
 let cf = vd.areaLearn({ rules: [{ dom: 'img>a.thumb', path: '/', seen: D, idle: 2 }] }, C1, '/v', D);
 eq('a verdict under a struck rule clears its strikes', cf.change + ' ' + cf.entry.rules[0].idle, 'confirmed undefined');
+let dup = vd.areaLearn(vd.areaLearn(null, AV1, '/watch', D, 'u1').entry, AV2, '/watch', D, 'u1');
+eq('the same item twice is one sample', dup.change + ' ' + dup.entry.samples.length, 'null 1');
+dup = vd.areaLearn(vd.areaLearn(dup.entry, AV2, '/watch', D, 'u2').entry, AV3, '/watch', D, 'u3');
+eq('  three different items make the rule', dup.change, 'learned');
 
 // ---- the captcha gate reads only the frame's own URL and whether it is the top frame.
 const cStart = src.indexOf('    const CAPTCHA_HERE');

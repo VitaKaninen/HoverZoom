@@ -552,7 +552,7 @@ this table is a table.
 | `E12` | A wall of playing clips is a picture page, not a video site | [`docs/GATES.md`](docs/GATES.md) |
 | `E13` | The frame reaches the bottom of the window — **retired in v0.33.0** | [`docs/VIEWER.md`](docs/VIEWER.md) |
 | `E14` | The preview itself may be a video | [`docs/RESOLVER.md`](docs/RESOLVER.md) |
-| `E15` | The original can come from the page the thumbnail links to | [`docs/RESOLVER.md`](docs/RESOLVER.md) |
+| `E15` | The original can come from the page the thumbnail links to; in an area where it never has (3 links), the fetch is skipped bar a 10 % recheck, and one success removes the skip (v0.212.0) | [`docs/RESOLVER.md`](docs/RESOLVER.md) |
 | `E16` | The thing you hover can be the clip itself | [`docs/RESOLVER.md`](docs/RESOLVER.md) |
 | `E17` | What counts as a page background | [`docs/GATES.md`](docs/GATES.md) |
 | `E18` | The pointer may never touch the picture at all | [`docs/GATES.md`](docs/GATES.md) |

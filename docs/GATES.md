@@ -353,7 +353,7 @@ things were true and each cost a version:
   video-link thumbnails forever. Evidence is the site's player landing on a video-link thumbnail:
   `withdrawn()` and `selfClosed()`'s player check for a previewed one, and `opWatch()` for a refused
   one (polls `videoOver(rect)` for `OP_WATCH_MS` 3 s + any learned wait while the pointer stays).
-  `opSeen()` → `areaLearn`. A covered refused hover that watches the full time with no player is a
+  `opSeen()` → `areaLearn`, id = the link. A covered refused hover that watches the full time with no player is a
   strike; 3 drop the area. The dormant-player refusal itself stays live (a fact of this page).
   `test-pages/own-player.html`: cards 1–3 teach, 4–5 refused, `#ctl` previews.
 
@@ -865,7 +865,8 @@ window, with today's behaviour kept until a site's avatars are known. So the sit
 *structure* is learned, never URLs:
 
 - **Learning** (`areaLearn`, pure, asserted in `test-resolver.js`): every hit passing `avatarBig()` on
-  an uncovered small hover is a sample `{chain, path}`; three sharing a `chainPrefix` become a rule,
+  an uncovered small hover is a sample `{chain, path, id}` (id = the shown URL, so one avatar
+  re-hovered counts once); three sharing a `chainPrefix` become a rule,
   near-misses widen it (`vdNearRule`). Same area arithmetic as the learned wait (`E62`), no `ms`,
   and **no cap on areas per site** (YouTube may have 50; a rule is ~100 chars and
   lookup is a linear string compare, so nothing needs bounding; a cap would evict live areas). Dead

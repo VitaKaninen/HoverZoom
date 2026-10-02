@@ -224,6 +224,18 @@ the search** — the candidate loop breaks the moment `trusted` is set. It does 
     is not automatically better than the markup — it can be a mid-size share crop that passes the
     upsize gate while the real original sits in the body.
 
+### Areas whose linked page never helps are skipped · v0.212.0
+
+The learned-areas pattern (`../CLAUDE.md`), store `cfg.linkAreas`. In `resolve()`: a fetched linked
+page (`lfetched` — a failed or non-HTML fetch is no evidence) that yields no `trusted` hit is a
+sample, id = the link, so one link re-hovered counts once; three in an area make a skip rule. Under
+a rule the fetch is skipped except on `LINK_RECHECK` (10 %) of resolves. **A fetch that yields
+`trusted` is `areaDrop`: the rule and that area's samples go at once** — a skip that hides originals
+costs a worse picture, so it must not wait for strikes, and an area that yields even sometimes never
+forms a rule. Speculative resolves (the widget's preload) count too: their fetches are real, so a
+page can learn before any hover. Only elements of this document learn (`ownerDocument`), never the
+slideshow's harvest from other pages. `test-pages/linked.html`.
+
 ### A matching filename outranks the shape test · v0.58.0
 
 `angryduck.cc` is a grid of clips where **some posts previewed and some did not, with byte-identical

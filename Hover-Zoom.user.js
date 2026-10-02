@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.211.0
+// @version     0.212.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -1691,18 +1691,25 @@
         return pageMediaFrom(doc, pageUrl);
     }
 
-    function linkedMedia(el) {
+    // The same-origin page this picture links to, worth fetching for its media; null when none.
+    function linkTarget(el) {
         const a = closestAcross(el, 'a[href]');
         const href = a && a.getAttribute('href');
-        if (!href) return Promise.resolve(null);
+        if (!href) return null;
         const at = baseOf(el);
         let u;
-        try { u = new URL(href, at); } catch (e) { return Promise.resolve(null); }
-        if (!/^https?:$/.test(u.protocol)) return Promise.resolve(null);
-        if (u.origin !== location.origin) return Promise.resolve(null);
+        try { u = new URL(href, at); } catch (e) { return null; }
+        if (!/^https?:$/.test(u.protocol)) return null;
+        if (u.origin !== location.origin) return null;
         u.hash = '';
-        if (u.href === at.split('#')[0]) return Promise.resolve(null);   // the page it is on
-        if (looksLikeImage(u.href) || isVideoUrl(u.href)) return Promise.resolve(null);
+        if (u.href === at.split('#')[0]) return null;   // the page it is on
+        if (looksLikeImage(u.href) || isVideoUrl(u.href)) return null;
+        return u;
+    }
+
+    function linkedMedia(el) {
+        const u = linkTarget(el);
+        if (!u) return Promise.resolve(null);
         if (pageCache.has(u.href)) return pageCache.get(u.href);
         const p = fetchPageMedia(u);
         pageCache.set(u.href, p);
@@ -1748,8 +1755,15 @@
             if (onHit) onHit(hit);
         }
 
-        const linked = skipLinkedPage(el) ? Promise.resolve(null) : linkedMedia(el).then(async function (page) {
+        // Learned per area: a linked page that never holds the original is skipped, bar a recheck. See E15.
+        const lt = !skipLinkedPage(el) && el.ownerDocument === document ? linkTarget(el) : null;
+        const lchain = lt ? domChain(el) : '', lpath = pagePath();
+        let lfetched = false;
+        const lskip = lt && areaRule('linkAreas', lchain, lpath) && Math.random() >= LINK_RECHECK;
+        if (lskip) dbg('linked page skipped — pages linked from here have never held the original', { link: lt.href });
+        const linked = skipLinkedPage(el) || lskip ? Promise.resolve(null) : linkedMedia(el).then(async function (page) {
             if (!page || token.cancelled) return null;
+            lfetched = true;
             const tries = [];
             // og:image is the share card on some sites, and that is the thumbnail itself.
             // A matching filename proves identity, so it outranks the shape test here too — the
@@ -1836,6 +1850,10 @@
             emit(best);
         }
         await linked;
+        if (lt && lfetched && !token.cancelled) {
+            if (trusted) areaApply('linkAreas', areaDrop, lchain, lpath);
+            else areaApply('linkAreas', areaLearn, lchain, lpath, lt.href);
+        }
         if (trusted) {
             // The linked page names the picture, but the page's own copy of it may be bigger.
             const own = shown && !trusted.video && !token.cancelled && !unstable.has(shown) ? await probe(shown, false) : null;
@@ -4997,12 +5015,13 @@
         return areaRule('ownPlayerAreas', domChain(el), pagePath()) ? why + ' — the site\'s own player has landed on thumbnails like this' : null;
     }
 
+    const LINK_RECHECK = 0.1;       // share of hovers in a skip area that fetch the linked page anyway
     const OP_WATCH_MS = 3000;       // how long a refused video-link hover watches for the site's player
     let opWatchEl = null, opWatchTimer = 0;
 
     // A player landed on a video-link thumbnail: evidence for its area. Recounts when the rules change.
-    function opSeen(chain, path) {
-        const c = areaApply('ownPlayerAreas', areaLearn, chain, path);
+    function opSeen(chain, path, id) {
+        const c = areaApply('ownPlayerAreas', areaLearn, chain, path, id);
         if (c && c !== 'sampled' && c !== 'used') setTimeout(twRecount, 0);
     }
 
@@ -5018,7 +5037,7 @@
         const limit = OP_WATCH_MS + vdHoldFor(chain, path);
         opWatchTimer = setInterval(function () {
             if (!holds(rect, pointer.x, pointer.y)) { opStop(); return; }
-            if (videoOver(rect)) { opStop(); opSeen(chain, path); return; }
+            if (videoOver(rect)) { opStop(); opSeen(chain, path, videoLinkReason(el)); return; }
             if (!el.isConnected) { opStop(); return; }
             if (Date.now() - t0 < limit) return;
             opStop();
@@ -5201,8 +5220,10 @@
     const AREA_GRACE_DAYS = 365;    // marked and unused this much longer, it is deleted
     const AREA_IDLE_MARGIN = 1.5;   // a marked area used again: the site's span becomes its gap × this
 
-    // Adds a sample; when VDELAY_SAMPLES share an area, appends a rule on it. The samples used, or null.
+    // Adds a sample; when VDELAY_SAMPLES share an area, appends a rule on it. The samples used, null,
+    // or false when this item (sample.id) is already a sample — one picture hovered thrice is one.
     function areaSample(e, sample, today) {
+        if (sample.id && (e.samples || []).some(function (x) { return x.id === sample.id; })) return false;
         const samples = (e.samples || []).concat([sample]).slice(-AREA_SAMPLE_MAX);
         e.samples = samples;
         const mates = samples.filter(function (x) { return chainPrefix([x.chain, sample.chain]) !== ''; });
@@ -5218,7 +5239,7 @@
 
     // One verdict for this chain: under a rule it confirms it (strikes cleared, day stamped); else a
     // near rule widens, or it is a sample — three sharing an area make a rule, whatever came between.
-    function areaLearn(entry, chain, path, today) {
+    function areaLearn(entry, chain, path, today, id) {
         const e = entry ? JSON.parse(JSON.stringify(entry)) : {};
         const rule = vdRuleFor(e, chain, path);
         if (rule) {
@@ -5230,7 +5251,11 @@
         }
         const near = vdNearRule(e, chain, path);
         if (near) { near.dom = sharedHead([near.dom, chain]).join('>'); return { entry: e, change: 'widened' }; }
-        if (!areaSample(e, { chain: chain, path: path }, today)) return { entry: e, change: 'sampled' };
+        const sample = { chain: chain, path: path };
+        if (id) sample.id = id;
+        const used = areaSample(e, sample, today);
+        if (used === false) return { entry: entry, change: null };
+        if (!used) return { entry: e, change: 'sampled' };
         return { entry: e, change: e.rules.length === 1 ? 'learned' : 'another area' };
     }
 
@@ -5366,11 +5391,11 @@
     function areaDay() { return Math.floor(Date.now() / 86400000); }
 
     // Read-modify-write of cfg[key] for this site. `step` is areaLearn, areaTouch, areaDrop, vdWorked or vdForget.
-    function areaApply(key, step, chain, path) {
+    function areaApply(key, step, chain, path, id) {
         const host = pageHost();
         if (!host || !isTopFrame) return null;
         reloadSettings();
-        const r = step((cfg[key] || {})[host] || null, chain, path, areaDay());
+        const r = step((cfg[key] || {})[host] || null, chain, path, areaDay(), id);
         if (!r.change) return null;
         const all = Object.assign({}, cfg[key]);
         if (r.entry) all[host] = r.entry;
@@ -6053,7 +6078,7 @@
                         if (myToken.cancelled || active !== el || playerArrived(el)) return;
                         if (small === 'avatar' && !avSeen && avatarBig(hit, displayed)) {
                             avSeen = true;
-                            areaApply('avatarAreas', areaLearn, chain, path);
+                            areaApply('avatarAreas', areaLearn, chain, path, activeShown);
                         }
                         if (activeSmall && !avatarBig(hit, displayed)) return;
                         got = true;
@@ -6085,7 +6110,7 @@
         dbg('a player arrived over the picture — preview withdrawn' + (holding ? ' before it opened' : ''),
             { after: (Date.now() - hoverAt) + ' ms', why: why });
         if (holding && ruleMs && active) vdApply(vdWorked, activeChain, activePath);
-        if (active && active.tagName !== 'VIDEO' && videoLinkReason(active)) opSeen(activeChain, activePath);
+        if (active && active.tagName !== 'VIDEO' && videoLinkReason(active)) opSeen(activeChain, activePath, videoLinkReason(active));
         selfClosed(why, pointer.x, pointer.y, true);
         cancel();
     }
@@ -6114,12 +6139,12 @@
         }
         const elapsed = Date.now() - hoverAt;
         const chain = activeChain, path = activePath, rect = activeRect, waited = ruleMs;
-        const vlink = active.tagName !== 'VIDEO' && !!videoLinkReason(active);
+        const vlink = active.tagName !== 'VIDEO' ? videoLinkReason(active) : null;
         const record = function () {
             dbg('the page took the preview away — ' + why,
                 { after: elapsed + ' ms', waited: waited ? waited + ' ms, learned' : 'the grace only' });
             vdRecord(chain, path, elapsed);
-            if (vlink && !seen) opSeen(chain, path);      // the player paths reported it already
+            if (vlink && !seen) opSeen(chain, path, vlink);      // the player paths reported it already
         };
         // Only a close a player caused teaches a wait. The player paths saw one; the rest look.
         if (seen) { record(); return; }
