@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.216.0
+// @version     0.217.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -440,6 +440,25 @@
         return host === e || host.endsWith('.' + e);
     }
 
+    // A site-list entry against the page URL: bare = host suffix, "quoted" = that one page.
+    function siteEntryMatches(entry, pageUrl) {
+        const raw = String(entry).trim();
+        const q = /^["“”'](.*)["“”']$/.exec(raw);
+        let page;
+        try { page = new URL(pageUrl); } catch (e) { return false; }
+        const host = page.hostname.toLowerCase();
+        if (!q) return entryCovers(raw, host);
+        let want;
+        try { want = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(q[1].trim()) ? q[1].trim() : 'https://' + q[1].trim()); } catch (e) { return false; }
+        const bare = function (h) { return h.toLowerCase().replace(/^www\./, ''); };
+        if (bare(want.hostname) !== bare(host)) return false;
+        const trim = function (p) { return p.replace(/\/+$/, ''); };
+        if (trim(want.pathname) !== trim(page.pathname)) return false;
+        let ok = true;
+        want.searchParams.forEach(function (v, k) { if (page.searchParams.getAll(k).indexOf(v) === -1) ok = false; });
+        return ok;
+    }
+
     const isTopFrame = (function () {
         try { return window.top === window.self; } catch (e) { return false; }
     })();
@@ -461,9 +480,16 @@
         return location.hostname.toLowerCase();
     }
 
+    // The page the USER is on; a cross-origin frame gets the host alone, so "quoted" pages miss there.
+    function pageUrl() {
+        if (isTopFrame) return location.href;
+        try { const h = window.top.location.href; if (h) return h; } catch (e) { /* cross-origin */ }
+        return 'https://' + pageHost() + '/';
+    }
+
     function siteListed() {
-        const host = pageHost();
-        return cfg.siteList.some(function (entry) { return entryCovers(entry, host); });
+        const url = pageUrl();
+        return cfg.siteList.some(function (entry) { return siteEntryMatches(entry, url); });
     }
 
     function siteEnabled() {
@@ -527,7 +553,8 @@
     function toggleSite() {
         reloadSettings();
         const host = pageHost();
-        const kept = cfg.siteList.filter(function (entry) { return !entryCovers(entry, host); });
+        const url = pageUrl();
+        const kept = cfg.siteList.filter(function (entry) { return !siteEntryMatches(entry, url); });
         if (kept.length === cfg.siteList.length) kept.push(host);
         cfg.siteList = kept;
         saveSettings();
@@ -10624,8 +10651,8 @@
             ['blacklist', 'Disable on listed sites'], ['whitelist', 'Enable only on listed sites']]);
 
         const sites = list('siteList', {
-            description: 'example.com also covers www.example.com.',
-            examples: 'Examples: example.com, news.ycombinator.com',
+            description: 'example.com also covers www.example.com. To match only one page, put it in quotes: "example.com/home?sort=new" matches that page with those settings, not the rest of the site.',
+            examples: 'Examples: example.com, news.ycombinator.com, "example.com/home?sort=new&t=week"',
             placeholder: 'e.g. example.com',
             addCurrentLabel: '+ This site',
             addCurrentTitle: pageHost(),

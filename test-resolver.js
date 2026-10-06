@@ -1118,5 +1118,25 @@ eq('missing shipped entries go on top, the rest keeps its order',
     DEFAULT_BLOCKS.filter(function (e, i) { return i !== 1; }).concat(['a', DEFAULT_BLOCKS[1], 'b']).join('|'));
 eq('an entry already offered is not added back',
     withDefaultBlocks(['a'], [DEFAULT_BLOCKS[0]]).indexOf(DEFAULT_BLOCKS[0]), -1);
+// Site-list entries: bare = host suffix, "quoted" = one page (v0.217.0).
+const seStart = src.indexOf('    // Does an entry cover this hostname');
+const seEnd = src.indexOf('    const isTopFrame');
+const siteEntryMatches = new Function(src.slice(seStart, seEnd) + NL + 'return siteEntryMatches;')();
+const P = 'https://www.site.com/home?sort=new&t=week';
+eq('bare host covers every page', siteEntryMatches('site.com', 'https://site.com/x/y'), true);
+eq('bare host covers subdomains', siteEntryMatches('site.com', 'https://a.site.com/'), true);
+eq('quoted page matches itself', siteEntryMatches('"site.com/home?sort=new&t=week"', P), true);
+eq('quoted page ignores param order', siteEntryMatches('"site.com/home?t=week&sort=new"', P), true);
+eq('quoted page ignores extra params', siteEntryMatches('"site.com/home?sort=new&t=week"', P + '&page=2'), true);
+eq('quoted page tolerates www and scheme', siteEntryMatches('"http://site.com/home?sort=new&t=week"', P), true);
+eq('quoted page tolerates trailing slash', siteEntryMatches('"site.com/home/"', P), true);
+eq('smart quotes count', siteEntryMatches('“site.com/home?sort=new”', P), true);
+eq('quoted page misses a different value', siteEntryMatches('"site.com/home?sort=new&t=month"', P), false);
+eq('quoted page misses a missing param', siteEntryMatches('"site.com/home?sort=new&t=week"', 'https://site.com/home?sort=new'), false);
+eq('quoted page misses another path', siteEntryMatches('"site.com/home"', 'https://site.com/somepage'), false);
+eq('quoted page misses a deeper path', siteEntryMatches('"site.com/home"', 'https://site.com/home/more'), false);
+eq('quoted root misses subpages', siteEntryMatches('"site.com"', 'https://site.com/somepage'), false);
+eq('quoted root matches root', siteEntryMatches('"site.com/"', 'https://site.com/'), true);
+eq('quoted page misses subdomains', siteEntryMatches('"site.com/home"', 'https://a.site.com/home'), false);
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

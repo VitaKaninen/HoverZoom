@@ -162,6 +162,13 @@ once — two frames disagreeing about whether the site was listed.
 - **`pageHost()` is what the site list matches**, not `location.hostname`: the top frame's host
   where it can be read (`ancestorOrigins`, then a same-origin `window.top.location`, then
   `document.referrer`), so a disabled site is disabled inside its frames too.
+- **A quoted site-list entry is one page** (`siteEntryMatches`, v0.217.0): `"site.com/home?sort=new"`
+  matches that host (± `www.`), that exact path (trailing `/` ignored, no deeper paths, no
+  subdomains), and every listed query param with its value — order and extra params ignored, so
+  `&page=2` or a reorder still matches. Matched against `pageUrl()` on every check, so SPA
+  navigation is honoured. A cross-origin frame can only learn the host, so quoted entries miss
+  inside such frames (they still preview). `toggleSite()` removes any entry matching the page,
+  quoted ones included.
 
 Frames still preview — the fix is about *which host* the decision is made against, not about
 running there.
