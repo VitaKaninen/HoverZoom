@@ -935,11 +935,43 @@ resolves count too.
   candidates, except every 10th time (`s`). Never skipped once it has worked there — Flickr 2048 and
   imgur's `.mp4` fail for many pictures on hosts where they also succeed, and skipping them would
   lose real upgrades.
-- **Report** (`brokenRules()`, the yellow box at the top of the settings panel): only rules with
-  `report: true`, at `f >= 10`, whatever `h` is. `report` means "a 404 here is abnormal": site rules
+- **Report** (`brokenRules()`, a list under *Diagnostics* in the settings panel since v0.218.0 —
+  it was a yellow box at the top, which read to users as an error they had caused and could do
+  nothing about): only rules with `report: true`, at `f >= 10`, whatever `h` is. `h === 0` is
+  worded "has never worked here, so it is skipped" — a rule matching a site it was not written for
+  (booru thumbnail on nexusmods' `/thumbnails/`), not a site change; `h > 0` is "the site may have
+  changed". `report` means "a 404 here is abnormal": site rules
   whose target always exists. Generic rules (size suffixes, path markers, size code) and optional
   sizes (Flickr 2048, Pinterest originals, imgur clip) are `false`, or the box fills with noise.
   The flag is read from the current `UPGRADES`, not stored, so changing it takes effect at once.
 - Capped at 300 entries, oldest-touched evicted. Clear in the panel deletes the listed entries.
-- It detects, it does not repair. The repair for a site whose thumbnail links to a page is the
-  linked-page fallback (v0.200.0, case 43).
+- It detects, it does not repair. The repairs are the linked-page fallback (v0.200.0, case 43) and
+  taught patterns (below).
+
+## Taught patterns · `E75` · v0.218.0
+
+The ground truth the shared learning rules call "the user teaching". The bar's magnifier
+(`teachShown()`: placed, not a clip, `view.url === activeShown`) opens a popover; the user pastes or
+drops the original's address. `teachSubmit()` probes it — must load and be larger in pixels than
+what is showing — then `upgradeViewer()`s to it and stores `taughtRuleFrom(thumb, original)` in
+`cfg.taughtRules[thumb host]` (kept across Reset). `collectCandidates()` tries
+`taughtCandidates()` first, ahead of data attributes. Case 44 on the test page.
+
+`taughtRuleFrom` (pure, asserted in `test-resolver.js`):
+- Tokens are alternating `[A-Za-z0-9]+` words and separator runs. The changed middle is what is
+  left after the common token prefix and suffix.
+- Context around the middle is chosen by **cost**: fewest plain words on the left (100 each), then
+  on the right (60 each), then fewest tokens — among windows whose rule **reproduces the example
+  exactly**. Plain words are the picture-specific risk: v0.218.0's first cut used a fixed two-token
+  window and learned `teach/sm/one → teach/lg/one`, which never carried to `two`. Right is cheaper
+  so an insertion before the extension anchors on `.jpg`, not on the file name.
+- Context words with a digit are ids → `([A-Za-z0-9]+)`; middle words with a digit keep their
+  letters (`w400` → `(w\d+)`). A middle word in the original equal to a thumbnail word is a
+  back-reference, and the window widens to capture it wherever it sits.
+- The pattern needs at least one word with letters, and gets `(?<![A-Za-z0-9])` / `(?![A-Za-z0-9])`
+  at word ends so `small` never matches inside `Xsmallx`.
+- An original carrying a digit word of 5+ chars that the thumbnail lacks (a hash) cannot be
+  derived: the rule is `one: true`, an exact match for that one picture. A new word shaped like a
+  replaced one (`w400` → `w2048`, same letters) is a size, not an id.
+- Taught rules are never dropped by learning (user-made); a wrong generalisation costs one failed
+  probe per hover on that host until removed in the panel. Not counted in rule health.

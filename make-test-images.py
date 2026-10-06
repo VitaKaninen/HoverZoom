@@ -135,6 +135,12 @@ def main():
     save(wiki, "wiki", "Wiki_file.jpg")
     save(wiki.resize((250, 188)), "250px-Wiki_file.jpg")
 
+    # Thumbnail and original in sibling folders no rule knows (case 44): only teaching finds them.
+    for i, name in enumerate(("one", "two")):
+        pic = make(1600, 1200, "TEACH " + name.upper(), 7 + i)
+        save(pic, "teach", "lg", name + ".jpg")
+        save(pic.resize((200, 150)), "teach", "sm", name + ".jpg")
+
     make_clip()
     # The letterbox thumbnail that clip hides behind (case 42).
     save(make(160, 70, "strip", 5), "letterbox.jpg")

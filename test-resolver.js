@@ -46,8 +46,8 @@ const sizeFromHeaders = new Function(
 const location = { href: 'https://example.com/page/index.html' };
 const body = src.slice(start, end);
 const exported = new Function('location', body +
-    '\nreturn {parseSrcset, looksLikeImage, isVideoUrl, upgradeCandidates, upgradeRules, linkParamCandidates, blockMatch, sameStem, urlStem, betterHit, sniffAnimated};')(location);
-const { parseSrcset, looksLikeImage, isVideoUrl, upgradeCandidates, upgradeRules, linkParamCandidates, blockMatch, sameStem, urlStem, betterHit, sniffAnimated } = exported;
+    '\nreturn {parseSrcset, looksLikeImage, isVideoUrl, upgradeCandidates, upgradeRules, linkParamCandidates, blockMatch, sameStem, urlStem, betterHit, sniffAnimated, taughtRuleFrom, taughtApply};')(location);
+const { parseSrcset, looksLikeImage, isVideoUrl, upgradeCandidates, upgradeRules, linkParamCandidates, blockMatch, sameStem, urlStem, betterHit, sniffAnimated, taughtRuleFrom, taughtApply } = exported;
 
 let pass = 0, fail = 0;
 const NL = String.fromCharCode(10);
@@ -1138,5 +1138,34 @@ eq('quoted page misses a deeper path', siteEntryMatches('"site.com/home"', 'http
 eq('quoted root misses subpages', siteEntryMatches('"site.com"', 'https://site.com/somepage'), false);
 eq('quoted root matches root', siteEntryMatches('"site.com/"', 'https://site.com/'), true);
 eq('quoted page misses subdomains', siteEntryMatches('"site.com/home"', 'https://a.site.com/home'), false);
+
+// ---- taught patterns: one pair from the user, generalised to the rest of the host
+function teach(thumb, orig) { return taughtRuleFrom(thumb, orig); }
+const NX = teach('https://staticdelivery.nexusmods.com/mods/110/images/thumbnails/12345/12345-1690000000-123456789.jpeg',
+    'https://staticdelivery.nexusmods.com/mods/110/images/12345/12345-1690000000-123456789.jpeg');
+eq('taught: a removed folder learns as a rule', !!NX && !NX.one, true);
+eq('taught: it reproduces its own example', taughtApply(NX, 'https://staticdelivery.nexusmods.com/mods/110/images/thumbnails/12345/12345-1690000000-123456789.jpeg'),
+    'https://staticdelivery.nexusmods.com/mods/110/images/12345/12345-1690000000-123456789.jpeg');
+eq('taught: another mod and picture follow', taughtApply(NX, 'https://staticdelivery.nexusmods.com/mods/2531/images/thumbnails/777/777-1700000000-42.png'),
+    'https://staticdelivery.nexusmods.com/mods/2531/images/777/777-1700000000-42.png');
+eq('taught: an address without the folder is left alone', taughtApply(NX, 'https://staticdelivery.nexusmods.com/mods/110/images/12345/x.jpeg'), null);
+const TW = teach('https://pbs.twimg.com/media/GaBcD3eXk?format=jpg&name=small', 'https://pbs.twimg.com/media/GaBcD3eXk?format=jpg&name=orig');
+eq('taught: a changed parameter value', taughtApply(TW, 'https://pbs.twimg.com/media/Zz9Yy8?format=png&name=small'), 'https://pbs.twimg.com/media/Zz9Yy8?format=png&name=orig');
+const SZ = teach('https://cdn.example.com/p/88123_w400.jpg', 'https://cdn.example.com/p/88123_w2048.jpg');
+eq('taught: a size swap carries to other ids', taughtApply(SZ, 'https://cdn.example.com/p/99001_w400.jpg'), 'https://cdn.example.com/p/99001_w2048.jpg');
+const MV = teach('https://img.example.com/t/5521/small.jpg', 'https://img.example.com/full/5521.jpg');
+eq('taught: an id moved from a folder to the name', taughtApply(MV, 'https://img.example.com/t/6000/small.jpg'), 'https://img.example.com/full/6000.jpg');
+const HX = teach('https://x.example.com/thumbs/a1.jpg', 'https://x.example.com/o/9f8e7d6c5b4a.jpg');
+eq('taught: an unrelated hash is one picture only', HX.one, true);
+eq('  and it still answers for that picture', taughtApply(HX, 'https://x.example.com/thumbs/a1.jpg'), 'https://x.example.com/o/9f8e7d6c5b4a.jpg');
+eq('  and nothing else', taughtApply(HX, 'https://x.example.com/thumbs/a2.jpg'), null);
+const SL = teach('http://localhost:8899/test-images/teach/sm/one.jpg', 'http://localhost:8899/test-images/teach/lg/one.jpg');
+eq('taught: a sibling folder carries to another file name', taughtApply(SL, 'http://localhost:8899/test-images/teach/sm/two.jpg'), 'http://localhost:8899/test-images/teach/lg/two.jpg');
+const IN = teach('https://a.com/u/alice/pic.jpg', 'https://a.com/u/alice/pic_orig.jpg');
+eq('taught: an insertion anchors on the extension, not the name', taughtApply(IN, 'https://a.com/u/bob/cat.jpg'), 'https://a.com/u/bob/cat_orig.jpg');
+eq('taught: a word inside another word is not matched', taughtApply(TW, 'https://pbs.twimg.com/media/Xsmallx?format=jpg&name=large'), null);
+eq('taught: identical addresses teach nothing', teach('https://a.com/x.jpg', 'https://a.com/x.jpg'), null);
+const DL = teach('https://a.com/i/1.jpg?v=$2', 'https://a.com/i/1-big.jpg?v=$2');
+eq('taught: a dollar sign in the address survives', taughtApply(DL, 'https://a.com/i/1.jpg?v=$2'), 'https://a.com/i/1-big.jpg?v=$2');
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

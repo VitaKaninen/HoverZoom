@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.217.0
+// @version     0.218.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -307,6 +307,7 @@
         avatarAreas: {},            // host -> {rules, samples, idleDays}: small pictures there preview as ordinary ones
         ownPlayerAreas: {},         // host -> {rules, samples, idleDays}: video-link thumbnails the site's own player lands on
         linkAreas: {},              // host -> {rules, samples, idleDays}: thumbnails whose linked page never holds the original
+        taughtRules: {},            // image host -> [{re, to, ex, one?, made}]: where the original lives, shown by the user
         areasAgedOn: 0,             // the day areaAgeAll() last ran
         siteAudio: {},              // host -> {muted, volume}; absent means muted, which is the
                                     // only default a first visit may have — see AUDIO_DEFAULT
@@ -1029,6 +1030,83 @@
         return next.w * next.h > cur.w * cur.h;
     }
 
+    // ---- taught patterns: one thumbnail -> original pair from the user, generalised. See RESOLVER.md "Taught patterns".
+    const TAUGHT_ID_LEN = 5;        // a word with a digit, this long, that only the original has names one picture
+
+    function urlTokens(s) { return String(s).match(/[A-Za-z0-9]+|[^A-Za-z0-9]+/g) || []; }
+
+    function taughtVar(t) { return /\d/.test(t) && /^[A-Za-z0-9]+$/.test(t); }
+
+    // The rewrite { re, to, ex, one? } that turns `thumb` into `orig`, and others shaped like it; null when equal.
+    // Picks the context naming the fewest plain words that still reproduces the example.
+    function taughtRuleFrom(thumb, orig) {
+        const A = urlTokens(thumb), B = urlTokens(orig);
+        if (thumb === orig || !A.length || !B.length) return null;
+        let p = 0;
+        while (p < A.length && p < B.length && A[p] === B[p]) p++;
+        let s = 0;
+        while (s < A.length - p && s < B.length - p && A[A.length - 1 - s] === B[B.length - 1 - s]) s++;
+        const midB = B.slice(p, B.length - s), mE = A.length - s;
+        const shape = function (t) { return t.replace(/\d+/g, '#'); };
+        const sizes = A.slice(p, mE).map(shape);       // w400 -> w2048 is a size, not an id
+        const esc = function (t) { return t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); };
+        const lit = function (t) { return t.replace(/\$/g, '$$$$'); };
+        const word = function (t) { return /^[A-Za-z0-9]+$/.test(t); };
+        const exact = { re: '^' + esc(thumb) + '$', to: lit(orig), ex: [thumb, orig], one: true };
+        if (midB.some(function (t) {
+            return taughtVar(t) && A.indexOf(t) < 0 && t.length >= TAUGHT_ID_LEN && sizes.indexOf(shape(t)) < 0;
+        })) return exact;
+        let best = null, bestCost = Infinity;
+        for (let lw = 0; lw <= p; lw++) {
+            for (let rw = 0; rw <= s; rw++) {
+                let L = p - lw, R = mE + rw;
+                midB.forEach(function (t) {
+                    if (!taughtVar(t) || A.slice(L, R).indexOf(t) >= 0) return;
+                    const i = A.indexOf(t);
+                    if (i >= 0) { L = Math.min(L, i); R = Math.max(R, i + 1); }
+                });
+                let cost = R - L, anchor = false;
+                for (let i = L; i < R; i++) {
+                    if (!word(A[i]) || taughtVar(A[i]) && (i < p || i >= mE)) continue;
+                    if (/[A-Za-z]/.test(A[i])) anchor = true;
+                    if (i < p) cost += 100; else if (i >= mE) cost += 60;
+                }
+                if (!anchor || cost >= bestCost) continue;
+                let re = '', n = 0;
+                const grp = {}, byVal = {};
+                for (let i = L; i < R; i++) {
+                    const t = A[i];
+                    if (!taughtVar(t)) { re += esc(t); continue; }
+                    n++; grp[i] = n;
+                    if (!(t in byVal)) byVal[t] = n;
+                    re += i >= p && i < mE ? '(' + esc(t).replace(/\d+/g, '\\d+') + ')' : '([A-Za-z0-9]+)';
+                }
+                if (word(A[L])) re = '(?<![A-Za-z0-9])' + re;
+                if (word(A[R - 1])) re += '(?![A-Za-z0-9])';
+                const ctx = function (i) { return grp[i] ? '$' + grp[i] : lit(A[i]); };
+                let to = '';
+                for (let i = L; i < p; i++) to += ctx(i);
+                midB.forEach(function (t) { to += taughtVar(t) && byVal[t] ? '$' + byVal[t] : lit(t); });
+                for (let i = mE; i < R; i++) to += ctx(i);
+                const rule = { re: re, to: to,
+                    ex: [A.slice(L, R).join(''), A.slice(L, p).concat(midB, A.slice(mE, R)).join('')] };
+                if (taughtApply(rule, thumb) !== orig) continue;
+                best = rule;
+                bestCost = cost;
+            }
+        }
+        return best || exact;
+    }
+
+    // A taught rule's rewrite of `url`, or null when it does not apply.
+    function taughtApply(rule, url) {
+        let re;
+        try { re = new RegExp(rule.re); } catch (e) { return null; }
+        if (!re.test(url)) return null;
+        const out = url.replace(re, rule.to);
+        return out !== url ? out : null;
+    }
+
     const DATA_ATTRS = ['data-src', 'data-original', 'data-original-src', 'data-full',
         'data-full-src', 'data-fullsize', 'data-large', 'data-large-src', 'data-hi-res',
         'data-highres', 'data-zoom-image', 'data-zoom', 'data-image', 'data-img',
@@ -1146,6 +1224,10 @@
             return function (r) { if (!ruleSkipped(r)) add(r.url, from, false, r); };
         };
 
+        const shown = shownUrl(el);
+        // 0. where the user showed the original lives, for pictures from this host
+        if (shown) taughtCandidates(shown, at).forEach(adder(TAUGHT_FROM));
+
         // 1. explicit high-res attributes
         DATA_ATTRS.forEach(function (a) {
             const v = el.getAttribute && el.getAttribute(a);
@@ -1189,7 +1271,6 @@
         }
 
         // 4. rewrites of the displayed src
-        const shown = shownUrl(el);
         // An image proxy carries its source in its own query: ?url=, ?piurl=, ?imgurl=. See E48.
         if (shown) linkParamCandidates(shown).forEach(adder('a url inside the displayed src\'s query'));
         if (shown) upgradeRules(shown).forEach(ruled('url rule on the displayed src'));
@@ -1197,6 +1278,20 @@
         // 5. the displayed src itself, last — it is the fallback, never the upgrade
         if (shown) add(shown, 'the displayed src itself', true);
 
+        return out;
+    }
+
+    const TAUGHT_FROM = 'a pattern you taught';
+
+    // Every taught rule's rewrite of `src`, from the rules for its own host.
+    function taughtCandidates(src, at) {
+        let u;
+        try { u = new URL(src, at); } catch (e) { return []; }
+        const out = [];
+        ((cfg.taughtRules || {})[u.hostname] || []).forEach(function (r) {
+            const v = taughtApply(r, u.href);
+            if (v && out.indexOf(v) < 0) out.push(v);
+        });
         return out;
     }
 
@@ -1918,6 +2013,7 @@
         vrateEl = null, vmuteEl = null, vsoundEl = null, vvolEl = null, vvolInEl = null,
         ratePopEl = null, rateInEl = null;
     let retryEl = null;         // in the bar, and only on a failed picture during a tour
+    let teachEl = null, teachPopEl = null, teachInEl = null, teachMsgEl = null, teachGoEl = null, teachNoEl = null;
     let seekDrag = false;       // the scrubber is being held; timeupdate must not fight it
     let volDrag = false;        // ditto for the volume column against syncVideoCtl()
     let fullPrev = null;        // geometry to put back, and the "this fullscreen is ours" flag
@@ -1957,6 +2053,7 @@
     const ICON_WHEEL = 'M7 3l-4 5h3v13h2V8h3L7 3zm10 18l4-5h-3V3h-2v13h-3l4 5z';
     const ICON_CLOSE = 'M6.4 5L12 10.6 17.6 5 19 6.4 13.4 12 19 17.6 17.6 19 12 13.4 6.4 19 5 17.6 10.6 12 5 6.4z';
     const ICON_RETRY = 'M12 5V2L8 6l4 4V7a5 5 0 1 1-5 5H5a7 7 0 1 0 7-7z';
+    const ICON_FIND = 'M10 3a7 7 0 0 1 5.6 11.2l4.6 4.6-1.4 1.4-4.6-4.6A7 7 0 1 1 10 3zm0 2a5 5 0 1 0 0 10 5 5 0 0 0 0-10zm-1 2h2v2h2v2h-2v2H9v-2H7V9h2V7z';
 
     // A filled glyph from one path, or a stroked one from several.
     function mkIcon(d) {
@@ -2103,6 +2200,9 @@
             '.box.nobar:not(:hover) .cx{display:none}',
             '.box.hot .cap.hasvid .vidoff{display:block}',
             '.box.hot .cap .retry.on{display:block}',
+            '.box.hot .cap .teach.on{display:block}',
+            '.cap .teach svg{display:block;width:12px;height:12px;margin:3px auto;fill:currentColor}',
+            '.cap .teach:hover{background:#89b4fa;border-color:#89b4fa;color:#1e1e2e}',
             '.cap .retry svg{display:block;width:12px;height:12px;margin:3px auto;fill:currentColor}',
             '.cap .retry:hover{background:#f9e2af;border-color:#f9e2af;color:#1e1e2e}',
             '.cap .vidoff svg{display:block;width:13px;height:13px;margin:2px auto;fill:none;',
@@ -2211,6 +2311,19 @@
             '.pop .acts button{font:11px system-ui,sans-serif;padding:4px 10px;border-radius:5px;',
             'border:1px solid #45475a;background:#313244;color:#cdd6f4;cursor:pointer}',
             '.pop .acts button.go{background:#f38ba8;border-color:#f38ba8;color:#1e1e2e;font-weight:700}',
+            '.pop .acts button.ok{background:#89b4fa;border-color:#89b4fa;color:#1e1e2e;font-weight:700}',
+            '.pop.teachpop{width:300px}',
+            '.pop .field{padding:8px 10px 0}',
+            '.pop .field input{display:block;width:100%;box-sizing:border-box;padding:4px 6px;',
+            'font:11px system-ui,sans-serif;color:#cdd6f4;background:#313244;',
+            'border:1px solid #45475a;border-radius:4px;outline:none}',
+            '.pop .field input:focus{border-color:#89b4fa}',
+            '.pop .field[hidden]{display:none}',
+            '.pop .msg{padding:6px 10px 0;color:#bac2de}',
+            '.pop .msg:empty{display:none}',
+            '.pop .msg.bad{color:#f38ba8}',
+            '.pop .msg.good{color:#a6e3a1}',
+            '.pop .acts button[hidden]{display:none}',
             // barFadeMs drives BOTH directions: in from 0, and out again after barIdleMs.
             '.cap,.vctl{transition:opacity var(--barfade) ease}',
             '.box.baridle .cap,.box.baridle .vctl{opacity:0;pointer-events:none}',
@@ -2304,6 +2417,13 @@
         retryEl.addEventListener('mousedown', function (e) { e.preventDefault(); e.stopPropagation(); }, true);
         retryEl.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); tourShow(); }, true);
 
+        teachEl = document.createElement('span');
+        teachEl.className = 'btn teach';
+        teachEl.appendChild(mkIcon(ICON_FIND));
+        setTip(teachEl, 'Show Hover Zoom where the full-size picture is');
+        teachEl.addEventListener('mousedown', function (e) { e.preventDefault(); e.stopPropagation(); }, true);
+        teachEl.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); openTeach(); }, true);
+
         fsEl = document.createElement('span');
         fsEl.className = 'btn fs';
         fsEl.appendChild(mkIcon(ICON_FULL));
@@ -2336,6 +2456,7 @@
         capEl.appendChild(blockEl);
         capEl.appendChild(vidOffEl);
         capEl.appendChild(retryEl);
+        capEl.appendChild(teachEl);
         capEl.appendChild(aaEl);
         capEl.appendChild(fsEl);
         capEl.appendChild(xEl);
@@ -2373,6 +2494,8 @@
         box.addEventListener('click', onBoxClick, true);
         root.appendChild(box);
         root.appendChild(blockPopEl);       // outside the box, whose overflow would clip it
+        teachPopEl = buildTeachPop();
+        root.appendChild(teachPopEl);
 
         document.addEventListener('fullscreenchange', onFullChange);
         document.addEventListener('webkitfullscreenchange', onFullChange);
@@ -3461,7 +3584,7 @@
     // the buttons once placed, and of nothing but the padding while hovering.
     function btnGutter() {
         if (!placed) return BAR_PAD;
-        const n = 4 + (mediaEl === vidEl ? 1 : 0) + (retryShown() ? 1 : 0);
+        const n = 4 + (mediaEl === vidEl ? 1 : 0) + (retryShown() ? 1 : 0) + (teachShown() ? 1 : 0);
         return grabInset() + BTN_STEP * n + 2;
     }
 
@@ -3470,6 +3593,13 @@
 
     function markRetry() {
         if (retryEl) retryEl.classList.toggle('on', retryShown());
+        if (teachEl) teachEl.classList.toggle('on', teachShown());
+    }
+
+    // The find-the-original button: on a pinned picture that is still the page's own copy.
+    function teachShown() {
+        return !!teachEl && !!view && placed && mediaEl !== vidEl && !!activeShown &&
+            (view.url === activeShown || isOpen(teachPopEl));
     }
 
     // How much of the bar the cluster covers right now.
@@ -3674,6 +3804,7 @@
         blockEl.style.right = px(right); right += BTN_STEP;
         if (hasVid) { vidOffEl.style.right = px(right); right += BTN_STEP; }
         if (retryShown()) { retryEl.style.right = px(right); right += BTN_STEP; }
+        if (teachShown()) { teachEl.style.right = px(right); right += BTN_STEP; }
         aaEl.style.right = px(right); right += BTN_STEP;
         markSmoothing();
         markRetry();
@@ -4453,7 +4584,7 @@
     function isBoxControl(t) {
         return blockEl.contains(t) || vidOffEl.contains(t) || aaEl.contains(t) ||
             fsEl.contains(t) || xEl.contains(t) || cornerXEl.contains(t) ||
-            retryEl.contains(t) || blockPopEl.contains(t) ||
+            retryEl.contains(t) || blockPopEl.contains(t) || teachEl.contains(t) || teachPopEl.contains(t) ||
             zctlEl.contains(t) || vctlEl.contains(t);
     }
 
@@ -4477,12 +4608,15 @@
         return h;
     }
 
+    function isOpen(pop) { return !!pop && pop.classList.contains('open'); }
+
     function popOpen() {
-        return !!(blockPopEl && blockPopEl.classList.contains('open')) || rateMenuOpen();
+        return isOpen(blockPopEl) || isOpen(teachPopEl) || rateMenuOpen();
     }
 
     function closePops() {
         if (blockPopEl) blockPopEl.classList.remove('open');
+        if (teachPopEl) teachPopEl.classList.remove('open');
         closeRateMenu();
     }
 
@@ -4495,13 +4629,136 @@
 
     // Above the bar at the window's right end, free to spill past the window, whole on screen.
     function placePop() {
-        if (!blockPopEl || !blockPopEl.classList.contains('open')) return;
-        const b = box.getBoundingClientRect(), c = capEl.getBoundingClientRect(), p = blockPopEl.getBoundingClientRect();
+        const pop = isOpen(blockPopEl) ? blockPopEl : isOpen(teachPopEl) ? teachPopEl : null;
+        if (!pop) return;
+        const b = box.getBoundingClientRect(), c = capEl.getBoundingClientRect(), p = pop.getBoundingClientRect();
         const x = Math.max(4, Math.min(b.right - 8 - p.width, vpW() - 4 - p.width));
         let y = c.top - 4 - p.height;
         if (y < 4) y = Math.min(c.bottom + 4, vpH() - 4 - p.height);
-        blockPopEl.style.left = Math.round(x) + 'px';
-        blockPopEl.style.top = Math.round(Math.max(4, y)) + 'px';
+        pop.style.left = Math.round(x) + 'px';
+        pop.style.top = Math.round(Math.max(4, y)) + 'px';
+    }
+
+    // ---- teaching where the original lives, from the bar's find button. See RESOLVER.md "Taught patterns".
+
+    function buildTeachPop() {
+        const d = document.createElement('div');
+        d.className = 'pop teachpop';
+        d.addEventListener('mousedown', function (e) {
+            const t = e.composedPath ? e.composedPath()[0] : e.target;
+            if (!t || t.tagName !== 'INPUT') e.preventDefault();      // the field must still take focus
+            e.stopPropagation();
+        }, true);
+        popHead(d, 'Where is the full-size picture?',
+            ' Open it in another tab — click through to it, or right-click it and choose “Open image in ' +
+            'new tab” — then copy its address and paste it here, or drag the picture onto this box. ' +
+            'Hover Zoom will look for other pictures on this site the same way.');
+        const field = document.createElement('div');
+        field.className = 'field';
+        teachInEl = document.createElement('input');
+        teachInEl.type = 'text';
+        teachInEl.spellcheck = false;
+        teachInEl.placeholder = 'Paste the picture’s address';
+        teachInEl.addEventListener('keydown', function (e) {
+            e.stopPropagation();
+            if (e.key === 'Enter') { e.preventDefault(); teachSubmit(); }
+            else if (e.key === 'Escape') { e.preventDefault(); closePops(); layout(); }
+        });
+        teachInEl.addEventListener('dragover', function (e) { e.preventDefault(); });
+        teachInEl.addEventListener('drop', function (e) {
+            const dt = e.dataTransfer;
+            const v = dt && ((dt.getData('text/uri-list') || '').split(/\r?\n/).filter(function (l) { return l && l[0] !== '#'; })[0] ||
+                dt.getData('text/plain'));
+            if (!v) return;
+            e.preventDefault();
+            teachInEl.value = v.trim();
+            teachSubmit();
+        });
+        field.appendChild(teachInEl);
+        d.appendChild(field);
+        teachMsgEl = document.createElement('div');
+        teachMsgEl.className = 'msg';
+        d.appendChild(teachMsgEl);
+        const acts = document.createElement('div');
+        acts.className = 'acts';
+        teachNoEl = document.createElement('button');
+        teachNoEl.textContent = 'Cancel';
+        teachNoEl.addEventListener('click', function (e) {
+            e.preventDefault(); e.stopPropagation(); closePops(); layout();
+        }, true);
+        teachGoEl = document.createElement('button');
+        teachGoEl.className = 'ok';
+        teachGoEl.textContent = 'Use it';
+        teachGoEl.addEventListener('click', function (e) {
+            e.preventDefault(); e.stopPropagation(); teachSubmit();
+        }, true);
+        acts.appendChild(teachNoEl);
+        acts.appendChild(teachGoEl);
+        d.appendChild(acts);
+        return d;
+    }
+
+    function teachSay(text, kind) {
+        teachMsgEl.textContent = text;
+        teachMsgEl.className = 'msg' + (kind ? ' ' + kind : '');
+        placePop();
+    }
+
+    function openTeach() {
+        const wasOpen = isOpen(teachPopEl);
+        togglePop(teachPopEl);
+        if (wasOpen) { layout(); return; }
+        teachInEl.value = '';
+        teachInEl.parentNode.hidden = false;
+        teachGoEl.hidden = false;
+        teachNoEl.textContent = 'Cancel';
+        teachSay('');
+        teachInEl.focus();
+    }
+
+    // Load what the user pointed at; if it is the bigger picture, show it and keep the pattern for this host.
+    async function teachSubmit() {
+        const thumb = activeShown, at = view, raw = teachInEl.value.trim();
+        if (!thumb || !view || !raw) return;
+        let u;
+        try { u = new URL(raw); } catch (e) { u = null; }
+        if (!u || !/^https?:$/.test(u.protocol)) { teachSay('That is not a web address.', 'bad'); return; }
+        teachSay('Checking…');
+        const dim = await probe(u.href, true);
+        if (view !== at || activeShown !== thumb) return;
+        if (!dim) {
+            teachSay('That address did not open as a picture. Copy the address of the picture itself — ' +
+                'right-click it and choose “Open image in new tab” — not the page it is on.', 'bad');
+            return;
+        }
+        if (dim.w * dim.h <= view.natW * view.natH) {
+            teachSay('That picture is ' + dim.w + ' × ' + dim.h + ', no bigger than this one.', 'bad');
+            return;
+        }
+        const rule = taughtRuleFrom(thumb, u.href);
+        let host = '';
+        try { host = new URL(thumb).hostname; } catch (e) { /* none */ }
+        if (rule && host) {
+            reloadSettings();
+            rule.made = new Date().toISOString().slice(0, 10);
+            const all = Object.assign({}, cfg.taughtRules);
+            all[host] = (all[host] || []).filter(function (r) { return r.re !== rule.re; }).concat([rule]);
+            cfg.taughtRules = all;
+            saveSettings();
+            probeCache.clear();
+            plReset();                  // buffered answers predate the pattern
+            refreshPanel();
+            dbg('taught a pattern', { host: host, rule: rule, thumb: thumb, original: u.href });
+        }
+        upgradeViewer({ url: u.href, w: dim.w, h: dim.h, video: !!dim.video, duration: dim.duration, display: dim.display });
+        teachInEl.parentNode.hidden = true;
+        teachGoEl.hidden = true;
+        teachNoEl.textContent = 'Close';
+        teachSay(!rule || rule.one
+            ? 'Found it. This address has nothing in common with the small one, so Hover Zoom can only ' +
+              'remember it for this picture.'
+            : 'Found it. Other pictures from ' + host + ' will be looked for the same way. The pattern is ' +
+              'listed under Per-site fixes in settings, where it can be removed.', 'good');
     }
 
     // ---- smoothing: a stored setting, toggled from the frame instead of the panel
@@ -4684,6 +4941,7 @@
         const path = e.composedPath();
         if (zinEl && !zinEl.hidden && path.indexOf(zinEl) !== -1) return true;
         if (rateInEl && rateMenuOpen() && path.indexOf(rateInEl) !== -1) return true;
+        if (teachInEl && isOpen(teachPopEl) && path.indexOf(teachInEl) !== -1) return true;
         if (!SLIDER_KEYS[e.key]) return false;
         // The scrubber answers the arrows exactly as the zoom slider does.
         return (!!zsliderEl && path.indexOf(zsliderEl) !== -1) ||
@@ -9709,7 +9967,7 @@
     let panelOpened = null;     // Undo's snapshot — see openPanel(); MUST outlive a re-render
 
     // What the user entered per site, not knobs: `Reset to defaults` leaves these alone.
-    const RESET_KEEPS = ['siteList', 'blockList', 'referrerSites', 'siteAudio', 'videoDelays', 'avatarAreas', 'ownPlayerAreas', 'linkAreas', 'areasAgedOn', 'scrollSites'];
+    const RESET_KEEPS = ['siteList', 'blockList', 'referrerSites', 'siteAudio', 'videoDelays', 'avatarAreas', 'ownPlayerAreas', 'linkAreas', 'areasAgedOn', 'scrollSites', 'taughtRules'];
 
     // Open/closed, the fold, scroll and position for this TAB — sessionStorage is per tab and
     // per origin, so it follows a same-site link or a refresh and dies with the tab.
@@ -9820,8 +10078,6 @@
             'button.danger{color:' + C.red + '}',
             '.listbtns{display:flex;gap:8px;justify-content:flex-end;margin-top:6px}',
             '.listwrap{margin-top:4px}',
-            '.alert{margin:6px 0 4px;padding:10px 12px;border:1px solid ' + C.yellow + ';border-radius:8px}',
-            '.alert .listhead{color:' + C.yellow + '}',
             '.listwrap + .listwrap{margin-top:18px}',
             '.listhead{font-size:12.5px;font-weight:600;color:' + C.text + ';margin-bottom:3px}',
             '.listdesc{font-size:12px;color:#9399b2;line-height:1.45}',
@@ -9830,6 +10086,7 @@
             '.addrow input[type=text]{flex:1;padding:6px 10px;border-radius:6px;font-size:13px}',
             '.addrow input[type=number]{width:84px;padding:6px 8px;border-radius:6px;font-size:13px}',
             '.entry .prov{color:#9399b2;font-size:12px;margin-left:8px;word-break:normal}',
+            '.entry span.words{word-break:normal;overflow-wrap:anywhere}',
             '.entry .msval{color:' + C.text + ';cursor:pointer;border-bottom:1px dotted #9399b2}',
             '.entry .msval:hover{border-bottom-color:' + C.text + '}',
             '.entry .msedit{width:70px;padding:1px 4px;font-size:12px}',
@@ -9984,20 +10241,23 @@
 
         let mount = body;
 
-        // A yellow box listing site rules whose guesses have stopped loading; nothing when all is well.
+        // Built-in site rules that keep missing on some image host, under Diagnostics; nothing when all is well.
         function brokenRulesNotice() {
             const list = brokenRules();
             if (!list.length) return;
             const wrap = document.createElement('div');
-            wrap.className = 'alert';
+            wrap.className = 'listwrap';
             const hd = document.createElement('div');
             hd.className = 'listhead';
-            hd.textContent = 'A site may have changed how it serves pictures';
+            hd.textContent = 'Built-in rules that keep missing';
             wrap.appendChild(hd);
             const desc = document.createElement('div');
             desc.className = 'listdesc';
-            desc.textContent = 'These rules for finding the full-size picture keep getting “not found”, ' +
-                'so previews from these hosts may stay small until the script is updated.';
+            desc.textContent = 'Hover Zoom knows where some sites keep their full-size pictures. On the sites ' +
+                'below, that guess keeps coming back “not found”, so previews there may stay small. A rule ' +
+                'that has never worked on a site is skipped there by itself. To fix a site, pin one of its ' +
+                'previews and press the magnifier in the status bar to show Hover Zoom where the full-size ' +
+                'picture is.';
             wrap.appendChild(desc);
             const entries = document.createElement('div');
             entries.className = 'entries';
@@ -10005,8 +10265,11 @@
                 const en = document.createElement('div');
                 en.className = 'entry';
                 const t = document.createElement('span');
-                t.textContent = b.rule + ' on ' + b.host + ' — ' + b.fails + ' not found in a row since ' +
-                    new Date(b.since).toLocaleDateString() + (b.hits ? ' (worked ' + b.hits + ' times before)' : '');
+                t.className = 'words';
+                t.textContent = '“' + b.rule + '” on ' + b.host + ' — ' + (b.hits
+                    ? 'worked ' + b.hits + ' times, then missed the last ' + b.fails + ' since ' +
+                      new Date(b.since).toLocaleDateString() + '. The site may have changed.'
+                    : 'has never worked here (' + b.fails + ' misses), so it is skipped here.');
                 en.appendChild(t);
                 entries.appendChild(en);
             });
@@ -10024,6 +10287,68 @@
             });
             btns.appendChild(clear);
             wrap.appendChild(btns);
+            mount.appendChild(wrap);
+        }
+
+        // The patterns taught with the bar's magnifier, one entry each, removable.
+        function taughtList() {
+            const wrap = document.createElement('div');
+            wrap.className = 'listwrap';
+            const hd = document.createElement('div');
+            hd.className = 'listhead';
+            hd.textContent = 'Full-size pictures you showed Hover Zoom';
+            wrap.appendChild(hd);
+            const desc = document.createElement('div');
+            desc.className = 'listdesc';
+            desc.textContent = 'When a preview stays small, pin it and press the magnifier in its status bar ' +
+                'to show where the full-size picture is. Hover Zoom then finds other pictures on that site ' +
+                'the same way.';
+            wrap.appendChild(desc);
+            const entries = document.createElement('div');
+            entries.className = 'entries';
+            function render() {
+                while (entries.firstChild) entries.removeChild(entries.firstChild);
+                const all = cfg.taughtRules || {};
+                const rows = [];
+                Object.keys(all).sort().forEach(function (h) {
+                    (all[h] || []).forEach(function (r) { rows.push({ host: h, rule: r }); });
+                });
+                if (!rows.length) {
+                    const empty = document.createElement('div');
+                    empty.className = 'empty';
+                    empty.textContent = 'None yet.';
+                    entries.appendChild(empty);
+                    return;
+                }
+                rows.forEach(function (row) {
+                    const en = document.createElement('div');
+                    en.className = 'entry';
+                    const t = document.createElement('span');
+                    t.className = 'words';
+                    t.textContent = row.host;
+                    const prov = document.createElement('span');
+                    prov.className = 'prov';
+                    prov.textContent = row.rule.one ? 'one picture only'
+                        : '“' + row.rule.ex[0] + '” ' + (row.rule.ex[1] ? 'becomes “' + row.rule.ex[1] + '”' : 'is removed');
+                    t.appendChild(prov);
+                    const rm = document.createElement('button');
+                    rm.textContent = '✕';
+                    setTip(rm, 'Forget this one');
+                    rm.addEventListener('click', function () {
+                        const next = Object.assign({}, cfg.taughtRules);
+                        next[row.host] = (next[row.host] || []).filter(function (r) { return r.re !== row.rule.re; });
+                        if (!next[row.host].length) delete next[row.host];
+                        cfg.taughtRules = next;
+                        persist();
+                        render();
+                    });
+                    en.appendChild(t);
+                    en.appendChild(rm);
+                    entries.appendChild(en);
+                });
+            }
+            render();
+            wrap.appendChild(entries);
             mount.appendChild(wrap);
         }
 
@@ -10532,7 +10857,6 @@
         body.appendChild(guideBtn);
         body.appendChild(guide);
 
-        brokenRulesNotice();
         section('The preview');
         const act = pick('activation', 'Show a preview', ' ', [
                 ['hover', 'On hover — the hotkey holds them back'],
@@ -10742,8 +11066,10 @@
             'A red line where the post ends (its replies or comments are left out; dashed at the top when ' +
             'the page has replies but no post), an orange one where each sidebar begins. What was found is ' +
             'logged to the console (F12): page structure and sizes only, no addresses or text.');
+        brokenRulesNotice();
 
         section('Per-site fixes');
+        taughtList();
         const refSites = list('referrerSites', {
             heading: 'Load previews without a referrer on these sites',
             description: 'For a site whose previews come up blank or say “no hotlinking”.',
