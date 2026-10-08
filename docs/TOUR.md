@@ -638,6 +638,17 @@ offline.
 - `probeCache` is keyed by URL and holds a promise, so concurrent probes of one URL
   collapse automatically. Free.
 
+### The files can go while the answers stay — v0.219.0
+
+`plDone` keeps every answer for the life of the page, so `plFill` never queues an answered entry.
+A tab left for hours (or backgrounded under memory pressure) loses the files — HTTP cache and
+`plKeep`'s held Images both — and every step then refetched on arrival with nothing ahead.
+Ground truth is the arrival itself: a preload-buffer `swapViewer(res, true)` slower than
+`PL_COLD_MS` (500) means the file was fetched again → `plWentCold()` bumps `plWarmGen`, empties
+`plKeep` and refills; `plFill` queues every answered image whose `warm` ≠ `plWarmGen` as a
+`rewarm` job (file only, no resolve, same workers and pacing). A false positive (a slow decode)
+costs only cache hits. Not reproduced in a browser — a long-idle tab cannot be staged here.
+
 ### Arrival must be flash-free
 
 `resolve()` emits every improvement as it lands and `upgradeViewer()` swaps it in live — on a tour

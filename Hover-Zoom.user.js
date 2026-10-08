@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.218.0
+// @version     0.219.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -4126,16 +4126,18 @@
     // A DIFFERENT picture into the same window, at the slideshow's spot. A hand-set size stays; zoom and pan
     // reset, because a pan offset means nothing carried into another picture. See TOUR.md.
     // Stages an image off-screen; the commit paints it on coverEl so frame size and picture change in one paint. See TOUR.md §2.
-    function swapViewer(res) {
+    function swapViewer(res, warm) {
         if (!view) return;
         const seq = ++swapSeq;
         if (res.video) { commitSwap(res); return; }
         const im = new Image();
         if (noReferrerHere()) im.referrerPolicy = 'no-referrer';
+        const t0 = Date.now();
         im.src = res.display || res.url;
         showSpinner();
         dockSpinner();
         const done = function () {
+            if (warm && im.naturalWidth && Date.now() - t0 > PL_COLD_MS) plWentCold();
             if (seq !== swapSeq || !view || !tourActive()) return;
             hideSpinner();
             commitSwap(res);
@@ -8954,7 +8956,7 @@
         const pre = plGet(el);
         if (pre && pre.res && sameDisplayed(pre.displayed, displayed)) {
             dbg('tour: from the preload buffer', pre.res);
-            swapViewer(pre.res);
+            swapViewer(pre.res, true);
             // The preload spent one guess, or the page has offered more since (Google fills a
             // result's link on hover): the full search runs once the user rests here.
             if (pre.sig !== undefined && pre.sig !== candSig(el)) tourRest(el, displayed, myToken, pre.res);
@@ -8984,7 +8986,7 @@
         hideSpinner();
         const myToken = token = { cancelled: false, fresh: true };
         const pre = plDone.get(pk);
-        if (pre && pre.res) { swapViewer(pre.res); myToken.shown = true; }
+        if (pre && pre.res) { swapViewer(pre.res, true); myToken.shown = true; }
         else if (!blanked) blankFrame();
         GHOST_LOOKS.forEach(function (ms, i) {
             setTimeout(function () {
@@ -9630,6 +9632,7 @@
     const PL_VIDS_WATCH = 5;    // clips buffered ahead while the user watches them through
     const PL_VIDS_FLIP = 12;    // ...and while they leave them unfinished
     const PL_MAX_WORKERS = 12;
+    const PL_COLD_MS = 500;     // a preloaded picture slower than this to arrive was fetched again
 
     const plDone = new Map();   // plKey -> { res, displayed, sig }; kept for the life of the page
     let plQueue = [];
@@ -9640,6 +9643,8 @@
     let plSerial = false;       // some host in the window pushed back
     let plGen = 0;              // bumped on a direction change; older jobs fall out
     let plDir = 0;
+    let plWarmGen = 0;          // bumped when the browser has dropped the loaded files
+    let plColdAt = 0;
 
     function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
 
@@ -9664,6 +9669,18 @@
         plQueue = [];
         plLive.forEach(function (t) { t.cancelled = true; });
         plLive = [];
+    }
+
+    // The answers survived but the files did not (a tab left for hours): load them all again.
+    function plWentCold() {
+        if (Date.now() - plColdAt < 10000) return;
+        plColdAt = Date.now();
+        plWarmGen++;
+        plKeep.length = 0;
+        plKeepBytes = 0;
+        dbg('preloader: the browser dropped the loaded pictures; loading them again');
+        if (!tour || !tour.on || tour.index < 0) return;
+        plFill(tourEntries(), tour.index, plDir || 1);
     }
 
     function plReset() {
@@ -9707,6 +9724,7 @@
         const wait = plReserve();
         if (wait > 0) await sleep(wait);
         if (job.gen !== plGen || (!tour && !job.hover)) return;
+        if (job.rewarm) { job.rewarm.warm = plWarmGen; plKeepImage(job.rewarm.res); return; }
         primeLink(job.el);
         if (plHas(job.el)) return;
         const token = { cancelled: false, fresh: false };
@@ -9717,7 +9735,7 @@
         catch (e) { hit = null; }
         plLive = plLive.filter(function (t) { return t !== token; });
         if (job.gen !== plGen || token.cancelled) return;
-        plSet(job.el, { res: hit, displayed: displayed, sig: candSig(job.el, PL_GUESSES) });
+        plSet(job.el, { res: hit, displayed: displayed, sig: candSig(job.el, PL_GUESSES), warm: plWarmGen });
         dbg('preloaded', { ahead: job.dist, buffered: plDone.size, queued: plQueue.length,
             workers: plWorkers(), got: hit ? hit.w + '×' + hit.h + ' ' + hit.url.slice(-48)
                                           : 'nothing (the full search runs on arrival)' });
@@ -9738,9 +9756,14 @@
         for (let i = 0; i < list.length; i++) {
             const d = (i - at) * dir;
             if (depth && Math.abs(d) > depth) continue;
-            if (plDone.has(list[i].pk || plKey(list[i].el))) continue;     // pk: taken when the list was built
+            const dist = d >= 0 ? d : -2 * d;
+            const pre = plDone.get(list[i].pk || plKey(list[i].el));     // pk: taken when the list was built
+            if (pre) {
+                if (plWarmGen && pre.warm !== plWarmGen && pre.res && !pre.res.video) jobs.push({ rewarm: pre, dist: dist, gen: plGen });
+                continue;
+            }
             if (list[i].ghost) continue;        // not on the page: nothing to resolve from until it mounts
-            jobs.push({ el: list[i].el, dist: d >= 0 ? d : -2 * d, gen: plGen });
+            jobs.push({ el: list[i].el, dist: dist, gen: plGen });
         }
         for (let k = 1; k <= plVidsAhead; k++) {
             const e = list[at + k * dir], pre = e && plDone.get(e.pk || plKey(e.el));
