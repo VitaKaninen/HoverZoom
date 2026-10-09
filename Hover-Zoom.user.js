@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.219.0
+// @version     0.220.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -2513,11 +2513,12 @@
         spinEl.appendChild(spinSvg);
         root.appendChild(spinEl);
 
-        // Both hosts sit at the maximum z-index, so DOM order is the only tie-break left: a
-        // preview first opened while the panel is up would otherwise bury the panel's controls.
+        // Max z-index everywhere, so DOM order decides: stay under the panel and every docked widget.
         const parent = document.body || document.documentElement;
-        if (panelHost && panelHost.parentNode === parent) parent.insertBefore(host, panelHost);
-        else parent.appendChild(host);
+        const under = Array.prototype.find.call(parent.children, function (c) {
+            return c === panelHost || c.hasAttribute('data-us-dock');
+        });
+        parent.insertBefore(host, under || null);
         // The tour widget floats over the preview, so it has to come after it.
         if (tw && tw.host.parentNode === parent) parent.appendChild(tw.host);
     }

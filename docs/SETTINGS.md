@@ -292,8 +292,9 @@ with the button's deletion:
   window on top, so Escape is its exit first, wherever the focus is.
 - **A preview first opened while the panel was up buried the panel.** Both hosts sit at
   `z-index: 2147483647`, so DOM order is the only tie-break left, and `buildViewer()` appended.
-  It now inserts *before* `panelHost` when there is one. `openPanel()` appends, so the other
-  order is already right.
+  It now inserts *before* `panelHost` and before any `[data-us-dock]` element (Forum Stumbler's
+  bar, RNFP, our own widget) — a preview built after another script's widget covered it.
+  `openPanel()` appends, so the other order is already right.
 
 ### Whatever is on top owns the keyboard and the wheel
 
