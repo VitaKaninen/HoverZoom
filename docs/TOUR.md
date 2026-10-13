@@ -42,7 +42,9 @@ fight that. They are deleted. Do not put nav controls back on the frame.
   is up and the first entry changed): `tourFromStart(1)` uses `twWarm.res` when it is for the same
   element at the same size, so ▶/→ from idle opens at once instead of after a silent resolve.
   Measured on the test page: 19 ms. One resolve per page (or per new first picture), at most 8 probes.
-- **From idle, sidebars are left out** (`mainPics` → `sideColumn`, v0.130.0; §1b), and the widget
+- **From idle, sidebars are left out** (`mainPics` → `sideColumn`, v0.130.0; §1b), and so are pictures in
+  a `position:fixed` layer under 60 % of the viewport wide (`popupLayer`, v0.221.0: YouTube's bell
+  dropdown showed the widget; a full-width fixed app shell must still count), and the widget
   counts and shows by the same list.
 - **Its scope is `tourCommon()`: the smallest element holding every picture counted**, `<body>`
   counting as the whole page. Not the whole document: hackaday's article links `rel=next` to the

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.220.0
+// @version     0.221.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -8191,6 +8191,7 @@
             else if ((why = refusal(el))) why = 'refused: ' + why.replace(/\S*[\/?]\S*/g, '<url>');
             else if (!tourWorthy(el, floor)) why = 'under the floor (' + floor + 'px)';
             else if (sideColumn(el)) why = 'side column';
+            else if (popupLayer(el)) why = 'popup layer';
             else why = 'COUNTED';
             out.push(el.tagName.toLowerCase() + ' ' + Math.round(r.width) + 'x' + Math.round(r.height) +
                 (el.naturalWidth ? ' nat ' + el.naturalWidth + 'x' + el.naturalHeight : '') + ' ' + urls.get(u) + lazy +
@@ -8409,8 +8410,16 @@
         return null;
     }
 
-    // What a slideshow started from idle may show: everything but the sidebars.
-    function mainPics(pics) { return pics.filter(function (p) { return !sideColumn(p); }); }
+    // Inside a fixed layer narrower than the page: a dropdown, menu or chat dock, not the page's pictures.
+    function popupLayer(el) {
+        for (let node = el.parentElement; node && node !== document.body && node !== document.documentElement; node = node.parentElement) {
+            if (getComputedStyle(node).position === 'fixed') return passRect(node).width < vpW() * 0.6;
+        }
+        return false;
+    }
+
+    // What a slideshow started from idle may show: everything but the sidebars and popups.
+    function mainPics(pics) { return pics.filter(function (p) { return !sideColumn(p) && !popupLayer(p); }); }
 
     // What the widget counts and ▶ starts on: the main column, down to the post end.
     // Reused like tourEntries(): the widget's count, pgTick and twWarmFirst all ask after one scroll.
