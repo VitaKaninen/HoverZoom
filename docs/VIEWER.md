@@ -734,13 +734,27 @@ root.
 **Only placed.** A hover preview is pointer-transparent, so the native menu there comes up for the
 thumbnail underneath and offers to save *that*.
 
-**The ⋮ menu was removed and must not be rebuilt.** Its Save and Copy ran in page JavaScript, so
+**The ⋮ menu was removed** (its narrow return on CSP pages is `E9a` below). Its Save and Copy ran in page JavaScript, so
 they needed the host to send `Access-Control-Allow-Origin`, and Copy needed clipboard-write on top.
 Most hosts send neither and nothing in a page context gets around it. The two that *do* work from
 page JS are "open in a new tab" and "copy the URL". Removing it touched eight places
 (`isBoxControl()`, `unplace()`, `onBoxDown()`, `onPinWheel()`, `onPinKey()`'s Escape, `cancel()`,
 and the document `mousedown`/`keydown`/`resize` listeners) — `node --check` catches none of that; a
 leftover call is a runtime `ReferenceError` in a handler, which fails silently.
+
+### A picture shown from bytes gets our own menu · `E9a`
+
+On a CSP page (`E49`: Brave, DuckDuckGo, Startpage, Qwant, Mojeek) `src` is a `blob:`/`data:` made in
+the userscript's world, and the native *Save image as…* / *Open image in new tab* silently do nothing
+on it (reported on Brave in LibreWolf, 2026-10-23). So when `shownFromBytes()` and the right-click
+lands on `mediaEl`, the window `contextmenu` listener suppresses the native menu and opens
+`bytesPopEl`: Save (`GM_download`, `saveAs`), Open (`GM_openInTab`), Copy address (clipboard), all
+on `view.url`. This is the ⋮ menu's objection answered: GM functions need no CORS. Everywhere else
+the native menu stays.
+
+- **`GM_download` refuses a name without a whitelisted extension** (`not_whitelisted`), so
+  `saveName()` appends one from `bytesMime` (the fetched blob's type). Any refusal other than
+  `not_succeeded` (which includes the user cancelling the dialog) falls back to opening the tab.
 
 ### The status bar fades itself out · `E10`
 

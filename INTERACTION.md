@@ -549,6 +549,7 @@ this table is a table.
 | `E7` | The growth ceiling — `maxSizeMultiple`, 2× the browser window | [`docs/VIEWER.md`](docs/VIEWER.md) |
 | `E8` | An upgrade is almost never visible | [`docs/RESOLVER.md`](docs/RESOLVER.md) |
 | `E9` | The browser's own context menu is the one that can save and copy | [`docs/VIEWER.md`](docs/VIEWER.md) |
+| `E9a` | …except on a picture shown from bytes (`E49`): right-click there opens our own Save / Open / Copy, acting on the real URL | [`docs/VIEWER.md`](docs/VIEWER.md) |
 | `E10` | The status bar fades itself out | [`docs/VIEWER.md`](docs/VIEWER.md) |
 | `E11` | The ⊘ button, and why it is not on a hover preview | [`docs/GATES.md`](docs/GATES.md) |
 | `E12` | A wall of playing clips is a picture page, not a video site | [`docs/GATES.md`](docs/GATES.md) |

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.221.0
+// @version     0.222.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -13,6 +13,8 @@
 // @grant       GM_unregisterMenuCommand
 // @grant       GM_getTab
 // @grant       GM_saveTab
+// @grant       GM_download
+// @grant       GM_openInTab
 // @connect     *
 // @run-at      document-idle
 // @downloadURL https://raw.githubusercontent.com/VitaKaninen/HoverZoom/master/Hover-Zoom.user.js
@@ -1489,6 +1491,7 @@
     }
 
     const bytesCache = new Map();   // url -> Promise<{w,h,display}|null>
+    const bytesMime = new Map();    // url -> the fetched file's type, for a saved file's extension
     const liveBlobs = [];           // object URLs held open, oldest first
     const BYTES_MAX = 12;           // enough for a tour's window; the oldest is revoked
 
@@ -1505,6 +1508,7 @@
     async function probeBytes(url) {
         const blob = await fetchBlob(url);
         if (!blob) return null;
+        bytesMime.set(url, blob.type || '');
         if (!blobRefused) {
             const objUrl = URL.createObjectURL(blob);
             const dim = await measureSrc(objUrl);
@@ -2004,6 +2008,7 @@
     let vidOffEl = null;        // "stop showing clips", only while the frame IS one
     let aaEl = null;            // smoothing, toggled between its two answers
     let blockPopEl = null;
+    let bytesPopEl = null;      // our own Save / Open / Copy for a picture shown from bytes. See E9a.
 
     let gripEl = null;          // invisible collar that carries the outer half of the resize strip
     let spinEl = null, spinSvg = null;
@@ -2324,6 +2329,9 @@
             '.pop .msg.bad{color:#f38ba8}',
             '.pop .msg.good{color:#a6e3a1}',
             '.pop .acts button[hidden]{display:none}',
+            '.pop.bytespop{width:auto;min-width:170px;padding:4px 0}',
+            '.pop .item{padding:5px 12px;cursor:pointer;white-space:nowrap}',
+            '.pop .item:hover{background:#45475a}',
             // barFadeMs drives BOTH directions: in from 0, and out again after barIdleMs.
             '.cap,.vctl{transition:opacity var(--barfade) ease}',
             '.box.baridle .cap,.box.baridle .vctl{opacity:0;pointer-events:none}',
@@ -2496,6 +2504,8 @@
         root.appendChild(blockPopEl);       // outside the box, whose overflow would clip it
         teachPopEl = buildTeachPop();
         root.appendChild(teachPopEl);
+        bytesPopEl = buildBytesPop();
+        root.appendChild(bytesPopEl);
 
         document.addEventListener('fullscreenchange', onFullChange);
         document.addEventListener('webkitfullscreenchange', onFullChange);
@@ -4588,7 +4598,7 @@
         return blockEl.contains(t) || vidOffEl.contains(t) || aaEl.contains(t) ||
             fsEl.contains(t) || xEl.contains(t) || cornerXEl.contains(t) ||
             retryEl.contains(t) || blockPopEl.contains(t) || teachEl.contains(t) || teachPopEl.contains(t) ||
-            zctlEl.contains(t) || vctlEl.contains(t);
+            bytesPopEl.contains(t) || zctlEl.contains(t) || vctlEl.contains(t);
     }
 
     // ---- the popover the ⊘ opens
@@ -4614,12 +4624,13 @@
     function isOpen(pop) { return !!pop && pop.classList.contains('open'); }
 
     function popOpen() {
-        return isOpen(blockPopEl) || isOpen(teachPopEl) || rateMenuOpen();
+        return isOpen(blockPopEl) || isOpen(teachPopEl) || isOpen(bytesPopEl) || rateMenuOpen();
     }
 
     function closePops() {
         if (blockPopEl) blockPopEl.classList.remove('open');
         if (teachPopEl) teachPopEl.classList.remove('open');
+        if (bytesPopEl) bytesPopEl.classList.remove('open');
         closeRateMenu();
     }
 
@@ -4640,6 +4651,75 @@
         if (y < 4) y = Math.min(c.bottom + 4, vpH() - 4 - p.height);
         pop.style.left = Math.round(x) + 'px';
         pop.style.top = Math.round(Math.max(4, y)) + 'px';
+    }
+
+    // ---- Save / Open / Copy on a picture shown from bytes, where the browser's menu would act on the blob. See VIEWER.md E9a.
+
+    function buildBytesPop() {
+        const d = buildPop();
+        d.classList.add('bytespop');
+        [['Save image as…', saveOriginal], ['Open image in new tab', openOriginal],
+         ['Copy image address', copyOriginal]].forEach(function (it) {
+            const o = document.createElement('div');
+            o.className = 'item';
+            o.textContent = it[0];
+            o.addEventListener('click', function (e) {
+                e.preventDefault(); e.stopPropagation();
+                const url = view && view.url;
+                closePops();
+                if (url) it[1](url);
+            }, true);
+            d.appendChild(o);
+        });
+        return d;
+    }
+
+    function shownFromBytes() {
+        if (!placed || !view || !mediaEl || !view.url) return false;
+        return /^(?:blob|data):/.test(mediaEl.currentSrc || mediaEl.src || '') && !/^(?:blob|data):/.test(view.url);
+    }
+
+    function openBytesPop(x, y) {
+        closePops();
+        bytesPopEl.classList.add('open');
+        const p = bytesPopEl.getBoundingClientRect();
+        bytesPopEl.style.left = Math.round(Math.max(4, Math.min(x, vpW() - 4 - p.width))) + 'px';
+        bytesPopEl.style.top = Math.round(Math.max(4, Math.min(y, vpH() - 4 - p.height))) + 'px';
+    }
+
+    const MIME_EXT = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/gif': 'gif', 'image/webp': 'webp',
+        'image/avif': 'avif', 'image/bmp': 'bmp', 'image/svg+xml': 'svg', 'video/mp4': 'mp4', 'video/webm': 'webm' };
+
+    // A file name the manager will accept: it refuses names without a whitelisted extension.
+    function saveName(url) {
+        let name = String(fileInfo(url).name || '').replace(/[\\/:*?"<>|\s]+/g, '_').replace(/^[._]+/, '').slice(0, 120) || 'image';
+        if (!/\.[a-z0-9]{2,5}$/i.test(name)) name += '.' + (MIME_EXT[bytesMime.get(url)] || 'jpg');
+        return name;
+    }
+
+    function saveOriginal(url) {
+        if (typeof GM_download !== 'function') { openOriginal(url); return; }
+        try {
+            GM_download({ url: url, name: saveName(url), saveAs: true,
+                onerror: function (r) {
+                    const why = r && r.error;
+                    dbg('saving the original failed', { url: url, error: why, details: r && r.details });
+                    if (why && why !== 'not_succeeded') openOriginal(url);   // refused outright: save it from the tab
+                } });
+        } catch (e) { dbg('saving the original threw', String(e)); openOriginal(url); }
+    }
+
+    function openOriginal(url) {
+        try {
+            if (typeof GM_openInTab === 'function') { GM_openInTab(url, { active: true, insert: true, setParent: true }); return; }
+        } catch (e) { dbg('opening the original threw', String(e)); }
+        window.open(url, '_blank', 'noopener');
+    }
+
+    function copyOriginal(url) {
+        try {
+            navigator.clipboard.writeText(url).catch(function (e) { dbg('copying the address failed', String(e)); });
+        } catch (e) { dbg('copying the address threw', String(e)); }
     }
 
     // ---- teaching where the original lives, from the bar's find button. See RESOLVER.md "Taught patterns".
@@ -4970,6 +5050,7 @@
         // wherever the focus happens to be. One press must not close both.
         if (e.key === 'Escape' && panelHost) return;
         if (e.ctrlKey || e.metaKey || e.altKey) return;   // leave browser/page chords alone
+        if (e.key === 'Escape' && isOpen(bytesPopEl)) { closePops(); e.preventDefault(); e.stopPropagation(); return; }
         // Fullscreen is the layer above the pin, so Escape leaves it first. The browser eats the
         // key itself when the API is what put us there; this covers the maximise fallback.
         if (e.key === 'Escape' && fullActive()) {
@@ -6629,6 +6710,12 @@
     CAP_TARGET.addEventListener('contextmenu', function (e) {
         const ours = swallowMenuAt && Date.now() - swallowMenuAt <= MENU_CLAIM_MS;
         swallowMenuAt = 0;
+        if (!ours && shownFromBytes() && e.composedPath && e.composedPath()[0] === mediaEl) {
+            e.preventDefault();
+            e.stopPropagation();
+            openBytesPop(e.clientX, e.clientY);
+            return;
+        }
         if (!ours) return;
         e.preventDefault();
         e.stopPropagation();
