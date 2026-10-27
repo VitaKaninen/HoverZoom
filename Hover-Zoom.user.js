@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.222.0
+// @version     0.223.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -10165,7 +10165,7 @@
             '.head{flex:none;margin:0;display:flex;align-items:baseline;gap:8px;cursor:move;',
             'padding:10px 20px 9px;font-size:15px;font-weight:600;color:' + C.text + ';',
             'border-bottom:1px solid ' + C.surface + '}',
-            '.head .ver{font-weight:400;font-size:12px;color:' + C.sub + ';cursor:move}',
+            '.ver{flex:none;text-align:right;padding:0 20px 8px;font-size:11px;color:' + C.sub + ';background:' + C.base + '}',
             // Every part of the panel that is not text or a control is a handle — see
             // dragBg(). These two rules only make the cursor agree with it; the later,
             // more specific control rules (.row label, input[type=checkbox], …) still win.
@@ -10324,10 +10324,6 @@
         h.className = 'head';
         setTip(h, 'Drag to move');
         h.textContent = 'Hover Zoom — settings';
-        const ver = document.createElement('span');
-        ver.className = 'ver';
-        ver.textContent = version();
-        h.appendChild(ver);
         panel.appendChild(h);
 
         const body = document.createElement('div');
@@ -11267,6 +11263,10 @@
         foot.appendChild(undo);
         foot.appendChild(close);
         panel.appendChild(foot);
+        const ver = document.createElement('div');
+        ver.className = 'ver';
+        ver.textContent = version();
+        panel.appendChild(ver);
 
         (document.body || document.documentElement).appendChild(panelHost);
 
