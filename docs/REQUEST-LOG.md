@@ -44,7 +44,7 @@ rows capped at 400 (front evicted); the host summary outlives eviction.
 |---|---|
 | `t` `ms` | start (epoch ms), elapsed |
 | `h` `i` | hostname; random per-page-instance id (two at once = two tabs or a re-render) |
-| `k` | kind: `range` `tail` `hunt` (FS reads), `busy` `norush` (notes) |
+| `k` | kind: `range` `quick` `verify` `tail` `hunt` (FS reads; `quick` = arrival read that stops at the last read, `verify` = its slow background re-check), `busy` `norush` (notes) |
 | `p` | pace label the read ran under, e.g. `v0.84.0 w6 g300-800 d400` (workers, start gap, serial delay) |
 | `n` `ok` `pg` | requests made; answered 2xx/3xx; pages that had topics |
 | `sp` | measured gap between request starts, `[min, median, max]` ms |
