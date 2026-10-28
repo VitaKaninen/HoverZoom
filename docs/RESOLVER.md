@@ -975,3 +975,50 @@ what is showing — then `upgradeViewer()`s to it and stores `taughtRuleFrom(thu
   replaced one (`w400` → `w2048`, same letters) is a size, not an id.
 - Taught rules are never dropped by learning (user-made); a wrong generalisation costs one failed
   probe per hover on that host until removed in the panel. Not counted in rule health.
+
+---
+
+## Why this exists
+
+Hover Zoom+ (extesy/hoverzoom) zooms some images on a page and silently ignores others. That is
+not a settings problem. Its generic fallback, `prepareDownscaledImages()` in `js/hoverzoom.js`,
+gates every bare `<img>` behind five hardcoded rules, none of them user-configurable:
+
+1. `src.toLowerCase().lastIndexOf('.jpg') != src.length - 4` — **only `.jpg`, and only when the
+   extension is the final 4 characters.** Rejects `.jpeg`, `.png`, `.webp`, `.avif`, `.gif`, and
+   any URL with a query string (`photo.jpg?w=400`).
+2. not `document.body.firstChild`
+3. must carry an explicit width/height/max-width/max-height
+4. `if (widthAttr > 300 || heightAttr > 300) return;` — thumbnails displayed over 300px are dropped
+5. natural size must be `> displayed * 1.8`
+
+Plus two defects in the same block:
+
+- **Global single-slot lock.** `if (document.body.querySelector('#hzDownscaled') !== null) return;`
+  — only one image can be measured at a time, and the handler is `.one('mouseover')`, so an image
+  hovered while another probe is in flight is skipped permanently. Added by the maintainer in
+  commit `b47d17a` (2021-07-29) as a performance fix.
+- **No `error` handler on the probe element.** If a probe's src fails to load, `#hzDownscaled` is
+  never removed and the guard above blocks *every* remaining image on the page for good.
+
+Reported upstream and still open: [#395](https://github.com/extesy/hoverzoom/issues/395)
+(query strings, 2018, zero comments), [#888](https://github.com/extesy/hoverzoom/issues/888)
+(`.jpg` only, 2022), [#779](https://github.com/extesy/hoverzoom/issues/779) (generic zoom, 2021).
+The repo is active but effort goes to per-site plugins — 399 of them in `plugins/`; the generic
+path has been touched twice ever, both times in 2021.
+
+## Known limits
+
+- HZ+'s 398 plugins were classified in v0.86.0 — **173 are pure URL rewrites, 144 are jQuery
+  against a pre-scanned page, and the two biggest hook `XMLHttpRequest` to read Facebook's and
+  Instagram's own API traffic.** The vocabulary worth harvesting has been harvested. Do not re-open
+  the directory expecting more without reading
+  [`docs/RESOLVER.md`](docs/RESOLVER.md)'s survey first — it says what was taken, what was refused
+  and why, and names the one mechanism still worth building. The generic resolver wins on the long
+  tail and loses on hostile sites. Add narrowly-scoped rules to `UPGRADES` only with host checks and
+  negative tests.
+- The resolver keeps probing past the first hit and upgrades the preview in place each time
+  something strictly bigger turns up. It costs up to `MAX_PROBES` (8) requests per hover instead of
+  usually one. This was `keepSearching` (before that `preferLargest`, off) and is unconditional
+  since v0.39.0: the whole point is to end up with the best size, so stop-at-first-hit was a switch
+  for turning the feature off.

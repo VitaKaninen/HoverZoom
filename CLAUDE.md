@@ -1,16 +1,11 @@
 # Hover Zoom — project notes
 
 A single-purpose replacement for the Hover Zoom+ browser extension. **Pictures only** — no
-galleries, downloads, or action keys, by design. It said *images* only until v0.18.0; the preview
-may now be a muted looping clip, because a large class of animated posts has no image form at all
-and "no video" meant "no answer" for them. v0.63.0 gave that clip a
-floating strip — play/pause, scrubber, speed, sound — and the bar a fullscreen button, so the
-"no controls, no sound" half of that sentence is retired: asked for directly, and the objection it
-rested on (a native control strip cannot be told apart from the picture under it) is answered by
-drawing our own. **What still holds is that this does not preview a video *player***: a page with a
-real player on it refuses previews on it, and `videoMode` still decides what may play at all.
-Inherits the shared rules in
-`../CLAUDE.md` (version bumps, commit+push, no `innerHTML`, `#89b4fa` checkboxes).
+galleries, downloads, or action keys, by design. A preview may be a muted looping clip (many
+animated posts have no image form) with **our own** control strip — a native one cannot be told
+apart from the picture under it. **This does not preview a video *player***: a page with a real
+player refuses previews, and `videoMode` decides what may play at all. Inherits the shared rules
+in `../CLAUDE.md` (version bumps, commit+push, no `innerHTML`, `#89b4fa` checkboxes).
 
 > **[`INTERACTION.md`](INTERACTION.md) is the ID vocabulary for the preview window** — every
 > state, transition, terminator and known edge, each with a permanent ID (`S05`, `T17`, `E22` …).
@@ -21,22 +16,20 @@ Inherits the shared rules in
 > **These notes are a record of reasons, not a veto.** They are written in a confident
 > voice — "do not regress this", "settled", "decided deliberately" — because a reason that is
 > not stated plainly is a reason nobody can weigh later. That voice is *not* a claim that the
-> decision is permanent. Said by the user, 2026-09-04, after two changes were reverted in the
-> session that shipped them: *"we need to not treat what is written in the notes as law. We are
+> decision is permanent. The user, 2026-09-04: *"we need to not treat what is written in the notes as law. We are
 > making this up as we go. Settled decisions from the past can be changed. If there is a good
 > reason behind it, then we need to address it head on, not just decide that we can't do that
 > because we previously decided against it."*
 >
 > So when a note argues against what is being asked for: **say what the old reason was, say
 > whether the new request answers it, and then do the work.** Quoting the note as an objection
-> and stopping there is the failure mode. v0.31.0 is the worked example — it reverses two of
-> v0.30.0's decisions, and both notes now carry the argument in both directions rather than
-> being deleted.
+> and stopping there is the failure mode. A reversed decision keeps its note, carrying the argument
+> in both directions.
 
 ## Start here — read ONE row, not the table
 
-The reasoning behind this project is ~35k tokens. It is split so a session loads the part it
-needs. **Opening all five defeats the point**; if a task genuinely spans two, read two.
+The reasoning is split so a session loads only the part it needs. **Opening them all defeats the
+point**; if a task genuinely spans two, read two.
 
 | Working on | Read |
 |---|---|
@@ -45,36 +38,34 @@ needs. **Opening all five defeats the point**; if a task genuinely spans two, re
 | finding the original — URL rules, linked pages, imgur, video previews, the loading ring | [`docs/RESOLVER.md`](docs/RESOLVER.md) |
 | the settings panel, stored settings, the manager's menu | [`docs/SETTINGS.md`](docs/SETTINGS.md) |
 | the test page, the `debug` log, the Browser pane's many lies | [`docs/TESTING.md`](docs/TESTING.md) |
-| the slideshow (`tour` in the code) and the ◀ ▶ widget that starts it | [`docs/TOUR.md`](docs/TOUR.md) — its first lines give the user's two words, *slideshow* and *widget*. Built v0.96.0–v0.100.0, reworked around the widget v0.120.0–v0.139.0; §1a is the scope — what a slideshow leaves out that a hover would show |
+| the slideshow (`tour` in the code) and the ◀ ▶ widget that starts it | [`docs/TOUR.md`](docs/TOUR.md) — its first lines give the user's two words, *slideshow* and *widget*; §1a is the scope — what a slideshow leaves out that a hover would show |
 | any banner-gate threshold | [`banner-test-sites.md`](banner-test-sites.md) — ~40 live pages measured in two browsers; every number in the gate sits next to a row |
 | the widget's position, or any floating widget shared with Forum Stumbler / RNFP | [`docs/WIDGET-DOCK.md`](docs/WIDGET-DOCK.md) — the shared `dock/us-dock.js`; never edit a synced copy |
-| the zoom **percentage** — what it counts, and why it once moved with browser zoom (fixed in v0.72.0) | [`docs/ZOOM-UNITS.md`](docs/ZOOM-UNITS.md) |
+| rate limiting, a 429, the one-at-a-time list, or the request log shared with Forum Stumbler | [`docs/REQUEST-LOG.md`](docs/REQUEST-LOG.md) — the shared `shared/us-log.js`; never edit a synced copy; **log first, no new pacing logic without a log** |
+| the zoom **percentage** — what it counts, and why it once moved with browser zoom | [`docs/ZOOM-UNITS.md`](docs/ZOOM-UNITS.md) |
 | the user cited an ID — `S05`, `E22`, `T17`, `P4` | [`INTERACTION.md`](INTERACTION.md) says what it is in one line; then `grep -rn "E22" docs/` for the argument |
 
-**Find code by name, not by reading the file.** `Hover-Zoom.user.js` is ~8,400 lines, and a
-whole-file read costs ~100k tokens. `grep -n` for the function, then read the range around it.
+**Find code by name, not by reading the file.** `Hover-Zoom.user.js` is ~11,600 lines, and a
+whole-file read costs ~150k tokens. `grep -n` for the function, then read the range around it.
 
 ### Keeping this current
 
 New reasoning goes in the `docs/` file it belongs to, under its own heading — **not here**. This
 file holds only what is true for every session, and it is capped at that on purpose: everything
-below is paid by every session whether it is relevant or not. `INTERACTION.md` is the user's own
-lookup for state IDs and is cited in conversation, so it must be updated whenever window
-behaviour changes.
+below is paid by every session whether it is relevant or not.
 
 ---
 
 ## Traps that fire BEFORE you act
 
-Each of these is silent — no error, no visible failure, just the wrong behaviour. They are here
-rather than in a `docs/` file because you cannot look them up after the fact; by then the symptom
-has already been misdiagnosed once. (The shared ones — `innerHTML` on Trusted-Types sites, the
+Each is silent — no error, just the wrong behaviour — and lives here, not in `docs/`, because by
+the time you would look one up the symptom has already been misdiagnosed. (The shared ones — `innerHTML` on Trusted-Types sites, the
 `const`-below-`cfg` hoisting trap, the two-userscripts-one-click contract — are in
 [`../CLAUDE.md`](../CLAUDE.md).)
 
 - **A control placed inside `.box` must be added to `isBoxControl()`.** `onBoxDown`/`onBoxClick`
   are capture listeners on the box, so they eat a child's events first. The symptom is silence,
-  and `node --check` passes. See the section below. (Anything inside `vctlEl` is already covered
+  and `node --check` passes. See the capture-listener note in [`docs/VIEWER.md`](docs/VIEWER.md). (Anything inside `vctlEl` is already covered
   by the whole-subtree exemption; a new button in the **bar** is not — ↻ had to be added by hand.)
 - **An element from a FETCHED page resolves its URLs against that page, not this one.** Anything
   reading a relative attribute off an element must go through `baseOf(el)`, which reads the
@@ -139,44 +130,6 @@ has already been misdiagnosed once. (The shared ones — `innerHTML` on Trusted-
 - **Never pass `view: window` to an event constructor.** Under Tampermonkey `window` is a proxy, the
   constructor throws, and a `try` around it makes the dispatch silently never happen — the test
   pages (no sandbox) pass. Found on `primeLink`, v0.126.0.
-- **The Browser pane is Chromium; a Firefox-only layout fault is invisible to every check made
-  here.** Give any absolutely positioned box holding a form control an explicit width — shrink-to-fit
-  diverges between engines. See [`docs/TESTING.md`](docs/TESTING.md).
-- **The Browser pane reports `innerWidth`/`clientHeight` as ZERO while hidden**, and delivers zero
-  animation frames while claiming to be visible. Pin a viewport with `resize_window` before
-  measuring anything geometric, and never use `requestAnimationFrame` for something that must
-  animate. More of these in [`docs/TESTING.md`](docs/TESTING.md).
-
----
-
-## Why this exists
-
-Hover Zoom+ (extesy/hoverzoom) zooms some images on a page and silently ignores others. That is
-not a settings problem. Its generic fallback, `prepareDownscaledImages()` in `js/hoverzoom.js`,
-gates every bare `<img>` behind five hardcoded rules, none of them user-configurable:
-
-1. `src.toLowerCase().lastIndexOf('.jpg') != src.length - 4` — **only `.jpg`, and only when the
-   extension is the final 4 characters.** Rejects `.jpeg`, `.png`, `.webp`, `.avif`, `.gif`, and
-   any URL with a query string (`photo.jpg?w=400`).
-2. not `document.body.firstChild`
-3. must carry an explicit width/height/max-width/max-height
-4. `if (widthAttr > 300 || heightAttr > 300) return;` — thumbnails displayed over 300px are dropped
-5. natural size must be `> displayed * 1.8`
-
-Plus two defects in the same block:
-
-- **Global single-slot lock.** `if (document.body.querySelector('#hzDownscaled') !== null) return;`
-  — only one image can be measured at a time, and the handler is `.one('mouseover')`, so an image
-  hovered while another probe is in flight is skipped permanently. Added by the maintainer in
-  commit `b47d17a` (2021-07-29) as a performance fix.
-- **No `error` handler on the probe element.** If a probe's src fails to load, `#hzDownscaled` is
-  never removed and the guard above blocks *every* remaining image on the page for good.
-
-Reported upstream and still open: [#395](https://github.com/extesy/hoverzoom/issues/395)
-(query strings, 2018, zero comments), [#888](https://github.com/extesy/hoverzoom/issues/888)
-(`.jpg` only, 2022), [#779](https://github.com/extesy/hoverzoom/issues/779) (generic zoom, 2021).
-The repo is active but effort goes to per-site plugins — 399 of them in `plugins/`; the generic
-path has been touched twice ever, both times in 2021.
 
 ---
 
@@ -189,14 +142,11 @@ path has been touched twice ever, both times in 2021.
   MutationObserver or a pre-pass "for performance", and do not hold a reference to a page element
   across an interaction; re-derive instead. Reading the document ahead of a hover is fine, and
   `tourEntries()` does exactly that on every press — keeping the answer is what causes the bugs.
-  *(Two earlier wordings, both too broad. "No DOM scanning, ever" reads as a ban on ever querying
-  the document; "nothing is decided before hover time" banned reading ahead of one. What both
-  were protecting against was *keeping* the answer: stale `src`, SPA navigation, images added
-  after a scan, dead references. See the Google Images section of
-  [`docs/RESOLVER.md`](docs/RESOLVER.md) for where the distinction bites, `coveredMedia()` for a
-  hit-test done at hover time caching nothing, and `tourAt()` for what re-deriving buys — the
-  anchor is an element and a position, never an index, so a virtualised feed deleting the node
-  under you is survivable. Rewritten with the user's approval 2026-09-07 for the tour.)*
+  *(Not a ban on querying the document or reading ahead: what it guards is *keeping* the answer —
+  stale `src`, SPA navigation, images added after a scan, dead references. Where it bites: the
+  Google Images section of [`docs/RESOLVER.md`](docs/RESOLVER.md); `coveredMedia()` hit-tests at
+  hover time and caches nothing; `tourAt()` anchors on an element and a position, never an index,
+  so a virtualised feed deleting the node under you is survivable.)*
 - **No format allowlist.** Extension never decides eligibility. The only gate is
   `bigEnough()`, measured by loading the candidate: by default (`sizeGate` off, v0.168.0) "would
   the window draw it larger than the page does", so every picture previews, enlarged up to
@@ -218,19 +168,6 @@ path has been touched twice ever, both times in 2021.
 
 ---
 
-## Gotcha: a capture listener on the box eats its own children's events
-
-`onBoxDown`/`onBoxClick` are capture listeners on `.box`, and a control inside the box is a
-*child* of it — capture descends from the ancestor, so those two run first and their
-`stopPropagation()` keeps the child's own handlers from ever firing. Found on the X button, which
-looked correct, hovered correctly, and did nothing. Both handlers now `return` early on
-**`isBoxControl(e.target)`**, which is the one list of exempt controls — the bar's buttons, both ✕, the ⊘
-popover, the zoom cluster and the video strip. Any new control placed inside the box
-goes in there — it is not optional, and the symptom is silence. Found 2026-09-03 in browser testing; nothing
-static catches it — `node --check` passes and the markup is fine.
-
----
-
 ## Testing
 
 ```bash
@@ -241,31 +178,10 @@ node test-resolver.js               # 461 assertions: the pure URL and video-lin
                                     # learned wait's arithmetic and the captcha gate
 node dock/test-dock.js               # the shared widget dock's layout and drops
 node dock/sync-dock.js --check      # the dock copy in all three scripts matches (reads the siblings)
+node shared/test-log.js             # the shared request log, and HZ's wiring of it
+node shared/sync-shared.js --check  # the us-log copy in HZ and Forum Stumbler matches
 python make-test-images.py          # regenerate fixtures into test-images/
 ```
 
-Browser test: `python test-server.py`, then open `http://localhost:8899/test-page.html`. 41 cases,
-19 of them marked `hz bad` — things HZ+'s generic path gets wrong or has no answer for, 5 of which
-it rejects outright. (Counts drift; `grep -c 'class="case"' test-page.html` is the truth.)
-(`.claude/launch.json` wraps the same command as
-`hover-zoom-test`, but `.claude/` is gitignored — a fresh clone has only the direct command.)
-
-The rest of the testing notes — what each case is for, and the Browser pane's behaviours — are in [`docs/TESTING.md`](docs/TESTING.md).
-
----
-
-## Known limits
-
-- HZ+'s 398 plugins were classified in v0.86.0 — **173 are pure URL rewrites, 144 are jQuery
-  against a pre-scanned page, and the two biggest hook `XMLHttpRequest` to read Facebook's and
-  Instagram's own API traffic.** The vocabulary worth harvesting has been harvested. Do not re-open
-  the directory expecting more without reading
-  [`docs/RESOLVER.md`](docs/RESOLVER.md)'s survey first — it says what was taken, what was refused
-  and why, and names the one mechanism still worth building. The generic resolver wins on the long
-  tail and loses on hostile sites. Add narrowly-scoped rules to `UPGRADES` only with host checks and
-  negative tests.
-- The resolver keeps probing past the first hit and upgrades the preview in place each time
-  something strictly bigger turns up. It costs up to `MAX_PROBES` (8) requests per hover instead of
-  usually one. This was `keepSearching` (before that `preferLargest`, off) and is unconditional
-  since v0.39.0: the whole point is to end up with the best size, so stop-at-first-hit was a switch
-  for turning the feature off.
+Browser test: `python test-server.py`, then `http://localhost:8899/test-page.html`. What each case
+is for, the counts, and the Browser pane's behaviours: [`docs/TESTING.md`](docs/TESTING.md).

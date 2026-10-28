@@ -45,6 +45,8 @@ GENERAL = "sidebar-600x600.jpg"
 
 class SlowHandler(SimpleHTTPRequestHandler):
     def do_GET(self):
+        if urlparse(self.path).path.startswith("/limited/"):
+            return self.serve_limited()
         if urlparse(self.path).path == "/rotate.php":
             return self.serve_rotating()
         if self.headers.get("Range", "").startswith("bytes="):
@@ -73,7 +75,21 @@ class SlowHandler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    # Anything under /limited/ is refused as a rate-limiting CDN refuses it: 429 with Retry-After.
+    def serve_limited(self, head=False):
+        body = b"Too Many Requests"
+        self.send_response(429)
+        self.send_header("Retry-After", "120")
+        self.send_header("Content-Type", "text/plain")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        if not head:
+            self.wfile.write(body)
+
     def do_HEAD(self):
+        if urlparse(self.path).path.startswith("/limited/"):
+            return self.serve_limited(head=True)
         if urlparse(self.path).path == "/rotate.php":
             return self.serve_rotating(head=True)
         return SimpleHTTPRequestHandler.do_HEAD(self)

@@ -312,3 +312,23 @@ either way.
 
 **A `file://` load will not work** — the preview pane renders local files as a static `data:`
 snapshot and the external script never executes. Use the HTTP server.
+
+---
+
+## The browser test page
+
+Browser test: `python test-server.py`, then open `http://localhost:8899/test-page.html`. 41 cases,
+19 of them marked `hz bad` — things HZ+'s generic path gets wrong or has no answer for, 5 of which
+it rejects outright. (Counts drift; `grep -c 'class="case"' test-page.html` is the truth.)
+(`.claude/launch.json` wraps the same command as
+`hover-zoom-test`, but `.claude/` is gitignored — a fresh clone has only the direct command.)
+
+## Two Browser-pane traps that fire before you act
+
+- **The Browser pane is Chromium; a Firefox-only layout fault is invisible to every check made
+  here.** Give any absolutely positioned box holding a form control an explicit width — shrink-to-fit
+  diverges between engines. See [`docs/TESTING.md`](docs/TESTING.md).
+- **The Browser pane reports `innerWidth`/`clientHeight` as ZERO while hidden**, and delivers zero
+  animation frames while claiming to be visible. Pin a viewport with `resize_window` before
+  measuring anything geometric, and never use `requestAnimationFrame` for something that must
+  animate. More of these in [`docs/TESTING.md`](docs/TESTING.md).

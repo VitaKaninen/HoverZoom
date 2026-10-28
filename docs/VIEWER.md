@@ -1367,3 +1367,16 @@ happens under the backdrop, so it is invisible.
 **The rate clamp is the browser's, not ours.** Chromium throws `NotSupportedError` outside
 [0.0625, 16] and Firefox ignores the assignment, so `setRate()` clamps and the readout shows what
 stuck — the same contract as the zoom field.
+
+---
+
+## Gotcha: a capture listener on the box eats its own children's events
+
+`onBoxDown`/`onBoxClick` are capture listeners on `.box`, and a control inside the box is a
+*child* of it — capture descends from the ancestor, so those two run first and their
+`stopPropagation()` keeps the child's own handlers from ever firing. Found on the X button, which
+looked correct, hovered correctly, and did nothing. Both handlers now `return` early on
+**`isBoxControl(e.target)`**, which is the one list of exempt controls — the bar's buttons, both ✕, the ⊘
+popover, the zoom cluster and the video strip. Any new control placed inside the box
+goes in there — it is not optional, and the symptom is silence. Found 2026-09-03 in browser testing; nothing
+static catches it — `node --check` passes and the markup is fine.
