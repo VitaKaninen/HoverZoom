@@ -85,7 +85,7 @@ UTC as local, so local would be ambiguous).
 ## When the user brings a log — what to check first
 
 - `since` on the refused read: a refresh re-reads the whole span on arrival (by design, Forum
-  Stumbler 0.31.0), and **closing Forum Stumbler's Settings does too** (`closeAll` → `rescan()`
+  Stumbler 0.31.0). Before 0.85.0 **closing Forum Stumbler's Settings did too** (`closeAll` → `rescan()`
   rebuilds the panel). Two reads seconds apart on one host is the leading suspect.
 - `ev.a` and `sp` on refused reads: refused at a consistent request count/gap = a real rate limit
   (that number is the limit); refused on request 1 = not caused by our pacing.
