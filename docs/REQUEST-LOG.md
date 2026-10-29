@@ -11,7 +11,7 @@ own `CLAUDE.md` and `tests/bar-render.test.js`.
 The user's decision (2026-10-28): **collect logs first; the user brings them after a rate limit;
 analyse them together; only then rewrite the pacing.** Do not add retry, backoff or an adaptive
 ladder without a log that justifies it. Both scripts still react to a refusal exactly as before
-(permanent per-host one-at-a-time); the log only records.
+(per-host one-at-a-time — permanent in HZ; FS lifts it 24 h after the last refusal, at the user's request 2026-10-28); the log only records.
 
 Candidate design discussed, **not built** — check it against the logs, don't assume it:
 - Honour `Retry-After` (seconds or HTTP date — `retryAfterOf` already parses both).
@@ -50,7 +50,7 @@ rows capped at 400 (front evicted); the host summary outlives eviction.
 | `sp` | measured gap between request starts, `[min, median, max]` ms |
 | `since` | ms from this host's previous read *ending* — the refresh-a-minute-later signal |
 | `nr` | the host was already on the one-at-a-time list |
-| `out` | `done` `end` `limited` `error` `cancelled` `cut`; notes: `set` `clear` `first` `slowed` |
+| `out` | `done` `end` `limited` `error` `cancelled` `cut`; notes: `set` `clear` `expired` (FS, 24 h passed) `first` `slowed`, `missed` (FS `quick`: its background check found a link the quick read did not show) |
 | `ev` | refusals: `{ a: request #, s: status, w: hard/soft, ra: Retry-After s, dt: ms into the read }` |
 
 A successful request logs status 200 whatever 2xx/3xx it was. Text export: one line per row,
