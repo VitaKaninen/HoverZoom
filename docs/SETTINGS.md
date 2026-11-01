@@ -169,6 +169,12 @@ once — two frames disagreeing about whether the site was listed.
   navigation is honoured. A cross-origin frame can only learn the host, so quoted entries miss
   inside such frames (they still preview). `toggleSite()` removes any entry matching the page,
   quoted ones included.
+- **A bare entry with a path is that path and below** (v0.227.0): `site.com/gallery` = host suffix
+  (subdomains too) + `/gallery` or `/gallery/…`, segment-bounded (not `/gallerys`); listed params
+  still required. A trailing `*` on bare or quoted = raw path prefix (`/gallery*` takes `/gallerys`,
+  `/gallery/*` does not). Before this a bare entry with a `/` matched nothing, and quoted entries had
+  no way to cover a subtree — the user's "on for /thisthing, off for the root and /otherthing" needs
+  `"site.com/"` plus `site.com/otherthing`.
 
 Frames still preview — the fix is about *which host* the decision is made against, not about
 running there.

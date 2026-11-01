@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.226.0
+// @version     0.227.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -444,20 +444,28 @@
         return host === e || host.endsWith('.' + e);
     }
 
-    // A site-list entry against the page URL: bare = host suffix, "quoted" = that one page.
+    // A site-list entry against the page URL: bare host = host suffix, bare with a path = that path and
+    // below, "quoted" = that one page; a trailing * on either = every path starting with it.
     function siteEntryMatches(entry, pageUrl) {
         const raw = String(entry).trim();
         const q = /^["“”'](.*)["“”']$/.exec(raw);
         let page;
         try { page = new URL(pageUrl); } catch (e) { return false; }
         const host = page.hostname.toLowerCase();
-        if (!q) return entryCovers(raw, host);
+        const scheme = /^[a-z][a-z0-9+.-]*:\/\//i;
+        if (!q && !/[\/?]/.test(raw.replace(scheme, ''))) return entryCovers(raw, host);
+        const text = (q ? q[1] : raw).trim();
         let want;
-        try { want = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(q[1].trim()) ? q[1].trim() : 'https://' + q[1].trim()); } catch (e) { return false; }
+        try { want = new URL(scheme.test(text) ? text : 'https://' + text); } catch (e) { return false; }
         const bare = function (h) { return h.toLowerCase().replace(/^www\./, ''); };
-        if (bare(want.hostname) !== bare(host)) return false;
+        if (q ? bare(want.hostname) !== bare(host) : !entryCovers(want.hostname, host)) return false;
         const trim = function (p) { return p.replace(/\/+$/, ''); };
-        if (trim(want.pathname) !== trim(page.pathname)) return false;
+        const wp = want.pathname, hp = trim(page.pathname);
+        if (/\*$/.test(wp)) {
+            if ((hp + '/').indexOf(wp.replace(/\*+$/, '')) !== 0) return false;
+        } else if (q) {
+            if (trim(wp) !== hp) return false;
+        } else if (hp !== trim(wp) && hp.indexOf(trim(wp) + '/') !== 0) return false;
         let ok = true;
         want.searchParams.forEach(function (v, k) { if (page.searchParams.getAll(k).indexOf(v) === -1) ok = false; });
         return ok;
@@ -11428,8 +11436,8 @@
             ['blacklist', 'Disable on listed sites'], ['whitelist', 'Enable only on listed sites']]);
 
         const sites = list('siteList', {
-            description: 'example.com also covers www.example.com. To match only one page, put it in quotes: "example.com/home?sort=new" matches that page with those settings, not the rest of the site.',
-            examples: 'Examples: example.com, news.ycombinator.com, "example.com/home?sort=new&t=week"',
+            description: 'example.com also covers www.example.com. example.com/gallery covers that page and every page under it. To match only one page, put it in quotes: "example.com/home?sort=new" matches that page with those settings, not the rest of the site. A trailing * matches any path starting with it.',
+            examples: 'Examples: example.com, example.com/gallery, "example.com/" (the front page only), "example.com/home?sort=new&t=week"',
             placeholder: 'e.g. example.com',
             addCurrentLabel: '+ This site',
             addCurrentTitle: pageHost(),

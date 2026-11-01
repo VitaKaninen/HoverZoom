@@ -1138,6 +1138,22 @@ eq('quoted page misses a deeper path', siteEntryMatches('"site.com/home"', 'http
 eq('quoted root misses subpages', siteEntryMatches('"site.com"', 'https://site.com/somepage'), false);
 eq('quoted root matches root', siteEntryMatches('"site.com/"', 'https://site.com/'), true);
 eq('quoted page misses subdomains', siteEntryMatches('"site.com/home"', 'https://a.site.com/home'), false);
+// Bare with a path = that path and below; a trailing * = any path starting with it (v0.227.0).
+const O = 'https://www.site.com/otherthing';
+['site.com/otherthing', 'site.com/otherthing/', 'site.com/otherthing/*', 'site.com/otherthing*',
+ '"site.com/otherthing/*"', '"site.com/otherthing*"'].forEach(function (e) {
+    eq(e + ' covers the page', siteEntryMatches(e, O), true);
+    eq(e + ' covers below it', siteEntryMatches(e, O + '/123/x?y=1'), true);
+    eq(e + ' spares the root', siteEntryMatches(e, 'https://site.com/'), false);
+    eq(e + ' spares a sibling', siteEntryMatches(e, 'https://site.com/thisthing'), false);
+});
+eq('bare path keeps segment boundaries', siteEntryMatches('site.com/otherthing', O + 's'), false);
+eq('bare path covers subdomains', siteEntryMatches('site.com/otherthing', 'https://m.site.com/otherthing/1'), true);
+eq('trailing slash star keeps the boundary', siteEntryMatches('site.com/otherthing/*', O + 's'), false);
+eq('bare star crosses the boundary', siteEntryMatches('site.com/otherthing*', O + 's'), true);
+eq('bare path misses another host', siteEntryMatches('site.com/otherthing', 'https://other.com/otherthing'), false);
+eq('bare path with params needs them', siteEntryMatches('site.com/list?sort=new', 'https://site.com/list/2'), false);
+eq('bare path with params matches them', siteEntryMatches('site.com/list?sort=new', 'https://site.com/list/2?sort=new'), true);
 
 // ---- taught patterns: one pair from the user, generalised to the rest of the host
 function teach(thumb, orig) { return taughtRuleFrom(thumb, orig); }
