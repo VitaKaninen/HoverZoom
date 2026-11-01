@@ -756,6 +756,15 @@ the native menu stays.
   `saveName()` appends one from `bytesMime` (the fetched blob's type). Any refusal other than
   `not_succeeded` (which includes the user cancelling the dialog) falls back to opening the tab.
 
+### Alt+click saves the original · `E76`
+
+`onBoxDown()` catches a left press with `altKey` (hover or placed — hover presses reach it through
+`pressPinsPreview()`) before anything else and calls `saveOriginal(view.url, true)`: `GM_download`
+with `saveAs: false`, so it lands in the browser's download folder (unless the browser is set to
+always ask). Nothing else happens — no pin, no drag, no tap; `swallowNextClick` eats the click half.
+Same `saveName()` and fallback as `E9a`. Controls (`isBoxControl()`) are checked first, so Alt+click
+on a button still does the button.
+
 ### The status bar fades itself out · `E10`
 
 The bar is drawn ON the picture, so on a meme, screenshot or comic panel it covers the text being

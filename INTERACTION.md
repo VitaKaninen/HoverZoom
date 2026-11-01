@@ -498,6 +498,7 @@ inert.
 | `T41` | any | The widget's ⇅ button: wheel over it, or click it | Wheel over it steps like ◀ ▶ (starting the slideshow from idle always at the first picture, either direction, v0.186.0). The wheel always steps within `wheelRange` (65 px) of the button, lit even when the pointer arrived there without moving (a still pointer carried over a navigation), and unlit when the pointer leaves the window. The tick that starts the slideshow drops the rest of its spin until the wheel rests 300 ms or 500 ms pass. A click starts the slideshow and **arms** it (filled blue — as it also is while the pointer is in reach): the wheel then steps anywhere on the page, the settings panel excepted. A second click disarms and leaves the slideshow open; any close, navigation or reload disarms (`E72`) |
 | `T42` | `S10`/`S25` | The magnifier, then paste or drop the original's address | The window upgrades to it in place, and the pattern from the small address to the big one is kept for that image host (`E75`) |
 | `T40` | `S10`/`S25` | Drag a pinned window and let go (Ctrl held: no snapping) | It snaps to the window's corners and edge middles (16 px) and centre (40 px) on the axes the drag moved, and stays where it is dropped. In a slideshow the drop becomes the slideshow's spot, under `position: last` where previews open — but only on an axis moved 40 px or more with 80 px (10%) of room to spare; otherwise nothing is remembered (`E64`) |
+| `T43` | `S05`/`S06`/`S10`/`S25` | Alt+click the picture | The original (`view.url`) saves to the browser's download folder with no dialog; the window is left as it was — a hover preview is not pinned (`E76`) |
 | `T25` | — | *Retired in v0.34.0.* Moving the window used to freeze its size as a ceiling; it no longer touches the size at all (`E22`) |
 
 ---
@@ -550,6 +551,7 @@ this table is a table.
 | `E8` | An upgrade is almost never visible | [`docs/RESOLVER.md`](docs/RESOLVER.md) |
 | `E9` | The browser's own context menu is the one that can save and copy | [`docs/VIEWER.md`](docs/VIEWER.md) |
 | `E9a` | …except on a picture shown from bytes (`E49`): right-click there opens our own Save / Open / Copy, acting on the real URL | [`docs/VIEWER.md`](docs/VIEWER.md) |
+| `E76` | Alt+click on the window saves the original to the default download folder (`GM_download`, no dialog) | [`docs/VIEWER.md`](docs/VIEWER.md) |
 | `E10` | The status bar fades itself out | [`docs/VIEWER.md`](docs/VIEWER.md) |
 | `E11` | The ⊘ button, and why it is not on a hover preview | [`docs/GATES.md`](docs/GATES.md) |
 | `E12` | A wall of playing clips is a picture page, not a video site | [`docs/GATES.md`](docs/GATES.md) |

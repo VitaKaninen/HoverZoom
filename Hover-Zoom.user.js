@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.225.0
+// @version     0.226.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -4699,10 +4699,10 @@
         return name;
     }
 
-    function saveOriginal(url) {
+    function saveOriginal(url, quiet) {
         if (typeof GM_download !== 'function') { openOriginal(url); return; }
         try {
-            GM_download({ url: url, name: saveName(url), saveAs: true,
+            GM_download({ url: url, name: saveName(url), saveAs: !quiet,
                 onerror: function (r) {
                     const why = r && r.error;
                     dbg('saving the original failed', { url: url, error: why, details: r && r.details });
@@ -4938,6 +4938,13 @@
         if (isBoxControl(e.target)) return;
         closePops();                // a press anywhere else puts an open menu away
         if (e.button !== 0 && e.button !== 2) return;
+        if (e.button === 0 && e.altKey) {   // Alt+click saves the original to the download folder. See E76.
+            e.preventDefault();
+            e.stopPropagation();
+            swallowNextClick = true;
+            if (view && view.url) saveOriginal(view.url, true);
+            return;
+        }
 
         if (placed) {
             if (e.button !== 0) return;
