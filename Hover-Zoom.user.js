@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.227.0
+// @version     0.228.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -4946,13 +4946,6 @@
         if (isBoxControl(e.target)) return;
         closePops();                // a press anywhere else puts an open menu away
         if (e.button !== 0 && e.button !== 2) return;
-        if (e.button === 0 && e.altKey) {   // Alt+click saves the original to the download folder. See E76.
-            e.preventDefault();
-            e.stopPropagation();
-            swallowNextClick = true;
-            if (view && view.url) saveOriginal(view.url, true);
-            return;
-        }
 
         if (placed) {
             if (e.button !== 0) return;
@@ -5140,6 +5133,7 @@
     let holding = false;        // still inside that wait
     let holdTimer = null;
     let watchTimer = null;      // the poll for a player under the picture
+    let midSaveAt = 0;          // when the last middle-click save happened; its click is ours
     let swallowMenuAt = 0;      // when the right press that dismissed a preview happened; its menu is ours
     const MENU_CLAIM_MS = 1500; // and only that long, or a press released off-window eats the next menu
     let pointer = { x: 0, y: 0 };
@@ -6667,7 +6661,28 @@
     document.addEventListener('mouseout', perfWrap(onOut, 'event'), true);
     document.addEventListener('mouseout', function (e) { if (!e.relatedTarget) twLeave(); }, true);   // left the window (or into a frame)
 
+    // Middle-click on the window saves the original to the download folder. See E76.
+    function midSave(e) {
+        if (e.button !== 1 || !view || !view.url || e.target === panelHost || !pointInPreview(e.clientX, e.clientY)) return false;
+        e.preventDefault();         // no autoscroll
+        e.stopImmediatePropagation();
+        claimClick();
+        midSaveAt = Date.now();
+        saveOriginal(view.url, true);
+        return true;
+    }
+    // The click half of that press: a hover preview lets it through to the link underneath, which would open a tab.
+    function midSaveClick(e) {
+        if (e.button !== 1 || Date.now() - midSaveAt > MENU_CLAIM_MS) return;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+    }
+    CAP_TARGET.addEventListener('auxclick', midSaveClick, true);
+    CAP_TARGET.addEventListener('click', midSaveClick, true);
+    CAP_TARGET.addEventListener('mouseup', midSaveClick, true);
+
     CAP_TARGET.addEventListener('mousedown', function (e) {
+        if (midSave(e)) return;
         swallowNextClick = false;
         lastUserAct = Date.now();
         hotTap = false;

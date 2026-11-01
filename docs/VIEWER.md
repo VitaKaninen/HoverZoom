@@ -756,14 +756,19 @@ the native menu stays.
   `saveName()` appends one from `bytesMime` (the fetched blob's type). Any refusal other than
   `not_succeeded` (which includes the user cancelling the dialog) falls back to opening the tab.
 
-### Alt+click saves the original · `E76`
+### Middle-click saves the original · `E76`
 
-`onBoxDown()` catches a left press with `altKey` (hover or placed — hover presses reach it through
-`pressPinsPreview()`) before anything else and calls `saveOriginal(view.url, true)`: `GM_download`
-with `saveAs: false`, so it lands in the browser's download folder (unless the browser is set to
-always ask). Nothing else happens — no pin, no drag, no tap; `swallowNextClick` eats the click half.
-Same `saveName()` and fallback as `E9a`. Controls (`isBoxControl()`) are checked first, so Alt+click
-on a button still does the button.
+`midSave()`, first thing in the window-capture `mousedown`: a middle press inside `pointInPreview()`
+(hover or placed — geometry, because a hover preview is pointer-transparent and the press lands on
+the thumbnail) calls `saveOriginal(view.url, true)`: `GM_download` with `saveAs: false`, so it lands
+in the download folder (unless the browser always asks). `preventDefault` stops autoscroll;
+`stopImmediatePropagation` + `claimClick()` keep the page and OLINT off it. `midSaveClick()` eats the
+`mouseup`/`auxclick`/`click` within `MENU_CLAIM_MS` — without it the link under a hover preview
+opens a tab. Window state is untouched. Buttons inside the window save too (no `isBoxControl()`).
+Same `saveName()` and fallback as `E9a`; Tampermonkey's Download Mode must be *Browser API* in
+LibreWolf.
+- **Alt+click was tried first (v0.226.0) and never reached the script in LibreWolf**; cause unknown,
+  removed in v0.228.0. Worked with synthetic events in the pane.
 
 ### The status bar fades itself out · `E10`
 
