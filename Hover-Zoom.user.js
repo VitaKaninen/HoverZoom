@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.224.0
+// @version     0.225.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -538,8 +538,8 @@
             linesMenuId = null;
         }
         try {
-            siteMenuId = GM_registerMenuCommand(siteMenuLabel(), toggleSite);
-            linesMenuId = GM_registerMenuCommand((cfg.showPostEnd ? '☑' : '☐') + ' Draw where the slideshow stops', toggleLines);
+            siteMenuId = GM_registerMenuCommand(siteMenuLabel(), toggleSite, { autoClose: false });
+            linesMenuId = GM_registerMenuCommand((cfg.showPostEnd ? '☑' : '☐') + ' Draw where the slideshow stops', toggleLines, { autoClose: false });
         } catch (e) { /* nothing to fall back to; the panel still has the list */ }
     }
 
