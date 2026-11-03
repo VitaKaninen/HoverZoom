@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.228.0
+// @version     0.229.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -546,7 +546,7 @@
             linesMenuId = null;
         }
         try {
-            siteMenuId = GM_registerMenuCommand(siteMenuLabel(), toggleSite, { autoClose: false });
+            siteMenuId = GM_registerMenuCommand(siteMenuLabel(), toggleSite);
             linesMenuId = GM_registerMenuCommand((cfg.showPostEnd ? '☑' : '☐') + ' Draw where the slideshow stops', toggleLines, { autoClose: false });
         } catch (e) { /* nothing to fall back to; the panel still has the list */ }
     }
@@ -559,6 +559,7 @@
         refreshSiteMenu();
         refreshPanel();
         twRefresh();
+        toast('Draw where the slideshow stops: ' + (cfg.showPostEnd ? 'on' : 'off'), 3000);
     }
 
     // reloadSettings() first for the same reason blockCurrent() does it.
@@ -575,6 +576,7 @@
         if (!siteEnabled()) { if (placed) unplace(); else cancel(); }
         twRefresh();                        // the widget goes or comes back now, not at the next load
         dbg('site toggled', { host: host, list: cfg.siteList, enabledHere: siteEnabled() });
+        toast('Hover Zoom ' + (siteEnabled() ? 'enabled' : 'disabled') + ' for ' + host, 3000);
     }
 
     function version() {
@@ -5178,7 +5180,7 @@
 
     // A short note by the pointer; gone by itself.
     let toastTimer = 0;
-    function toast(text) {
+    function toast(text, ms) {
         hideTip();
         const t = tipBox();
         t.textContent = text;
@@ -5187,7 +5189,7 @@
         t.style.left = Math.max(4, Math.min(vpW() - 4 - b.width, pointer.x + 14)) + 'px';
         t.style.top = Math.max(4, Math.min(vpH() - 4 - b.height, pointer.y + 18)) + 'px';
         clearTimeout(toastTimer);
-        toastTimer = setTimeout(hideTip, 1800);
+        toastTimer = setTimeout(hideTip, ms || 1800);
     }
 
     // A hover preview cannot be hit-tested, so "is the pointer on it" is answered from `view` instead.
