@@ -24,10 +24,17 @@ the site list; the galleries they lead to are not, so previews keep working ther
   uniform grid left the page mostly empty; rows may hold different counts). `galShow` loads every
   thumbnail first (`galImg`, up to `GAL_WAIT_MS` 2.5 s; late or failed ones are left out), so each
   shape is known **before** anything is placed — the user does not want pictures swimming as they
-  load. One extra portrait slot (`GAL_DUMMY` 3:4) is the empty space under the pointer.
+  load. One extra slot (at least `GAL_DUMMY` 3:4, see below) is the empty space under the pointer.
 - `galRows(aspects)` packs in order into rows that fill the width, binary-searching the row
   height so the total fits the viewport; the last row is not stretched past that height and is
   centred; the block is centred vertically. Pictures fill their slot exactly (`object-fit:cover`).
+- **The slot is as wide as the widest picture in its row** (user, v0.240.0): a 3:4 slot in a row of
+  landscapes left the pointer no way out — every neighbour was wider than the slot, so no layout's
+  slot covered the pointer once it crossed the edge. `galLayouts` re-packs up to 4 times, growing the
+  slot's aspect (never shrinking, so it converges) to the widest in the row it lands in; rows re-pack
+  around it, which pushes pictures into the short last row. Height needs nothing: a row is one height.
+  Measured with a random walk of pointer steps 25 px past each slot edge on `gallery-mixed.html`
+  at 1024 × 768: 33 of 87 steps stuck before, 0 of 88 after.
 - `galLayouts(set)` precomputes one layout per slot position (n + 1). `galMove`: pointer over the
   slot or blank space → nothing; over a picture → the position whose slot covers the pointer,
   nearest the current one (`galPosAt`); none covers it → stay. Pictures slide between layouts by

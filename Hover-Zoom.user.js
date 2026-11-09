@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.239.0
+// @version     0.240.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -10634,13 +10634,22 @@
         return out;
     }
 
-    // Every layout the set can take: the pointer's empty slot at each position in the order.
+    // Every layout the set can take: the pointer's empty slot at each position, as wide as the widest picture in its row.
     function galLayouts(set) {
         set.layouts = [];
         for (let p = 0; p <= set.asp.length; p++) {
-            const asp = set.asp.slice();
-            asp.splice(p, 0, GAL_DUMMY);
-            set.layouts.push(galRows(asp));
+            let d = GAL_DUMMY, L = null;
+            for (let k = 0; k < 4; k++) {
+                const asp = set.asp.slice();
+                asp.splice(p, 0, d);
+                L = galRows(asp);
+                const y = L[p].y;
+                let want = GAL_DUMMY;
+                L.forEach(function (r, i) { if (i !== p && Math.abs(r.y - y) < 1) want = Math.max(want, asp[i]); });
+                if (want <= d + 1e-3) break;
+                d = want;
+            }
+            set.layouts.push(L);
         }
     }
 
