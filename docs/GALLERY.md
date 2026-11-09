@@ -20,15 +20,17 @@ the site list; the galleries they lead to are not, so previews keep working ther
 ## Behaviour (user's numbers, 2026-11-09)
 
 - At most 34 pictures (`GAL_COLS` × `GAL_ROWS` − 1; that is all those constants do now).
-- **Shown only while Ctrl is held** (user, v0.248.0). Hovering alone shows nothing (it only
-  preloads). `galKeyDown`: Ctrl alone, not typing → the gallery of the result under the pointer
-  (`galAt`, kept by `galOver`/`galOut`, cleared on scroll, resize, window edge) at once, no hover
-  delay. Release, window `blur`, or a `mousemove` without `ctrlKey` (keyup lost) → hide. Any other key
-  while held (Ctrl+F, Ctrl+T) hides it and voids Ctrl until released (`galKeyVoid`). While held,
-  moving to another result swaps galleries after `cfg.hoverDelay`, as hovering did before. A Ctrl
-  **tap** on a gallery page no longer runs the previews hotkey toggle (`hotkeyToggle`'s keyup).
+- **A Ctrl tap toggles it, locked on one result** (user, v0.250.0; held-Ctrl was v0.248.0-v0.249.0).
+  Hovering alone shows nothing (it only preloads). A tap = Ctrl down then up with no other key,
+  mouse press or wheel between (`galTap`; Ctrl+F, Ctrl+click, Ctrl+wheel never toggle), not typing.
+  On: the result under the pointer (`galAt`, kept by `galOver`/`galOut` even while on; cleared on
+  scroll, resize, window edge) is locked (`galOn`): no hover delay, the hole and gallery never change
+  while on, and leaving the link, the window edge band and leaving the window do not hide it — so the
+  pointer can go over the thumbnails. Off: another tap, Esc, a mouse press, a scroll, a resize
+  (`galHide` clears `galOn`). Tap with no result under the pointer does nothing. A Ctrl tap on a
+  gallery page does not run the previews hotkey toggle (`hotkeyToggle`'s keyup).
 - **Layout: the hole is the picture under the pointer** (user, v0.248.0): `galSteer` on every
-  `mousemove` and once at build; on no picture it stays. The user rejected looking past the
+  `mousemove` and once at build, unless locked (`galOn`, always now); on no picture it stays. The user rejected looking past the
   hovered picture: a 3 × 3 rule picking a neighbour (v0.243.0–v0.247.0) gave no way to tell which
   page pictures were still unseen on a non-grid page. The moving slot is v0.240.0, commit de9996a
   ("take it back to here" means that).

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.249.0
+// @version     0.250.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -10395,7 +10395,7 @@
     const GAL_EDGE = 50;                // px band inside the window's edge where the set goes at once
     const GAL_VISITED_KEY = 'hoverZoomGalleryVisited';   // linked pages clicked or opened, oldest first
     let galSeen = {}, galLock = null, galMarkTimer = 0, galEdge = false, galHole = null;
-    let galKey = false, galKeyVoid = false, galAt = null;      // Ctrl held; Ctrl used in a chord; the result under the pointer {href, hole}
+    let galOn = false, galTap = false, galAt = null;      // toggled on and locked; Ctrl down with nothing else yet; the result under the pointer {href, hole}
     let galPre = null, galPreStop = false, galPreLog = null;   // the preload in flight; stopped by a refusal; its log row
     const galPreTried = new Set();
 
@@ -10817,7 +10817,7 @@
         set.el.classList.add('on');
         galBlur.classList.add('on');
         galCur = set;
-        galSteer(galPt.x, galPt.y);
+        if (!galOn) galSteer(galPt.x, galPt.y);
         setTimeout(function () {
             if (galCur !== set) return;            // hidden or replaced before it counted
             galListAdd(GAL_SEEN_KEY, href);
@@ -10837,6 +10837,7 @@
         clearTimeout(galGraceTimer);
         clearTimeout(galHoverTimer);
         galWant = null;
+        galOn = false;
         if (galCur) { galDrop(galCur); galCur = null; galBlur.classList.remove('on'); }
     }
 
@@ -10846,43 +10847,37 @@
         if (galLock || galAtEdge(e.clientX, e.clientY)) return;
         const href = galLinkOf(e.target);
         if (!href) return;
-        clearTimeout(galGraceTimer);
+        if (!galOn) clearTimeout(galGraceTimer);
         if (galAt && galAt.href === href) return;
         const a = e.target.closest('a[href]'), pic = e.target.tagName === 'IMG' ? e.target : a && a.querySelector('img');
         const hr = (pic || e.target).getBoundingClientRect();
         galAt = { href: href, hole: { x: hr.left, y: hr.top, w: hr.width, h: hr.height } };
-        if (galKey) { galHole = galAt.hole; galWant = href; }
+        if (galOn) return;                          // locked on its target
         clearTimeout(galHoverTimer);
         galHoverTimer = setTimeout(function () {
-            galLoad(href).then(function (list) {
-                if (galKey) galShow(href, list);
-                else if (Array.isArray(list)) galWarm(list);
-            });
+            galLoad(href).then(function (list) { if (Array.isArray(list)) galWarm(list); });
         }, cfg.hoverDelay);
     }
 
-    // Ctrl pressed: the gallery of the result under the pointer, at once, the hole on that picture.
+    // A Ctrl tap (nothing else pressed, clicked or scrolled meanwhile) toggles the gallery, locked on the result under the pointer.
     function galKeyDown(e) {
-        if (e.key !== 'Control') {
-            if (galKey) { galKey = false; galKeyVoid = true; galHide(); }
-            return;
-        }
-        if (e.repeat || galKey || galKeyVoid || e.shiftKey || e.altKey || e.metaKey || typingIn(e) || !galleryHere()) return;
-        galKey = true;
-        if (!galAt || galLock || galEdge) return;
-        galHole = galAt.hole;
-        galWant = galAt.href;
-        clearTimeout(galHoverTimer);
-        const href = galWant;
-        galLoad(href).then(function (list) { galShow(href, list); });
+        if (e.key !== 'Control') { galTap = false; return; }
+        if (e.repeat) return;
+        galTap = !e.shiftKey && !e.altKey && !e.metaKey && !typingIn(e) && galleryHere();
     }
 
     function galKeyUp(e) {
-        if (e && e.key !== 'Control') return;
-        galKeyVoid = false;
-        if (!galKey) return;
-        galKey = false;
-        galHide();
+        if (e.key !== 'Control' || !galTap) return;
+        galTap = false;
+        if (galOn || galWant || galCur) { galHide(); return; }
+        if (!galAt || galLock || galEdge) return;
+        galOn = true;
+        galHole = galAt.hole;
+        galWant = galAt.href;
+        clearTimeout(galHoverTimer);
+        clearTimeout(galGraceTimer);
+        const href = galWant;
+        galLoad(href).then(function (list) { galShow(href, list); });
     }
 
     // Within GAL_EDGE of the window's edge: no grace period, the set goes at once.
@@ -10891,12 +10886,12 @@
     }
 
     function galOut(e) {
-        if (!e.relatedTarget) { galAt = null; if (galWant || galCur) galHide(); return; }
+        if (!e.relatedTarget) { galAt = null; if (!galOn && (galWant || galCur)) galHide(); return; }
         const from = galLinkOf(e.target);
         if (!from || galLinkOf(e.relatedTarget)) return;
         galAt = null;
         clearTimeout(galHoverTimer);
-        if (!galWant) return;
+        if (!galWant || galOn) return;
         clearTimeout(galGraceTimer);
         galGraceTimer = setTimeout(galHide, GAL_GRACE_MS);
     }
@@ -10905,9 +10900,8 @@
     function galMove(e) {
         galPt.x = e.clientX;
         galPt.y = e.clientY;
-        if (galKey && !e.ctrlKey) galKeyUp();      // the keyup went elsewhere
         if (galAtEdge(galPt.x, galPt.y)) {
-            if (!galEdge) { galEdge = true; galAt = null; if (galWant || galCur) galHide(); }
+            if (!galEdge) { galEdge = true; galAt = null; if (!galOn && (galWant || galCur)) galHide(); }
             return;
         }
         if (galEdge) {
@@ -10921,7 +10915,7 @@
             galLock = null;
             galOver(e);
         }
-        galSteer(galPt.x, galPt.y);
+        if (!galOn) galSteer(galPt.x, galPt.y);
     }
 
     // A page scroll hides the set; nothing shows again until the pointer itself moves.
@@ -11075,7 +11069,8 @@
         setTimeout(function () { galMarkAll(); galPreNext(); }, 1500);
         window.addEventListener('keydown', galKeyDown, true);
         window.addEventListener('keyup', galKeyUp, true);
-        window.addEventListener('blur', function () { galKeyVoid = false; galKeyUp(); });
+        window.addEventListener('blur', function () { galTap = false; });
+        window.addEventListener('wheel', function () { galTap = false; }, { capture: true, passive: true });
         window.addEventListener('pagehide', function () { if (galPreLog) { galPreLog.end('cut'); galPreLog = null; } });
         setTimeout(function () {
             if (galleryListed() && !galleryHere()) galListAdd(GAL_VISITED_KEY, location.href.split('#')[0]);
@@ -11085,7 +11080,7 @@
         document.addEventListener('mouseover', galOver, true);
         document.addEventListener('mouseout', galOut, true);
         document.addEventListener('mousemove', galMove, { capture: true, passive: true });
-        document.addEventListener('mousedown', function () { if (galWant || galCur) galHide(); }, true);
+        document.addEventListener('mousedown', function () { galTap = false; if (galWant || galCur) galHide(); }, true);
         window.addEventListener('keydown', function (e) { if (e.key === 'Escape' && galCur) galHide(); }, true);
         window.addEventListener('resize', function () {
             if ((cfg.gallerySites || []).length) galMarkSoon();
