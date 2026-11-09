@@ -19,13 +19,23 @@ the site list; the galleries they lead to are not, so previews keep working ther
 
 ## Behaviour (user's numbers, 2026-11-09)
 
-- At most 34 pictures (`GAL_COLS` × `GAL_ROWS` − 1). The grid is sized to the count (v0.233.0,
-  user: "fill the available space"): `galGrid(n)` tries every column count for n + 1 cells and keeps
-  the one that draws a `GAL_ASPECT` (4:3) picture largest. Chosen once per set (`set.grid`) and
-  again only on resize — the user wants placement settled first, not pictures swimming as
-  thumbnails load. Spare cells sit at the end. The cell under the pointer stays empty; pictures
-  fill the others in reading order and slide one slot when the pointer changes cell (CSS
-  transform transition) — that is the "move out of the way".
+- At most 34 pictures (`GAL_COLS` × `GAL_ROWS` − 1; that is all those constants do now).
+- **Justified rows, not a grid** (user, 2026-11-09: galleries are ~50/50 portrait/landscape, a
+  uniform grid left the page mostly empty; rows may hold different counts). `galShow` loads every
+  thumbnail first (`galImg`, up to `GAL_WAIT_MS` 2.5 s; late or failed ones are left out), so each
+  shape is known **before** anything is placed — the user does not want pictures swimming as they
+  load. One extra portrait slot (`GAL_DUMMY` 3:4) is the empty space under the pointer.
+- `galRows(aspects)` packs in order into rows that fill the width, binary-searching the row
+  height so the total fits the viewport; the last row is not stretched past that height and is
+  centred; the block is centred vertically. Pictures fill their slot exactly (`object-fit:cover`).
+- `galLayouts(set)` precomputes one layout per slot position (n + 1). `galMove`: pointer over the
+  slot or blank space → nothing; over a picture → the position whose slot covers the pointer,
+  nearest the current one (`galPosAt`); none covers it → stay. Pictures slide between layouts by
+  the CSS transform transition — the "move out of the way". Resize → recompute layouts.
+  Choosing only positions whose slot covers the pointer is what stops ping-pong flicker.
+- Upgrade check uses each picture's slot width in the first layout.
+- Fixture `test-pages/gallery-mixed.html`: 20 alternating 4:3 / 2:3; at 1024 × 768 it fills 4 rows,
+  79 % of the viewport.
 - Hover delay = `cfg.hoverDelay`. Off every result link for `GAL_GRACE_MS` 500 → fade out. Moving
   to another link within that time keeps the old set until the new one is ready, then crossfades
   (`GAL_FADE_MS` 200). A linked page with no pictures clears the old set.

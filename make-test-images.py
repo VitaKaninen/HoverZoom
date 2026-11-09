@@ -128,6 +128,7 @@ def main():
     # picture" has a shape a test can assert on. See cases 36-38.
     save(make(1200, 125, "BANNER", 2), "banner-1200x125.jpg")
     save(make(600, 600, "SIDEBAR", 5), "sidebar-600x600.jpg")
+    save(make(200, 300, "PORTRAIT", 6), "portrait-200x300.jpg")
 
     # Wikipedia's shape (case 43): a size-headed thumbnail whose original is only reachable
     # through a link on the file page, served from another host.
