@@ -40,6 +40,10 @@ the site list; the galleries they lead to are not, so previews keep working ther
   to another link within that time keeps the old set until the new one is ready, then crossfades
   (`GAL_FADE_MS` 200). A linked page with no pictures clears the old set.
 - Esc, a mouse press, or leaving gallery-mode pages hides it.
+- **The grace period is for inside the page only** (user): the pointer within `GAL_EDGE` 50 px of
+  the window's edge, or leaving the window (`mouseout` with no `relatedTarget`), hides it at once.
+  Hovers inside that band are ignored; coming back out of it counts as a hover on whatever is under
+  the pointer (no `mouseover` fires for a move within one element).
 - **Scroll hides it and locks hovering** (user): `galScroll` (document or a container ≥ half the
   viewport tall — a carousel must not count) stores the pointer as `galLock`; `galOver` ignores
   everything until `galMove` sees different coordinates, then treats that move as the hover. The lock

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.238.0
+// @version     0.239.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -10392,7 +10392,8 @@
     const GAL_SEEN_KEY = 'hoverZoomGallerySeen';   // linked pages whose gallery was shown, oldest first
     const GAL_SEEN_MAX = 10000;
     const GAL_MARK = 'data-hz-seen';
-    let galSeen = null, galLock = null, galMarkTimer = 0;
+    const GAL_EDGE = 50;                // px band inside the window's edge where the set goes at once
+    let galSeen = null, galLock = null, galMarkTimer = 0, galEdge = false;
 
     // Gallery mode runs where the gallery list covers the page and ordinary previews are off.
     function galleryHere() {
@@ -10795,7 +10796,7 @@
     function galOver(e) {
         if (!galWant && !galCur && !(cfg.gallerySites || []).length) return;
         if (!galleryHere()) { if (galWant || galCur) galHide(); return; }
-        if (galLock) return;
+        if (galLock || galAtEdge(e.clientX, e.clientY)) return;
         const href = galLinkOf(e.target);
         if (!href) return;
         clearTimeout(galGraceTimer);
@@ -10807,7 +10808,13 @@
         }, cfg.hoverDelay);
     }
 
+    // Within GAL_EDGE of the window's edge: no grace period, the set goes at once.
+    function galAtEdge(x, y) {
+        return x < GAL_EDGE || y < GAL_EDGE || x > vpW() - GAL_EDGE || y > vpH() - GAL_EDGE;
+    }
+
     function galOut(e) {
+        if (!e.relatedTarget && (galWant || galCur)) { galHide(); return; }
         if (!galWant) return;
         const from = galLinkOf(e.target);
         if (!from || galLinkOf(e.relatedTarget)) return;
@@ -10819,6 +10826,16 @@
     function galMove(e) {
         galPt.x = e.clientX;
         galPt.y = e.clientY;
+        if (galAtEdge(galPt.x, galPt.y)) {
+            if (!galEdge) { galEdge = true; if (galWant || galCur) galHide(); }
+            return;
+        }
+        if (galEdge) {
+            galEdge = false;
+            galLock = null;
+            galOver(e);
+            return;
+        }
         if (galLock) {
             if (galPt.x === galLock.x && galPt.y === galLock.y) return;
             galLock = null;
