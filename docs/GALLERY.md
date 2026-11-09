@@ -19,14 +19,16 @@ the site list; the galleries they lead to are not, so previews keep working ther
 
 ## Behaviour (user's numbers, 2026-11-09)
 
-- At most 34 pictures (`GAL_COLS` × `GAL_ROWS` − 1; that is all those constants do now).
+- Every picture the page has (`GAL_MAX` = Infinity, user v0.251.0: galleries run 10-100 and a cap
+  silently hid the rest; more pictures = smaller cells).
 - **A Ctrl tap toggles it, locked on one result** (user, v0.250.0; held-Ctrl was v0.248.0-v0.249.0).
   Hovering alone shows nothing (it only preloads). A tap = Ctrl down then up with no other key,
   mouse press or wheel between (`galTap`; Ctrl+F, Ctrl+click, Ctrl+wheel never toggle), not typing.
   On: the result under the pointer (`galAt`, kept by `galOver`/`galOut` even while on; cleared on
   scroll, resize, window edge) is locked (`galOn`): no hover delay, the hole and gallery never change
   while on, and leaving the link, the window edge band and leaving the window do not hide it — so the
-  pointer can go over the thumbnails. Off: another tap, Esc, a mouse press, a scroll, a resize
+  pointer can go over the thumbnails. Off: another tap, Esc (with no preview up), a press on the page
+  (not on the gallery or a preview), a scroll, a resize
   (`galHide` clears `galOn`). Tap with no result under the pointer does nothing. A Ctrl tap on a
   gallery page does not run the previews hotkey toggle (`hotkeyToggle`'s keyup).
 - **Layout: the hole is the picture under the pointer** (user, v0.248.0): `galSteer` on every
@@ -56,7 +58,24 @@ the site list; the galleries they lead to are not, so previews keep working ther
 - Hover delay = `cfg.hoverDelay`. Off every result link for `GAL_GRACE_MS` 500 → fade out. Moving
   to another link within that time keeps the old set until the new one is ready, then crossfades
   (`GAL_FADE_MS` 200). A linked page with no pictures clears the old set.
-- Esc, a mouse press, or leaving gallery-mode pages hides it.
+- Leaving gallery-mode pages hides it.
+- **Previews on the thumbnails** (user, v0.251.0 — the use: save chosen pictures without opening the
+  result). When the linked page would preview (`siteEnabledAt(href)` = the site list run on that URL)
+  the set gets `.live` and its cells take the pointer. A cell's `mouseenter` → `galPv`: the ordinary
+  `active`/`token`/`timer` hover, after `cfg.hoverDelay`, with `galResolve` = the item's `cands`
+  (from the linked page's own context), then its srcsets widest first; first larger than the
+  thumbnail wins, else the thumbnail; then `showViewer`. `mouseleave` cancels unless placed. None of
+  `refusal()`'s gates run (no layout of that page), like harvested tour entries. `galOwns(el)` = el is
+  in the gallery's shadow root; `onMove` skips `playerArrived` for it; `galHide` cancels its preview.
+  The document's `onOver` never acts on the gallery: previews are off on every gallery page.
+- Presses: on the gallery (`galHost`), on our preview/backdrop (`ours`) or inside the preview keep the
+  gallery, so middle-click save, pinning and click-away-from-a-pinned-preview all leave it up.
+- **Saved mark** (user): a middle-click save (`midSave` → `saveOriginal(url, quiet, done)`, `done` on
+  `GM_download`'s `onload`) of a gallery preview stores the thumbnail URL (`hoverZoomGallerySaved`)
+  and the result's link (`hoverZoomGallerySavedFrom`), same list rules as seen. Mark = 22 px blue
+  `#89b4fa` disc with a down arrow (`galSavedIcon`), top-left: `.svd` in the cell, and on the result's
+  picture a `data-hz-saved` span (`galMarkSaved`). Marks are found by scanning the next 3 siblings
+  (`galMarkFind`), since a picture can now have two.
 - **The grace period is for inside the page only** (user): the pointer within `GAL_EDGE` 50 px of
   the window's edge, or leaving the window (`mouseout` with no `relatedTarget`), hides it at once.
   Hovers inside that band are ignored; coming back out of it counts as a hover on whatever is under
@@ -159,7 +178,7 @@ with `logBusy` — the host is already stored in `gallerySites`, so the log priv
 
 `test-pages/gallery-search.html` (sets its own localStorage settings on first load):
 "built by script" → 25 through the frame in ~1.5 s, logo left out; A → (frame times out: A has no
-script) 34 of 40 grid pictures from the HTML, none of the 6 related; B → 10; the last → nothing. Synthetic
+script) all 40 grid pictures from the HTML, none of the 6 related; B → 10; the last → nothing. Synthetic
 `mouseover` on `#ra img` works; the pane's hover coordinates are scaled (×1.28 measured), so aim
 by `clientX` read back from a `mousemove` listener. Upgrade path needs cells > 260 px: emulate a
 2400 × 1500 viewport; expect `photo-420x315.jpg`, not the 800.

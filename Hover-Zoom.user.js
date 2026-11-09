@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.250.0
+// @version     0.251.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -4741,10 +4741,11 @@
         return name;
     }
 
-    function saveOriginal(url, quiet) {
+    function saveOriginal(url, quiet, done) {
         if (typeof GM_download !== 'function') { openOriginal(url); return; }
         try {
             GM_download({ url: url, name: saveName(url), saveAs: !quiet,
+                onload: function () { if (done) done(); },
                 onerror: function (r) {
                     const why = r && r.error;
                     dbg('saving the original failed', { url: url, error: why, details: r && r.details });
@@ -6395,7 +6396,7 @@
         if (emojiEl) emojiPlace();
         twNear(e.clientX, e.clientY);
         if (placed) thruSync(e.clientX, e.clientY);
-        if (active && !placed && playerArrived(active)) return;
+        if (active && !placed && !galOwns(active) && playerArrived(active)) return;
         if (spinEl && spinEl.classList.contains('on')) moveSpinner();
         const over = !!view && !!box && box.classList.contains('on') &&
             pointInPreview(e.clientX, e.clientY);
@@ -6702,7 +6703,8 @@
         e.stopImmediatePropagation();
         claimClick();
         midSaveAt = Date.now();
-        saveOriginal(view.url, true);
+        const gImg = galOwns(active) ? active : null, gHref = gImg && galCur ? galCur.href : null;
+        saveOriginal(view.url, true, gImg ? function () { galSaved(gImg, gHref); } : null);
         return true;
     }
     // The click half of that press: a hover preview lets it through to the link underneath, which would open a tab.
@@ -10367,7 +10369,6 @@
 
     // ---- gallery mode: hovering a link floats the linked page's thumbnails. See docs/GALLERY.md.
 
-    const GAL_COLS = 7, GAL_ROWS = 5;   // only caps the count: 34 pictures
     const GAL_WAIT_MS = 2500;           // longest wait for thumbnails before laying out without the rest
     const GAL_GAP = 12;                 // px between cells and at the edges
     const GAL_GRACE_MS = 500;           // off every link this long before the set fades
@@ -10376,7 +10377,7 @@
     const GAL_CACHE = 300;              // fetched pages kept by URL
     const GAL_TRIES = 4;                // bigger sizes tried per thumbnail
     const GAL_LAZY = ['data-src', 'data-lazy-src', 'data-original', 'data-lazy', 'data-echo', 'data-defer-src', 'data-url'];
-    const GAL_MAX = GAL_COLS * GAL_ROWS - 1;
+    const GAL_MAX = Infinity;           // every picture the page has
     const GAL_NAME = 'hz-gallery-probe';    // the hidden frame's window.name prefix
     const GAL_FRAME_MS = 10000;         // longest wait for the hidden frame's page to load
     const GAL_HTML_ENOUGH = 6;          // the plain HTML is trusted at once from this many pictures (a logo group is 1-3)
@@ -10394,6 +10395,9 @@
     const GAL_MARK = 'data-hz-seen';
     const GAL_EDGE = 50;                // px band inside the window's edge where the set goes at once
     const GAL_VISITED_KEY = 'hoverZoomGalleryVisited';   // linked pages clicked or opened, oldest first
+    const GAL_SAVED_KEY = 'hoverZoomGallerySaved';       // thumbnails whose picture was saved from the gallery
+    const GAL_SAVEDFROM_KEY = 'hoverZoomGallerySavedFrom';   // linked pages something was saved from
+    const GAL_SAVED_MARK = 'data-hz-saved';
     let galSeen = {}, galLock = null, galMarkTimer = 0, galEdge = false, galHole = null;
     let galOn = false, galTap = false, galAt = null;      // toggled on and locked; Ctrl down with nothing else yet; the result under the pointer {href, hole}
     let galPre = null, galPreStop = false, galPreLog = null;   // the preload in flight; stopped by a refusal; its log row
@@ -10597,6 +10601,8 @@
             '.set{position:fixed;inset:0;opacity:0;transition:opacity ' + GAL_FADE_MS + 'ms ease}' +
             '.set.on{opacity:1}' +
             '.cell{position:absolute;left:0;top:0;display:flex;align-items:center;justify-content:center}' +
+            '.set.live .cell{pointer-events:auto}' +
+            '.svd{position:absolute;left:4px;top:4px;width:22px;height:22px;pointer-events:none;filter:drop-shadow(0 1px 2px rgba(0,0,0,.7))}' +
             'img{display:block;width:100%;height:100%;object-fit:cover;border-radius:6px;background:#1e1e2e;opacity:0;transition:opacity ' + GAL_FADE_MS + 'ms ease;' +
             'box-shadow:0 8px 22px rgba(0,0,0,.55),0 2px 5px rgba(0,0,0,.4)}' +
             'img.ok{opacity:1}' +
@@ -10802,16 +10808,22 @@
         set.ring.className = 'ring';
         set.el.appendChild(set.shade);
         set.el.appendChild(set.ring);
+        const saved = galList(GAL_SAVED_KEY);
         pics.forEach(function (p) {
             const cell = document.createElement('div');
             cell.className = 'cell';
             p.img.classList.add('ok');
+            p.img.__hzItem = p.item;
             cell.appendChild(p.img);
+            if (saved.has(p.item.thumb)) cell.appendChild(galSavedIcon('svd'));
+            cell.addEventListener('mouseenter', function () { galPv(p.img); });
+            cell.addEventListener('mouseleave', function () { if (!placed && active === p.img) cancel(); });
             set.cells.push(cell);
             set.asp.push(p.asp);
             set.el.appendChild(cell);
         });
         const L = galLayout(set, galHole);
+        if (siteEnabledAt(href)) set.el.classList.add('live');      // the linked page previews: so do its thumbnails
         root.appendChild(set.el);
         void set.el.offsetWidth;
         set.el.classList.add('on');
@@ -10838,7 +10850,86 @@
         clearTimeout(galHoverTimer);
         galWant = null;
         galOn = false;
+        if (galOwns(active)) cancel();
         if (galCur) { galDrop(galCur); galCur = null; galBlur.classList.remove('on'); }
+    }
+
+    function galOwns(el) {
+        return !!el && !!galRoot && !!el.getRootNode && el.getRootNode() === galRoot;
+    }
+
+    // Would previews run on this page? The site list checked against a URL other than this page's.
+    function siteEnabledAt(url) {
+        const listed = cfg.siteList.some(function (entry) { return siteEntryMatches(entry, url); });
+        return cfg.siteMode === 'whitelist' ? listed : !listed;
+    }
+
+    // Hovering a thumbnail: the ordinary preview of its best original, after the hover delay.
+    function galPv(img) {
+        if (placed || !img.__hzItem) return;
+        cancel();
+        active = img;
+        activeShown = img.__hzItem.thumb;
+        hoverAt = Date.now();
+        const myToken = token = { cancelled: false, fresh: true };
+        timer = setTimeout(async function () {
+            if (myToken.cancelled || active !== img) return;
+            showSpinner();
+            const hit = await galResolve(img, myToken);
+            if (myToken.cancelled || active !== img) return;
+            hideSpinner();
+            if (hit) showViewer(hit, pointer);
+        }, cfg.hoverDelay);
+    }
+
+    // A thumbnail's original: its page's candidates, then srcset widest first; the first larger than the thumbnail wins, else the thumbnail.
+    async function galResolve(img, tok) {
+        const item = img.__hzItem, nw = img.naturalWidth || 0;
+        const abs = function (v) { try { return new URL(v, item.base).href; } catch (e) { return ''; } };
+        let list = (item.cands || []).slice();
+        (item.ss || []).forEach(function (v) { list = list.concat(parseSrcset(v).map(abs)); });
+        list = list.filter(function (u, i) { return u && list.indexOf(u) === i && !blocked(u); });
+        const hitOf = function (u, d) { return { url: u, w: d.w, h: d.h, video: !!d.video, duration: d.duration, display: d.display }; };
+        for (let i = 0; i < list.length; i++) {
+            if (tok.cancelled) return null;
+            const d = await probe(list[i], tok.fresh);
+            if (d && d.w > nw) return hitOf(list[i], d);
+        }
+        const own = img.currentSrc || img.src;
+        const d = own ? await probe(own) : null;
+        return d ? hitOf(own, d) : null;
+    }
+
+    // A picture saved from the gallery: its thumbnail and the result it came from are marked.
+    function galSaved(img, href) {
+        if (!img || !img.__hzItem) return;
+        galListAdd(GAL_SAVED_KEY, img.__hzItem.thumb);
+        if (href) galListAdd(GAL_SAVEDFROM_KEY, href);
+        const cell = img.parentNode;
+        if (cell && !cell.querySelector('.svd')) cell.appendChild(galSavedIcon('svd'));
+        galMarkAll();
+    }
+
+    // The saved mark: a blue disc with a down arrow.
+    function galSavedIcon(cls) {
+        const NS = 'http://www.w3.org/2000/svg';
+        const m = document.createElement('span');
+        if (cls) m.className = cls;
+        const svg = document.createElementNS(NS, 'svg');
+        svg.setAttribute('viewBox', '0 0 24 24');
+        svg.setAttribute('width', '100%');
+        svg.setAttribute('height', '100%');
+        const c = document.createElementNS(NS, 'circle');
+        c.setAttribute('cx', '12'); c.setAttribute('cy', '12'); c.setAttribute('r', '10.5');
+        c.setAttribute('fill', '#89b4fa'); c.setAttribute('stroke', '#11111b'); c.setAttribute('stroke-width', '1.5');
+        svg.appendChild(c);
+        const a = document.createElementNS(NS, 'path');
+        a.setAttribute('d', 'M12 6.5v8M8.2 11l3.8 3.8 3.8-3.8M7.5 17.5h9');
+        a.setAttribute('fill', 'none'); a.setAttribute('stroke', '#11111b'); a.setAttribute('stroke-width', '2.2');
+        a.setAttribute('stroke-linecap', 'round'); a.setAttribute('stroke-linejoin', 'round');
+        svg.appendChild(a);
+        m.appendChild(svg);
+        return m;
     }
 
     function galOver(e) {
@@ -10961,9 +11052,9 @@
         const at = img.closest('picture') || img;
         const ir = at.getBoundingClientRect();
         if (ir.width < 48 || ir.height < 24) return;
-        let m = at.nextElementSibling;
-        if (m && m.hasAttribute(GAL_MARK) && m.getAttribute(GAL_MARK) !== kind) { m.remove(); m = null; }
-        if (!m || !m.hasAttribute(GAL_MARK)) {
+        let m = galMarkFind(at, GAL_MARK);
+        if (m && m.getAttribute(GAL_MARK) !== kind) { m.remove(); m = null; }
+        if (!m) {
             m = document.createElement('span');
             m.setAttribute(GAL_MARK, kind);
             const NS = 'http://www.w3.org/2000/svg';
@@ -10994,15 +11085,41 @@
         m.style.top = (ir.top + 4 - o.top) + 'px';
     }
 
+    // Our mark of one kind among the few elements right after the picture.
+    function galMarkFind(at, attr) {
+        let m = at.nextElementSibling;
+        for (let i = 0; m && i < 3; i++, m = m.nextElementSibling) if (m.hasAttribute(attr)) return m;
+        return null;
+    }
+
+    // The saved mark in the picture's top-left corner.
+    function galMarkSaved(img) {
+        const at = img.closest('picture') || img;
+        const ir = at.getBoundingClientRect();
+        if (ir.width < 48 || ir.height < 24) return;
+        let m = galMarkFind(at, GAL_SAVED_MARK);
+        if (!m) {
+            m = galSavedIcon('');
+            m.setAttribute(GAL_SAVED_MARK, '');
+            at.after(m);
+        }
+        m.style.cssText = 'all:initial;position:absolute;left:0;top:0;z-index:2;pointer-events:none;display:block;' +
+            'width:22px;height:22px;filter:drop-shadow(0 1px 2px rgba(0,0,0,.7))';
+        const o = m.getBoundingClientRect();
+        m.style.left = (ir.left + 4 - o.left) + 'px';
+        m.style.top = (ir.top + 4 - o.top) + 'px';
+    }
+
     function galMarkAll() {
         if (!galleryHere()) return;
-        const seen = galList(GAL_SEEN_KEY), went = galList(GAL_VISITED_KEY);
-        if (!seen.size && !went.size) return;
+        const seen = galList(GAL_SEEN_KEY), went = galList(GAL_VISITED_KEY), from = galList(GAL_SAVEDFROM_KEY);
+        if (!seen.size && !went.size && !from.size) return;
         document.querySelectorAll('a[href] img').forEach(function (img) {
             const h = galLinkOf(img);
             if (!h) return;
             if (went.has(h)) galMarkImg(img, '2');
             else if (seen.has(h)) galMarkImg(img, '1');
+            if (from.has(h)) galMarkSaved(img);
         });
     }
 
@@ -11080,8 +11197,15 @@
         document.addEventListener('mouseover', galOver, true);
         document.addEventListener('mouseout', galOut, true);
         document.addEventListener('mousemove', galMove, { capture: true, passive: true });
-        document.addEventListener('mousedown', function () { galTap = false; if (galWant || galCur) galHide(); }, true);
-        window.addEventListener('keydown', function (e) { if (e.key === 'Escape' && galCur) galHide(); }, true);
+        document.addEventListener('mousedown', function (e) {
+            galTap = false;
+            if (!galWant && !galCur) return;
+            if (e.target === galHost || ours(e.target) || pointInPreview(e.clientX, e.clientY)) return;   // the gallery or the preview
+            galHide();
+        }, true);
+        window.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape' && galCur && !(view && box && box.classList.contains('on'))) galHide();   // a preview up: Esc closes it first
+        }, true);
         window.addEventListener('resize', function () {
             if ((cfg.gallerySites || []).length) galMarkSoon();
             galAt = null;
