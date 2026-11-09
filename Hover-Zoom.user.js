@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.237.0
+// @version     0.238.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -10872,13 +10872,27 @@
         if (!m || !m.hasAttribute(GAL_MARK)) {
             m = document.createElement('span');
             m.setAttribute(GAL_MARK, '');
-            m.textContent = '✓';
+            const NS = 'http://www.w3.org/2000/svg';
+            const svg = document.createElementNS(NS, 'svg');
+            svg.setAttribute('viewBox', '0 0 24 24');
+            svg.setAttribute('width', '100%');
+            svg.setAttribute('height', '100%');
+            [['#0b2b0b', '6.5'], ['#3ee03e', '3.6']].forEach(function (p) {
+                const path = document.createElementNS(NS, 'path');
+                path.setAttribute('d', 'M4 13.5 9.5 19 20.5 5');
+                path.setAttribute('fill', 'none');
+                path.setAttribute('stroke', p[0]);
+                path.setAttribute('stroke-width', p[1]);
+                path.setAttribute('stroke-linecap', 'round');
+                path.setAttribute('stroke-linejoin', 'round');
+                svg.appendChild(path);
+            });
+            m.appendChild(svg);
             at.after(m);
         }
-        const s = 18;
-        m.style.cssText = 'all:initial;position:absolute;left:0;top:0;z-index:2;pointer-events:none;box-sizing:border-box;' +
-            'width:' + s + 'px;height:' + s + 'px;background:#a6e3a1;color:#1e1e2e;border-radius:4px;' +
-            'font:bold 13px/18px system-ui,sans-serif;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,.6)';
+        const s = 24;
+        m.style.cssText = 'all:initial;position:absolute;left:0;top:0;z-index:2;pointer-events:none;display:block;' +
+            'width:' + s + 'px;height:' + s + 'px;filter:drop-shadow(0 1px 2px rgba(0,0,0,.7))';
         const o = m.getBoundingClientRect();
         m.style.left = (ir.right - s - 4 - o.left) + 'px';
         m.style.top = (ir.top + 4 - o.top) + 'px';

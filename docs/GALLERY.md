@@ -46,7 +46,7 @@ the site list; the galleries they lead to are not, so previews keep working ther
   exists because a scroll fires `mouseover` under a still pointer.
 - **Seen check** (user): a shown gallery's link is stored (`hoverZoomGallerySeen`, an ordered list,
   last `GAL_SEEN_MAX` 10,000, re-read before each write so tabs don't erase each other) and every
-  page `<img>` linking there gets an 18 px green ✓ span (`data-hz-seen`) inserted right after it,
+  page `<img>` linking there gets a 24 px bare green tick (inline SVG, dark outline, no box) in a span (`data-hz-seen`) inserted right after it,
   absolutely positioned by measuring its own containing block (`galMarkImg`) — so no ancestor's
   `position` is changed. `galMarkAll` re-derives on boot (+1.5 s), 250 ms after a scroll or resize,
   and after each show; it holds no element references.
