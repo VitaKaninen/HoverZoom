@@ -20,18 +20,16 @@ the site list; the galleries they lead to are not, so previews keep working ther
 ## Behaviour (user's numbers, 2026-11-09)
 
 - At most 34 pictures (`GAL_COLS` × `GAL_ROWS` − 1; that is all those constants do now).
-- **Layout: the hole is one result, steered by the pointer** (user, v0.243.0). Earlier methods: the
-  moving slot is v0.240.0, commit de9996a ("take it back to here" means that); a plus-shaped hole
-  (the result + half its size out in 4 directions) was v0.241.0-v0.242.0. Now the hole is exactly
-  the hovered result's `<img>` rect (`set.anchor`, from `galHole` taken in `galOver`). Pointer in an
-  edge third (`GAL_REVEAL`) of it, or past that edge, moves the hole to the nearest result picture
-  that way (`galZone` picks the deeper axis; `galNeighbour` = nearest `a[href] img` overlapping
-  across, by gap + centre offset), covering the hovered one; back to the middle restores it; no
-  neighbour that way keeps the hole put. The set re-lays out at once on each hole change
-  (`galSteer` from `galMove`, `galLayout`).
-- **Armed only after the middle:** a set built with the pointer in an edge third does not steer
-  until the pointer passes the middle third (`set.armed`). Without it, arriving at a neighbour
-  from its left edge would swing the hole straight back to the result just left.
+- **Layout: the hole is one result picture, chosen by where the pointer is** (user, v0.244.0).
+  Earlier methods: the moving slot is v0.240.0, commit de9996a ("take it back to here" means that);
+  a plus-shaped hole (result + half its size out in 4 directions) v0.241.0-v0.242.0; edge thirds
+  stepping to the neighbour that way, armed only after the middle, v0.243.0 (felt direction-driven
+  to the user). Rule now, stateless, on every `mousemove` (`galSteer`) and once at build: the
+  picture under the pointer (`galPics` = visible `a[href] img` rects) split into a 3 x 3 grid
+  (`GAL_REVEAL`); pointer in the middle ninth -> hole over that picture; in any other ninth -> hole
+  over the *other* picture whose centre is nearest the pointer (diagonals included); pointer on no
+  picture (a gap) -> hole stays. The set re-lays out at once when the hole changes (`galLayout`).
+  The hole does not depend on which result's gallery is showing.
 - `galShow` loads every thumbnail first (`galImg`, up to `GAL_WAIT_MS` 2.5 s; late or failed ones are
   left out), so each shape is known **before** anything is placed — the user does not want pictures
   swimming as they load.

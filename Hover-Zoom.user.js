@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.243.0
+// @version     0.244.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -10368,7 +10368,7 @@
     // ---- gallery mode: hovering a link floats the linked page's thumbnails. See docs/GALLERY.md.
 
     const GAL_COLS = 7, GAL_ROWS = 5;   // only caps the count: 34 pictures
-    const GAL_REVEAL = 1 / 3;           // pointer this close to the result's edge (of its size) moves the hole to the neighbour there
+    const GAL_REVEAL = 1 / 3;           // outside a picture's middle ninth the hole moves to the nearest other picture
     const GAL_WAIT_MS = 2500;           // longest wait for thumbnails before laying out without the rest
     const GAL_GAP = 12;                 // px between cells and at the edges
     const GAL_GRACE_MS = 500;           // off every link this long before the set fades
@@ -10671,45 +10671,42 @@
         return L;
     }
 
-    // Which edge third of the result the pointer is in ('l', 'r', 'u', 'd'), or '' in the middle.
-    function galZone(a, x, y) {
+    // True when the pointer is in the middle ninth of a rect.
+    function galMiddle(a, x, y) {
         const fx = (x - a.x) / a.w, fy = (y - a.y) / a.h, R = GAL_REVEAL;
-        const dx = fx < R ? R - fx : fx > 1 - R ? fx - 1 + R : 0;
-        const dy = fy < R ? R - fy : fy > 1 - R ? fy - 1 + R : 0;
-        if (!dx && !dy) return '';
-        return dx >= dy ? (fx < R ? 'l' : 'r') : (fy < R ? 'u' : 'd');
+        return fx >= R && fx <= 1 - R && fy >= R && fy <= 1 - R;
     }
 
-    // The nearest linked page picture beside the result in one direction, as a rect, or null.
-    function galNeighbour(a, dir) {
-        let best = null, bestD = Infinity;
+    // Every visible linked picture on the page, as rects.
+    function galPics() {
+        const out = [];
         document.querySelectorAll('a[href] img').forEach(function (img) {
             const r = img.getBoundingClientRect();
             if (r.width < 24 || r.height < 24 || r.bottom <= 0 || r.right <= 0 || r.top >= vpH() || r.left >= vpW()) return;
-            const across = dir === 'l' || dir === 'r'
-                ? r.top < a.y + a.h && r.bottom > a.y : r.left < a.x + a.w && r.right > a.x;
-            if (!across) return;
-            const d = dir === 'r' ? r.left - (a.x + a.w) : dir === 'l' ? a.x - r.right
-                : dir === 'd' ? r.top - (a.y + a.h) : a.y - r.bottom;
-            if (d < -1) return;
-            const off = dir === 'l' || dir === 'r'
-                ? Math.abs(r.top + r.height / 2 - a.y - a.h / 2) : Math.abs(r.left + r.width / 2 - a.x - a.w / 2);
-            if (d + off < bestD) { bestD = d + off; best = { x: r.left, y: r.top, w: r.width, h: r.height }; }
+            out.push({ x: r.left, y: r.top, w: r.width, h: r.height });
         });
-        return best;
+        return out;
     }
 
-    // Pointer in an edge third of the shown result (after passing its middle) opens the hole over the neighbour there.
+    // Hole = the picture under the pointer when in its middle ninth, else the other picture whose centre is nearest.
     function galSteer(x, y) {
         const set = galCur;
-        if (!set || !set.anchor) return;
-        const z = galZone(set.anchor, x, y);
-        if (!z) set.armed = true;
-        const dir = set.armed ? z : '';
-        if (dir === set.dir) return;
-        set.dir = dir;
-        const hole = (dir && galNeighbour(set.anchor, dir)) || set.anchor;
-        if (hole !== set.open) galLayout(set, hole);
+        if (!set) return;
+        const pics = galPics();
+        const on = pics.find(function (r) { return x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h; });
+        if (!on) return;
+        let hole = on;
+        if (!galMiddle(on, x, y)) {
+            let best = Infinity;
+            pics.forEach(function (r) {
+                if (r === on) return;
+                const d = Math.hypot(r.x + r.w / 2 - x, r.y + r.h / 2 - y);
+                if (d < best) { best = d; hole = r; }
+            });
+        }
+        const o = set.open;
+        if (o && o.x === hole.x && o.y === hole.y && o.w === hole.w && o.h === hole.h) return;
+        galLayout(set, hole);
     }
 
     // Bigger files for one thumbnail, the next size up first: srcset widths ascending, else the resolver's list.
@@ -10808,14 +10805,12 @@
             set.asp.push(p.asp);
             set.el.appendChild(cell);
         });
-        set.anchor = galHole;
-        set.dir = '';
-        set.armed = galZone(galHole, galPt.x, galPt.y) === '';
         const L = galLayout(set, galHole);
         root.appendChild(set.el);
         void set.el.offsetWidth;
         set.el.classList.add('on');
         galCur = set;
+        galSteer(galPt.x, galPt.y);
         galListAdd(GAL_SEEN_KEY, href);
         galMarkAll();
         pics.forEach(function (p, k) {
