@@ -40,6 +40,18 @@ the site list; the galleries they lead to are not, so previews keep working ther
   to another link within that time keeps the old set until the new one is ready, then crossfades
   (`GAL_FADE_MS` 200). A linked page with no pictures clears the old set.
 - Esc, a mouse press, or leaving gallery-mode pages hides it.
+- **Scroll hides it and locks hovering** (user): `galScroll` (document or a container ≥ half the
+  viewport tall — a carousel must not count) stores the pointer as `galLock`; `galOver` ignores
+  everything until `galMove` sees different coordinates, then treats that move as the hover. The lock
+  exists because a scroll fires `mouseover` under a still pointer.
+- **Seen check** (user): a shown gallery's link is stored (`hoverZoomGallerySeen`, an ordered list,
+  last `GAL_SEEN_MAX` 10,000, re-read before each write so tabs don't erase each other) and every
+  page `<img>` linking there gets an 18 px green ✓ span (`data-hz-seen`) inserted right after it,
+  absolutely positioned by measuring its own containing block (`galMarkImg`) — so no ancestor's
+  `position` is changed. `galMarkAll` re-derives on boot (+1.5 s), 250 ms after a scroll or resize,
+  and after each show; it holds no element references.
+- Test: the Browser pane's background tab fires **no** scroll events (`scrollBy` moves the page,
+  listeners get nothing) — dispatch `new Event('scroll')` on `document` by hand.
 - Backdrop (user): the page darkens while a set shows (`.shade`, a box the size of the pointer's
   slot whose `box-shadow` spreads `rgba(0,0,0,.6)` over the viewport); the slot itself is lighter
   (`.25`). It lives inside the set, so it fades and slides with it.

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.236.0
+// @version     0.237.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -10389,6 +10389,10 @@
     let galFrameStop = null;
     let galHost = null, galRoot = null, galCur = null, galWant = null;
     let galHoverTimer = 0, galGraceTimer = 0, galPt = { x: 0, y: 0 };
+    const GAL_SEEN_KEY = 'hoverZoomGallerySeen';   // linked pages whose gallery was shown, oldest first
+    const GAL_SEEN_MAX = 10000;
+    const GAL_MARK = 'data-hz-seen';
+    let galSeen = null, galLock = null, galMarkTimer = 0;
 
     // Gallery mode runs where the gallery list covers the page and ordinary previews are off.
     function galleryHere() {
@@ -10767,6 +10771,8 @@
         void set.el.offsetWidth;
         set.el.classList.add('on', 'live');
         galCur = set;
+        galSeenAdd(href);
+        galMarkAll();
         const L = set.layouts[set.pos];
         pics.forEach(function (p, k) {
             const w = L[k < set.pos ? k : k + 1].w;
@@ -10789,6 +10795,7 @@
     function galOver(e) {
         if (!galWant && !galCur && !(cfg.gallerySites || []).length) return;
         if (!galleryHere()) { if (galWant || galCur) galHide(); return; }
+        if (galLock) return;
         const href = galLinkOf(e.target);
         if (!href) return;
         clearTimeout(galGraceTimer);
@@ -10812,6 +10819,12 @@
     function galMove(e) {
         galPt.x = e.clientX;
         galPt.y = e.clientY;
+        if (galLock) {
+            if (galPt.x === galLock.x && galPt.y === galLock.y) return;
+            galLock = null;
+            galOver(e);
+            return;
+        }
         const set = galCur;
         if (!set) return;
         const L = set.layouts[set.pos];
@@ -10823,13 +10836,79 @@
         galPlace(set);
     }
 
+    // A page scroll hides the set; nothing shows again until the pointer itself moves.
+    function galScroll(e) {
+        if (!(cfg.gallerySites || []).length) return;
+        const t = e.target;
+        if (t !== document && !(t && t.nodeType === 1 && t.clientHeight >= vpH() / 2)) return;
+        galLock = { x: galPt.x, y: galPt.y };
+        if (galWant || galCur) galHide();
+        galMarkSoon();
+    }
+
+    function galSeenSet() {
+        if (galSeen) return galSeen;
+        let a = [];
+        try { a = JSON.parse(GM_getValue(GAL_SEEN_KEY, '') || '[]'); } catch (e) { /* unreadable: start empty */ }
+        galSeen = new Set(Array.isArray(a) ? a : []);
+        return galSeen;
+    }
+
+    function galSeenAdd(href) {
+        galSeen = null;
+        const s = galSeenSet();
+        s.delete(href);
+        s.add(href);
+        while (s.size > GAL_SEEN_MAX) s.delete(s.values().next().value);
+        try { GM_setValue(GAL_SEEN_KEY, JSON.stringify(Array.from(s))); } catch (e) { /* storage unavailable */ }
+    }
+
+    // A green check in the picture's top-right corner, placed after it in the page.
+    function galMarkImg(img) {
+        const at = img.closest('picture') || img;
+        const ir = at.getBoundingClientRect();
+        if (ir.width < 24 || ir.height < 24) return;
+        let m = at.nextElementSibling;
+        if (!m || !m.hasAttribute(GAL_MARK)) {
+            m = document.createElement('span');
+            m.setAttribute(GAL_MARK, '');
+            m.textContent = '✓';
+            at.after(m);
+        }
+        const s = 18;
+        m.style.cssText = 'all:initial;position:absolute;left:0;top:0;z-index:2;pointer-events:none;box-sizing:border-box;' +
+            'width:' + s + 'px;height:' + s + 'px;background:#a6e3a1;color:#1e1e2e;border-radius:4px;' +
+            'font:bold 13px/18px system-ui,sans-serif;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,.6)';
+        const o = m.getBoundingClientRect();
+        m.style.left = (ir.right - s - 4 - o.left) + 'px';
+        m.style.top = (ir.top + 4 - o.top) + 'px';
+    }
+
+    function galMarkAll() {
+        if (!galleryHere()) return;
+        const s = galSeenSet();
+        if (!s.size) return;
+        document.querySelectorAll('a[href] img').forEach(function (img) {
+            const h = galLinkOf(img);
+            if (h && s.has(h)) galMarkImg(img);
+        });
+    }
+
+    function galMarkSoon() {
+        clearTimeout(galMarkTimer);
+        galMarkTimer = setTimeout(galMarkAll, 250);
+    }
+
     if (isTopFrame) {
+        document.addEventListener('scroll', galScroll, { capture: true, passive: true });
+        setTimeout(galMarkAll, 1500);
         document.addEventListener('mouseover', galOver, true);
         document.addEventListener('mouseout', galOut, true);
         document.addEventListener('mousemove', galMove, { capture: true, passive: true });
         document.addEventListener('mousedown', function () { if (galWant || galCur) galHide(); }, true);
         window.addEventListener('keydown', function (e) { if (e.key === 'Escape' && galCur) galHide(); }, true);
         window.addEventListener('resize', function () {
+            if ((cfg.gallerySites || []).length) galMarkSoon();
             if (!galCur) return;
             galLayouts(galCur);
             galPlace(galCur);
