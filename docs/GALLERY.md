@@ -55,6 +55,13 @@ the site list; the galleries they lead to are not, so previews keep working ther
   absolutely positioned by measuring its own containing block (`galMarkImg`) — so no ancestor's
   `position` is changed. `galMarkAll` re-derives on boot (+1.5 s), 250 ms after a scroll or resize,
   and after each show; it holds no element references.
+- **Visited = double tick** (user): two of the same ticks, 10 px apart in a 34 × 24 box, both fully
+  outlined. Stored in `hoverZoomGalleryVisited` (same list rules, `galList`/`galListAdd`). A link
+  counts as visited when (a) a left or middle `click`/`auxclick` on a result link on a gallery-mode
+  page (`galClick`), or (b) the page itself loads where `gallerySites` covers it but gallery mode
+  is off (previews on) — that catches "open in new tab" from the context menu, but only if the
+  gallery pages are covered (a bare-host entry). `:visited` cannot be read by script, hence our
+  own list. Visited wins over seen; a mark of the wrong kind is replaced.
 - Test: the Browser pane's background tab fires **no** scroll events (`scrollBy` moves the page,
   listeners get nothing) — dispatch `new Event('scroll')` on `document` by hand.
 - Backdrop (user): `.shade` darkens the page `rgba(0,0,0,.6)` with the plus cut out

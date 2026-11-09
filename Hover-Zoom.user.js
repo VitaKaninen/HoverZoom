@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.241.0
+// @version     0.242.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -10393,7 +10393,8 @@
     const GAL_SEEN_MAX = 10000;
     const GAL_MARK = 'data-hz-seen';
     const GAL_EDGE = 50;                // px band inside the window's edge where the set goes at once
-    let galSeen = null, galLock = null, galMarkTimer = 0, galEdge = false, galHole = null;
+    const GAL_VISITED_KEY = 'hoverZoomGalleryVisited';   // linked pages clicked or opened, oldest first
+    let galSeen = {}, galLock = null, galMarkTimer = 0, galEdge = false, galHole = null;
 
     // Gallery mode runs where the gallery list covers the page and ordinary previews are off.
     function galleryHere() {
@@ -10771,7 +10772,7 @@
         void set.el.offsetWidth;
         set.el.classList.add('on');
         galCur = set;
-        galSeenAdd(href);
+        galListAdd(GAL_SEEN_KEY, href);
         galMarkAll();
         pics.forEach(function (p, k) {
             if (L[k] && L[k].w > p.nw * GAL_UPGRADE) galUpgrade(p.item, p.img, p.nw, L[k].w);
@@ -10853,65 +10854,80 @@
         galMarkSoon();
     }
 
-    function galSeenSet() {
-        if (galSeen) return galSeen;
+    // A stored list of links, oldest first, the last GAL_SEEN_MAX kept.
+    function galList(key) {
+        if (galSeen[key]) return galSeen[key];
         let a = [];
-        try { a = JSON.parse(GM_getValue(GAL_SEEN_KEY, '') || '[]'); } catch (e) { /* unreadable: start empty */ }
-        galSeen = new Set(Array.isArray(a) ? a : []);
-        return galSeen;
+        try { a = JSON.parse(GM_getValue(key, '') || '[]'); } catch (e) { /* unreadable: start empty */ }
+        galSeen[key] = new Set(Array.isArray(a) ? a : []);
+        return galSeen[key];
     }
 
-    function galSeenAdd(href) {
-        galSeen = null;
-        const s = galSeenSet();
+    function galListAdd(key, href) {
+        galSeen[key] = null;
+        const s = galList(key);
         s.delete(href);
         s.add(href);
         while (s.size > GAL_SEEN_MAX) s.delete(s.values().next().value);
-        try { GM_setValue(GAL_SEEN_KEY, JSON.stringify(Array.from(s))); } catch (e) { /* storage unavailable */ }
+        try { GM_setValue(key, JSON.stringify(Array.from(s))); } catch (e) { /* storage unavailable */ }
     }
 
-    // A green check in the picture's top-right corner, placed after it in the page.
-    function galMarkImg(img) {
+    // A clicked result link counts as visited.
+    function galClick(e) {
+        if (e.button > 1 || !galleryHere()) return;
+        const h = galLinkOf(e.target);
+        if (!h) return;
+        galListAdd(GAL_VISITED_KEY, h);
+        galMarkAll();
+    }
+
+    // One green tick in the picture's top-right corner, or two overlapping for a visited gallery.
+    function galMarkImg(img, kind) {
         const at = img.closest('picture') || img;
         const ir = at.getBoundingClientRect();
-        if (ir.width < 24 || ir.height < 24) return;
+        if (ir.width < 48 || ir.height < 24) return;
         let m = at.nextElementSibling;
+        if (m && m.hasAttribute(GAL_MARK) && m.getAttribute(GAL_MARK) !== kind) { m.remove(); m = null; }
         if (!m || !m.hasAttribute(GAL_MARK)) {
             m = document.createElement('span');
-            m.setAttribute(GAL_MARK, '');
+            m.setAttribute(GAL_MARK, kind);
             const NS = 'http://www.w3.org/2000/svg';
             const svg = document.createElementNS(NS, 'svg');
-            svg.setAttribute('viewBox', '0 0 24 24');
+            svg.setAttribute('viewBox', kind === '2' ? '0 0 34 24' : '0 0 24 24');
             svg.setAttribute('width', '100%');
             svg.setAttribute('height', '100%');
-            [['#0b2b0b', '6.5'], ['#3ee03e', '3.6']].forEach(function (p) {
-                const path = document.createElementNS(NS, 'path');
-                path.setAttribute('d', 'M4 13.5 9.5 19 20.5 5');
-                path.setAttribute('fill', 'none');
-                path.setAttribute('stroke', p[0]);
-                path.setAttribute('stroke-width', p[1]);
-                path.setAttribute('stroke-linecap', 'round');
-                path.setAttribute('stroke-linejoin', 'round');
-                svg.appendChild(path);
+            (kind === '2' ? [0, 10] : [0]).forEach(function (dx) {
+                [['#0b2b0b', '6.5'], ['#3ee03e', '3.6']].forEach(function (p) {
+                    const path = document.createElementNS(NS, 'path');
+                    path.setAttribute('d', 'M' + (4 + dx) + ' 13.5 ' + (9.5 + dx) + ' 19 ' + (20.5 + dx) + ' 5');
+                    path.setAttribute('fill', 'none');
+                    path.setAttribute('stroke', p[0]);
+                    path.setAttribute('stroke-width', p[1]);
+                    path.setAttribute('stroke-linecap', 'round');
+                    path.setAttribute('stroke-linejoin', 'round');
+                    svg.appendChild(path);
+                });
             });
             m.appendChild(svg);
             at.after(m);
         }
-        const s = 24;
+        const w = kind === '2' ? 34 : 24, s = 24;
         m.style.cssText = 'all:initial;position:absolute;left:0;top:0;z-index:2;pointer-events:none;display:block;' +
-            'width:' + s + 'px;height:' + s + 'px;filter:drop-shadow(0 1px 2px rgba(0,0,0,.7))';
+            'width:' + w + 'px;height:' + s + 'px;filter:drop-shadow(0 1px 2px rgba(0,0,0,.7))';
         const o = m.getBoundingClientRect();
-        m.style.left = (ir.right - s - 4 - o.left) + 'px';
+        m.style.left = (ir.right - w - 4 - o.left) + 'px';
         m.style.top = (ir.top + 4 - o.top) + 'px';
     }
 
     function galMarkAll() {
         if (!galleryHere()) return;
-        const s = galSeenSet();
-        if (!s.size) return;
+        const seen = galList(GAL_SEEN_KEY), went = galList(GAL_VISITED_KEY);
+        if (!seen.size && !went.size) return;
         document.querySelectorAll('a[href] img').forEach(function (img) {
             const h = galLinkOf(img);
-            if (h && s.has(h)) galMarkImg(img);
+            if (!h) return;
+            if (went.has(h)) galMarkImg(img, '2');
+            else if (seen.has(h)) galMarkImg(img, '1');
         });
     }
 
@@ -10923,6 +10939,11 @@
     if (isTopFrame) {
         document.addEventListener('scroll', galScroll, { capture: true, passive: true });
         setTimeout(galMarkAll, 1500);
+        setTimeout(function () {
+            if (galleryListed() && !galleryHere()) galListAdd(GAL_VISITED_KEY, location.href.split('#')[0]);
+        }, 0);
+        document.addEventListener('click', galClick, true);
+        document.addEventListener('auxclick', galClick, true);
         document.addEventListener('mouseover', galOver, true);
         document.addEventListener('mouseout', galOut, true);
         document.addEventListener('mousemove', galMove, { capture: true, passive: true });
