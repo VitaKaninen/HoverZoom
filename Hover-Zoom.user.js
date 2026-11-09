@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.235.0
+// @version     0.236.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -10380,6 +10380,8 @@
     const GAL_MAX = GAL_COLS * GAL_ROWS - 1;
     const GAL_NAME = 'hz-gallery-probe';    // the hidden frame's window.name prefix
     const GAL_FRAME_MS = 10000;         // longest wait for the hidden frame's page to load
+    const GAL_HTML_ENOUGH = 6;          // the plain HTML is trusted at once from this many pictures (a logo group is 1-3)
+    const GAL_PREFER_MS = 2500;         // the frame's report wins only within this; then the plain HTML is used
     const GAL_REPORT_MS = 3000;         // longest wait for its report once loaded (settle + one retry + slack)
     const GAL_SETTLE_MS = 700;          // after the frame's load, before it counts
     const GAL_RETRY_MS = 1500;          // one more look when it counted nothing
@@ -10529,22 +10531,38 @@
             catch (e) { /* parent gone */ }
         };
         const go = function () { setTimeout(send, GAL_SETTLE_MS); };
-        if (document.readyState === 'complete') go(); else window.addEventListener('load', go);
+        if (document.readyState !== 'loading') go(); else document.addEventListener('DOMContentLoaded', go);
     }
 
-    // The rendered page first; the plain HTML only when the frame fails.
+    // Both reads at once: the plain HTML as soon as it holds GAL_HTML_ENOUGH; else the frame's report within GAL_PREFER_MS, else whatever the HTML had.
     function galLoad(href) {
         if (galCache.has(href)) return galCache.get(href);
-        const p = galRender(href).then(function (list) {
-            if (list === 'cancel') { galCache.delete(href); return 'cancel'; }
-            if (list) return list;
-            return fetchDoc(href, function (res) {
-                if (res.status === 429 || res.status === 503) logBusy(href, res);
-                dbg('gallery page refused', { href: href, status: res.status });
-            }).then(function (doc) {
-                if (!doc) { galCache.delete(href); return null; }
-                return galPick(doc, href);
+        const frame = galRender(href);
+        const stopFrame = galFrameStop;
+        const html = fetchDoc(href, function (res) {
+            if (res.status === 429 || res.status === 503) logBusy(href, res);
+            dbg('gallery page refused', { href: href, status: res.status });
+        }).then(function (doc) { return doc ? galPick(doc, href) : null; });
+        const p = new Promise(function (resolve) {
+            let done = false, late = false, fromHtml, frameOver = false;
+            const finish = function (v) { if (!done) { done = true; resolve(v); } };
+            const useHtml = function () {
+                if (!fromHtml || !fromHtml.length) return false;
+                if (!frameOver && stopFrame === galFrameStop && galFrameStop) galFrameStop();
+                finish(fromHtml);
+                return true;
+            };
+            frame.then(function (v) {
+                frameOver = true;
+                if (v === 'cancel' && !done) return finish('cancel');
+                if (v && v.length) return finish(v);
+                html.then(function (h) { finish(h); });
             });
+            html.then(function (h) { fromHtml = h; if (late || (h && h.length >= GAL_HTML_ENOUGH)) useHtml(); });
+            setTimeout(function () { late = true; useHtml(); }, GAL_PREFER_MS);
+        }).then(function (v) {
+            if (v === 'cancel' || !v) galCache.delete(href);
+            return v;
         });
         galCache.set(href, p);
         if (galCache.size > GAL_CACHE) galCache.delete(galCache.keys().next().value);
@@ -10564,7 +10582,10 @@
             '.set.live .cell{transition:transform 300ms cubic-bezier(.2,.8,.2,1),width 300ms ease,height 300ms ease}' +
             'img{display:block;width:100%;height:100%;object-fit:cover;border-radius:6px;background:#1e1e2e;opacity:0;transition:opacity ' + GAL_FADE_MS + 'ms ease;' +
             'box-shadow:0 8px 22px rgba(0,0,0,.55),0 2px 5px rgba(0,0,0,.4)}' +
-            'img.ok{opacity:1}';
+            'img.ok{opacity:1}' +
+            '.shade{position:absolute;left:0;top:0;border-radius:10px;background:rgba(0,0,0,.25);' +
+            'box-shadow:0 0 0 200vmax rgba(0,0,0,.6)}' +
+            '.set.live .shade{transition:transform 300ms cubic-bezier(.2,.8,.2,1),width 300ms ease,height 300ms ease}';
         galRoot.appendChild(st);
         return galRoot;
     }
@@ -10633,7 +10654,10 @@
 
     // Every picture to its slot in the current layout.
     function galPlace(set) {
-        const L = set.layouts[set.pos];
+        const L = set.layouts[set.pos], g = L[set.pos];
+        set.shade.style.width = g.w + 'px';
+        set.shade.style.height = g.h + 'px';
+        set.shade.style.transform = 'translate(' + g.x + 'px,' + g.y + 'px)';
         set.cells.forEach(function (cell, k) {
             const r = L[k < set.pos ? k : k + 1];
             cell.style.width = r.w + 'px';
@@ -10723,8 +10747,10 @@
         const root = galLayer();
         if (!galHost.isConnected) document.documentElement.appendChild(galHost);
         if (galCur) galDrop(galCur);
-        const set = { href: href, el: document.createElement('div'), cells: [], asp: [], pos: 0 };
+        const set = { href: href, el: document.createElement('div'), shade: document.createElement('div'), cells: [], asp: [], pos: 0 };
         set.el.className = 'set';
+        set.shade.className = 'shade';
+        set.el.appendChild(set.shade);
         pics.forEach(function (p) {
             const cell = document.createElement('div');
             cell.className = 'cell';

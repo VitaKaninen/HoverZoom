@@ -40,6 +40,9 @@ the site list; the galleries they lead to are not, so previews keep working ther
   to another link within that time keeps the old set until the new one is ready, then crossfades
   (`GAL_FADE_MS` 200). A linked page with no pictures clears the old set.
 - Esc, a mouse press, or leaving gallery-mode pages hides it.
+- Backdrop (user): the page darkens while a set shows (`.shade`, a box the size of the pointer's
+  slot whose `box-shadow` spreads `rgba(0,0,0,.6)` over the viewport); the slot itself is lighter
+  (`.25`). It lives inside the set, so it fades and slides with it.
 
 ## Reading the gallery: the hidden frame first (v0.231.0)
 
@@ -56,6 +59,13 @@ plain items `{thumb, ss, cands, base}` (`galItem`). It also mutes and pauses any
 No `allow="autoplay 'none'"`: Gecko logs "Skipping unsupported feature name autoplay" for it
 (removed v0.235.0; the play listener does the job).
 One frame at a time (`galFrameStop`); a newer hover cancels it (`'cancel'`, not cached).
+
+**Both reads start at once** (`galLoad`, v0.236.0). The plain HTML wins as soon as it holds
+`GAL_HTML_ENOUGH` (6) pictures — the frame is stopped. Otherwise the frame's report wins if it comes
+within `GAL_PREFER_MS` (2.5 s); after that any non-empty HTML result is used; an empty HTML waits for
+the frame. Why: on the user's site the frame's page never reaches `load` (ads keep it loading), so
+every hover waited the full 10 s; the user wants no wait at all. The frame's copy reports from
+`DOMContentLoaded` + settle, not `load`, for the same reason.
 
 The frame **fails** → the plain HTML read below: load lands on an error page or another origin
 (cross-origin links always do), the page not loaded in `GAL_FRAME_MS` (10 s), or no report
