@@ -11,14 +11,15 @@ so the user can judge whether that gallery is worth opening. Look only: the floa
   in `hoverZoomGalleryDock`, first placed top-right). Menu item `toggleGallery()`: "Show / Hide gallery
   button on this site" (removes every entry covering the page, else adds the host). Elsewhere nothing
   shows, nothing preloads, nothing listens for Ctrl or the middle button.
-- The button (`galToggle`) turns gallery mode on/off **for this host + path** (`hoverZoomGalleryOn` =
-  `{host: [pathname]}`, `galleryActive()`), remembered across reloads and tabs. Per path, not per
-  site, so a gallery page opened from the results (another path) starts normal. If a site ever puts
-  results and galleries on one path, this needs the query too.
+- The button (`galToggle`) turns gallery mode on/off **in this tab** (user, v0.253.0): `galTabOn`,
+  saved as `hzGalleryOn` in `GM_saveTab`, read back by `GM_getTab` at boot (async: the page starts
+  off and `galApply()` switches it on when the answer comes). A reload or a same-tab link keeps it; a
+  new tab starts off — so a gallery opened in a new tab previews normally. (v0.252.0 kept it per host
+  + path in GM storage; the user preferred per tab.)
 - `galleryHere()` = top frame, not a captcha, `galleryActive()`. **While active, ordinary previews
   are off on that page** (`siteEnabled()` is false; the slideshow widget hides). Off = the page as it
   is without gallery mode. Seen/visited/saved marks show either way (`galMarkAll` needs only the list).
-- `galOnStore` is a `var`: `siteEnabled()` reads it and can run before its line.
+- `galTabOn` is a `var`: `siteEnabled()` reads it and can run before its line.
 ## Behaviour (user's numbers, 2026-11-09)
 
 - Every picture the page has (`GAL_MAX` = Infinity, user v0.251.0: galleries run 10-100 and a cap
@@ -70,7 +71,10 @@ so the user can judge whether that gallery is worth opening. Look only: the floa
 - Leaving gallery-mode pages hides it.
 - **Previews on the thumbnails** (user, v0.251.0 — the use: save chosen pictures without opening the
   result). When the linked page would preview (`siteEnabledAt(href)` = the site list run on that URL)
-  the set gets `.live` and its cells take the pointer. A cell's `mouseenter` → `galPv`: the ordinary
+  (`set.pv`) a cell's hover previews; otherwise the first hover toasts which site-list entry turns
+  that page off (`galNoPv`, once per gallery) — the silent version cost the user a debugging round,
+  because a bare-host "Disable for this site" from the previews-off era covers the galleries too.
+  Cells always take the pointer while a set is up (`.live`). A cell's `mouseenter` → `galPv`: the ordinary
   `active`/`token`/`timer` hover, after `cfg.hoverDelay`, with `galResolve` = the item's `cands`
   (from the linked page's own context), then its srcsets widest first; first larger than the
   thumbnail wins, else the thumbnail; then `showViewer`. `mouseleave` cancels unless placed. None of
@@ -102,8 +106,9 @@ so the user can judge whether that gallery is worth opening. Look only: the floa
   and after each show; it holds no element references.
 - **Visited = double tick** (user): two of the same ticks, 10 px apart in a 34 × 24 box, both fully
   outlined. Stored in `hoverZoomGalleryVisited` (same list rules, `galList`/`galListAdd`). **Only the
-  browser loading the page counts** (user, v0.252.0): at boot, a top-frame page on a `gallerySites`
-  site where gallery mode is not on stores its own URL. A link, middle-click or context-menu "Open in
+  browser loading the page counts** (user, v0.252.0): at boot, every top-frame page on a
+  `gallerySites` site stores its own URL (the tab's on-state is not known yet at boot; storing the
+  search page too is harmless). A link, middle-click or context-menu "Open in
   new tab" all land there; hovering, the gallery, middle-click-to-gallery and the hidden preload
   frame (not top frame) never do. No click counting (`galClick` removed). Untested assumptions,
   true on the user's site so far: the result link is the URL that loads (no redirect / extra params)

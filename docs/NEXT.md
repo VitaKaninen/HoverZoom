@@ -18,8 +18,9 @@ reasons: [`GALLERY.md`](GALLERY.md).
 - Seen = gallery on screen 1 s. Visited = the browser loading the page (no click counting).
 - Locked thumbnails preview (`galPv`) when the linked page would; middle-click on the preview saves
   and adds a blue saved mark to the thumbnail and the result. No picture cap.
-- Gallery button (top-right dock widget) on `gallerySites` sites switches gallery mode per host +
-  path; off = the page untouched. Site list moved to Settings → Advanced.
+- Gallery button (top-right dock widget) on `gallerySites` sites switches gallery mode per tab
+  (v0.253.0); off = the page untouched. Site list moved to Settings → Advanced. Thumbnails whose page
+  the site list turns off now say so on hover.
 
 ## Not verified
 
@@ -27,7 +28,8 @@ All tests ran on `test-pages/` with synthetic events, never in Tampermonkey on t
 questions only the user's browser answers:
 - Does LibreWolf + Tampermonkey fire `GM_download`'s `onload`? If not, the saved mark never appears;
   fix by marking at click time.
-- The path-based on-switch assumes results and galleries live on different paths.
+- The user reported no thumbnail previews on their site; most likely a site-list entry covering the
+  galleries (v0.253.0 now names it in a toast). Not confirmed.
 
 ## Last exchange
 
