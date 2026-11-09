@@ -20,16 +20,20 @@ the site list; the galleries they lead to are not, so previews keep working ther
 ## Behaviour (user's numbers, 2026-11-09)
 
 - At most 34 pictures (`GAL_COLS` × `GAL_ROWS` − 1; that is all those constants do now).
-- **Layout: the hole is one result picture, chosen by where the pointer is** (user, v0.244.0).
+- **Layout: the hole is one result picture, chosen by where the pointer is** (user, v0.245.0).
   Earlier methods: the moving slot is v0.240.0, commit de9996a ("take it back to here" means that);
-  a plus-shaped hole (result + half its size out in 4 directions) v0.241.0-v0.242.0; edge thirds
-  stepping to the neighbour that way, armed only after the middle, v0.243.0 (felt direction-driven
-  to the user). Rule now, stateless, on every `mousemove` (`galSteer`) and once at build: the
-  picture under the pointer (`galPics` = visible `a[href] img` rects) split into a 3 x 3 grid
-  (`GAL_REVEAL`); pointer in the middle ninth -> hole over that picture; in any other ninth -> hole
-  over the *other* picture whose centre is nearest the pointer (diagonals included); pointer on no
-  picture (a gap) -> hole stays. The set re-lays out at once when the hole changes (`galLayout`).
-  The hole does not depend on which result's gallery is showing.
+  plus-shaped hole v0.241.0-v0.242.0; edge thirds armed after the middle v0.243.0 (felt
+  direction-driven); nearest other centre v0.244.0 (replaced unseen). Rule now, stateless, on every
+  `mousemove` (`galSteer`) and once at build: the picture under the pointer (`galPics` = visible
+  `a[href] img` rects) is cut into a 3 x 3 grid (`galNinth`, `GAL_REVEAL`).
+  - middle ninth -> that picture;
+  - left/right/top/bottom middle -> the picture first met looking out from its centre that way
+    (`galLook`: nearest by gap + how far the centre line misses it, so a masonry gap still finds
+    the next column);
+  - a corner -> the side picture (left or right), then the one above/below *that* picture
+    (user's rule); no side picture -> the one above/below the hovered one; nothing found -> stays.
+  - pointer on no picture (a gap) -> hole stays. Re-lays out at once on change (`galLayout`).
+    The hole does not depend on which result's gallery is showing.
 - `galShow` loads every thumbnail first (`galImg`, up to `GAL_WAIT_MS` 2.5 s; late or failed ones are
   left out), so each shape is known **before** anything is placed — the user does not want pictures
   swimming as they load.

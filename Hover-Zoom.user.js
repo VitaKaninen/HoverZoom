@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.244.0
+// @version     0.245.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -10368,7 +10368,7 @@
     // ---- gallery mode: hovering a link floats the linked page's thumbnails. See docs/GALLERY.md.
 
     const GAL_COLS = 7, GAL_ROWS = 5;   // only caps the count: 34 pictures
-    const GAL_REVEAL = 1 / 3;           // outside a picture's middle ninth the hole moves to the nearest other picture
+    const GAL_REVEAL = 1 / 3;           // a picture is split into thirds each way; outside the middle ninth the hole looks out that way
     const GAL_WAIT_MS = 2500;           // longest wait for thumbnails before laying out without the rest
     const GAL_GAP = 12;                 // px between cells and at the edges
     const GAL_GRACE_MS = 500;           // off every link this long before the set fades
@@ -10671,10 +10671,25 @@
         return L;
     }
 
-    // True when the pointer is in the middle ninth of a rect.
-    function galMiddle(a, x, y) {
+    // Which ninth of a rect the pointer is in: column and row, each -1, 0 or 1.
+    function galNinth(a, x, y) {
         const fx = (x - a.x) / a.w, fy = (y - a.y) / a.h, R = GAL_REVEAL;
-        return fx >= R && fx <= 1 - R && fy >= R && fy <= 1 - R;
+        return { c: fx < R ? -1 : fx > 1 - R ? 1 : 0, r: fy < R ? -1 : fy > 1 - R ? 1 : 0 };
+    }
+
+    // The picture first met looking out from a rect's centre one way (dx or dy is -1 or 1), or null.
+    function galLook(pics, a, dx, dy) {
+        const cx = a.x + a.w / 2, cy = a.y + a.h / 2;
+        let best = null, bestD = Infinity;
+        pics.forEach(function (r) {
+            if (r === a) return;
+            const gap = dx > 0 ? r.x - (a.x + a.w) : dx < 0 ? a.x - (r.x + r.w) : dy > 0 ? r.y - (a.y + a.h) : a.y - (r.y + r.h);
+            if (gap < -1) return;
+            const off = dx ? Math.max(0, r.y - cy, cy - (r.y + r.h)) : Math.max(0, r.x - cx, cx - (r.x + r.w));
+            const d = gap + off;
+            if (d < bestD) { bestD = d; best = r; }
+        });
+        return best;
     }
 
     // Every visible linked picture on the page, as rects.
@@ -10688,21 +10703,20 @@
         return out;
     }
 
-    // Hole = the picture under the pointer when in its middle ninth, else the other picture whose centre is nearest.
+    // Hole by the pointer's ninth of the picture under it: middle = it; a side = the picture that way from its centre; a corner = above/below the side one.
     function galSteer(x, y) {
         const set = galCur;
         if (!set) return;
         const pics = galPics();
         const on = pics.find(function (r) { return x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h; });
         if (!on) return;
+        const n = galNinth(on, x, y);
         let hole = on;
-        if (!galMiddle(on, x, y)) {
-            let best = Infinity;
-            pics.forEach(function (r) {
-                if (r === on) return;
-                const d = Math.hypot(r.x + r.w / 2 - x, r.y + r.h / 2 - y);
-                if (d < best) { best = d; hole = r; }
-            });
+        if (n.c) {
+            const side = galLook(pics, on, n.c, 0);
+            hole = side ? (n.r && galLook(pics, side, 0, n.r)) || side : (n.r && galLook(pics, on, 0, n.r)) || on;
+        } else if (n.r) {
+            hole = galLook(pics, on, 0, n.r) || on;
         }
         const o = set.open;
         if (o && o.x === hole.x && o.y === hole.y && o.w === hole.w && o.h === hole.h) return;
