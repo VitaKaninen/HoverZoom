@@ -70,7 +70,7 @@ the site list; the galleries they lead to are not, so previews keep working ther
   own list. Visited wins over seen; a mark of the wrong kind is replaced.
 - Test: the Browser pane's background tab fires **no** scroll events (`scrollBy` moves the page,
   listeners get nothing) — dispatch `new Event('scroll')` on `document` by hand.
-- Backdrop (user): `.shade` darkens the page `rgba(0,0,0,.6)` with the hole cut out
+- Backdrop (user): `.shade` darkens the page `rgba(0,0,0,.8)` with the hole cut out
   (`clip-path: polygon(evenodd, viewport, hole)`); `.lite` covers the hole at `.25` (`galShade`).
   Both live inside the set, so they fade with it.
 

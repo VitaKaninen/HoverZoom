@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.245.0
+// @version     0.246.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -10588,7 +10588,7 @@
             'img{display:block;width:100%;height:100%;object-fit:cover;border-radius:6px;background:#1e1e2e;opacity:0;transition:opacity ' + GAL_FADE_MS + 'ms ease;' +
             'box-shadow:0 8px 22px rgba(0,0,0,.55),0 2px 5px rgba(0,0,0,.4)}' +
             'img.ok{opacity:1}' +
-            '.shade{position:absolute;inset:0;background:rgba(0,0,0,.6)}' +
+            '.shade{position:absolute;inset:0;background:rgba(0,0,0,.8)}' +
             '.lite{position:absolute;inset:0;background:rgba(0,0,0,.25)}';
         galRoot.appendChild(st);
         return galRoot;
