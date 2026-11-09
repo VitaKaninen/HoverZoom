@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.240.0
+// @version     0.241.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -10368,7 +10368,7 @@
     // ---- gallery mode: hovering a link floats the linked page's thumbnails. See docs/GALLERY.md.
 
     const GAL_COLS = 7, GAL_ROWS = 5;   // only caps the count: 34 pictures
-    const GAL_DUMMY = 3 / 4;            // the pointer's empty slot is one portrait picture
+    const GAL_ARM = 0.5;                // the hole reaches this much of the result's size out on each side
     const GAL_WAIT_MS = 2500;           // longest wait for thumbnails before laying out without the rest
     const GAL_GAP = 12;                 // px between cells and at the edges
     const GAL_GRACE_MS = 500;           // off every link this long before the set fades
@@ -10393,7 +10393,7 @@
     const GAL_SEEN_MAX = 10000;
     const GAL_MARK = 'data-hz-seen';
     const GAL_EDGE = 50;                // px band inside the window's edge where the set goes at once
-    let galSeen = null, galLock = null, galMarkTimer = 0, galEdge = false;
+    let galSeen = null, galLock = null, galMarkTimer = 0, galEdge = false, galHole = null;
 
     // Gallery mode runs where the gallery list covers the page and ordinary previews are off.
     function galleryHere() {
@@ -10584,100 +10584,82 @@
             '.set{position:fixed;inset:0;opacity:0;transition:opacity ' + GAL_FADE_MS + 'ms ease}' +
             '.set.on{opacity:1}' +
             '.cell{position:absolute;left:0;top:0;display:flex;align-items:center;justify-content:center}' +
-            '.set.live .cell{transition:transform 300ms cubic-bezier(.2,.8,.2,1),width 300ms ease,height 300ms ease}' +
             'img{display:block;width:100%;height:100%;object-fit:cover;border-radius:6px;background:#1e1e2e;opacity:0;transition:opacity ' + GAL_FADE_MS + 'ms ease;' +
             'box-shadow:0 8px 22px rgba(0,0,0,.55),0 2px 5px rgba(0,0,0,.4)}' +
             'img.ok{opacity:1}' +
-            '.shade{position:absolute;left:0;top:0;border-radius:10px;background:rgba(0,0,0,.25);' +
-            'box-shadow:0 0 0 200vmax rgba(0,0,0,.6)}' +
-            '.set.live .shade{transition:transform 300ms cubic-bezier(.2,.8,.2,1),width 300ms ease,height 300ms ease}';
+            '.shade{position:absolute;inset:0;background:rgba(0,0,0,.6)}' +
+            '.lite{position:absolute;inset:0;background:rgba(0,0,0,.25)}';
         galRoot.appendChild(st);
         return galRoot;
     }
 
-    // Justified rows: shapes (w/h) in order, as large as fits the viewport. One {x, y, w, h} per shape.
-    function galRows(asp) {
-        const W = vpW() - 2 * GAL_GAP, H = vpH() - 2 * GAL_GAP;
-        const pack = function (h) {
-            const rows = [];
-            let row = [], sum = 0;
-            asp.forEach(function (a, i) {
-                if (row.length && (sum + a) * h + GAL_GAP * row.length > W) { rows.push({ idx: row, sum: sum }); row = []; sum = 0; }
-                row.push(i);
-                sum += a;
+    // The hole: the hovered result plus half its size out on each side, as two bars (a plus, corners covered).
+    function galBars(hole) {
+        return [
+            { x: hole.x - hole.w * GAL_ARM, y: hole.y, w: hole.w * (1 + 2 * GAL_ARM), h: hole.h },
+            { x: hole.x, y: hole.y - hole.h * GAL_ARM, w: hole.w, h: hole.h * (1 + 2 * GAL_ARM) }];
+    }
+
+    // Rows of one height spread over the viewport, each split around the hole; the largest height that fits every shape.
+    function galRows(asp, hole) {
+        const G = GAL_GAP, W = vpW(), H = vpH(), bars = galBars(hole);
+        const free = function (y, h) {
+            let segs = [[G, W - G]];
+            bars.forEach(function (b) {
+                if (b.y >= y + h + G || b.y + b.h <= y - G) return;
+                const l = b.x - G, r = b.x + b.w + G, next = [];
+                segs.forEach(function (s) {
+                    if (r <= s[0] || l >= s[1]) { next.push(s); return; }
+                    if (l > s[0]) next.push([s[0], l]);
+                    if (r < s[1]) next.push([r, s[1]]);
+                });
+                segs = next;
             });
-            if (row.length) rows.push({ idx: row, sum: sum });
-            let total = GAL_GAP * (rows.length - 1);
-            rows.forEach(function (r, k) {
-                const fill = (W - GAL_GAP * (r.idx.length - 1)) / r.sum;
-                r.h = k === rows.length - 1 ? Math.min(fill, h) : fill;
-                total += r.h;
-            });
-            return { rows: rows, total: total };
+            return segs;
         };
-        let lo = 8, hi = H, best = pack(lo);
-        for (let i = 0; i < 24; i++) {
-            const mid = (lo + hi) / 2, p = pack(mid);
-            if (p.total <= H) { best = p; lo = mid; } else hi = mid;
-        }
-        const sc = Math.min(1, H / best.total), out = [];
-        let y = GAL_GAP + (H - best.total * sc) / 2;
-        best.rows.forEach(function (r) {
-            const rh = r.h * sc;
-            let x = GAL_GAP + (W - (r.sum * rh + GAL_GAP * (r.idx.length - 1))) / 2;
-            r.idx.forEach(function (i) {
-                out[i] = { x: x, y: y, w: asp[i] * rh, h: rh };
-                x += asp[i] * rh + GAL_GAP;
-            });
-            y += rh + GAL_GAP;
-        });
-        return out;
-    }
-
-    // Every layout the set can take: the pointer's empty slot at each position, as wide as the widest picture in its row.
-    function galLayouts(set) {
-        set.layouts = [];
-        for (let p = 0; p <= set.asp.length; p++) {
-            let d = GAL_DUMMY, L = null;
-            for (let k = 0; k < 4; k++) {
-                const asp = set.asp.slice();
-                asp.splice(p, 0, d);
-                L = galRows(asp);
-                const y = L[p].y;
-                let want = GAL_DUMMY;
-                L.forEach(function (r, i) { if (i !== p && Math.abs(r.y - y) < 1) want = Math.max(want, asp[i]); });
-                if (want <= d + 1e-3) break;
-                d = want;
+        const place = function (h) {
+            const n = Math.max(1, Math.floor((H - G) / (h + G)));
+            const pitch = n > 1 ? (H - 2 * G - h) / (n - 1) : 0;
+            const out = [];
+            let i = 0;
+            for (let k = 0; k < n && i < asp.length; k++) {
+                const y = G + k * pitch;
+                free(y, h).forEach(function (s) {
+                    const row = [];
+                    let used = 0;
+                    while (i < asp.length) {
+                        const add = (row.length ? G : 0) + asp[i] * h;
+                        if (used + add > s[1] - s[0]) break;
+                        row.push(i);
+                        used += add;
+                        i++;
+                    }
+                    const spare = (s[1] - s[0] - used) / (row.length + 1);
+                    let x = s[0] + spare;
+                    row.forEach(function (j) {
+                        out[j] = { x: x, y: y, w: asp[j] * h, h: h };
+                        x += asp[j] * h + G + spare;
+                    });
+                });
             }
-            set.layouts.push(L);
+            return { out: out, all: i === asp.length };
+        };
+        let lo = 8, hi = H - 2 * G, best = place(lo);
+        for (let k = 0; k < 24; k++) {
+            const mid = (lo + hi) / 2, p = place(mid);
+            if (p.all) { best = p; lo = mid; } else hi = mid;
         }
+        return best.out;
     }
 
-    const galIn = function (r, x, y) { return r && x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h; };
-
-    // The slot position for a pointer: one whose empty slot covers it, nearest the current; else, if asked, the nearest.
-    function galPosAt(set, x, y, nearest) {
-        let best = -1, bestD = Infinity;
-        set.layouts.forEach(function (L, p) {
-            const r = L[p];
-            const d = galIn(r, x, y) ? Math.abs(p - set.pos) : nearest ? 1e6 + Math.hypot(r.x + r.w / 2 - x, r.y + r.h / 2 - y) : Infinity;
-            if (d < bestD) { bestD = d; best = p; }
-        });
-        return best;
-    }
-
-    // Every picture to its slot in the current layout.
-    function galPlace(set) {
-        const L = set.layouts[set.pos], g = L[set.pos];
-        set.shade.style.width = g.w + 'px';
-        set.shade.style.height = g.h + 'px';
-        set.shade.style.transform = 'translate(' + g.x + 'px,' + g.y + 'px)';
-        set.cells.forEach(function (cell, k) {
-            const r = L[k < set.pos ? k : k + 1];
-            cell.style.width = r.w + 'px';
-            cell.style.height = r.h + 'px';
-            cell.style.transform = 'translate(' + r.x + 'px,' + r.y + 'px)';
-        });
+    // The hole's shading: the page dark except the plus, which is lighter.
+    function galShade(set, hole) {
+        const W = vpW(), H = vpH(), b = galBars(hole), h = b[0], v = b[1];
+        const plus = [[v.x, v.y], [v.x + v.w, v.y], [v.x + v.w, h.y], [h.x + h.w, h.y], [h.x + h.w, h.y + h.h], [v.x + v.w, h.y + h.h],
+            [v.x + v.w, v.y + v.h], [v.x, v.y + v.h], [v.x, h.y + h.h], [h.x, h.y + h.h], [h.x, h.y], [v.x, h.y]];
+        const pts = function (a) { return a.map(function (p) { return p[0] + 'px ' + p[1] + 'px'; }).join(','); };
+        set.shade.style.clipPath = 'polygon(evenodd,' + pts([[0, 0], [W, 0], [W, H], [0, H], [0, 0]]) + ',' + pts(plus.concat([plus[0]])) + ')';
+        set.lite.style.clipPath = 'polygon(' + pts(plus) + ')';
     }
 
     // Bigger files for one thumbnail, the next size up first: srcset widths ascending, else the resolver's list.
@@ -10761,10 +10743,12 @@
         const root = galLayer();
         if (!galHost.isConnected) document.documentElement.appendChild(galHost);
         if (galCur) galDrop(galCur);
-        const set = { href: href, el: document.createElement('div'), shade: document.createElement('div'), cells: [], asp: [], pos: 0 };
+        const set = { href: href, el: document.createElement('div'), shade: document.createElement('div'), lite: document.createElement('div'), cells: [], asp: [] };
         set.el.className = 'set';
         set.shade.className = 'shade';
+        set.lite.className = 'lite';
         set.el.appendChild(set.shade);
+        set.el.appendChild(set.lite);
         pics.forEach(function (p) {
             const cell = document.createElement('div');
             cell.className = 'cell';
@@ -10774,19 +10758,23 @@
             set.asp.push(p.asp);
             set.el.appendChild(cell);
         });
-        galLayouts(set);
-        set.pos = Math.max(0, galPosAt(set, galPt.x, galPt.y, true));
+        const L = galRows(set.asp, galHole);
+        galShade(set, galHole);
+        set.cells.forEach(function (cell, k) {
+            const r = L[k];
+            if (!r) { cell.style.display = 'none'; return; }
+            cell.style.width = r.w + 'px';
+            cell.style.height = r.h + 'px';
+            cell.style.transform = 'translate(' + r.x + 'px,' + r.y + 'px)';
+        });
         root.appendChild(set.el);
-        galPlace(set);
         void set.el.offsetWidth;
-        set.el.classList.add('on', 'live');
+        set.el.classList.add('on');
         galCur = set;
         galSeenAdd(href);
         galMarkAll();
-        const L = set.layouts[set.pos];
         pics.forEach(function (p, k) {
-            const w = L[k < set.pos ? k : k + 1].w;
-            if (w > p.nw * GAL_UPGRADE) galUpgrade(p.item, p.img, p.nw, w);
+            if (L[k] && L[k].w > p.nw * GAL_UPGRADE) galUpgrade(p.item, p.img, p.nw, L[k].w);
         });
     }
 
@@ -10810,6 +10798,9 @@
         if (!href) return;
         clearTimeout(galGraceTimer);
         if (href === galWant) return;
+        const a = e.target.closest('a[href]'), pic = e.target.tagName === 'IMG' ? e.target : a && a.querySelector('img');
+        const hr = (pic || e.target).getBoundingClientRect();
+        galHole = { x: hr.left, y: hr.top, w: hr.width, h: hr.height };
         galWant = href;
         clearTimeout(galHoverTimer);
         galHoverTimer = setTimeout(function () {
@@ -10831,7 +10822,7 @@
         galGraceTimer = setTimeout(galHide, GAL_GRACE_MS);
     }
 
-    // The pointer over a picture moves the empty slot under it; over the slot or blank space, nothing moves.
+    // Tracks the pointer; hides at the window's edge; a move ends the scroll lock.
     function galMove(e) {
         galPt.x = e.clientX;
         galPt.y = e.clientY;
@@ -10849,17 +10840,7 @@
             if (galPt.x === galLock.x && galPt.y === galLock.y) return;
             galLock = null;
             galOver(e);
-            return;
         }
-        const set = galCur;
-        if (!set) return;
-        const L = set.layouts[set.pos];
-        if (galIn(L[set.pos], galPt.x, galPt.y)) return;
-        if (!L.some(function (r, i) { return i !== set.pos && galIn(r, galPt.x, galPt.y); })) return;
-        const p = galPosAt(set, galPt.x, galPt.y, false);
-        if (p < 0 || p === set.pos) return;
-        set.pos = p;
-        galPlace(set);
     }
 
     // A page scroll hides the set; nothing shows again until the pointer itself moves.
@@ -10949,9 +10930,7 @@
         window.addEventListener('keydown', function (e) { if (e.key === 'Escape' && galCur) galHide(); }, true);
         window.addEventListener('resize', function () {
             if ((cfg.gallerySites || []).length) galMarkSoon();
-            if (!galCur) return;
-            galLayouts(galCur);
-            galPlace(galCur);
+            if (galWant || galCur) galHide();
         });
     } else if (String(window.name || '').indexOf(GAL_NAME + ':') === 0) {
         setTimeout(galProbeReport, 0);

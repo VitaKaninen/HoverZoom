@@ -20,29 +20,23 @@ the site list; the galleries they lead to are not, so previews keep working ther
 ## Behaviour (user's numbers, 2026-11-09)
 
 - At most 34 pictures (`GAL_COLS` × `GAL_ROWS` − 1; that is all those constants do now).
-- **Justified rows, not a grid** (user, 2026-11-09: galleries are ~50/50 portrait/landscape, a
-  uniform grid left the page mostly empty; rows may hold different counts). `galShow` loads every
-  thumbnail first (`galImg`, up to `GAL_WAIT_MS` 2.5 s; late or failed ones are left out), so each
-  shape is known **before** anything is placed — the user does not want pictures swimming as they
-  load. One extra slot (at least `GAL_DUMMY` 3:4, see below) is the empty space under the pointer.
-- `galRows(aspects)` packs in order into rows that fill the width, binary-searching the row
-  height so the total fits the viewport; the last row is not stretched past that height and is
-  centred; the block is centred vertically. Pictures fill their slot exactly (`object-fit:cover`).
-- **The slot is as wide as the widest picture in its row** (user, v0.240.0): a 3:4 slot in a row of
-  landscapes left the pointer no way out — every neighbour was wider than the slot, so no layout's
-  slot covered the pointer once it crossed the edge. `galLayouts` re-packs up to 4 times, growing the
-  slot's aspect (never shrinking, so it converges) to the widest in the row it lands in; rows re-pack
-  around it, which pushes pictures into the short last row. Height needs nothing: a row is one height.
-  Measured with a random walk of pointer steps 25 px past each slot edge on `gallery-mixed.html`
-  at 1024 × 768: 33 of 87 steps stuck before, 0 of 88 after.
-- `galLayouts(set)` precomputes one layout per slot position (n + 1). `galMove`: pointer over the
-  slot or blank space → nothing; over a picture → the position whose slot covers the pointer,
-  nearest the current one (`galPosAt`); none covers it → stay. Pictures slide between layouts by
-  the CSS transform transition — the "move out of the way". Resize → recompute layouts.
-  Choosing only positions whose slot covers the pointer is what stops ping-pong flicker.
-- Upgrade check uses each picture's slot width in the first layout.
-- Fixture `test-pages/gallery-mixed.html`: 20 alternating 4:3 / 2:3; at 1024 × 768 it fills 4 rows,
-  79 % of the viewport.
+- **Layout: a fixed hole over the hovered result** (user, v0.241.0, "another method"; the earlier
+  moving-slot method is v0.240.0, commit de9996a — "take it back to here" means that). The hole is
+  the hovered result's `<img>` rect (`galHole`, taken in `galOver`) plus `GAL_ARM` (0.5) of its own
+  width/height out left, right, up and down: a plus, corners covered (`galBars`) — the user wanted
+  half of each neighbouring result visible so the pointer can reach it. Nothing moves under the
+  pointer; hovering a neighbour switches the gallery after the hover delay, hole and all.
+- `galShow` loads every thumbnail first (`galImg`, up to `GAL_WAIT_MS` 2.5 s; late or failed ones are
+  left out), so each shape is known **before** anything is placed — the user does not want pictures
+  swimming as they load.
+- `galRows(aspects, hole)`: rows of one height spread evenly over the viewport; each row's band is
+  split into free segments around the bars (+ `GAL_GAP`); pictures fill segments in order, spare
+  width spread evenly between them; binary search for the largest height that places every
+  picture (none fits even at 8 px → the unplaced cells are hidden). Rows are one height because a
+  segment beside the hole cannot be justified independently of the rows above and below.
+- Resize hides the set (the hole's rect is stale). Upgrade check uses each picture's drawn width.
+- Fixtures at 1024 × 768: `gallery-mixed.html` (20 alternating 4:3 / 2:3) → 4 rows of 143 px, 52 %
+  of the viewport; gallery A → 34 in 6 rows of 100 px. Fill is lower than the old justified rows (79 %).
 - Hover delay = `cfg.hoverDelay`. Off every result link for `GAL_GRACE_MS` 500 → fade out. Moving
   to another link within that time keeps the old set until the new one is ready, then crossfades
   (`GAL_FADE_MS` 200). A linked page with no pictures clears the old set.
@@ -63,9 +57,9 @@ the site list; the galleries they lead to are not, so previews keep working ther
   and after each show; it holds no element references.
 - Test: the Browser pane's background tab fires **no** scroll events (`scrollBy` moves the page,
   listeners get nothing) — dispatch `new Event('scroll')` on `document` by hand.
-- Backdrop (user): the page darkens while a set shows (`.shade`, a box the size of the pointer's
-  slot whose `box-shadow` spreads `rgba(0,0,0,.6)` over the viewport); the slot itself is lighter
-  (`.25`). It lives inside the set, so it fades and slides with it.
+- Backdrop (user): `.shade` darkens the page `rgba(0,0,0,.6)` with the plus cut out
+  (`clip-path: polygon(evenodd, viewport, plus)`); `.lite` covers the plus at `.25` (`galShade`).
+  Both live inside the set, so they fade with it.
 
 ## Reading the gallery: the hidden frame first (v0.231.0)
 
