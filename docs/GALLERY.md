@@ -56,8 +56,16 @@ previous set stays up.
 **largest group**: the grid shares one chain; logos, ads and "related galleries" usually sit in
 another. A site whose related block shares the grid's chain will mix them.
 
-Thumbnail URL (`galThumbOf`): `src`, else a lazy attribute (`GAL_LAZY`), else the smallest srcset
-entry. Blocked URLs, `data:`/`blob:` skipped.
+Thumbnail URL (`galThumbOf`): a lazy attribute first (`GAL_LAZY`, then any other `data-*` whose
+value ends in an image extension), else `src`, else the smallest srcset entry. Blocked URLs,
+`data:`/`blob:` skipped.
+
+- **Lazy attribute before `src`:** lazy pages give every grid `<img>` one placeholder `src`, and
+  `galPick` dedupes by URL, so the whole grid collapsed to one entry and the 2-picture logo group
+  won (user's site, v0.231.0). Fixture: `test-pages/gallery-lazy.html` (12 must show, no header).
+- The frame's "refused" log names where it landed (v0.232.0). On the user's site it fails although
+  `frame-ancestors 'self'` allows it and the fetch redirects within the origin. Cause unknown; a
+  script frame-buster that navigates itself is the guess.
 
 ## Bigger size (user's rule)
 

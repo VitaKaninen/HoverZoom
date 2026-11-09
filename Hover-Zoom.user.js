@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.231.0
+// @version     0.232.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -10403,15 +10403,21 @@
         return u.href;
     }
 
-    // A fetched <img>'s thumbnail URL: its src, else a lazy attribute, else its smallest srcset entry.
+    // A fetched <img>'s thumbnail URL: a lazy attribute (src is then a placeholder), else src, else its smallest srcset entry.
     function galThumbOf(n) {
         const ok = function (u) { return u && !/^(data|blob):/.test(u) && !blocked(u); };
         const abs = function (v) { try { return new URL(v.trim(), n.__hzBase).href; } catch (e) { return ''; } };
-        if (n.getAttribute('src') && ok(n.src)) return n.src;
-        for (let i = 0; i < GAL_LAZY.length; i++) {
-            const v = n.getAttribute(GAL_LAZY[i]);
+        const named = GAL_LAZY.slice();
+        for (let i = 0; i < n.attributes.length; i++) {
+            const a = n.attributes[i];
+            if (/^data-/.test(a.name) && named.indexOf(a.name) < 0 && !/srcset/.test(a.name) &&
+                /\.(jpe?g|png|webp|gif|avif)(\?|#|$)/i.test(a.value.trim())) named.push(a.name);
+        }
+        for (let i = 0; i < named.length; i++) {
+            const v = n.getAttribute(named[i]);
             if (v && !/\s/.test(v.trim()) && ok(abs(v))) return abs(v);
         }
+        if (n.getAttribute('src') && ok(n.src)) return n.src;
         const ss = n.getAttribute('srcset') || n.getAttribute('data-srcset');
         if (ss) {
             const list = parseSrcset(ss);       // widest first
@@ -10489,8 +10495,8 @@
                 'px;border:0;opacity:0;pointer-events:none;z-index:-2147483647';
             f.addEventListener('load', function () {
                 let u = '';
-                try { u = f.contentWindow.location.href; } catch (e) { /* an error page or another origin */ }
-                if (!u || u === 'about:blank') fin(null, 'the page refused to load in a frame');
+                try { u = f.contentWindow.location.href; } catch (e) { u = 'unreadable: ' + e.name; }
+                if (!u || u === 'about:blank' || /^unreadable/.test(u)) fin(null, 'the page refused to load in a frame, landed on ' + (u || 'nothing'));
             });
             t = setTimeout(function () { fin(null, 'no report in ' + GAL_FRAME_MS + ' ms'); }, GAL_FRAME_MS);
             f.src = href;
