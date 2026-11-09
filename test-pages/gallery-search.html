@@ -5,7 +5,7 @@
   Gallery mode. This page is on the site list by path (previews off) and localhost is on the gallery
   list, so hovering a result floats the thumbnails of the page it links to. gallery-a.html has 40 grid
   pictures plus 6 "related" ones in another structure: 34 grid ones show, no related ones.
-  gallery-b.html has 10. gallery-empty.html has none (nothing shows). Clear localStorage to reset.
+  gallery-b.html has 10. gallery-empty.html has none (nothing shows). gallery-js.html builds 25 by script: only the hidden frame sees them; A and B carry no script, so they reach the HTML fallback after the frame times out. Clear localStorage to reset.
 -->
 <style>
   body { font: 14px system-ui, sans-serif; background: #1e1e2e; color: #cdd6f4; padding: 20px; }
@@ -16,6 +16,7 @@
 <div class="results">
   <div class="result"><a id="ra" href="gallery-a.html"><img src="/test-images/photo-200x150.jpg?r1"></a>gallery A (40 + 6 related)</div>
   <div class="result"><a id="rb" href="gallery-b.html"><img src="/test-images/photo-200x150.jpg?r2"></a>gallery B (10)</div>
+  <div class="result"><a id="rj" href="gallery-js.html"><img src="/test-images/photo-200x150.jpg?r4"></a>built by script (25)</div>
   <div class="result"><a id="re" href="gallery-empty.html"><img src="/test-images/photo-200x150.jpg?r3"></a>no pictures</div>
 </div>
 <script>

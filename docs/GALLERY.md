@@ -27,14 +27,34 @@ the site list; the galleries they lead to are not, so previews keep working ther
   (`GAL_FADE_MS` 200). A linked page with no pictures clears the old set.
 - Esc, a mouse press, or leaving gallery-mode pages hides it.
 
-## Picking the gallery from the fetched page
+## Reading the gallery: the hidden frame first (v0.231.0)
 
-`fetchDoc` (DOMParser, so **a gallery built by JavaScript comes back empty** — nothing shows; the
-debug log says `gallery: no pictures`). `galPick` groups every `<img>` by `domChain` and takes the
+The user's site builds its gallery by script: the plain HTML held 5 groups, the biggest the
+header logo (2), so the HTML read showed only the logo and excluding it promoted the next header
+picture. The user wants **the widget's own rules** (it counted 20 there and left the logo out).
+
+`galRender(href)` loads the page in a hidden same-origin iframe (`opacity:0`, viewport-sized so
+layout and lazy loading run, `sandbox="allow-scripts allow-same-origin"` = no top navigation or
+popups, `allow="autoplay 'none'"`). `window.name` = `hz-gallery-probe:<token>`. Our own copy runs
+in that frame (no `@noframes`); seeing the name it runs `galProbeReport()`: after `load` +
+`GAL_SETTLE_MS` (one retry after `GAL_RETRY_MS` if empty) it posts `widgetEntries()`'s `<img>`s as
+plain items `{thumb, ss, cands, base}` (`galItem`). It also mutes and pauses anything that plays.
+One frame at a time (`galFrameStop`); a newer hover cancels it (`'cancel'`, not cached).
+
+The frame **fails** → the plain HTML read below: load lands on an error page or another origin
+(cross-origin links always do), or no report in `GAL_FRAME_MS` (10 s). During that wait the
+previous set stays up.
+
+- **Unverified:** whether Tampermonkey injects into a `sandbox`ed iframe. The test pages load the
+  script by `<script>`, so they cannot tell. If it does not, every hover logs `gallery frame: no
+  report in 10000 ms` and falls back; then drop the `sandbox` attribute (cost: frame-busting
+  scripts could navigate the user's page).
+
+## The HTML fallback
+
+`fetchDoc` (DOMParser runs no scripts). `galPick` groups every `<img>` by `domChain` and takes the
 **largest group**: the grid shares one chain; logos, ads and "related galleries" usually sit in
-another. No learning yet: a site where the related block shares the grid's chain will mix them.
-If that happens, the next step is the learned-structure pattern from `../CLAUDE.md` with the user
-teaching the grid, not a hardcoded selector.
+another. A site whose related block shares the grid's chain will mix them.
 
 Thumbnail URL (`galThumbOf`): `src`, else a lazy attribute (`GAL_LAZY`), else the smallest srcset
 entry. Blocked URLs, `data:`/`blob:` skipped.
@@ -58,7 +78,8 @@ with `logBusy` — the host is already stored in `gallerySites`, so the log priv
 ## Test
 
 `test-pages/gallery-search.html` (sets its own localStorage settings on first load):
-A → 34 of 40 grid pictures, none of the 6 related; B → 10; the third → nothing. Synthetic
+"built by script" → 25 through the frame in ~1.5 s, logo left out; A → (frame times out: A has no
+script) 34 of 40 grid pictures from the HTML, none of the 6 related; B → 10; the last → nothing. Synthetic
 `mouseover` on `#ra img` works; the pane's hover coordinates are scaled (×1.28 measured), so aim
 by `clientX` read back from a `mousemove` listener. Upgrade path needs cells > 260 px: emulate a
 2400 × 1500 viewport; expect `photo-420x315.jpg`, not the 800.

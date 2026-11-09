@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.230.0
+// @version     0.231.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -10375,7 +10375,13 @@
     const GAL_CACHE = 30;               // fetched pages kept by URL
     const GAL_TRIES = 4;                // bigger sizes tried per thumbnail
     const GAL_LAZY = ['data-src', 'data-lazy-src', 'data-original', 'data-lazy', 'data-echo', 'data-defer-src', 'data-url'];
-    const galCache = new Map();         // href -> Promise of [{el, thumb}] | null
+    const GAL_MAX = GAL_COLS * GAL_ROWS - 1;
+    const GAL_NAME = 'hz-gallery-probe';    // the hidden frame's window.name prefix
+    const GAL_FRAME_MS = 10000;         // longest wait for the hidden frame's report
+    const GAL_SETTLE_MS = 700;          // after the frame's load, before it counts
+    const GAL_RETRY_MS = 1500;          // one more look when it counted nothing
+    const galCache = new Map();         // href -> Promise of [{thumb, ss, cands, base}] | null | 'cancel'
+    let galFrameStop = null;
     let galHost = null, galRoot = null, galCur = null, galWant = null;
     let galHoverTimer = 0, galGraceTimer = 0, galGap = -1, galPt = { x: 0, y: 0 };
 
@@ -10432,19 +10438,101 @@
         });
         let best = [];
         groups.forEach(function (g) { if (g.length > best.length) best = g; });
-        dbg('gallery picked', { href: href, groups: groups.size, pictures: best.length,
+        dbg('gallery picked from the HTML', { href: href, groups: groups.size, pictures: best.length,
             chain: best.length ? domChain(best[0].el) : '' });
-        return best.slice(0, GAL_COLS * GAL_ROWS - 1);
+        return best.slice(0, GAL_MAX).map(function (x) { return galItem(x.el, x.thumb, href); });
     }
 
+    // One picture as plain data, so it can cross from the hidden frame: thumbnail, srcsets, resolver candidates.
+    function galItem(el, thumb, base) {
+        const ss = [el.getAttribute('srcset'), el.getAttribute('data-srcset')];
+        const pic = el.closest && el.closest('picture');
+        if (pic) pic.querySelectorAll('source[srcset]').forEach(function (s) { ss.push(s.getAttribute('srcset')); });
+        let cands = [];
+        try {
+            cands = collectCandidates(el).map(function (c) { return c.url; })
+                .filter(function (u) { return u !== thumb && !isVideoUrl(u); }).slice(0, GAL_TRIES * 2);
+        } catch (e) { /* no candidates is fine: the thumbnail stays */ }
+        return { thumb: thumb, ss: ss.filter(Boolean), cands: cands, base: base };
+    }
+
+    // The rendered page's pictures, by the widget's own rules, from a hidden frame. null = the frame failed.
+    function galRender(href) {
+        if (galFrameStop) galFrameStop();
+        return new Promise(function (resolve) {
+            const token = Math.random().toString(36).slice(2);
+            const f = document.createElement('iframe');
+            let done = false, t = 0;
+            const fin = function (v, why) {
+                if (done) return;
+                done = true;
+                clearTimeout(t);
+                window.removeEventListener('message', onMsg);
+                if (galFrameStop === stop) galFrameStop = null;
+                f.remove();
+                dbg('gallery frame: ' + why, { href: href, pictures: v ? v.length : 0 });
+                resolve(v);
+            };
+            const stop = function () { fin('cancel', 'replaced by a newer hover'); };
+            const onMsg = function (e) {
+                if (e.source !== f.contentWindow || !e.data || e.data.hzGallery !== token) return;
+                fin(Array.isArray(e.data.items) ? e.data.items : [], 'reported');
+            };
+            galFrameStop = stop;
+            window.addEventListener('message', onMsg);
+            f.name = GAL_NAME + ':' + token;
+            f.setAttribute('sandbox', 'allow-scripts allow-same-origin');     // no top navigation, no popups
+            f.setAttribute('allow', "autoplay 'none'");
+            f.setAttribute('aria-hidden', 'true');
+            f.tabIndex = -1;
+            f.style.cssText = 'all:initial;position:fixed;left:0;top:0;width:' + vpW() + 'px;height:' + vpH() +
+                'px;border:0;opacity:0;pointer-events:none;z-index:-2147483647';
+            f.addEventListener('load', function () {
+                let u = '';
+                try { u = f.contentWindow.location.href; } catch (e) { /* an error page or another origin */ }
+                if (!u || u === 'about:blank') fin(null, 'the page refused to load in a frame');
+            });
+            t = setTimeout(function () { fin(null, 'no report in ' + GAL_FRAME_MS + ' ms'); }, GAL_FRAME_MS);
+            f.src = href;
+            document.documentElement.appendChild(f);
+        });
+    }
+
+    // Inside the hidden frame: once the page has settled, send the parent what the widget would count.
+    function galProbeReport() {
+        const token = String(window.name).slice(GAL_NAME.length + 1);
+        let tries = 0;
+        document.addEventListener('play', function (e) {
+            try { e.target.muted = true; e.target.pause(); } catch (x) { /* not media */ }
+        }, true);
+        const send = function () {
+            let items = [];
+            try {
+                items = widgetEntries().filter(function (e) { return e.el && e.el.tagName === 'IMG'; })
+                    .map(function (e) { return galItem(e.el, shownUrl(e.el) || e.url, location.href); })
+                    .filter(function (x) { return x.thumb && !/^(data|blob):/.test(x.thumb); }).slice(0, GAL_MAX);
+            } catch (err) { dbg('gallery frame could not list the page', String(err)); }
+            if (!items.length && ++tries < 2) { setTimeout(send, GAL_RETRY_MS); return; }
+            try { window.parent.postMessage({ hzGallery: token, items: items }, location.origin); }
+            catch (e) { /* parent gone */ }
+        };
+        const go = function () { setTimeout(send, GAL_SETTLE_MS); };
+        if (document.readyState === 'complete') go(); else window.addEventListener('load', go);
+    }
+
+    // The rendered page first; the plain HTML only when the frame fails.
     function galLoad(href) {
         if (galCache.has(href)) return galCache.get(href);
-        const p = fetchDoc(href, function (res) {
-            if (res.status === 429 || res.status === 503) logBusy(href, res);
-            dbg('gallery page refused', { href: href, status: res.status });
-        }).then(function (doc) {
-            if (!doc) { galCache.delete(href); return null; }
-            return galPick(doc, href);
+        const p = galRender(href).then(function (list) {
+            if (list === 'cancel') { galCache.delete(href); return 'cancel'; }
+            if (list) return list;
+            return fetchDoc(href, function (res) {
+                if (res.status === 429 || res.status === 503) logBusy(href, res);
+                dbg('gallery page refused', { href: href, status: res.status });
+            }).then(function (doc) {
+                if (!doc) { galCache.delete(href); return null; }
+                return galPick(doc, href);
+            });
         });
         galCache.set(href, p);
         if (galCache.size > GAL_CACHE) galCache.delete(galCache.keys().next().value);
@@ -10502,18 +10590,13 @@
 
     // Bigger files for one thumbnail, the next size up first: srcset widths ascending, else the resolver's list.
     function galBigger(item, nw, need) {
-        const el = item.el;
         const ss = [];
-        const widths = function (v) {
+        (item.ss || []).forEach(function (v) {
             const re = /(\S+)\s+(\d+)w\b/g;
             let m;
-            while (v && (m = re.exec(v))) ss.push({ url: m[1].replace(/^,/, ''), weight: +m[2] });
-        };
-        widths(el.getAttribute('srcset'));
-        widths(el.getAttribute('data-srcset'));
-        const pic = el.closest && el.closest('picture');
-        if (pic) pic.querySelectorAll('source[srcset]').forEach(function (s) { widths(s.getAttribute('srcset')); });
-        const abs = function (v) { try { return new URL(v, el.__hzBase).href; } catch (e) { return ''; } };
+            while ((m = re.exec(v))) ss.push({ url: m[1].replace(/^,/, ''), weight: +m[2] });
+        });
+        const abs = function (v) { try { return new URL(v, item.base).href; } catch (e) { return ''; } };
         const wide = ss.filter(function (c) { return c.weight > nw; })
             .sort(function (a, b) { return a.weight - b.weight; });
         let out;
@@ -10522,8 +10605,7 @@
             out = i < 0 ? wide.slice().reverse() : wide.slice(i).concat(wide.slice(0, i).reverse());
             out = out.map(function (c) { return abs(c.url); });
         } else {
-            out = collectCandidates(el).map(function (c) { return c.url; })
-                .filter(function (u) { return !isVideoUrl(u); });
+            out = (item.cands || []).slice();
         }
         return out.filter(function (u, i) { return u && u !== item.thumb && out.indexOf(u) === i; }).slice(0, GAL_TRIES);
     }
@@ -10565,7 +10647,7 @@
     }
 
     function galShow(href, list) {
-        if (galWant !== href || (galCur && galCur.href === href)) return;
+        if (list === 'cancel' || galWant !== href || (galCur && galCur.href === href)) return;
         if (!list || !list.length) {
             dbg('gallery: no pictures on the linked page', { href: href });
             if (galCur) { galDrop(galCur); galCur = null; }
@@ -10642,6 +10724,8 @@
         document.addEventListener('mousedown', function () { if (galWant || galCur) galHide(); }, true);
         window.addEventListener('keydown', function (e) { if (e.key === 'Escape' && galCur) galHide(); }, true);
         window.addEventListener('resize', function () { if (galCur) galPlace(galCur); });
+    } else if (String(window.name || '').indexOf(GAL_NAME + ':') === 0) {
+        setTimeout(galProbeReport, 0);
     }
 
     // ---- hosts that pushed back
