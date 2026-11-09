@@ -696,7 +696,7 @@ anyone makes, and doing it through the panel means opening it and scrolling to t
   checkbox `showPostEnd`, put in the menu at the user's request because it is toggled often while
   the post end is tuned; expected to go when that work settles. `refreshSiteMenu()` re-registers
   every entry each time, in the order site, gallery, lines.
-- **"Enable / Disable gallery mode for this site"** (`toggleGallery()`, v0.230.0) works like
+- **"Show / Hide gallery button on this site"** (`toggleGallery()`, v0.230.0; renamed v0.252.0) works like
   `toggleSite()` on `gallerySites`; see [`GALLERY.md`](GALLERY.md).
 - **`toggleSite()` removes EVERY entry that covers the host, not an exact match.** `siteEnabled()`
   matches by suffix, so on `www.example.com` a listed `example.com` is what is in force —

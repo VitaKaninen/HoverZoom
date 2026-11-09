@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.251.0
+// @version     0.252.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -506,7 +506,27 @@
     }
 
     function siteEnabled() {
-        return cfg.siteMode === 'whitelist' ? siteListed() : !siteListed();
+        return (cfg.siteMode === 'whitelist' ? siteListed() : !siteListed()) && !galleryActive();
+    }
+
+    var galOnStore = null;      // var, not let: siteEnabled() can run before this line. host -> [paths gallery mode is on for]
+
+    function galOnPaths() {
+        if (!galOnStore) {
+            try { galOnStore = JSON.parse(GM_getValue('hoverZoomGalleryOn', '') || '{}') || {}; } catch (e) { galOnStore = {}; }
+        }
+        return galOnStore;
+    }
+
+    function galPathHere() {
+        try { return new URL(pageUrl()).pathname; } catch (e) { return '/'; }
+    }
+
+    // Gallery mode is switched on for this page: the site has the button and it is on for this path.
+    function galleryActive() {
+        if (!galleryListed()) return false;
+        const l = galOnPaths()[pageHost()];
+        return !!l && l.indexOf(galPathHere()) >= 0;
     }
 
     function galleryListed() {
@@ -560,7 +580,7 @@
         }
         try {
             siteMenuId = GM_registerMenuCommand(siteMenuLabel(), toggleSite);
-            galleryMenuId = GM_registerMenuCommand((galleryListed() ? 'Disable' : 'Enable') + ' gallery mode for this site', toggleGallery);
+            galleryMenuId = GM_registerMenuCommand((galleryListed() ? 'Hide' : 'Show') + ' gallery button on this site', toggleGallery);
             linesMenuId = GM_registerMenuCommand((cfg.showPostEnd ? '☑' : '☐') + ' Draw where the slideshow stops', toggleLines, { autoClose: false });
         } catch (e) { /* nothing to fall back to; the panel still has the list */ }
     }
@@ -606,9 +626,9 @@
         refreshSiteMenu();
         refreshPanel();
         if (!galleryListed()) galHide();
-        const on = galleryListed();
-        toast('Gallery mode ' + (on ? 'enabled' : 'disabled') + ' for ' + host +
-            (on && siteEnabled() ? ' (works on pages where previews are off)' : ''), 3000);
+        galBtnSync();
+        twRefresh();
+        toast('Gallery button ' + (galleryListed() ? 'shown' : 'hidden') + ' on ' + host, 3000);
     }
 
     function version() {
@@ -10399,13 +10419,98 @@
     const GAL_SAVEDFROM_KEY = 'hoverZoomGallerySavedFrom';   // linked pages something was saved from
     const GAL_SAVED_MARK = 'data-hz-saved';
     let galSeen = {}, galLock = null, galMarkTimer = 0, galEdge = false, galHole = null;
-    let galOn = false, galTap = false, galAt = null;      // toggled on and locked; Ctrl down with nothing else yet; the result under the pointer {href, hole}
+    let galOn = false, galTap = false, galAt = null, galMidAt = 0;      // toggled on and locked; Ctrl down with nothing else yet; the result under the pointer {href, hole}
     let galPre = null, galPreStop = false, galPreLog = null;   // the preload in flight; stopped by a refusal; its log row
     const galPreTried = new Set();
 
     // Gallery mode runs where the gallery list covers the page and ordinary previews are off.
     function galleryHere() {
-        return isTopFrame && !CAPTCHA_HERE && galleryListed() && !siteEnabled();
+        return isTopFrame && !CAPTCHA_HERE && galleryActive();
+    }
+
+    // The button: gallery mode on or off for this page; remembered per site and path.
+    function galToggle() {
+        galOnStore = null;
+        const st = galOnPaths(), h = pageHost(), path = galPathHere();
+        const l = (st[h] || []).filter(function (x) { return x !== path; });
+        const on = !galleryActive();
+        if (on) l.push(path);
+        if (l.length) st[h] = l; else delete st[h];
+        try { GM_setValue('hoverZoomGalleryOn', JSON.stringify(st)); } catch (e) { /* storage unavailable */ }
+        galOnStore = st;
+        if (on) { if (placed) unplace(); else cancel(); setTimeout(galPreNext, 0); galMarkAll(); }
+        else galHide();
+        twRefresh();
+        galBtnSync();
+        toast('Gallery mode ' + (on ? 'on' : 'off'), 3000);
+    }
+
+    let galBtn = null;
+    const ICON_GALLERY = 'M4 4h7v7H4V4zm9 0h7v7h-7V4zM4 13h7v7H4v-7zm9 0h7v7h-7v-7z';
+
+    // Shown on sites in the gallery list only; blue when on.
+    function galBtnSync() {
+        if (!isTopFrame || !document.body) return;
+        const want = galleryListed() && !CAPTCHA_HERE;
+        if (!galBtn) {
+            if (!want) return;
+            galBtnBuild();
+        }
+        galBtn.host.hidden = !want;
+        galBtn.host.style.display = want ? 'block' : 'none';
+        const on = galleryActive();
+        galBtn.b.classList.toggle('on', on);
+        setTip(galBtn.b, 'Gallery mode ' + (on ? 'on' : 'off') + ' — click to turn it ' + (on ? 'off' : 'on'));
+        if (galBtn.dock) galBtn.dock.relayout();
+    }
+
+    function galBtnBuild() {
+        const host = document.createElement('div');
+        host.id = 'hover-zoom-gallery';
+        host.style.cssText = 'all:initial;position:fixed;right:8px;top:8px;z-index:2147483647;width:max-content;display:none';
+        const sr = host.attachShadow({ mode: 'open' });
+        const st = document.createElement('style');
+        st.textContent = ':host{all:initial}' +
+            '.g{box-sizing:border-box;display:flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:6px;' +
+            'background:#1e1e2e;border:1px solid #45475a;box-shadow:0 2px 8px rgba(0,0,0,.45);color:#6c7086;cursor:pointer;user-select:none}' +
+            '.g:hover{color:#cdd6f4}' +
+            '.g.on{background:#89b4fa;border-color:#89b4fa;color:#1e1e2e}' +
+            '.g svg{display:block;width:14px;height:14px;fill:currentColor}';
+        sr.appendChild(st);
+        const b = document.createElement('div');
+        b.className = 'g';
+        b.appendChild(mkIcon(ICON_GALLERY));
+        sr.appendChild(b);
+        let down = null;
+        b.addEventListener('mousedown', function (e) { down = { x: e.clientX, y: e.clientY }; });
+        b.addEventListener('click', function (e) {
+            e.preventDefault();
+            e.stopPropagation();
+            if (down && Math.abs(e.clientX - down.x) + Math.abs(e.clientY - down.y) > 4) return;     // a drag, not a click
+            galToggle();
+        });
+        document.body.appendChild(host);
+        galBtn = { host: host, b: b, dock: null };
+        const corner = { x: { r: 'win', m: 'e', t: 'e', o: -8 }, y: { r: 'win', m: 's', t: 's', o: 8 } };
+        galBtn.dock = usDock.create({ id: 'hover-zoom-gallery', el: host, radius: 6,
+            load: function () {
+                let all = {};
+                try { all = JSON.parse(GM_getValue('hoverZoomGalleryDock', '') || '{}') || {}; } catch (e) { /* fresh */ }
+                return all[pageHost()] || null;
+            },
+            save: function (spec) {
+                let all = {};
+                try { all = JSON.parse(GM_getValue('hoverZoomGalleryDock', '') || '{}') || {}; } catch (e) { /* fresh */ }
+                all[pageHost()] = spec;
+                GM_setValue('hoverZoomGalleryDock', JSON.stringify(all));
+            },
+            initial: function () { return { x: corner.x, y: corner.y, fx: corner.x, fy: corner.y, ov: [] }; },
+            apply: function (r) {
+                host.style.left = r.x + 'px';
+                host.style.top = r.y + 'px';
+                host.style.right = 'auto';
+            },
+            onDrag: function (on) { if (on) hideTip(); } });
     }
 
     // The page a hovered picture links to, or null.
@@ -10780,7 +10885,7 @@
         if (list === 'cancel' || galWant !== href || (galCur && galCur.href === href)) return;
         if (!list || !list.length) {
             dbg('gallery: no pictures on the linked page', { href: href });
-            if (galCur) { galDrop(galCur); galCur = null; galBlur.classList.remove('on'); }
+            galHide();
             return;
         }
         let timer = 0;
@@ -10793,7 +10898,7 @@
             clearTimeout(timer);
             if (galWant !== href || (galCur && galCur.href === href)) return;
             const pics = (v || got).filter(Boolean);
-            if (!pics.length) { if (galCur) { galDrop(galCur); galCur = null; galBlur.classList.remove('on'); } return; }
+            if (!pics.length) { galHide(); return; }
             galBuild(href, pics);
         });
     }
@@ -10950,6 +11055,28 @@
         }, cfg.hoverDelay);
     }
 
+    // Middle press on a result: its gallery, locked; on the open one, closed; on another, switched.
+    function galMiddle(t, href) {
+        if (galOn && (galWant === href || (galCur && galCur.href === href))) { galHide(); return; }
+        const a = t.closest('a[href]'), pic = t.tagName === 'IMG' ? t : a && a.querySelector('img');
+        const hr = (pic || t).getBoundingClientRect();
+        galAt = { href: href, hole: { x: hr.left, y: hr.top, w: hr.width, h: hr.height } };
+        if (galOwns(active)) cancel();
+        galOn = true;
+        galHole = galAt.hole;
+        galWant = href;
+        clearTimeout(galHoverTimer);
+        clearTimeout(galGraceTimer);
+        galLoad(href).then(function (list) { galShow(href, list); });
+    }
+
+    // The rest of that press: no new tab.
+    function galMidEat(e) {
+        if (e.button !== 1 || !galMidAt || Date.now() - galMidAt > 1000) return;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+    }
+
     // A Ctrl tap (nothing else pressed, clicked or scrolled meanwhile) toggles the gallery, locked on the result under the pointer.
     function galKeyDown(e) {
         if (e.key !== 'Control') { galTap = false; return; }
@@ -11038,15 +11165,6 @@
         try { GM_setValue(key, JSON.stringify(Array.from(s))); } catch (e) { /* storage unavailable */ }
     }
 
-    // A clicked result link counts as visited.
-    function galClick(e) {
-        if (e.button > 1 || !galleryHere()) return;
-        const h = galLinkOf(e.target);
-        if (!h) return;
-        galListAdd(GAL_VISITED_KEY, h);
-        galMarkAll();
-    }
-
     // One green tick in the picture's top-right corner, or two overlapping for a visited gallery.
     function galMarkImg(img, kind) {
         const at = img.closest('picture') || img;
@@ -11111,7 +11229,7 @@
     }
 
     function galMarkAll() {
-        if (!galleryHere()) return;
+        if (!isTopFrame || !galleryListed()) return;
         const seen = galList(GAL_SEEN_KEY), went = galList(GAL_VISITED_KEY), from = galList(GAL_SAVEDFROM_KEY);
         if (!seen.size && !went.size && !from.size) return;
         document.querySelectorAll('a[href] img').forEach(function (img) {
@@ -11185,6 +11303,8 @@
         document.addEventListener('scroll', galScroll, { capture: true, passive: true });
         setTimeout(function () { galMarkAll(); galPreNext(); }, 1500);
         window.addEventListener('keydown', galKeyDown, true);
+        ['mouseup', 'auxclick', 'click'].forEach(function (t) { document.addEventListener(t, galMidEat, true); });
+        setTimeout(galBtnSync, 0);
         window.addEventListener('keyup', galKeyUp, true);
         window.addEventListener('blur', function () { galTap = false; });
         window.addEventListener('wheel', function () { galTap = false; }, { capture: true, passive: true });
@@ -11192,14 +11312,24 @@
         setTimeout(function () {
             if (galleryListed() && !galleryHere()) galListAdd(GAL_VISITED_KEY, location.href.split('#')[0]);
         }, 0);
-        document.addEventListener('click', galClick, true);
-        document.addEventListener('auxclick', galClick, true);
         document.addEventListener('mouseover', galOver, true);
         document.addEventListener('mouseout', galOut, true);
         document.addEventListener('mousemove', galMove, { capture: true, passive: true });
         document.addEventListener('mousedown', function (e) {
             galTap = false;
-            if (!galWant && !galCur) return;
+            galMidAt = 0;
+            if (e.button === 1 && !e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey && galleryHere()) {
+                if (e.target === galHost) { e.preventDefault(); return; }      // no autoscroll over the gallery
+                const href = galLinkOf(e.target);
+                if (href) {
+                    e.preventDefault();
+                    e.stopImmediatePropagation();
+                    galMidAt = Date.now();
+                    galMiddle(e.target, href);
+                    return;
+                }
+            }
+            if (e.button !== 0 || (!galWant && !galCur)) return;     // middle and right presses (a tab, the menu) leave it up
             if (e.target === galHost || ours(e.target) || pointInPreview(e.clientX, e.clientY)) return;   // the gallery or the preview
             galHide();
         }, true);
@@ -12343,16 +12473,6 @@
             currentValue: function () { return pageHost(); },
         });
 
-        const gallerySites = list('gallerySites', {
-            heading: 'Gallery mode',
-            description: 'Only on pages where previews are off by the list above. Hovering a link there floats the pictures of the page it opens, around the pointer. Entries match like the list above, so example.com/tags limits it to those pages.',
-            examples: 'Examples: example.com, example.com/tags, "example.com/search"',
-            placeholder: 'e.g. example.com',
-            addCurrentLabel: '+ This site',
-            addCurrentTitle: pageHost(),
-            currentValue: function () { return pageHost(); },
-        });
-
         section('Exceptions');
         const blocks = list('blockList', {
             heading: 'Never preview these images',
@@ -12465,6 +12585,18 @@
             description: 'Learned when your scrolling raises the widget’s count; dropped after ' +
                 GROWS_FORGET + ' loads that find nothing more.',
             examples: 'example.com also covers www.example.com',
+            placeholder: 'e.g. example.com',
+            addCurrentLabel: '+ This site',
+            addCurrentTitle: pageHost(),
+            currentValue: function () { return pageHost(); },
+        });
+
+        section('Gallery mode');
+        const gallerySites = list('gallerySites', {
+            heading: 'Sites with the gallery button',
+            description: 'The button sits top right on these sites and turns gallery mode on or off for the page it is on. ' +
+                'The menu item “Show gallery button on this site” adds a site here.',
+            examples: 'Examples: example.com, example.com/tags',
             placeholder: 'e.g. example.com',
             addCurrentLabel: '+ This site',
             addCurrentTitle: pageHost(),

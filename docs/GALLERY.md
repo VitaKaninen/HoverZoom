@@ -4,19 +4,21 @@ Hovering a result on a search/listing page floats the thumbnails of the page tha
 so the user can judge whether that gallery is worth opening. Look only: the floating layer is
 `pointer-events:none`, nothing on it is clickable. Code: `galleryHere` … `galMove`, after `harvest`.
 
-## Where it runs
+## Where it runs (user, v0.252.0)
 
-`galleryHere()` = top frame, not a captcha, page covered by `cfg.gallerySites`, **and ordinary
-previews are off here** (`!siteEnabled()`). The user's search pages are already path entries in
-the site list; the galleries they lead to are not, so previews keep working there.
-
-- `gallerySites` entries use `siteEntryMatches` (same syntax as the site list). A bare host covers
-  every previews-off page on that host; a path entry narrows it. That is the answer to "a page
-  where I want neither": exclude it in the site list and give `gallerySites` path entries that
-  don't cover it. The user flagged the bare-host case as possibly needing a rethink later.
-- Menu item `toggleGallery()` removes every entry covering the page, else adds the host.
-- In `RESET_KEEPS`.
-
+- `gallerySites` (Settings → Advanced → Gallery mode; `RESET_KEEPS`) = the sites that get the **gallery
+  button**, a 26 px docked widget (`galBtnBuild`, dock id `hover-zoom-gallery`, own per-site position
+  in `hoverZoomGalleryDock`, first placed top-right). Menu item `toggleGallery()`: "Show / Hide gallery
+  button on this site" (removes every entry covering the page, else adds the host). Elsewhere nothing
+  shows, nothing preloads, nothing listens for Ctrl or the middle button.
+- The button (`galToggle`) turns gallery mode on/off **for this host + path** (`hoverZoomGalleryOn` =
+  `{host: [pathname]}`, `galleryActive()`), remembered across reloads and tabs. Per path, not per
+  site, so a gallery page opened from the results (another path) starts normal. If a site ever puts
+  results and galleries on one path, this needs the query too.
+- `galleryHere()` = top frame, not a captcha, `galleryActive()`. **While active, ordinary previews
+  are off on that page** (`siteEnabled()` is false; the slideshow widget hides). Off = the page as it
+  is without gallery mode. Seen/visited/saved marks show either way (`galMarkAll` needs only the list).
+- `galOnStore` is a `var`: `siteEnabled()` reads it and can run before its line.
 ## Behaviour (user's numbers, 2026-11-09)
 
 - Every picture the page has (`GAL_MAX` = Infinity, user v0.251.0: galleries run 10-100 and a cap
@@ -27,10 +29,17 @@ the site list; the galleries they lead to are not, so previews keep working ther
   On: the result under the pointer (`galAt`, kept by `galOver`/`galOut` even while on; cleared on
   scroll, resize, window edge) is locked (`galOn`): no hover delay, the hole and gallery never change
   while on, and leaving the link, the window edge band and leaving the window do not hide it — so the
-  pointer can go over the thumbnails. Off: another tap, Esc (with no preview up), a press on the page
-  (not on the gallery or a preview), a scroll, a resize
+  pointer can go over the thumbnails. Off: another tap, Esc (with no preview up), a left press on the
+  page (not on the gallery or a preview; middle and right presses leave it up), a scroll, a resize
   (`galHide` clears `galOn`). Tap with no result under the pointer does nothing. A Ctrl tap on a
   gallery page does not run the previews hotkey toggle (`hotkeyToggle`'s keyup).
+- **Middle button, one-handed** (user, v0.252.0), only while gallery mode is on: a middle press on a
+  result (`galMiddle`) opens its gallery locked, as a Ctrl tap does; on the open result (the one in
+  the ring) it closes it; on another result it switches. `preventDefault` on the press (no
+  autoscroll; also over the gallery itself), and `galMidEat` swallows that press's
+  mouseup/auxclick/click (no new tab; `galMidAt`, reset by every press). Any modifier (Ctrl+middle =
+  new tab) goes to the browser. A middle press on the preview is still `midSave` (window capture,
+  runs first). Visited is not touched by any of it.
 - **Layout: the hole is the picture under the pointer** (user, v0.248.0): `galSteer` on every
   `mousemove` and once at build, unless locked (`galOn`, always now); on no picture it stays. The user rejected looking past the
   hovered picture: a 3 × 3 rule picking a neighbour (v0.243.0–v0.247.0) gave no way to tell which
@@ -67,7 +76,7 @@ the site list; the galleries they lead to are not, so previews keep working ther
   thumbnail wins, else the thumbnail; then `showViewer`. `mouseleave` cancels unless placed. None of
   `refusal()`'s gates run (no layout of that page), like harvested tour entries. `galOwns(el)` = el is
   in the gallery's shadow root; `onMove` skips `playerArrived` for it; `galHide` cancels its preview.
-  The document's `onOver` never acts on the gallery: previews are off on every gallery page.
+  The document's `onOver` never acts on the gallery: previews are off while gallery mode is on.
 - Presses: on the gallery (`galHost`), on our preview/backdrop (`ours`) or inside the preview keep the
   gallery, so middle-click save, pinning and click-away-from-a-pinned-preview all leave it up.
 - **Saved mark** (user): a middle-click save (`midSave` → `saveOriginal(url, quiet, done)`, `done` on
@@ -92,12 +101,14 @@ the site list; the galleries they lead to are not, so previews keep working ther
   `position` is changed. `galMarkAll` re-derives on boot (+1.5 s), 250 ms after a scroll or resize,
   and after each show; it holds no element references.
 - **Visited = double tick** (user): two of the same ticks, 10 px apart in a 34 × 24 box, both fully
-  outlined. Stored in `hoverZoomGalleryVisited` (same list rules, `galList`/`galListAdd`). A link
-  counts as visited when (a) a left or middle `click`/`auxclick` on a result link on a gallery-mode
-  page (`galClick`), or (b) the page itself loads where `gallerySites` covers it but gallery mode
-  is off (previews on) — that catches "open in new tab" from the context menu, but only if the
-  gallery pages are covered (a bare-host entry). `:visited` cannot be read by script, hence our
-  own list. Visited wins over seen; a mark of the wrong kind is replaced.
+  outlined. Stored in `hoverZoomGalleryVisited` (same list rules, `galList`/`galListAdd`). **Only the
+  browser loading the page counts** (user, v0.252.0): at boot, a top-frame page on a `gallerySites`
+  site where gallery mode is not on stores its own URL. A link, middle-click or context-menu "Open in
+  new tab" all land there; hovering, the gallery, middle-click-to-gallery and the hidden preload
+  frame (not top frame) never do. No click counting (`galClick` removed). Untested assumptions,
+  true on the user's site so far: the result link is the URL that loads (no redirect / extra params)
+  and the site reloads between pages (no SPA). `:visited` cannot be read by script, hence our own
+  list. Visited wins over seen; a mark of the wrong kind is replaced.
 - Test: the Browser pane's background tab fires **no** scroll events (`scrollBy` moves the page,
   listeners get nothing) — dispatch `new Event('scroll')` on `document` by hand.
 - Backdrop (user, v0.247.0 — so the page's picture can't be taken for a thumbnail): `.shade`
@@ -176,7 +187,8 @@ with `logBusy` — the host is already stored in `gallerySites`, so the log priv
 
 ## Test
 
-`test-pages/gallery-search.html` (sets its own localStorage settings on first load):
+`test-pages/gallery-search.html` (sets its own localStorage settings on first load; click the
+gallery button top-right once, or nothing happens — the on-state is not part of those settings):
 "built by script" → 25 through the frame in ~1.5 s, logo left out; A → (frame times out: A has no
 script) all 40 grid pictures from the HTML, none of the 6 related; B → 10; the last → nothing. Synthetic
 `mouseover` on `#ra img` works; the pane's hover coordinates are scaled (×1.28 measured), so aim
