@@ -19,9 +19,13 @@ the site list; the galleries they lead to are not, so previews keep working ther
 
 ## Behaviour (user's numbers, 2026-11-09)
 
-- Grid 7 × 5 over the viewport (`GAL_COLS`/`GAL_ROWS`); the cell under the pointer stays empty,
-  so at most 34 pictures. Pictures fill the other cells in reading order; when the pointer changes
-  cell they slide one slot (CSS transform transition) — that is the "move out of the way".
+- At most 34 pictures (`GAL_COLS` × `GAL_ROWS` − 1). The grid is sized to the count (v0.233.0,
+  user: "fill the available space"): `galGrid(n)` tries every column count for n + 1 cells and keeps
+  the one that draws a `GAL_ASPECT` (4:3) picture largest. Chosen once per set (`set.grid`) and
+  again only on resize — the user wants placement settled first, not pictures swimming as
+  thumbnails load. Spare cells sit at the end. The cell under the pointer stays empty; pictures
+  fill the others in reading order and slide one slot when the pointer changes cell (CSS
+  transform transition) — that is the "move out of the way".
 - Hover delay = `cfg.hoverDelay`. Off every result link for `GAL_GRACE_MS` 500 → fade out. Moving
   to another link within that time keeps the old set until the new one is ready, then crossfades
   (`GAL_FADE_MS` 200). A linked page with no pictures clears the old set.

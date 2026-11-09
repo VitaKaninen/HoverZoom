@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.232.0
+// @version     0.233.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -10367,7 +10367,8 @@
 
     // ---- gallery mode: hovering a link floats the linked page's thumbnails. See docs/GALLERY.md.
 
-    const GAL_COLS = 7, GAL_ROWS = 5;   // one cell, under the pointer, stays empty
+    const GAL_COLS = 7, GAL_ROWS = 5;   // the most cells; one, under the pointer, stays empty
+    const GAL_ASPECT = 4 / 3;           // picture shape the grid is sized for, before any has loaded
     const GAL_GAP = 12;                 // px between cells and at the edges
     const GAL_GRACE_MS = 500;           // off every link this long before the set fades
     const GAL_FADE_MS = 200;
@@ -10563,23 +10564,37 @@
         return galRoot;
     }
 
-    function galCellRect(i) {
+    // Columns x rows for n pictures plus the pointer's cell: the grid that draws a GAL_ASPECT picture largest.
+    function galGrid(n) {
         const W = vpW(), H = vpH();
-        const cw = (W - GAL_GAP) / GAL_COLS, ch = (H - GAL_GAP) / GAL_ROWS;
-        const c = i % GAL_COLS, r = Math.floor(i / GAL_COLS);
+        let best = null;
+        for (let cols = 1; cols <= n + 1; cols++) {
+            const rows = Math.ceil((n + 1) / cols);
+            const cw = (W - GAL_GAP) / cols - GAL_GAP, ch = (H - GAL_GAP) / rows - GAL_GAP;
+            if (cw <= 0 || ch <= 0) continue;
+            const w = Math.min(cw, ch * GAL_ASPECT);
+            if (!best || w > best.w + 0.5) best = { cols: cols, rows: rows, w: w };
+        }
+        return best || { cols: GAL_COLS, rows: GAL_ROWS };
+    }
+
+    function galCellRect(i, g) {
+        const W = vpW(), H = vpH();
+        const cw = (W - GAL_GAP) / g.cols, ch = (H - GAL_GAP) / g.rows;
+        const c = i % g.cols, r = Math.floor(i / g.cols);
         return { x: GAL_GAP + c * cw, y: GAL_GAP + r * ch, w: cw - GAL_GAP, h: ch - GAL_GAP };
     }
 
-    function galCellAt(x, y) {
-        const c = Math.max(0, Math.min(GAL_COLS - 1, Math.floor(x / (vpW() / GAL_COLS))));
-        const r = Math.max(0, Math.min(GAL_ROWS - 1, Math.floor(y / (vpH() / GAL_ROWS))));
-        return r * GAL_COLS + c;
+    function galCellAt(x, y, g) {
+        const c = Math.max(0, Math.min(g.cols - 1, Math.floor(x / (vpW() / g.cols))));
+        const r = Math.max(0, Math.min(g.rows - 1, Math.floor(y / (vpH() / g.rows))));
+        return r * g.cols + c;
     }
 
     // Every picture to its cell in reading order, stepping over the pointer's cell.
     function galPlace(set) {
         set.cells.forEach(function (cell, k) {
-            const r = galCellRect(k < galGap ? k : k + 1);
+            const r = galCellRect(k < galGap ? k : k + 1, set.grid);
             cell.style.width = r.w + 'px';
             cell.style.height = r.h + 'px';
             cell.style.transform = 'translate(' + r.x + 'px,' + r.y + 'px)';
@@ -10616,7 +10631,7 @@
         return out.filter(function (u, i) { return u && u !== item.thumb && out.indexOf(u) === i; }).slice(0, GAL_TRIES);
     }
 
-    function galImg(item, cell) {
+    function galImg(item, cell, grid) {
         const img = document.createElement('img');
         img.decoding = 'async';
         if (noReferrerHere()) img.referrerPolicy = 'no-referrer';
@@ -10625,7 +10640,7 @@
             const nw = img.naturalWidth, nh = img.naturalHeight;
             if (!nw || !nh) { cell.style.visibility = 'hidden'; return; }
             img.__hzFit = { w: nw, h: nh };
-            const r = galCellRect(0);
+            const r = galCellRect(0, grid);
             galFit(img, cell, r);
             img.classList.add('ok');
             const scale = Math.min(r.w / nw, r.h / nh);
@@ -10662,17 +10677,17 @@
         const root = galLayer();
         if (!galHost.isConnected) document.documentElement.appendChild(galHost);
         if (galCur) galDrop(galCur);
-        const set = { href: href, el: document.createElement('div'), cells: [] };
+        const set = { href: href, el: document.createElement('div'), cells: [], grid: galGrid(list.length) };
         set.el.className = 'set';
         list.forEach(function (item) {
             const cell = document.createElement('div');
             cell.className = 'cell';
-            galImg(item, cell);
+            galImg(item, cell, set.grid);
             set.cells.push(cell);
             set.el.appendChild(cell);
         });
         root.appendChild(set.el);
-        galGap = galCellAt(galPt.x, galPt.y);
+        galGap = galCellAt(galPt.x, galPt.y, set.grid);
         galPlace(set);
         void set.el.offsetWidth;
         set.el.classList.add('on', 'live');
@@ -10717,7 +10732,7 @@
         galPt.x = e.clientX;
         galPt.y = e.clientY;
         if (!galCur) return;
-        const g = galCellAt(e.clientX, e.clientY);
+        const g = galCellAt(e.clientX, e.clientY, galCur.grid);
         if (g === galGap) return;
         galGap = g;
         galPlace(galCur);
@@ -10729,7 +10744,12 @@
         document.addEventListener('mousemove', galMove, { capture: true, passive: true });
         document.addEventListener('mousedown', function () { if (galWant || galCur) galHide(); }, true);
         window.addEventListener('keydown', function (e) { if (e.key === 'Escape' && galCur) galHide(); }, true);
-        window.addEventListener('resize', function () { if (galCur) galPlace(galCur); });
+        window.addEventListener('resize', function () {
+            if (!galCur) return;
+            galCur.grid = galGrid(galCur.cells.length);
+            galGap = galCellAt(galPt.x, galPt.y, galCur.grid);
+            galPlace(galCur);
+        });
     } else if (String(window.name || '').indexOf(GAL_NAME + ':') === 0) {
         setTimeout(galProbeReport, 0);
     }
