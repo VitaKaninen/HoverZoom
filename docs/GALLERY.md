@@ -63,7 +63,8 @@ the site list; the galleries they lead to are not, so previews keep working ther
   viewport tall — a carousel must not count) stores the pointer as `galLock`; `galOver` ignores
   everything until `galMove` sees different coordinates, then treats that move as the hover. The lock
   exists because a scroll fires `mouseover` under a still pointer.
-- **Seen check** (user): a shown gallery's link is stored (`hoverZoomGallerySeen`, an ordered list,
+- **Seen check** (user): a gallery that stays on screen `GAL_SEEN_MS` (1 s) as the current set has its
+  link stored (user, v0.249.0: a shorter look, a hover without Ctrl, and preloading never count) (`hoverZoomGallerySeen`, an ordered list,
   last `GAL_SEEN_MAX` 10,000, re-read before each write so tabs don't erase each other) and every
   page `<img>` linking there gets a 24 px bare green tick (inline SVG, dark outline, no box) in a span (`data-hz-seen`) inserted right after it,
   absolutely positioned by measuring its own containing block (`galMarkImg`) — so no ancestor's

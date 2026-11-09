@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.248.0
+// @version     0.249.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -10390,6 +10390,7 @@
     let galHoverTimer = 0, galGraceTimer = 0, galPt = { x: 0, y: 0 };
     const GAL_SEEN_KEY = 'hoverZoomGallerySeen';   // linked pages whose gallery was shown, oldest first
     const GAL_SEEN_MAX = 10000;
+    const GAL_SEEN_MS = 1000;           // a gallery counts as seen once it has been on screen this long
     const GAL_MARK = 'data-hz-seen';
     const GAL_EDGE = 50;                // px band inside the window's edge where the set goes at once
     const GAL_VISITED_KEY = 'hoverZoomGalleryVisited';   // linked pages clicked or opened, oldest first
@@ -10817,8 +10818,11 @@
         galBlur.classList.add('on');
         galCur = set;
         galSteer(galPt.x, galPt.y);
-        galListAdd(GAL_SEEN_KEY, href);
-        galMarkAll();
+        setTimeout(function () {
+            if (galCur !== set) return;            // hidden or replaced before it counted
+            galListAdd(GAL_SEEN_KEY, href);
+            galMarkAll();
+        }, GAL_SEEN_MS);
         pics.forEach(function (p, k) {
             if (L[k] && L[k].w > p.nw * GAL_UPGRADE) galUpgrade(p.item, p.img, p.nw, L[k].w);
         });
