@@ -53,16 +53,20 @@ popups, `allow="autoplay 'none'"`). `window.name` = `hz-gallery-probe:<token>`. 
 in that frame (no `@noframes`); seeing the name it runs `galProbeReport()`: after `load` +
 `GAL_SETTLE_MS` (one retry after `GAL_RETRY_MS` if empty) it posts `widgetEntries()`'s `<img>`s as
 plain items `{thumb, ss, cands, base}` (`galItem`). It also mutes and pauses anything that plays.
+No `allow="autoplay 'none'"`: Gecko logs "Skipping unsupported feature name autoplay" for it
+(removed v0.235.0; the play listener does the job).
 One frame at a time (`galFrameStop`); a newer hover cancels it (`'cancel'`, not cached).
 
 The frame **fails** → the plain HTML read below: load lands on an error page or another origin
-(cross-origin links always do), or no report in `GAL_FRAME_MS` (10 s). During that wait the
-previous set stays up.
+(cross-origin links always do), the page not loaded in `GAL_FRAME_MS` (10 s), or no report
+`GAL_REPORT_MS` (3 s) after it loaded. During that wait the previous set stays up.
 
-- **Unverified:** whether Tampermonkey injects into a `sandbox`ed iframe. The test pages load the
-  script by `<script>`, so they cannot tell. If it does not, every hover logs `gallery frame: no
-  report in 10000 ms` and falls back; then drop the `sandbox` attribute (cost: frame-busting
-  scripts could navigate the user's page).
+- The 3 s post-load cap exists because the user saw a very long pause in their main browser
+  (v0.234.0): the frame almost certainly never reported, and the wait ran the full 10 s.
+- **Unverified:** whether Tampermonkey injects into a `sandbox`ed iframe (per browser). The test
+  pages load the script by `<script>`, so they cannot tell. If it does not, every hover logs
+  `no report 3000 ms after the page loaded`; then try dropping the `sandbox` attribute (cost:
+  frame-busting scripts could navigate the user's page).
 
 ## The HTML fallback
 

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.234.0
+// @version     0.235.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -10379,7 +10379,8 @@
     const GAL_LAZY = ['data-src', 'data-lazy-src', 'data-original', 'data-lazy', 'data-echo', 'data-defer-src', 'data-url'];
     const GAL_MAX = GAL_COLS * GAL_ROWS - 1;
     const GAL_NAME = 'hz-gallery-probe';    // the hidden frame's window.name prefix
-    const GAL_FRAME_MS = 10000;         // longest wait for the hidden frame's report
+    const GAL_FRAME_MS = 10000;         // longest wait for the hidden frame's page to load
+    const GAL_REPORT_MS = 3000;         // longest wait for its report once loaded (settle + one retry + slack)
     const GAL_SETTLE_MS = 700;          // after the frame's load, before it counts
     const GAL_RETRY_MS = 1500;          // one more look when it counted nothing
     const galCache = new Map();         // href -> Promise of [{thumb, ss, cands, base}] | null | 'cancel'
@@ -10490,7 +10491,6 @@
             window.addEventListener('message', onMsg);
             f.name = GAL_NAME + ':' + token;
             f.setAttribute('sandbox', 'allow-scripts allow-same-origin');     // no top navigation, no popups
-            f.setAttribute('allow', "autoplay 'none'");
             f.setAttribute('aria-hidden', 'true');
             f.tabIndex = -1;
             f.style.cssText = 'all:initial;position:fixed;left:0;top:0;width:' + vpW() + 'px;height:' + vpH() +
@@ -10499,6 +10499,10 @@
                 let u = '';
                 try { u = f.contentWindow.location.href; } catch (e) { u = 'unreadable: ' + e.name; }
                 if (!u || u === 'about:blank' || /^unreadable/.test(u)) fin(null, 'the page refused to load in a frame, landed on ' + (u || 'nothing'));
+                else {
+                    clearTimeout(t);
+                    t = setTimeout(function () { fin(null, 'no report ' + GAL_REPORT_MS + ' ms after the page loaded'); }, GAL_REPORT_MS);
+                }
             });
             t = setTimeout(function () { fin(null, 'no report in ' + GAL_FRAME_MS + ' ms'); }, GAL_FRAME_MS);
             f.src = href;
