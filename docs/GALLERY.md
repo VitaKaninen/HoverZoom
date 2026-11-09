@@ -83,8 +83,7 @@ value ends in an image extension), else `src`, else the smallest srcset entry. B
 
 ## Bigger size (user's rule)
 
-After the thumbnail loads it is drawn to fit its cell. If that is more than `GAL_UPGRADE` (1.3) ×
-the file's width, `galBigger` lists bigger files: srcset `w` entries above the thumbnail, the
+After layout, if a picture's slot is more than `GAL_UPGRADE` (1.3) × the thumbnail file's width, `galBigger` lists bigger files: srcset `w` entries above the thumbnail, the
 smallest one ≥ the drawn width first, then larger, then smaller; with no srcset, the resolver's
 `collectCandidates` (original first). The first that loads larger than the thumbnail replaces it;
 the drawn size does not change. At most `GAL_TRIES` per picture.
