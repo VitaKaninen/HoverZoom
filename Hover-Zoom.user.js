@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.247.0
+// @version     0.248.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -6893,7 +6893,7 @@
             cancel();
             return;
         }
-        if (hotTap && cfg.hotkeyToggle && isTopFrame) setOff(!hzOff);
+        if (hotTap && cfg.hotkeyToggle && isTopFrame && !(e.key === 'Control' && galleryHere())) setOff(!hzOff);   // Ctrl there is the gallery's key
         hotTap = false;
     }, true);
 
@@ -10368,13 +10368,12 @@
     // ---- gallery mode: hovering a link floats the linked page's thumbnails. See docs/GALLERY.md.
 
     const GAL_COLS = 7, GAL_ROWS = 5;   // only caps the count: 34 pictures
-    const GAL_REVEAL = 1 / 3;           // a picture is split into thirds each way; outside the middle ninth the hole looks out that way
     const GAL_WAIT_MS = 2500;           // longest wait for thumbnails before laying out without the rest
     const GAL_GAP = 12;                 // px between cells and at the edges
     const GAL_GRACE_MS = 500;           // off every link this long before the set fades
     const GAL_FADE_MS = 200;
     const GAL_UPGRADE = 1.3;            // drawn this much larger than the thumbnail's file -> fetch the next size
-    const GAL_CACHE = 30;               // fetched pages kept by URL
+    const GAL_CACHE = 300;              // fetched pages kept by URL
     const GAL_TRIES = 4;                // bigger sizes tried per thumbnail
     const GAL_LAZY = ['data-src', 'data-lazy-src', 'data-original', 'data-lazy', 'data-echo', 'data-defer-src', 'data-url'];
     const GAL_MAX = GAL_COLS * GAL_ROWS - 1;
@@ -10395,6 +10394,9 @@
     const GAL_EDGE = 50;                // px band inside the window's edge where the set goes at once
     const GAL_VISITED_KEY = 'hoverZoomGalleryVisited';   // linked pages clicked or opened, oldest first
     let galSeen = {}, galLock = null, galMarkTimer = 0, galEdge = false, galHole = null;
+    let galKey = false, galKeyVoid = false, galAt = null;      // Ctrl held; Ctrl used in a chord; the result under the pointer {href, hole}
+    let galPre = null, galPreStop = false, galPreLog = null;   // the preload in flight; stopped by a refusal; its log row
+    const galPreTried = new Set();
 
     // Gallery mode runs where the gallery list covers the page and ordinary previews are off.
     function galleryHere() {
@@ -10541,14 +10543,22 @@
     }
 
     // Both reads at once: the plain HTML as soon as it holds GAL_HTML_ENOUGH; else the frame's report within GAL_PREFER_MS, else whatever the HTML had.
-    function galLoad(href) {
+    function galLoad(href, log) {
         if (galCache.has(href)) return galCache.get(href);
         const frame = galRender(href);
         const stopFrame = galFrameStop;
+        const req = log && log.req();
+        let refused = null;
         const html = fetchDoc(href, function (res) {
-            if (res.status === 429 || res.status === 503) logBusy(href, res);
+            refused = res;
+            if (res.status === 429 || res.status === 503) { logBusy(href, res); galPreHalt(); }
             dbg('gallery page refused', { href: href, status: res.status });
-        }).then(function (doc) { return doc ? galPick(doc, href) : null; });
+        }).then(function (doc) {
+            const busy = !!refused && (refused.status === 429 || refused.status === 503);
+            if (req) req.done(refused ? { status: refused.status, limited: busy, signal: 'hard',
+                retryAfter: busy ? usLog.retryAfterOf(refused.headers) : null } : { status: doc ? 200 : 0 });
+            return doc ? galPick(doc, href) : null;
+        });
         const p = new Promise(function (resolve) {
             let done = false, late = false, fromHtml, frameOver = false;
             const finish = function (v) { if (!done) { done = true; resolve(v); } };
@@ -10568,6 +10578,7 @@
             setTimeout(function () { late = true; useHtml(); }, GAL_PREFER_MS);
         }).then(function (v) {
             if (v === 'cancel' || !v) galCache.delete(href);
+            setTimeout(galPreNext, 0);
             return v;
         });
         galCache.set(href, p);
@@ -10681,27 +10692,6 @@
         return L;
     }
 
-    // Which ninth of a rect the pointer is in: column and row, each -1, 0 or 1.
-    function galNinth(a, x, y) {
-        const fx = (x - a.x) / a.w, fy = (y - a.y) / a.h, R = GAL_REVEAL;
-        return { c: fx < R ? -1 : fx > 1 - R ? 1 : 0, r: fy < R ? -1 : fy > 1 - R ? 1 : 0 };
-    }
-
-    // The picture first met looking out from a rect's centre one way (dx or dy is -1 or 1), or null.
-    function galLook(pics, a, dx, dy) {
-        const cx = a.x + a.w / 2, cy = a.y + a.h / 2;
-        let best = null, bestD = Infinity;
-        pics.forEach(function (r) {
-            if (r === a) return;
-            const gap = dx > 0 ? r.x - (a.x + a.w) : dx < 0 ? a.x - (r.x + r.w) : dy > 0 ? r.y - (a.y + a.h) : a.y - (r.y + r.h);
-            if (gap < -1) return;
-            const off = dx ? Math.max(0, r.y - cy, cy - (r.y + r.h)) : Math.max(0, r.x - cx, cx - (r.x + r.w));
-            const d = gap + off;
-            if (d < bestD) { bestD = d; best = r; }
-        });
-        return best;
-    }
-
     // Every visible linked picture on the page, as rects.
     function galPics() {
         const out = [];
@@ -10713,21 +10703,12 @@
         return out;
     }
 
-    // Hole by the pointer's ninth of the picture under it: middle = it; a side = the picture that way from its centre; a corner = above/below the side one.
+    // The hole is the picture under the pointer; on no picture it stays.
     function galSteer(x, y) {
         const set = galCur;
         if (!set) return;
-        const pics = galPics();
-        const on = pics.find(function (r) { return x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h; });
-        if (!on) return;
-        const n = galNinth(on, x, y);
-        let hole = on;
-        if (n.c) {
-            const side = galLook(pics, on, n.c, 0);
-            hole = side ? (n.r && galLook(pics, side, 0, n.r)) || side : (n.r && galLook(pics, on, 0, n.r)) || on;
-        } else if (n.r) {
-            hole = galLook(pics, on, 0, n.r) || on;
-        }
+        const hole = galPics().find(function (r) { return x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h; });
+        if (!hole) return;
         const o = set.open;
         if (o && o.x === hole.x && o.y === hole.y && o.w === hole.w && o.h === hole.h) return;
         galLayout(set, hole);
@@ -10862,15 +10843,42 @@
         const href = galLinkOf(e.target);
         if (!href) return;
         clearTimeout(galGraceTimer);
-        if (href === galWant) return;
+        if (galAt && galAt.href === href) return;
         const a = e.target.closest('a[href]'), pic = e.target.tagName === 'IMG' ? e.target : a && a.querySelector('img');
         const hr = (pic || e.target).getBoundingClientRect();
-        galHole = { x: hr.left, y: hr.top, w: hr.width, h: hr.height };
-        galWant = href;
+        galAt = { href: href, hole: { x: hr.left, y: hr.top, w: hr.width, h: hr.height } };
+        if (galKey) { galHole = galAt.hole; galWant = href; }
         clearTimeout(galHoverTimer);
         galHoverTimer = setTimeout(function () {
-            galLoad(href).then(function (list) { galShow(href, list); });
+            galLoad(href).then(function (list) {
+                if (galKey) galShow(href, list);
+                else if (Array.isArray(list)) galWarm(list);
+            });
         }, cfg.hoverDelay);
+    }
+
+    // Ctrl pressed: the gallery of the result under the pointer, at once, the hole on that picture.
+    function galKeyDown(e) {
+        if (e.key !== 'Control') {
+            if (galKey) { galKey = false; galKeyVoid = true; galHide(); }
+            return;
+        }
+        if (e.repeat || galKey || galKeyVoid || e.shiftKey || e.altKey || e.metaKey || typingIn(e) || !galleryHere()) return;
+        galKey = true;
+        if (!galAt || galLock || galEdge) return;
+        galHole = galAt.hole;
+        galWant = galAt.href;
+        clearTimeout(galHoverTimer);
+        const href = galWant;
+        galLoad(href).then(function (list) { galShow(href, list); });
+    }
+
+    function galKeyUp(e) {
+        if (e && e.key !== 'Control') return;
+        galKeyVoid = false;
+        if (!galKey) return;
+        galKey = false;
+        galHide();
     }
 
     // Within GAL_EDGE of the window's edge: no grace period, the set goes at once.
@@ -10879,10 +10887,12 @@
     }
 
     function galOut(e) {
-        if (!e.relatedTarget && (galWant || galCur)) { galHide(); return; }
-        if (!galWant) return;
+        if (!e.relatedTarget) { galAt = null; if (galWant || galCur) galHide(); return; }
         const from = galLinkOf(e.target);
         if (!from || galLinkOf(e.relatedTarget)) return;
+        galAt = null;
+        clearTimeout(galHoverTimer);
+        if (!galWant) return;
         clearTimeout(galGraceTimer);
         galGraceTimer = setTimeout(galHide, GAL_GRACE_MS);
     }
@@ -10891,8 +10901,9 @@
     function galMove(e) {
         galPt.x = e.clientX;
         galPt.y = e.clientY;
+        if (galKey && !e.ctrlKey) galKeyUp();      // the keyup went elsewhere
         if (galAtEdge(galPt.x, galPt.y)) {
-            if (!galEdge) { galEdge = true; if (galWant || galCur) galHide(); }
+            if (!galEdge) { galEdge = true; galAt = null; if (galWant || galCur) galHide(); }
             return;
         }
         if (galEdge) {
@@ -10915,6 +10926,7 @@
         const t = e.target;
         if (t !== document && !(t && t.nodeType === 1 && t.clientHeight >= vpH() / 2)) return;
         galLock = { x: galPt.x, y: galPt.y };
+        galAt = null;
         if (galWant || galCur) galHide();
         galMarkSoon();
     }
@@ -10998,12 +11010,69 @@
 
     function galMarkSoon() {
         clearTimeout(galMarkTimer);
-        galMarkTimer = setTimeout(galMarkAll, 250);
+        galMarkTimer = setTimeout(function () { galMarkAll(); galPreNext(); }, 250);
+    }
+
+    // ---- preload: every same-origin result's gallery, one page at a time, nearest the pointer first
+
+    // The next result link not yet read, nearest the pointer; null when none is left.
+    function galPrePick() {
+        const seen = new Set();
+        let best = null, bestD = Infinity;
+        document.querySelectorAll('a[href] img').forEach(function (img) {
+            const h = galLinkOf(img);
+            if (!h || seen.has(h)) return;
+            seen.add(h);
+            if (galPreTried.has(h) || galCache.has(h)) return;
+            try { if (new URL(h).origin !== location.origin) return; } catch (e) { return; }
+            const r = img.getBoundingClientRect();
+            if (!r.width || !r.height) return;
+            const d = Math.hypot(r.left + r.width / 2 - galPt.x, r.top + r.height / 2 - galPt.y);
+            if (d < bestD) { bestD = d; best = h; }
+        });
+        return best;
+    }
+
+    // Load a gallery's thumbnails into the browser's cache, up to GAL_WAIT_MS.
+    function galWarm(list) {
+        let t = 0;
+        return Promise.race([Promise.all(list.map(galImg)), new Promise(function (r) { t = setTimeout(r, GAL_WAIT_MS); })])
+            .then(function () { clearTimeout(t); });
+    }
+
+    // One more page, unless one is in flight, a hover's frame is loading, or a refusal stopped it. Kicked by every load's end.
+    function galPreNext() {
+        if (galPre || galPreStop || galFrameStop || !galleryHere()) return;
+        const href = galPrePick();
+        if (!href) { if (galPreLog) { galPreLog.end('done'); galPreLog = null; } return; }
+        if (!galPreLog) {
+            usLog.enable(cfg.logRequests !== false);
+            galPreLog = usLog.start('gallery', { host: pageHost(), pace: version().replace(/\?/g, '') + ' serial', slowed: noRush(pageHost()) });
+        }
+        galPre = href;
+        galPreTried.add(href);
+        galLoad(href, galPreLog).then(function (list) {
+            if (list === 'cancel') galPreTried.delete(href);
+            return Array.isArray(list) ? galWarm(list) : null;
+        }).then(function () {
+            galPre = null;
+            galPreNext();
+        });
+    }
+
+    // A refusal: no more preloading on this page.
+    function galPreHalt() {
+        galPreStop = true;
+        if (galPreLog) { galPreLog.end('limited'); galPreLog = null; }
     }
 
     if (isTopFrame) {
         document.addEventListener('scroll', galScroll, { capture: true, passive: true });
-        setTimeout(galMarkAll, 1500);
+        setTimeout(function () { galMarkAll(); galPreNext(); }, 1500);
+        window.addEventListener('keydown', galKeyDown, true);
+        window.addEventListener('keyup', galKeyUp, true);
+        window.addEventListener('blur', function () { galKeyVoid = false; galKeyUp(); });
+        window.addEventListener('pagehide', function () { if (galPreLog) { galPreLog.end('cut'); galPreLog = null; } });
         setTimeout(function () {
             if (galleryListed() && !galleryHere()) galListAdd(GAL_VISITED_KEY, location.href.split('#')[0]);
         }, 0);
@@ -11016,6 +11085,7 @@
         window.addEventListener('keydown', function (e) { if (e.key === 'Escape' && galCur) galHide(); }, true);
         window.addEventListener('resize', function () {
             if ((cfg.gallerySites || []).length) galMarkSoon();
+            galAt = null;
             if (galWant || galCur) galHide();
         });
     } else if (String(window.name || '').indexOf(GAL_NAME + ':') === 0) {

@@ -20,20 +20,18 @@ the site list; the galleries they lead to are not, so previews keep working ther
 ## Behaviour (user's numbers, 2026-11-09)
 
 - At most 34 pictures (`GAL_COLS` × `GAL_ROWS` − 1; that is all those constants do now).
-- **Layout: the hole is one result picture, chosen by where the pointer is** (user, v0.245.0).
-  Earlier methods: the moving slot is v0.240.0, commit de9996a ("take it back to here" means that);
-  plus-shaped hole v0.241.0-v0.242.0; edge thirds armed after the middle v0.243.0 (felt
-  direction-driven); nearest other centre v0.244.0 (replaced unseen). Rule now, stateless, on every
-  `mousemove` (`galSteer`) and once at build: the picture under the pointer (`galPics` = visible
-  `a[href] img` rects) is cut into a 3 x 3 grid (`galNinth`, `GAL_REVEAL`).
-  - middle ninth -> that picture;
-  - left/right/top/bottom middle -> the picture first met looking out from its centre that way
-    (`galLook`: nearest by gap + how far the centre line misses it, so a masonry gap still finds
-    the next column);
-  - a corner -> the side picture (left or right), then the one above/below *that* picture
-    (user's rule); no side picture -> the one above/below the hovered one; nothing found -> stays.
-  - pointer on no picture (a gap) -> hole stays. Re-lays out at once on change (`galLayout`).
-    The hole does not depend on which result's gallery is showing.
+- **Shown only while Ctrl is held** (user, v0.248.0). Hovering alone shows nothing (it only
+  preloads). `galKeyDown`: Ctrl alone, not typing → the gallery of the result under the pointer
+  (`galAt`, kept by `galOver`/`galOut`, cleared on scroll, resize, window edge) at once, no hover
+  delay. Release, window `blur`, or a `mousemove` without `ctrlKey` (keyup lost) → hide. Any other key
+  while held (Ctrl+F, Ctrl+T) hides it and voids Ctrl until released (`galKeyVoid`). While held,
+  moving to another result swaps galleries after `cfg.hoverDelay`, as hovering did before. A Ctrl
+  **tap** on a gallery page no longer runs the previews hotkey toggle (`hotkeyToggle`'s keyup).
+- **Layout: the hole is the picture under the pointer** (user, v0.248.0): `galSteer` on every
+  `mousemove` and once at build; on no picture it stays. The user rejected looking past the
+  hovered picture: a 3 × 3 rule picking a neighbour (v0.243.0–v0.247.0) gave no way to tell which
+  page pictures were still unseen on a non-grid page. The moving slot is v0.240.0, commit de9996a
+  ("take it back to here" means that).
 - `galShow` loads every thumbnail first (`galImg`, up to `GAL_WAIT_MS` 2.5 s; late or failed ones are
   left out), so each shape is known **before** anything is placed — the user does not want pictures
   swimming as they load.
@@ -43,6 +41,16 @@ the site list; the galleries they lead to are not, so previews keep working ther
   picture (none fits even at 8 px → the unplaced cells are hidden). Rows are one height because a
   segment beside the hole cannot be justified independently of the rows above and below.
 - Resize hides the set (the hole's rect is stale). Upgrade check uses each picture's drawn width.
+- **Preload** (user, v0.248.0): `galPreNext` reads every same-origin result's gallery (`galLoad`) and
+  then its thumbnails (`galWarm`, into the browser cache), **one page at a time**, nearest the
+  pointer first (`galPrePick`, re-derived each step, so a scroll re-orders it). Kicked at boot +1.5 s,
+  250 ms after a scroll/resize, and by the end of every `galLoad`. It never starts while a frame is
+  loading (`galFrameStop`), so it cannot cancel a hover's frame; a hover's frame does cancel it (that
+  page is retried). Tried pages are not retried (`galPreTried`). A hover still loads its own result
+  at once after `cfg.hoverDelay`. A 429/503 on any gallery fetch stops preloading for the page
+  (`galPreHalt`). Logged: one `gallery` us-log row per run on the page's host (stored in
+  `gallerySites`, so the privacy rule holds); the hidden frame's requests are not counted.
+  `GAL_CACHE` is 300 so a long results page is not evicted while it preloads.
 - Hover delay = `cfg.hoverDelay`. Off every result link for `GAL_GRACE_MS` 500 → fade out. Moving
   to another link within that time keeps the old set until the new one is ready, then crossfades
   (`GAL_FADE_MS` 200). A linked page with no pictures clears the old set.
@@ -141,7 +149,7 @@ the drawn size does not change. At most `GAL_TRIES` per picture.
 
 ## Requests
 
-Fetched pages are cached by URL (`GAL_CACHE` 30; failures are not cached). A 429/503 is logged
+Fetched pages are cached by URL (`GAL_CACHE` 300; failures are not cached). A 429/503 is logged
 with `logBusy` — the host is already stored in `gallerySites`, so the log privacy rule holds.
 
 ## Test
