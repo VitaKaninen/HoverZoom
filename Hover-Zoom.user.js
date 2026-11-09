@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.242.0
+// @version     0.243.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -10368,7 +10368,7 @@
     // ---- gallery mode: hovering a link floats the linked page's thumbnails. See docs/GALLERY.md.
 
     const GAL_COLS = 7, GAL_ROWS = 5;   // only caps the count: 34 pictures
-    const GAL_ARM = 0.5;                // the hole reaches this much of the result's size out on each side
+    const GAL_REVEAL = 1 / 3;           // pointer this close to the result's edge (of its size) moves the hole to the neighbour there
     const GAL_WAIT_MS = 2500;           // longest wait for thumbnails before laying out without the rest
     const GAL_GAP = 12;                 // px between cells and at the edges
     const GAL_GRACE_MS = 500;           // off every link this long before the set fades
@@ -10594,16 +10594,9 @@
         return galRoot;
     }
 
-    // The hole: the hovered result plus half its size out on each side, as two bars (a plus, corners covered).
-    function galBars(hole) {
-        return [
-            { x: hole.x - hole.w * GAL_ARM, y: hole.y, w: hole.w * (1 + 2 * GAL_ARM), h: hole.h },
-            { x: hole.x, y: hole.y - hole.h * GAL_ARM, w: hole.w, h: hole.h * (1 + 2 * GAL_ARM) }];
-    }
-
     // Rows of one height spread over the viewport, each split around the hole; the largest height that fits every shape.
     function galRows(asp, hole) {
-        const G = GAL_GAP, W = vpW(), H = vpH(), bars = galBars(hole);
+        const G = GAL_GAP, W = vpW(), H = vpH(), bars = [hole];
         const free = function (y, h) {
             let segs = [[G, W - G]];
             bars.forEach(function (b) {
@@ -10653,14 +10646,70 @@
         return best.out;
     }
 
-    // The hole's shading: the page dark except the plus, which is lighter.
-    function galShade(set, hole) {
-        const W = vpW(), H = vpH(), b = galBars(hole), h = b[0], v = b[1];
-        const plus = [[v.x, v.y], [v.x + v.w, v.y], [v.x + v.w, h.y], [h.x + h.w, h.y], [h.x + h.w, h.y + h.h], [v.x + v.w, h.y + h.h],
-            [v.x + v.w, v.y + v.h], [v.x, v.y + v.h], [v.x, h.y + h.h], [h.x, h.y + h.h], [h.x, h.y], [v.x, h.y]];
+    // The hole's shading: the page dark except the hole, which is lighter.
+    function galShade(set, o) {
+        const W = vpW(), H = vpH();
+        const box = [[o.x, o.y], [o.x + o.w, o.y], [o.x + o.w, o.y + o.h], [o.x, o.y + o.h]];
         const pts = function (a) { return a.map(function (p) { return p[0] + 'px ' + p[1] + 'px'; }).join(','); };
-        set.shade.style.clipPath = 'polygon(evenodd,' + pts([[0, 0], [W, 0], [W, H], [0, H], [0, 0]]) + ',' + pts(plus.concat([plus[0]])) + ')';
-        set.lite.style.clipPath = 'polygon(' + pts(plus) + ')';
+        set.shade.style.clipPath = 'polygon(evenodd,' + pts([[0, 0], [W, 0], [W, H], [0, H], [0, 0]]) + ',' + pts(box.concat([box[0]])) + ')';
+        set.lite.style.clipPath = 'polygon(' + pts(box) + ')';
+    }
+
+    // Lay the set out around one hole; returns the slots.
+    function galLayout(set, hole) {
+        const L = galRows(set.asp, hole);
+        set.open = hole;
+        galShade(set, hole);
+        set.cells.forEach(function (cell, k) {
+            const r = L[k];
+            if (!r) { cell.style.display = 'none'; return; }
+            cell.style.display = '';
+            cell.style.width = r.w + 'px';
+            cell.style.height = r.h + 'px';
+            cell.style.transform = 'translate(' + r.x + 'px,' + r.y + 'px)';
+        });
+        return L;
+    }
+
+    // Which edge third of the result the pointer is in ('l', 'r', 'u', 'd'), or '' in the middle.
+    function galZone(a, x, y) {
+        const fx = (x - a.x) / a.w, fy = (y - a.y) / a.h, R = GAL_REVEAL;
+        const dx = fx < R ? R - fx : fx > 1 - R ? fx - 1 + R : 0;
+        const dy = fy < R ? R - fy : fy > 1 - R ? fy - 1 + R : 0;
+        if (!dx && !dy) return '';
+        return dx >= dy ? (fx < R ? 'l' : 'r') : (fy < R ? 'u' : 'd');
+    }
+
+    // The nearest linked page picture beside the result in one direction, as a rect, or null.
+    function galNeighbour(a, dir) {
+        let best = null, bestD = Infinity;
+        document.querySelectorAll('a[href] img').forEach(function (img) {
+            const r = img.getBoundingClientRect();
+            if (r.width < 24 || r.height < 24 || r.bottom <= 0 || r.right <= 0 || r.top >= vpH() || r.left >= vpW()) return;
+            const across = dir === 'l' || dir === 'r'
+                ? r.top < a.y + a.h && r.bottom > a.y : r.left < a.x + a.w && r.right > a.x;
+            if (!across) return;
+            const d = dir === 'r' ? r.left - (a.x + a.w) : dir === 'l' ? a.x - r.right
+                : dir === 'd' ? r.top - (a.y + a.h) : a.y - r.bottom;
+            if (d < -1) return;
+            const off = dir === 'l' || dir === 'r'
+                ? Math.abs(r.top + r.height / 2 - a.y - a.h / 2) : Math.abs(r.left + r.width / 2 - a.x - a.w / 2);
+            if (d + off < bestD) { bestD = d + off; best = { x: r.left, y: r.top, w: r.width, h: r.height }; }
+        });
+        return best;
+    }
+
+    // Pointer in an edge third of the shown result (after passing its middle) opens the hole over the neighbour there.
+    function galSteer(x, y) {
+        const set = galCur;
+        if (!set || !set.anchor) return;
+        const z = galZone(set.anchor, x, y);
+        if (!z) set.armed = true;
+        const dir = set.armed ? z : '';
+        if (dir === set.dir) return;
+        set.dir = dir;
+        const hole = (dir && galNeighbour(set.anchor, dir)) || set.anchor;
+        if (hole !== set.open) galLayout(set, hole);
     }
 
     // Bigger files for one thumbnail, the next size up first: srcset widths ascending, else the resolver's list.
@@ -10759,15 +10808,10 @@
             set.asp.push(p.asp);
             set.el.appendChild(cell);
         });
-        const L = galRows(set.asp, galHole);
-        galShade(set, galHole);
-        set.cells.forEach(function (cell, k) {
-            const r = L[k];
-            if (!r) { cell.style.display = 'none'; return; }
-            cell.style.width = r.w + 'px';
-            cell.style.height = r.h + 'px';
-            cell.style.transform = 'translate(' + r.x + 'px,' + r.y + 'px)';
-        });
+        set.anchor = galHole;
+        set.dir = '';
+        set.armed = galZone(galHole, galPt.x, galPt.y) === '';
+        const L = galLayout(set, galHole);
         root.appendChild(set.el);
         void set.el.offsetWidth;
         set.el.classList.add('on');
@@ -10823,7 +10867,7 @@
         galGraceTimer = setTimeout(galHide, GAL_GRACE_MS);
     }
 
-    // Tracks the pointer; hides at the window's edge; a move ends the scroll lock.
+    // Tracks the pointer; hides at the window edge; a move ends the scroll lock; steers the hole.
     function galMove(e) {
         galPt.x = e.clientX;
         galPt.y = e.clientY;
@@ -10842,6 +10886,7 @@
             galLock = null;
             galOver(e);
         }
+        galSteer(galPt.x, galPt.y);
     }
 
     // A page scroll hides the set; nothing shows again until the pointer itself moves.

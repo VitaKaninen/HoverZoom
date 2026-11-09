@@ -20,23 +20,27 @@ the site list; the galleries they lead to are not, so previews keep working ther
 ## Behaviour (user's numbers, 2026-11-09)
 
 - At most 34 pictures (`GAL_COLS` × `GAL_ROWS` − 1; that is all those constants do now).
-- **Layout: a fixed hole over the hovered result** (user, v0.241.0, "another method"; the earlier
-  moving-slot method is v0.240.0, commit de9996a — "take it back to here" means that). The hole is
-  the hovered result's `<img>` rect (`galHole`, taken in `galOver`) plus `GAL_ARM` (0.5) of its own
-  width/height out left, right, up and down: a plus, corners covered (`galBars`) — the user wanted
-  half of each neighbouring result visible so the pointer can reach it. Nothing moves under the
-  pointer; hovering a neighbour switches the gallery after the hover delay, hole and all.
+- **Layout: the hole is one result, steered by the pointer** (user, v0.243.0). Earlier methods: the
+  moving slot is v0.240.0, commit de9996a ("take it back to here" means that); a plus-shaped hole
+  (the result + half its size out in 4 directions) was v0.241.0-v0.242.0. Now the hole is exactly
+  the hovered result's `<img>` rect (`set.anchor`, from `galHole` taken in `galOver`). Pointer in an
+  edge third (`GAL_REVEAL`) of it, or past that edge, moves the hole to the nearest result picture
+  that way (`galZone` picks the deeper axis; `galNeighbour` = nearest `a[href] img` overlapping
+  across, by gap + centre offset), covering the hovered one; back to the middle restores it; no
+  neighbour that way keeps the hole put. The set re-lays out at once on each hole change
+  (`galSteer` from `galMove`, `galLayout`).
+- **Armed only after the middle:** a set built with the pointer in an edge third does not steer
+  until the pointer passes the middle third (`set.armed`). Without it, arriving at a neighbour
+  from its left edge would swing the hole straight back to the result just left.
 - `galShow` loads every thumbnail first (`galImg`, up to `GAL_WAIT_MS` 2.5 s; late or failed ones are
   left out), so each shape is known **before** anything is placed — the user does not want pictures
   swimming as they load.
 - `galRows(aspects, hole)`: rows of one height spread evenly over the viewport; each row's band is
-  split into free segments around the bars (+ `GAL_GAP`); pictures fill segments in order, spare
+  split into free segments around the hole (+ `GAL_GAP`); pictures fill segments in order, spare
   width spread evenly between them; binary search for the largest height that places every
   picture (none fits even at 8 px → the unplaced cells are hidden). Rows are one height because a
   segment beside the hole cannot be justified independently of the rows above and below.
 - Resize hides the set (the hole's rect is stale). Upgrade check uses each picture's drawn width.
-- Fixtures at 1024 × 768: `gallery-mixed.html` (20 alternating 4:3 / 2:3) → 4 rows of 143 px, 52 %
-  of the viewport; gallery A → 34 in 6 rows of 100 px. Fill is lower than the old justified rows (79 %).
 - Hover delay = `cfg.hoverDelay`. Off every result link for `GAL_GRACE_MS` 500 → fade out. Moving
   to another link within that time keeps the old set until the new one is ready, then crossfades
   (`GAL_FADE_MS` 200). A linked page with no pictures clears the old set.
@@ -64,8 +68,8 @@ the site list; the galleries they lead to are not, so previews keep working ther
   own list. Visited wins over seen; a mark of the wrong kind is replaced.
 - Test: the Browser pane's background tab fires **no** scroll events (`scrollBy` moves the page,
   listeners get nothing) — dispatch `new Event('scroll')` on `document` by hand.
-- Backdrop (user): `.shade` darkens the page `rgba(0,0,0,.6)` with the plus cut out
-  (`clip-path: polygon(evenodd, viewport, plus)`); `.lite` covers the plus at `.25` (`galShade`).
+- Backdrop (user): `.shade` darkens the page `rgba(0,0,0,.6)` with the hole cut out
+  (`clip-path: polygon(evenodd, viewport, hole)`); `.lite` covers the hole at `.25` (`galShade`).
   Both live inside the set, so they fade with it.
 
 ## Reading the gallery: the hidden frame first (v0.231.0)
