@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.246.0
+// @version     0.247.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -10387,7 +10387,7 @@
     const GAL_RETRY_MS = 1500;          // one more look when it counted nothing
     const galCache = new Map();         // href -> Promise of [{thumb, ss, cands, base}] | null | 'cancel'
     let galFrameStop = null;
-    let galHost = null, galRoot = null, galCur = null, galWant = null;
+    let galHost = null, galRoot = null, galBlur = null, galCur = null, galWant = null;
     let galHoverTimer = 0, galGraceTimer = 0, galPt = { x: 0, y: 0 };
     const GAL_SEEN_KEY = 'hoverZoomGallerySeen';   // linked pages whose gallery was shown, oldest first
     const GAL_SEEN_MAX = 10000;
@@ -10589,8 +10589,15 @@
             'box-shadow:0 8px 22px rgba(0,0,0,.55),0 2px 5px rgba(0,0,0,.4)}' +
             'img.ok{opacity:1}' +
             '.shade{position:absolute;inset:0;background:rgba(0,0,0,.8)}' +
-            '.lite{position:absolute;inset:0;background:rgba(0,0,0,.25)}';
+            '.blur{position:fixed;inset:0;backdrop-filter:blur(0) grayscale(0);transition:backdrop-filter ' + GAL_FADE_MS + 'ms ease}' +
+            '.blur.on{backdrop-filter:blur(6px) grayscale(.6)}' +
+            '.ring{position:absolute;left:0;top:0;box-sizing:border-box;border:3px solid #89b4fa;border-radius:8px;' +
+            'box-shadow:0 0 14px 2px rgba(137,180,250,.55)}';
         galRoot.appendChild(st);
+        // Outside the fading .set: an ancestor below opacity 1 is a backdrop root, so the blur would show nothing mid-fade.
+        galBlur = document.createElement('div');
+        galBlur.className = 'blur';
+        galRoot.appendChild(galBlur);
         return galRoot;
     }
 
@@ -10646,13 +10653,16 @@
         return best.out;
     }
 
-    // The hole's shading: the page dark except the hole, which is lighter.
+    // The hole's shading: the page dark and blurred except the hole, which gets a ring.
     function galShade(set, o) {
         const W = vpW(), H = vpH();
         const box = [[o.x, o.y], [o.x + o.w, o.y], [o.x + o.w, o.y + o.h], [o.x, o.y + o.h]];
         const pts = function (a) { return a.map(function (p) { return p[0] + 'px ' + p[1] + 'px'; }).join(','); };
         set.shade.style.clipPath = 'polygon(evenodd,' + pts([[0, 0], [W, 0], [W, H], [0, H], [0, 0]]) + ',' + pts(box.concat([box[0]])) + ')';
-        set.lite.style.clipPath = 'polygon(' + pts(box) + ')';
+        if (galBlur) galBlur.style.clipPath = set.shade.style.clipPath;
+        const R = 4, rs = set.ring.style;
+        rs.left = (o.x - R) + 'px'; rs.top = (o.y - R) + 'px';
+        rs.width = (o.w + 2 * R) + 'px'; rs.height = (o.h + 2 * R) + 'px';
     }
 
     // Lay the set out around one hole; returns the slots.
@@ -10782,7 +10792,7 @@
         if (list === 'cancel' || galWant !== href || (galCur && galCur.href === href)) return;
         if (!list || !list.length) {
             dbg('gallery: no pictures on the linked page', { href: href });
-            if (galCur) { galDrop(galCur); galCur = null; }
+            if (galCur) { galDrop(galCur); galCur = null; galBlur.classList.remove('on'); }
             return;
         }
         let timer = 0;
@@ -10795,7 +10805,7 @@
             clearTimeout(timer);
             if (galWant !== href || (galCur && galCur.href === href)) return;
             const pics = (v || got).filter(Boolean);
-            if (!pics.length) { if (galCur) { galDrop(galCur); galCur = null; } return; }
+            if (!pics.length) { if (galCur) { galDrop(galCur); galCur = null; galBlur.classList.remove('on'); } return; }
             galBuild(href, pics);
         });
     }
@@ -10804,12 +10814,12 @@
         const root = galLayer();
         if (!galHost.isConnected) document.documentElement.appendChild(galHost);
         if (galCur) galDrop(galCur);
-        const set = { href: href, el: document.createElement('div'), shade: document.createElement('div'), lite: document.createElement('div'), cells: [], asp: [] };
+        const set = { href: href, el: document.createElement('div'), shade: document.createElement('div'), ring: document.createElement('div'), cells: [], asp: [] };
         set.el.className = 'set';
         set.shade.className = 'shade';
-        set.lite.className = 'lite';
+        set.ring.className = 'ring';
         set.el.appendChild(set.shade);
-        set.el.appendChild(set.lite);
+        set.el.appendChild(set.ring);
         pics.forEach(function (p) {
             const cell = document.createElement('div');
             cell.className = 'cell';
@@ -10823,6 +10833,7 @@
         root.appendChild(set.el);
         void set.el.offsetWidth;
         set.el.classList.add('on');
+        galBlur.classList.add('on');
         galCur = set;
         galSteer(galPt.x, galPt.y);
         galListAdd(GAL_SEEN_KEY, href);
@@ -10841,7 +10852,7 @@
         clearTimeout(galGraceTimer);
         clearTimeout(galHoverTimer);
         galWant = null;
-        if (galCur) { galDrop(galCur); galCur = null; }
+        if (galCur) { galDrop(galCur); galCur = null; galBlur.classList.remove('on'); }
     }
 
     function galOver(e) {

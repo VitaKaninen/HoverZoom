@@ -70,9 +70,13 @@ the site list; the galleries they lead to are not, so previews keep working ther
   own list. Visited wins over seen; a mark of the wrong kind is replaced.
 - Test: the Browser pane's background tab fires **no** scroll events (`scrollBy` moves the page,
   listeners get nothing) — dispatch `new Event('scroll')` on `document` by hand.
-- Backdrop (user): `.shade` darkens the page `rgba(0,0,0,.8)` with the hole cut out
-  (`clip-path: polygon(evenodd, viewport, hole)`); `.lite` covers the hole at `.25` (`galShade`).
-  Both live inside the set, so they fade with it.
+- Backdrop (user, v0.247.0 — so the page's picture can't be taken for a thumbnail): `.shade`
+  darkens the page `rgba(0,0,0,.8)` with the hole cut out (`clip-path: polygon(evenodd, viewport,
+  hole)`, `galShade`); the hole is left undimmed with a 3 px `#89b4fa` glowing `.ring` 4 px outside it.
+  Both live inside the set and fade with it. The page is also blurred and greyed (`blur(6px)
+  grayscale(.6)`) by one shared `galBlur` with the same clip, **outside** the sets: an ancestor
+  with opacity < 1 is a backdrop root, so inside the fading set the blur would show nothing
+  mid-fade. It transitions `backdrop-filter`, goes on in `galShow`, off wherever `galCur` is cleared.
 
 ## Reading the gallery: the hidden frame first (v0.231.0)
 
