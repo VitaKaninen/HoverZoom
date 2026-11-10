@@ -769,6 +769,14 @@ Same `saveName()` and fallback as `E9a`; Tampermonkey's Download Mode must be *B
 LibreWolf.
 - **Alt+click was tried first (v0.226.0) and never reached the script in LibreWolf**; cause unknown,
   removed in v0.228.0. Worked with synthetic events in the pane.
+- **Converting on save** (user, v0.257.0; `saveConvert` off/png/jpg/webp, `saveConvertFrom` avif /
+  modern = AVIF+WebP+JPEG XL, `saveJpegQuality` 92; Settings → Saving, main tab). `saveOriginal` fetches
+  the bytes (`GM_xhr` arraybuffer, 120 s), `sniffFormat()` decides by the bytes (CDNs serve AVIF under
+  `.jpg` names), animated files never convert, then `createImageBitmap` → canvas → `toBlob`; JPEG gets
+  a white backdrop. Hand-off: `GM_download` of a blob URL, else an `<a download>` click (that one ignores
+  `saveAs`). Any failure saves as served (`saveAsServed`, the old path). HEIC is sniffed but browsers
+  cannot decode it, so it falls through. Conversion verified in Chromium; the blob hand-off to the
+  manager is not verified.
 
 ### The status bar fades itself out · `E10`
 

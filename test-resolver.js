@@ -46,8 +46,8 @@ const sizeFromHeaders = new Function(
 const location = { href: 'https://example.com/page/index.html' };
 const body = src.slice(start, end);
 const exported = new Function('location', body +
-    '\nreturn {parseSrcset, looksLikeImage, isVideoUrl, upgradeCandidates, upgradeRules, linkParamCandidates, blockMatch, sameStem, urlStem, betterHit, sniffAnimated, taughtRuleFrom, taughtApply};')(location);
-const { parseSrcset, looksLikeImage, isVideoUrl, upgradeCandidates, upgradeRules, linkParamCandidates, blockMatch, sameStem, urlStem, betterHit, sniffAnimated, taughtRuleFrom, taughtApply } = exported;
+    '\nreturn {parseSrcset, looksLikeImage, isVideoUrl, upgradeCandidates, upgradeRules, linkParamCandidates, blockMatch, sameStem, urlStem, betterHit, sniffAnimated, sniffFormat, taughtRuleFrom, taughtApply};')(location);
+const { parseSrcset, looksLikeImage, isVideoUrl, upgradeCandidates, upgradeRules, linkParamCandidates, blockMatch, sameStem, urlStem, betterHit, sniffAnimated, sniffFormat, taughtRuleFrom, taughtApply } = exported;
 
 let pass = 0, fail = 0;
 const NL = String.fromCharCode(10);
@@ -1183,5 +1183,18 @@ eq('taught: a word inside another word is not matched', taughtApply(TW, 'https:/
 eq('taught: identical addresses teach nothing', teach('https://a.com/x.jpg', 'https://a.com/x.jpg'), null);
 const DL = teach('https://a.com/i/1.jpg?v=$2', 'https://a.com/i/1-big.jpg?v=$2');
 eq('taught: a dollar sign in the address survives', taughtApply(DL, 'https://a.com/i/1.jpg?v=$2'), 'https://a.com/i/1-big.jpg?v=$2');
+// ---- sniffFormat(): converting on save goes by the bytes, never the name.
+function ftyp(brand) { return bytes('____ftyp' + brand + '____', 40); }
+eq('format: a still AVIF', sniffFormat(ftyp('avif')), { fmt: 'avif', animated: false });
+eq('format: an AVIF sequence is animated', sniffFormat(ftyp('avis')), { fmt: 'avif', animated: true });
+eq('format: HEIC', sniffFormat(ftyp('heic')).fmt, 'heic');
+eq('format: an mp4 is no picture', sniffFormat(ftyp('isom')), null);
+eq('format: a still webp', sniffFormat(webp('VP8X', 0x10)), { fmt: 'webp', animated: false });
+eq('format: an animated webp', sniffFormat(webp('VP8X', 0x12)), { fmt: 'webp', animated: true });
+const jpgB = bytes('xx', 30); jpgB[0] = 0xFF; jpgB[1] = 0xD8;
+eq('format: a JPEG', sniffFormat(jpgB).fmt, 'jpg');
+const jxlB = bytes('xx', 30); jxlB[0] = 0xFF; jxlB[1] = 0x0A;
+eq('format: a bare JPEG XL codestream', sniffFormat(jxlB).fmt, 'jxl');
+eq('format: a GIF never converts', sniffFormat(bytes('GIF89a', 30)).animated, true);
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

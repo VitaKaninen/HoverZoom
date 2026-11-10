@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.256.0
+// @version     0.257.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -303,6 +303,9 @@
         shadowStrength: 50,         // % opacity
         smoothing: 'auto',          // 'auto' | 'pixelated' | 'crisp-edges' — image-rendering
         spinnerTheme: 'auto',       // 'auto' (follows the browser) | 'dark' | 'light'
+        saveConvert: 'off',         // saving converts to: 'off' | 'png' | 'jpg' | 'webp'
+        saveConvertFrom: 'avif',    // ...which files: 'avif' | 'modern' (AVIF, WebP, JPEG XL)
+        saveJpegQuality: 92,        // %, for 'jpg' and 'webp'
         referrerSites: [],          // sites to load previews from WITHOUT a referrer
         scrollSites: [],            // sites that load more when scrolled: learned, or the user's
         videoDelays: {},            // host -> {ms, rules, samples, fixes, user}: wait for the page's
@@ -1079,6 +1082,24 @@
         if (head.slice(0, 4) === 'GIF8') return head.indexOf('NETSCAPE2.0') >= 0;
         if (bytes[0] === 0x89 && head.slice(1, 4) === 'PNG') return head.indexOf('acTL') >= 0;
         return false;
+    }
+
+    // A file's real format from its first bytes: { fmt, animated } or null.
+    function sniffFormat(bytes) {
+        if (!bytes || bytes.length < 12) return null;
+        let head = '';
+        for (let i = 0; i < Math.min(bytes.length, 16); i++) head += String.fromCharCode(bytes[i]);
+        let fmt = null, anim = sniffAnimated(bytes);
+        if (head.slice(4, 8) === 'ftyp') {
+            const brand = head.slice(8, 12);
+            if (brand === 'avif' || brand === 'avis') { fmt = 'avif'; anim = brand === 'avis'; }
+            else if (/^(heic|heix|mif1|msf1)$/.test(brand)) fmt = 'heic';
+        } else if (head.slice(0, 4) === 'RIFF' && head.slice(8, 12) === 'WEBP') fmt = 'webp';
+        else if ((bytes[0] === 0xFF && bytes[1] === 0x0A) || head.slice(4, 8) === 'JXL ') fmt = 'jxl';
+        else if (bytes[0] === 0xFF && bytes[1] === 0xD8) fmt = 'jpg';
+        else if (bytes[0] === 0x89 && head.slice(1, 4) === 'PNG') fmt = 'png';
+        else if (head.slice(0, 4) === 'GIF8') { fmt = 'gif'; anim = true; }
+        return fmt ? { fmt: fmt, animated: anim } : null;
     }
 
     // Is `next` worth replacing what the frame is already showing? The two resolver paths
@@ -4757,7 +4778,91 @@
         return name;
     }
 
-    function saveOriginal(url, quiet, done) {
+    // ---- converting on save: the file's own bytes decide its format, never its name
+    const SAVE_FETCH_MS = 120000;
+    const CONVERT_MIME = { png: 'image/png', jpg: 'image/jpeg', webp: 'image/webp' };
+
+    function convertWanted(fmt) {
+        if (!fmt || cfg.saveConvert === 'off' || fmt.animated || fmt.fmt === cfg.saveConvert) return false;
+        if (cfg.saveConvertFrom === 'modern') return ['avif', 'webp', 'jxl'].indexOf(fmt.fmt) >= 0;
+        return fmt.fmt === 'avif';
+    }
+
+    function fetchForSave(url) {
+        return new Promise(function (res) {
+            let settled = false;
+            const fin = function (v) { if (!settled) { settled = true; res(v); } };
+            setTimeout(function () { fin(null); }, SAVE_FETCH_MS);
+            try {
+                GM_xmlhttpRequest({
+                    method: 'GET', url: url, responseType: 'arraybuffer', timeout: SAVE_FETCH_MS,
+                    onload: function (r) { fin(r.status && (r.status < 200 || r.status >= 300) ? null : r.response || null); },
+                    onerror: function () { fin(null); },
+                    ontimeout: function () { fin(null); },
+                });
+            } catch (e) { fin(null); }
+        });
+    }
+
+    // The bytes decoded and re-encoded as cfg.saveConvert; null when the browser cannot decode them.
+    async function convertBytes(buf, fmt) {
+        try {
+            const bmp = await createImageBitmap(new Blob([buf], { type: 'image/' + fmt.fmt }));
+            const c = document.createElement('canvas');
+            c.width = bmp.width;
+            c.height = bmp.height;
+            const g = c.getContext('2d');
+            if (cfg.saveConvert === 'jpg') { g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); }   // JPEG has no transparency
+            g.drawImage(bmp, 0, 0);
+            if (bmp.close) bmp.close();
+            const mime = CONVERT_MIME[cfg.saveConvert];
+            const out = await new Promise(function (r) { c.toBlob(r, mime, Math.max(0.1, Math.min(1, cfg.saveJpegQuality / 100))); });
+            c.width = c.height = 0;
+            return out && out.type === mime ? out : null;
+        } catch (e) {
+            dbg('converting for save failed', String(e));
+            return null;
+        }
+    }
+
+    // A converted file to the download folder: the manager's download, else a plain link download.
+    function saveBlob(blob, name, quiet, done, url) {
+        const obj = URL.createObjectURL(blob);
+        const viaLink = function () {
+            try {
+                const a = document.createElement('a');
+                a.href = obj;
+                a.download = name;
+                a.style.display = 'none';
+                document.documentElement.appendChild(a);
+                a.click();
+                a.remove();
+                if (done) done();
+            } catch (e) { dbg('saving the converted file failed', String(e)); saveAsServed(url, quiet, done); }
+            setTimeout(function () { URL.revokeObjectURL(obj); }, 60000);
+        };
+        try {
+            GM_download({ url: obj, name: name, saveAs: !quiet,
+                onload: function () { setTimeout(function () { URL.revokeObjectURL(obj); }, 60000); if (done) done(); },
+                onerror: function (r) { dbg('manager refused the converted file', { error: r && r.error }); if (!(r && r.error === 'not_succeeded')) viaLink(); } });
+        } catch (e) { viaLink(); }
+    }
+
+    // Saving: converted when the setting covers the file's real format, else exactly as served.
+    async function saveOriginal(url, quiet, done) {
+        if (cfg.saveConvert === 'off' || typeof GM_xmlhttpRequest !== 'function' || /^(data|blob):/.test(url)) { saveAsServed(url, quiet, done); return; }
+        toast('Saving…', 60000);
+        const buf = await fetchForSave(url);
+        const fmt = buf ? sniffFormat(new Uint8Array(buf, 0, Math.min(4096, buf.byteLength))) : null;
+        if (!convertWanted(fmt)) { hideTip(); saveAsServed(url, quiet, done); return; }
+        toast('Converting ' + fmt.fmt.toUpperCase() + ' to ' + cfg.saveConvert.toUpperCase() + '…', 60000);
+        const out = await convertBytes(buf, fmt);
+        if (!out) { toast('Could not convert this ' + fmt.fmt.toUpperCase() + '; saved as it is', 3000); saveAsServed(url, quiet, done); return; }
+        hideTip();
+        saveBlob(out, saveName(url).replace(/\.[a-z0-9]{2,5}$/i, '') + '.' + cfg.saveConvert, quiet, done, url);
+    }
+
+    function saveAsServed(url, quiet, done) {
         if (typeof GM_download !== 'function') { openOriginal(url); return; }
         try {
             GM_download({ url: url, name: saveName(url), saveAs: !quiet,
@@ -12648,6 +12753,23 @@
             'Fetches the next page in the background; you stay on this one.');
         check('tourSkipDupes', 'Skip duplicate pictures',
             'Shows each picture once, even when it was uploaded twice under different addresses. The first copy stays.');
+
+        section('Saving');
+        const conv = pick('saveConvert', 'Convert when saving',
+            'Middle-click on a preview saves its picture. The file’s real format decides, not its name. ' +
+            'Animated pictures are always saved as they are.', [
+                ['off', 'Never: save as the site serves it'], ['png', 'To PNG (lossless, large)'],
+                ['jpg', 'To JPEG'], ['webp', 'To WebP']]);
+        const convFrom = pick('saveConvertFrom', 'Which pictures', null, [
+            ['avif', 'AVIF only'], ['modern', 'AVIF, WebP and JPEG XL']]);
+        const convQ = num('saveJpegQuality', 'JPEG / WebP quality', 'In %. (default: 92)', 10, 100, 1);
+        function syncConvert() {
+            const v = conv.el.value;
+            convFrom.row.hidden = v === 'off';
+            convQ.row.hidden = v === 'off' || v === 'png';
+        }
+        conv.el.addEventListener('change', syncConvert);
+        syncConvert();
 
         section('Where it runs');
         pick('siteMode', 'Site list', null, [

@@ -102,6 +102,7 @@ def main():
     save(full, "photo.jpg")
     save(full, "photo.png")
     save(full, "photo.webp")
+    save(full, "photo.avif")    # converting on save
 
     for w, h in ((200, 150), (420, 315), (800, 600)):
         save(full.resize((w, h)), "photo-%dx%d.jpg" % (w, h))
