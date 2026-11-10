@@ -781,6 +781,10 @@ LibreWolf.
   or an SPA navigation saves again. A repeat press shows "Already saved" and still claims the
   press. A save that never reports done (failed) may be pressed again after `MID_RETRY_MS` (60 s).
   The context menu's Save is not covered: it is a deliberate choice.
+- **Saved mark by the pointer** (user, v0.272.0): while a picture saved this visit is up, a 12 px
+  `galSavedIcon` disc follows the pointer 14 px below-right (`syncSavedMark`, from `onMove`,
+  `setMedia`, `hideViewer`, `hideSpinner` and the save's `done`); the spinner takes that spot first.
+  Placed: only with the pointer in the window. No outline or shadow on any saved disc (user).
 - **Alt+click was tried first (v0.226.0) and never reached the script in LibreWolf**; cause unknown,
   removed in v0.228.0. Worked with synthetic events in the pane.
 - **Converting on save** (user, v0.257.0; `saveConvert` off/png/jpg/webp, `saveConvertFrom` avif /

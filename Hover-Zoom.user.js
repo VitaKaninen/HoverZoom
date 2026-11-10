@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.271.0
+// @version     0.272.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -2096,6 +2096,11 @@
 
     let gripEl = null;          // invisible collar that carries the outer half of the resize strip
     let spinEl = null, spinSvg = null;
+    let savedMarkEl = null;      // the small blue disc by the pointer over a picture saved this visit
+    const SAVED_MARK = 12;       // px
+    const midSaved = new Map(); // url -> when pressed, or Infinity once saved; this page address only
+    let midSavedHref = '';
+    const MID_RETRY_MS = 60000; // a save that never reported back may be pressed again after this
     let seamNoteEl = null, seamNoteTimer = 0;
     let fsEl = null;            // the bar's fullscreen button
     let vctlEl = null, vgrpEl = null, vplayEl = null, vtimeEl = null, vseekEl = null,
@@ -2432,6 +2437,9 @@
             'display:none;pointer-events:none;',
             'filter:drop-shadow(0 2px 6px rgba(0,0,0,.5))}',
             '.spin.on{display:block}',
+            '.svmark{position:fixed;width:' + SAVED_MARK + 'px;height:' + SAVED_MARK + 'px;display:none;pointer-events:none}',
+            '.svmark.on{display:block}',
+            '.svmark svg{display:block}',
             '.spin svg{display:block;width:100%;height:100%}',
             '.spin .disc{fill:var(--spin-bg);stroke:var(--spin-edge);stroke-width:1.5}',
             '.spin .track,.spin .arc{fill:none;stroke-width:4.5;stroke-linecap:round}',
@@ -2606,6 +2614,8 @@
         spinSvg.appendChild(arcEl);
         spinEl.appendChild(spinSvg);
         root.appendChild(spinEl);
+        savedMarkEl = galSavedIcon('svmark');
+        root.appendChild(savedMarkEl);
 
         // Max z-index everywhere, so DOM order decides: stay under the panel and every docked widget.
         const parent = document.body || document.documentElement;
@@ -3847,6 +3857,7 @@
         imgEl.style.visibility = '';
         mediaEl.src = want;   // a CSP-refused picture displays from bytes. See E49.
         if (stage && !wantsVideo && was && was !== want) stageCover(want, seq);
+        syncSavedMark();
         if (wantsVideo) {
             // The site's remembered answer, not the last clip's: a fresh tab on a site that has
             // never been unmuted starts silent, which is what AUDIO_DEFAULT is for.
@@ -4097,11 +4108,24 @@
         moveSpinner();
     }
 
+    // The saved mark follows the pointer, below-right, while a picture saved this visit is up; the spinner takes the spot first.
+    function syncSavedMark() {
+        if (!savedMarkEl) return;
+        const on = !!view && !!box && box.classList.contains('on') && midSavedHref === location.href && midSaved.get(view.url) === Infinity &&
+            !(spinEl && spinEl.classList.contains('on')) && (!placed || pointInPreview(pointer.x, pointer.y));
+        savedMarkEl.classList.toggle('on', on);
+        if (!on) return;
+        const m = viewportBox();
+        savedMarkEl.style.left = Math.min(pointer.x + 14, m.vw - SAVED_MARK - EDGE_GAP) + 'px';
+        savedMarkEl.style.top = Math.min(pointer.y + 14, m.vh - SAVED_MARK - bottomGap()) + 'px';
+    }
+
     function hideSpinner() {
         clearTimeout(spinTimer);
         if (spinAnim) { clearInterval(spinAnim); spinAnim = 0; }
         spinDocked = false;
         if (spinEl) spinEl.classList.remove('on');
+        syncSavedMark();
     }
 
     // -------------------------------------------------------------------- show
@@ -4332,6 +4356,7 @@
         volDrag = false;
         closeVol();
         box.classList.remove('on', 'hot', 'pan', 'drag', 'full');
+        syncSavedMark();
         box.style.cursor = '';      // onMove writes this inline over the bands; see hitRegion
         if (gripEl) { gripEl.classList.remove('hot'); gripEl.style.cursor = ''; }
         clearTimeout(hideTimer);
@@ -5443,9 +5468,6 @@
     let holdTimer = null;
     let watchTimer = null;      // the poll for a player under the picture
     let midSaveAt = 0;          // when the last middle-click save happened; its click is ours
-    const midSaved = new Map(); // url -> when pressed, or Infinity once saved; this page address only
-    let midSavedHref = '';
-    const MID_RETRY_MS = 60000; // a save that never reported back may be pressed again after this
     let swallowMenuAt = 0;      // when the right press that dismissed a preview happened; its menu is ours
     const MENU_CLAIM_MS = 1500; // and only that long, or a press released off-window eats the next menu
     let pointer = { x: 0, y: 0 };
@@ -6675,6 +6697,7 @@
         if (placed) thruSync(e.clientX, e.clientY);
         if (active && !placed && !galOwns(active) && playerArrived(active)) return;
         if (spinEl && spinEl.classList.contains('on')) moveSpinner();
+        syncSavedMark();
         const over = !!view && !!box && box.classList.contains('on') &&
             pointInPreview(e.clientX, e.clientY);
         // Leaving is a one-shot: showBar() once on the way out arms the fade, where calling it on
@@ -6985,7 +7008,7 @@
         if (at && Date.now() - at < MID_RETRY_MS) { toast('Already saved', 2000); return true; }
         midSaved.set(url, Date.now());
         const gImg = galOwns(active) ? active : null, gHref = gImg && galCur ? galCur.href : null;
-        saveOriginal(url, true, function () { midSaved.set(url, Infinity); if (gImg) galSaved(gImg, gHref); }, savePage(active));
+        saveOriginal(url, true, function () { midSaved.set(url, Infinity); syncSavedMark(); if (gImg) galSaved(gImg, gHref); }, savePage(active));
         return true;
     }
     // The click half of that press: a hover preview lets it through to the link underneath, which would open a tab.
@@ -11041,7 +11064,7 @@
             '.short{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);max-width:calc(100vw - 32px);box-sizing:border-box;' +
             'padding:6px 12px;border-radius:8px;background:#1e1e2e;border:1px solid #f9e2af;color:#f9e2af;font:13px/1.3 system-ui,sans-serif;' +
             'pointer-events:none;box-shadow:0 4px 14px rgba(0,0,0,.6)}' +
-            '.svd{position:absolute;left:4px;top:4px;width:22px;height:22px;pointer-events:none;filter:drop-shadow(0 1px 2px rgba(0,0,0,.7))}' +
+            '.svd{position:absolute;left:4px;top:4px;width:22px;height:22px;pointer-events:none}' +
             'img{display:block;width:100%;height:100%;object-fit:cover;border-radius:6px;background:#1e1e2e;opacity:0;transition:opacity ' + GAL_FADE_MS + 'ms ease;' +
             'box-shadow:0 8px 22px rgba(0,0,0,.55),0 2px 5px rgba(0,0,0,.4)}' +
             'img.ok{opacity:1}' +
@@ -11490,7 +11513,7 @@
         galMarkAll();
     }
 
-    // The saved mark: a blue disc with a down arrow.
+    // The saved mark: a blue disc with a down arrow, no outline (user).
     function galSavedIcon(cls) {
         const NS = 'http://www.w3.org/2000/svg';
         const m = document.createElement('span');
@@ -11501,7 +11524,7 @@
         svg.setAttribute('height', '100%');
         const c = document.createElementNS(NS, 'circle');
         c.setAttribute('cx', '12'); c.setAttribute('cy', '12'); c.setAttribute('r', '10.5');
-        c.setAttribute('fill', '#89b4fa'); c.setAttribute('stroke', '#11111b'); c.setAttribute('stroke-width', '1.5');
+        c.setAttribute('fill', '#89b4fa');
         svg.appendChild(c);
         const a = document.createElementNS(NS, 'path');
         a.setAttribute('d', 'M12 6.5v8M8.2 11l3.8 3.8 3.8-3.8M7.5 17.5h9');
@@ -11829,7 +11852,7 @@
             at.after(m);
         }
         m.style.cssText = 'all:initial;position:absolute;left:0;top:0;z-index:2;pointer-events:none;display:block;' +
-            'width:22px;height:22px;filter:drop-shadow(0 1px 2px rgba(0,0,0,.7))';
+            'width:22px;height:22px';
         const o = m.getBoundingClientRect();
         m.style.left = (ir.left + 4 - o.left) + 'px';
         m.style.top = (ir.top + 4 - o.top) + 'px';
