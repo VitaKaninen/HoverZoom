@@ -11,15 +11,15 @@ so the user can judge whether that gallery is worth opening. Look only: the floa
   in `hoverZoomGalleryDock`, first placed top-right). Menu item `toggleGallery()`: "Show / Hide gallery
   button on this site" (removes every entry covering the page, else adds the host). Elsewhere nothing
   shows, nothing preloads, nothing listens for Ctrl or the middle button.
-- The button (`galToggle`) turns gallery mode on/off **in this tab** (user, v0.253.0): `galTabOn`,
-  saved as `hzGalleryOn` in `GM_saveTab`, read back by `GM_getTab` at boot (async: the page starts
-  off and `galApply()` switches it on when the answer comes). A reload or a same-tab link keeps it; a
-  new tab starts off — so a gallery opened in a new tab previews normally. (v0.252.0 kept it per host
-  + path in GM storage; the user preferred per tab.)
+- The button (`galToggle`) turns gallery mode on/off **for the site** (user, v0.254.0): hosts in
+  `hoverZoomGalleryHosts` (GM storage, own key, survives Reset), read synchronously, so on until the
+  button is pressed again on that host, in every tab; open tabs follow via `GM_addValueChangeListener`.
+  Cost: a gallery opened in a new tab on the same host is also in gallery mode (the reason v0.253.0
+  used per-tab `GM_saveTab`; v0.252.0 was per host + path). The user chose per site over that.
 - `galleryHere()` = top frame, not a captcha, `galleryActive()`. **While active, ordinary previews
   are off on that page** (`siteEnabled()` is false; the slideshow widget hides). Off = the page as it
   is without gallery mode. Seen/visited/saved marks show either way (`galMarkAll` needs only the list).
-- `galTabOn` is a `var`: `siteEnabled()` reads it and can run before its line.
+- `galOnHosts` / `GAL_ON_KEY` are `var`s: `siteEnabled()` reads it and can run before its line.
 ## Behaviour (user's numbers, 2026-11-09)
 
 - Every picture the page has (`GAL_MAX` = Infinity, user v0.251.0: galleries run 10-100 and a cap

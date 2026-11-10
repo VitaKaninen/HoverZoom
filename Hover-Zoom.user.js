@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.253.0
+// @version     0.254.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -509,11 +509,20 @@
         return (cfg.siteMode === 'whitelist' ? siteListed() : !siteListed()) && !galleryActive();
     }
 
-    var galTabOn = false;       // var, not let: siteEnabled() can run before this line. Gallery mode in this tab (GM_getTab)
+    var galOnHosts = null;      // var, not let: siteEnabled() can run before this line. Hosts gallery mode is on for
+    var GAL_ON_KEY = 'hoverZoomGalleryHosts';
 
-    // Gallery mode is switched on in this tab, on a site that has the button.
+    function galOnList() {
+        if (!galOnHosts) {
+            try { galOnHosts = JSON.parse(GM_getValue(GAL_ON_KEY, '') || '[]'); } catch (e) { galOnHosts = []; }
+            if (!Array.isArray(galOnHosts)) galOnHosts = [];
+        }
+        return galOnHosts;
+    }
+
+    // Gallery mode is switched on for this site, on a site that has the button.
     function galleryActive() {
-        return galTabOn && galleryListed();
+        return galOnList().indexOf(pageHost()) >= 0 && galleryListed();
     }
 
     function galleryListed() {
@@ -10415,13 +10424,14 @@
         return isTopFrame && !CAPTCHA_HERE && galleryActive();
     }
 
-    // The button: gallery mode on or off in this tab; a new tab starts off, a reload keeps it.
+    // The button: gallery mode on or off for this site, remembered until toggled again.
     function galToggle() {
-        galTabOn = !galTabOn;
-        const on = galTabOn;
-        try {
-            if (typeof GM_getTab === 'function') GM_getTab(function (t) { t = t || {}; t.hzGalleryOn = on; GM_saveTab(t); });
-        } catch (e) { /* this tab only, until a reload */ }
+        galOnHosts = null;
+        const h = pageHost(), on = galOnList().indexOf(h) < 0;
+        const l = galOnList().filter(function (x) { return x !== h; });
+        if (on) l.push(h);
+        galOnHosts = l;
+        try { GM_setValue(GAL_ON_KEY, JSON.stringify(l)); } catch (e) { /* this page only, until a reload */ }
         galApply();
         toast('Gallery mode ' + (on ? 'on' : 'off'), 3000);
     }
@@ -11306,8 +11316,13 @@
         ['mouseup', 'auxclick', 'click'].forEach(function (t) { document.addEventListener(t, galMidEat, true); });
         setTimeout(galBtnSync, 0);
         try {
-            if (typeof GM_getTab === 'function') GM_getTab(function (t) { if (t && t.hzGalleryOn && !galTabOn) { galTabOn = true; galApply(); } });
-        } catch (e) { /* starts off */ }
+            if (typeof GM_addValueChangeListener === 'function') GM_addValueChangeListener(GAL_ON_KEY, function (n, o, v, remote) {
+                if (!remote) return;
+                const was = galleryActive();
+                galOnHosts = null;
+                if (galleryActive() !== was) galApply();
+            });
+        } catch (e) { /* other tabs follow on their next load */ }
         window.addEventListener('keyup', galKeyUp, true);
         window.addEventListener('blur', function () { galTap = false; });
         window.addEventListener('wheel', function () { galTap = false; }, { capture: true, passive: true });
