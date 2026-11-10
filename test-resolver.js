@@ -1196,5 +1196,30 @@ eq('format: a JPEG', sniffFormat(jpgB).fmt, 'jpg');
 const jxlB = bytes('xx', 30); jxlB[0] = 0xFF; jxlB[1] = 0x0A;
 eq('format: a bare JPEG XL codestream', sniffFormat(jxlB).fmt, 'jxl');
 eq('format: a GIF never converts', sniffFormat(bytes('GIF89a', 30)).animated, true);
+// ---- save names: which names are meaningless, the title split, the template.
+const nStart = src.indexOf('    // ---- save names (pure)');
+const nEnd = src.indexOf('    // ---- save names end');
+if (nStart < 0 || nEnd < 0) { console.error('save-name markers not found'); process.exit(1); }
+const N = new Function(src.slice(nStart, nEnd) + '\nreturn { meaninglessName, titleParts, pageIdOf, fillNameTemplate };')();
+['0001', '12', 'image', 'img_3', 'large', 'IMG-0007', '', '01 (1)'].forEach(function (x) { eq('meaningless: ' + x, N.meaninglessName(x), true); });
+['0oGHQ8DWEab_004', 'OIP-3500992138', 'red_panda', 'DSC_0042x', 'sunset-beach-2'].forEach(function (x) { eq('meaningful: ' + x, N.meaninglessName(x), false); });
+eq('title: site from og:site_name', N.titleParts('Red panda - Wikipedia', 'Wikipedia', 'en.wikipedia.org'), { site: 'Wikipedia', title: 'Red panda', full: 'Red panda - Wikipedia' });
+eq('title: site from the host when no meta', N.titleParts('Red panda - Wikipedia', '', 'en.wikipedia.org').site, 'Wikipedia');
+eq('title: site first, pipe', N.titleParts('Imgur | Cats on boxes', '', 'imgur.com').title, 'Cats on boxes');
+eq('title: no site part kept whole', N.titleParts('Cats on boxes', '', 'example.com'), { site: 'Example', title: 'Cats on boxes', full: 'Cats on boxes' });
+eq('title: a co.uk host', N.titleParts('News - BBC', '', 'www.bbc.co.uk').title, 'News');
+eq('title: a title that is only the site', N.titleParts('Wikipedia', 'Wikipedia', 'wikipedia.org').title, '');
+eq('page id: the longest number', N.pageIdOf('https://x.com/g/12/48213/p'), '48213');
+eq('page id: no number gives a code', N.pageIdOf('https://x.com/gallery/cats').length, 5);
+eq('page id: stable', N.pageIdOf('https://x.com/gallery/cats'), N.pageIdOf('https://x.com/gallery/cats'));
+const NOW = new Date(2026, 10, 10, 7, 48, 36);
+eq('template: the user\'s example', N.fillNameTemplate('[site] - ([page_title]) - [date]_[time]-###', { site: 'Wikipedia', title: 'Red Panda', now: NOW }),
+    'Wikipedia - (Red Panda) - 2026-11-10_074836-###');
+eq('template: an empty title drops its brackets and one dash', N.fillNameTemplate('[site] - ([page_title]) - [date]_[time]-###', { site: 'Wikipedia', title: '', now: NOW }),
+    'Wikipedia - 2026-11-10_074836-###');
+eq('template: hh mm ss', N.fillNameTemplate('[hh][mm][ss]', { now: NOW }), '074836');
+eq('template: forbidden characters go', N.fillNameTemplate('[page_title]', { title: 'A/B: "c"?', now: NOW }), 'A B c');
+eq('template: an unknown token stays', N.fillNameTemplate('[nope] [num]', { num: '7', now: NOW }), '[nope] 7');
+eq('template: all empty', N.fillNameTemplate('[site] - ([page_title])', { now: NOW }), '');
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

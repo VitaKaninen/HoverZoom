@@ -777,6 +777,17 @@ LibreWolf.
   `saveAs`). Any failure saves as served (`saveAsServed`, the old path). HEIC is sniffed but browsers
   cannot decode it, so it falls through. Conversion verified in Chromium; the blob hand-off to the
   manager is not verified.
+- **Renaming on save** (user, v0.258.0; `saveRename` meaningless/always/off, `saveNameTemplate`, default
+  `[site] - ([page_title]) - [date]_[time]-###`). `saveName(url, page, ext)`; tokens in `NAME_TOKENS`,
+  pure block `// ---- save names (pure)` … `end` (`meaninglessName`, `titleParts`, `pageIdOf`,
+  `fillNameTemplate`), asserted in `test-resolver.js`. Empty tokens drop their brackets and one
+  separator. `###` = `saveCount()`, per rendered name, persisted (`hoverZoomSaveCounts`, last 500), so
+  a repeat never reuses a number. **The page is the picture's source, not this one** (`savePage`): a
+  gallery thumbnail -> `galCur.href`, a harvested picture -> `__hzBase`; their titles come from
+  `pageInfos` (filled by `keepDocInfo` in `galLoad`'s HTML read, the frame's report and
+  `harvestFrom`). Site name: `og:site_name` / `application-name`, else a title segment matching the
+  host's label, else the label capitalised. `[page_id]` = longest digit run in the page address, else
+  a 5-char hash — what keeps same-titled pages apart.
 
 ### The status bar fades itself out · `E10`
 

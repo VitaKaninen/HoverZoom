@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.257.0
+// @version     0.258.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -306,6 +306,8 @@
         saveConvert: 'off',         // saving converts to: 'off' | 'png' | 'jpg' | 'webp'
         saveConvertFrom: 'avif',    // ...which files: 'avif' | 'modern' (AVIF, WebP, JPEG XL)
         saveJpegQuality: 92,        // %, for 'jpg' and 'webp'
+        saveRename: 'meaningless',  // 'off' | 'meaningless' (0001.jpg, image.jpg) | 'always'
+        saveNameTemplate: '[site] - ([page_title]) - [date]_[time]-###',
         referrerSites: [],          // sites to load previews from WITHOUT a referrer
         scrollSites: [],            // sites that load more when scrolled: learned, or the user's
         videoDelays: {},            // host -> {ms, rules, samples, fixes, user}: wait for the page's
@@ -4771,11 +4773,144 @@
     const MIME_EXT = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/gif': 'gif', 'image/webp': 'webp',
         'image/avif': 'avif', 'image/bmp': 'bmp', 'image/svg+xml': 'svg', 'video/mp4': 'mp4', 'video/webm': 'webm' };
 
+    // ---- save names (pure)
+    const NAME_TOKENS = ['site', 'page_title', 'full_title', 'host', 'page_id', 'name', 'num',
+        'date', 'time', 'year', 'month', 'day', 'hh', 'mm', 'ss'];
+    const MEANINGLESS_RE = /^(?:image|img|photo|pic|picture|large|big|original|orig|full|fullsize|download|file|index|untitled|default|thumb|media|preview|view|max|hd)?[\d\W_]*$/i;
+
+    // A file stem that says nothing about its picture: 0001, 12, image, img_3, large.
+    function meaninglessName(stem) {
+        const s = String(stem || '');
+        return !s || MEANINGLESS_RE.test(s) || s.replace(/[\d\W_]+/g, '').length < 2;
+    }
+
+    // A page title split into the site's name and the page's own: "Red panda - Wikipedia" -> {site, title}.
+    function titleParts(title, siteHint, host) {
+        const full = String(title || '').replace(/\s+/g, ' ').trim();
+        const hp = String(host || '').toLowerCase().split('.').filter(Boolean);
+        if (hp.length > 1) hp.pop();
+        if (hp.length > 1 && /^(co|com|net|org|ac|gov|edu|ne|or)$/.test(hp[hp.length - 1])) hp.pop();
+        const label = hp.length ? hp[hp.length - 1] : '';
+        const squash = function (x) { return String(x || '').toLowerCase().replace(/[^a-z0-9]+/g, ''); };
+        const segs = full.split(/\s+[-|–—•·»:]\s+/);
+        let site = String(siteHint || '').trim(), page = full;
+        const isSite = function (seg) {
+            const q = squash(seg);
+            return !!q && ((site && q === squash(site)) || (label && (q === squash(label) || q.indexOf(squash(label)) === 0 && q.length <= squash(label).length + 4)));
+        };
+        if (segs.length > 1) {
+            if (isSite(segs[segs.length - 1])) { if (!site) site = segs[segs.length - 1]; page = segs.slice(0, -1).join(' - '); }
+            else if (isSite(segs[0])) { if (!site) site = segs[0]; page = segs.slice(1).join(' - '); }
+        }
+        if (!site) site = label ? label.charAt(0).toUpperCase() + label.slice(1) : '';
+        if (squash(page) === squash(site)) page = '';
+        return { site: site, title: page, full: full };
+    }
+
+    // The longest run of digits in a page address's path, else a 5-character code of the address.
+    function pageIdOf(href) {
+        let path = String(href || '');
+        try { const u = new URL(href); path = u.pathname + u.search; } catch (e) { /* the raw text */ }
+        const runs = path.match(/\d{2,}/g) || [];
+        if (runs.length) return runs.sort(function (a, b) { return b.length - a.length; })[0];
+        let h = 2166136261;
+        for (let i = 0; i < String(href).length; i++) { h ^= String(href).charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+        return h.toString(36).slice(0, 5);
+    }
+
+    // The template with every [token] filled; ### stays for the counter. Empty brackets and dangling separators go.
+    function fillNameTemplate(tpl, v) {
+        const d = v.now || new Date(), two = function (n) { return String(n).padStart(2, '0'); };
+        const val = {
+            site: v.site, page_title: v.title, full_title: v.full, host: v.host, page_id: v.pageId,
+            name: v.name, num: v.num,
+            date: d.getFullYear() + '-' + two(d.getMonth() + 1) + '-' + two(d.getDate()),
+            time: two(d.getHours()) + two(d.getMinutes()) + two(d.getSeconds()),
+            year: String(d.getFullYear()), month: two(d.getMonth() + 1), day: two(d.getDate()),
+            hh: two(d.getHours()), mm: two(d.getMinutes()), ss: two(d.getSeconds()),
+        };
+        let out = String(tpl || '').replace(/\[([a-z_]+)\]/gi, function (m, k) {
+            k = k.toLowerCase();
+            return NAME_TOKENS.indexOf(k) >= 0 ? String(val[k] || '') : m;
+        });
+        out = out.replace(/[\u0000-\u001f\\/:*?"<>|]+/g, ' ');
+        for (let i = 0; i < 3; i++) {
+            out = out.replace(/\(\s*\)|\[\s*\]|\{\s*\}/g, '')
+                .replace(/\s*([-_.,])(?:\s*[-_.,])+\s*/g, function (m, c) { return /\s/.test(m) ? ' ' + c + ' ' : c; })
+                .replace(/\s{2,}/g, ' ');
+        }
+        return out.replace(/^[\s\-_.,]+|[\s\-_.,]+$/g, '').slice(0, 150).trim();
+    }
+    // ---- save names end
+
+    const PAGE_INFO_MAX = 200;
+    const pageInfos = new Map();        // page address -> {title, site}: the pages pictures came from
+
+    function keepPageInfo(href, title, siteHint) {
+        if (!href || !title) return;
+        const k = String(href).split('#')[0];
+        pageInfos.delete(k);
+        pageInfos.set(k, { title: String(title), site: siteHint || '' });
+        if (pageInfos.size > PAGE_INFO_MAX) pageInfos.delete(pageInfos.keys().next().value);
+    }
+
+    function siteNameOf(doc) {
+        try {
+            const m = doc.querySelector('meta[property="og:site_name"],meta[name="application-name"],meta[name="apple-mobile-web-app-title"]');
+            return m ? String(m.getAttribute('content') || '').trim() : '';
+        } catch (e) { return ''; }
+    }
+
+    function keepDocInfo(href, doc) {
+        try { keepPageInfo(href, doc.title, siteNameOf(doc)); } catch (e) { /* no title */ }
+    }
+
+    // Which page a picture came from: a gallery thumbnail's linked page, a harvested page, else this one.
+    function savePage(el) {
+        if (el && galOwns(el) && galCur) return galCur.href;
+        const b = el ? baseOf(el) : location.href;
+        return String(b || location.href).split('#')[0];
+    }
+
     // A file name the manager will accept: it refuses names without a whitelisted extension.
-    function saveName(url) {
+    function saveName(url, page, ext) {
         let name = String(fileInfo(url).name || '').replace(/[\\/:*?"<>|\s]+/g, '_').replace(/^[._]+/, '').slice(0, 120) || 'image';
-        if (!/\.[a-z0-9]{2,5}$/i.test(name)) name += '.' + (MIME_EXT[bytesMime.get(url)] || 'jpg');
-        return name;
+        const m = name.match(/\.([a-z0-9]{2,5})$/i);
+        let stem = m ? name.slice(0, -m[0].length) : name;
+        ext = ext || (m ? m[1] : MIME_EXT[bytesMime.get(url)] || 'jpg');
+        if (cfg.saveRename === 'always' || (cfg.saveRename === 'meaningless' && meaninglessName(stem))) {
+            const renamed = templateName(page || location.href, stem);
+            if (renamed) stem = renamed;
+        }
+        return stem + '.' + ext;
+    }
+
+    function templateName(page, stem) {
+        const here = page === location.href.split('#')[0];
+        const info = here ? { title: document.title, site: siteNameOf(document) } : (pageInfos.get(page) || { title: '', site: '' });
+        let host = '';
+        try { host = new URL(page).hostname.replace(/^www\./, ''); } catch (e) { /* none */ }
+        const tp = titleParts(info.title, info.site, host);
+        const nums = String(stem).match(/\d+/g);
+        let out = fillNameTemplate(cfg.saveNameTemplate, {
+            site: tp.site, title: tp.title, full: tp.full, host: host, pageId: pageIdOf(page),
+            name: stem, num: nums ? nums[nums.length - 1] : '',
+        });
+        if (/#/.test(out)) out = out.replace(/#+/, function (h) { return String(saveCount(out)).padStart(h.length, '0'); });
+        return out.replace(/#+/g, '');
+    }
+
+    // The next number for a name, remembered across visits so a later save never repeats one.
+    function saveCount(key) {
+        let all = {};
+        try { all = JSON.parse(GM_getValue('hoverZoomSaveCounts', '') || '{}') || {}; } catch (e) { /* fresh */ }
+        const n = (all[key] || 0) + 1;
+        delete all[key];
+        all[key] = n;
+        const keys = Object.keys(all);
+        for (let i = 0; i < keys.length - 500; i++) delete all[keys[i]];
+        try { GM_setValue('hoverZoomSaveCounts', JSON.stringify(all)); } catch (e) { /* this name only */ }
+        return n;
     }
 
     // ---- converting on save: the file's own bytes decide its format, never its name
@@ -4826,7 +4961,7 @@
     }
 
     // A converted file to the download folder: the manager's download, else a plain link download.
-    function saveBlob(blob, name, quiet, done, url) {
+    function saveBlob(blob, name, quiet, done, url, page) {
         const obj = URL.createObjectURL(blob);
         const viaLink = function () {
             try {
@@ -4838,7 +4973,7 @@
                 a.click();
                 a.remove();
                 if (done) done();
-            } catch (e) { dbg('saving the converted file failed', String(e)); saveAsServed(url, quiet, done); }
+            } catch (e) { dbg('saving the converted file failed', String(e)); saveAsServed(url, quiet, done, page); }
             setTimeout(function () { URL.revokeObjectURL(obj); }, 60000);
         };
         try {
@@ -4849,23 +4984,23 @@
     }
 
     // Saving: converted when the setting covers the file's real format, else exactly as served.
-    async function saveOriginal(url, quiet, done) {
-        if (cfg.saveConvert === 'off' || typeof GM_xmlhttpRequest !== 'function' || /^(data|blob):/.test(url)) { saveAsServed(url, quiet, done); return; }
+    async function saveOriginal(url, quiet, done, page) {
+        if (cfg.saveConvert === 'off' || typeof GM_xmlhttpRequest !== 'function' || /^(data|blob):/.test(url)) { saveAsServed(url, quiet, done, page); return; }
         toast('Saving…', 60000);
         const buf = await fetchForSave(url);
         const fmt = buf ? sniffFormat(new Uint8Array(buf, 0, Math.min(4096, buf.byteLength))) : null;
-        if (!convertWanted(fmt)) { hideTip(); saveAsServed(url, quiet, done); return; }
+        if (!convertWanted(fmt)) { hideTip(); saveAsServed(url, quiet, done, page); return; }
         toast('Converting ' + fmt.fmt.toUpperCase() + ' to ' + cfg.saveConvert.toUpperCase() + '…', 60000);
         const out = await convertBytes(buf, fmt);
-        if (!out) { toast('Could not convert this ' + fmt.fmt.toUpperCase() + '; saved as it is', 3000); saveAsServed(url, quiet, done); return; }
+        if (!out) { toast('Could not convert this ' + fmt.fmt.toUpperCase() + '; saved as it is', 3000); saveAsServed(url, quiet, done, page); return; }
         hideTip();
-        saveBlob(out, saveName(url).replace(/\.[a-z0-9]{2,5}$/i, '') + '.' + cfg.saveConvert, quiet, done, url);
+        saveBlob(out, saveName(url, page, cfg.saveConvert), quiet, done, url, page);
     }
 
-    function saveAsServed(url, quiet, done) {
+    function saveAsServed(url, quiet, done, page) {
         if (typeof GM_download !== 'function') { openOriginal(url); return; }
         try {
-            GM_download({ url: url, name: saveName(url), saveAs: !quiet,
+            GM_download({ url: url, name: saveName(url, page), saveAs: !quiet,
                 onload: function () { if (done) done(); },
                 onerror: function (r) {
                     const why = r && r.error;
@@ -6825,7 +6960,7 @@
         claimClick();
         midSaveAt = Date.now();
         const gImg = galOwns(active) ? active : null, gHref = gImg && galCur ? galCur.href : null;
-        saveOriginal(view.url, true, gImg ? function () { galSaved(gImg, gHref); } : null);
+        saveOriginal(view.url, true, gImg ? function () { galSaved(gImg, gHref); } : null, savePage(active));
         return true;
     }
     // The click half of that press: a hover preview lets it through to the link underneath, which would open a tab.
@@ -9995,6 +10130,7 @@
     // on its own — the block list, the page's own decoration flags, and declared width/height.
     // Everything else is settled by the probe when the entry is reached.
     function harvestFrom(doc, href, page) {
+        keepDocInfo(href, doc);
         const out = [], seen = new Set(), floor = tourFloor();
         doc.querySelectorAll('img,video').forEach(function (n) {
             if (n.tagName === 'VIDEO' && !videoPreviewsOn()) return;
@@ -10717,6 +10853,7 @@
             const stop = function () { fin('cancel', 'replaced by a newer hover'); };
             const onMsg = function (e) {
                 if (e.source !== f.contentWindow || !e.data || e.data.hzGallery !== token) return;
+                if (e.data.title) keepPageInfo(href, e.data.title, e.data.site);
                 fin(Array.isArray(e.data.items) ? e.data.items : [], 'reported');
             };
             galFrameStop = stop;
@@ -10759,7 +10896,7 @@
                     .filter(function (x) { return x.thumb && !/^(data|blob):/.test(x.thumb); }).slice(0, GAL_MAX);
             } catch (err) { dbg('gallery frame could not list the page', String(err)); }
             if (!items.length && ++tries < 2) { setTimeout(send, GAL_RETRY_MS); return; }
-            try { window.parent.postMessage({ hzGallery: token, items: items }, location.origin); }
+            try { window.parent.postMessage({ hzGallery: token, items: items, title: document.title, site: siteNameOf(document) }, location.origin); }
             catch (e) { /* parent gone */ }
         };
         const go = function () { setTimeout(send, GAL_SETTLE_MS); };
@@ -10783,6 +10920,7 @@
             galTrace(href, 'html: ' + (refused ? 'status ' + refused.status : doc ? 'ok' : 'failed or not html'));
             if (req) req.done(refused ? { status: refused.status, limited: busy, signal: 'hard',
                 retryAfter: busy ? usLog.retryAfterOf(refused.headers) : null } : { status: doc ? 200 : 0 });
+            if (doc) keepDocInfo(href, doc);
             const got = doc ? galPick(doc, href) : null;
             if (doc) galTrace(href, 'html: ' + (got ? got.length : 0) + ' pictures');
             return got;
@@ -12770,6 +12908,36 @@
         }
         conv.el.addEventListener('change', syncConvert);
         syncConvert();
+        const ren = pick('saveRename', 'Rename saved pictures',
+            'Meaningless names are ones like 0001.jpg, 12.png or image.jpg, which pile up as 0001 (1).jpg, 0001 (2).jpg.', [
+                ['meaningless', 'Only meaningless names'], ['always', 'Always'], ['off', 'Never']]);
+        const tplIn = document.createElement('input');
+        tplIn.type = 'text';
+        tplIn.value = cfg.saveNameTemplate;
+        tplIn.spellcheck = false;
+        tplIn.style.cssText = 'width:100%;box-sizing:border-box';
+        const tplRow = row('File name',
+            '[site] [page_title] [full_title] [host] [page_id] [name] [num] [date] [time] [year] [month] [day] [hh] [mm] [ss]; ' +
+            '### is a counter (as many digits as #). The extension is added.', tplIn);
+        const tplEx = document.createElement('div');
+        tplEx.className = 'hint';
+        tplEx.style.cssText = 'margin:-4px 0 10px;text-align:right;word-break:break-all';
+        mount.appendChild(tplEx);
+        function syncTpl() {
+            const v = tplIn.value.trim() || DEFAULTS.saveNameTemplate;
+            const page = location.href.split('#')[0], tp = titleParts(document.title, siteNameOf(document), location.hostname.replace(/^www\./, ''));
+            const ex = fillNameTemplate(v, { site: tp.site, title: tp.title, full: tp.full, host: location.hostname.replace(/^www\./, ''),
+                pageId: pageIdOf(page), name: '0001', num: '0001' }).replace(/#+/, function (h) { return '1'.padStart(h.length, '0'); }).replace(/#+/g, '');
+            tplEx.textContent = 'On this page: ' + (ex || '(empty: the original name is kept)') + '.jpg';
+            const off = ren.el.value === 'off';
+            tplRow.hidden = off;
+            tplEx.hidden = off;
+        }
+        tplIn.addEventListener('input', syncTpl);
+        tplIn.addEventListener('change', function () { cfg.saveNameTemplate = tplIn.value.trim() || DEFAULTS.saveNameTemplate; tplIn.value = cfg.saveNameTemplate; persist(); syncTpl(); });
+        tplIn.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); tplIn.blur(); } });
+        ren.el.addEventListener('change', syncTpl);
+        syncTpl();
 
         section('Where it runs');
         pick('siteMode', 'Site list', null, [
