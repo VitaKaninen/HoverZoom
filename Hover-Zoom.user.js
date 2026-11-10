@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.262.0
+// @version     0.263.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -10641,7 +10641,8 @@
     const GAL_HTML_ENOUGH = 6;          // the plain HTML is trusted at once from this many pictures (a logo group is 1-3)
     const GAL_PREFER_MS = 2500;         // the frame's report wins only within this; then the plain HTML is used
     const GAL_REPORT_MS = 3000;         // longest wait for its report once loaded (settle + one retry + slack)
-    const GAL_LAG_TICK = 250;           // while a hidden frame loads, a timer this often measures how late it runs
+    const GAL_HQ_PAR = 4;               // originals fetched at once when a gallery opens
+    const GAL_LAG_TICK = 250;          // while a hidden frame loads, a timer this often measures how late it runs
     const GAL_LAG_MS = 1000;            // later than this = the page froze: the frame goes and preloading stops for the page
     const GAL_SETTLE_MS = 700;          // after the frame's load, before it counts
     const GAL_RETRY_MS = 1500;          // one more look when it counted nothing
@@ -11267,9 +11268,39 @@
         pics.forEach(function (p, k) {
             if (L[k] && L[k].w > p.nw * GAL_UPGRADE) galUpgrade(p.item, p.img, p.nw, L[k].w);
         });
+        if (set.pv) galHqAll(set, pics.map(function (p) { return p.img; }));
+    }
+
+    // Every cell's original, GAL_HQ_PAR at a time, through the hover's own probe, so a hover finds it loaded.
+    function galHqAll(set, imgs) {
+        if (!imgs.length) return;
+        usLog.enable(cfg.logRequests !== false);
+        const lg = usLog.start('origs', { host: pageHost(), pace: version().replace(/\?/g, '') + ' ' + GAL_HQ_PAR + ' at once', slowed: noRush(pageHost()) });
+        const tok = set.hqTok = { cancelled: false, fresh: false };
+        let i = 0, running = 0, ended = false, got = 0;
+        const end = function (why) {
+            if (ended) return;
+            ended = true;
+            if (lg) lg.end(why);
+            dbg('gallery originals: ' + why, { href: set.href, pictures: imgs.length, found: got });
+        };
+        const next = function () {
+            if (tok.cancelled) { if (!running) end('cut'); return; }
+            if (i >= imgs.length) { if (!running) end('done'); return; }
+            while (running < GAL_HQ_PAR && i < imgs.length) {
+                const img = imgs[i++], r = lg && lg.req();
+                running++;
+                galResolve(img, tok).then(function (hit) {
+                    if (hit) got++;
+                    if (r) r.done({ status: hit ? 200 : 0 });
+                }, function () { if (r) r.done({ status: 0 }); }).then(function () { running--; next(); });
+            }
+        };
+        next();
     }
 
     function galDrop(set) {
+        if (set.hqTok) set.hqTok.cancelled = true;
         set.el.classList.remove('on');
         setTimeout(function () { set.el.remove(); }, GAL_FADE_MS + 50);
     }

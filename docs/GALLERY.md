@@ -70,6 +70,12 @@ so the user can judge whether that gallery is worth opening. Look only: the floa
   (`galPreHalt`). Logged: one `gallery` us-log row per run on the page's host (stored in
   `gallerySites`, so the privacy rule holds); the hidden frame's requests are not counted.
   `GAL_CACHE` is 300 so a long results page is not evicted while it preloads.
+- **Originals on open** (user, v0.263.0 — hovering each cell then waiting for its fetch was the
+  complaint): when a set is built and its thumbnails preview (`set.pv`), `galHqAll` runs `galResolve`
+  on every cell, `GAL_HQ_PAR` 4 at a time, in cell order. Same probe as the hover, so `probeCache`
+  shares an in-flight fetch and a hover finds the answer (and the browser cache the file). `galDrop`
+  cancels it (`set.hqTok`); probes in flight finish. us-log kind `origs`, one row per open, on the
+  page's host. No pacing beyond the 4: log first.
 - **Safeguards** (user, v0.262.0, after gallery mode on YouTube with several tabs open crashed the
   browser — every tab follows the per-site on-state, and each preload frame is a full watch page):
   - Only the tab in view preloads: `galPreNext` returns while `document.visibilityState` is hidden;
