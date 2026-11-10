@@ -708,6 +708,12 @@ Consequences, which must be handled together:
 Two guards keep a drag from destroying what it is dragging: `onOver` and `onOut` both return early
 while `drag` is set.
 
+**A new picture into an `imgEl` that still holds the last one is hidden until it decodes** (`setMedia`,
+v0.268.0). `hideViewer()` clears the media only after the fade (`fadeNow() + 60`); a show inside that
+window — hover delay 0, or a quick move between gallery cells — set the new `src` on top, and the
+browser kept painting the old bitmap at the new size until the new one loaded (user: "the previous
+image, stretched"). `visibility:hidden` + `decode()`, revealed only if `src` is still that URL.
+
 **`hot` is set by `layout()` and MUST be cleared by `hideViewer()`.** `layout()` stops running once
 the frame is down, so a `hot` left set leaves the box with `pointer-events:auto` and `cursor:move`
 at its last position: an invisible full-size rectangle that shows the move cursor, swallows every

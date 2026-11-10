@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.267.0
+// @version     0.268.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -3843,7 +3843,14 @@
         mediaEl.hidden = false;
         applySmoothing();
         if (!wantsVideo && noReferrerHere()) imgEl.referrerPolicy = 'no-referrer';
-        mediaEl.src = res.display || res.url;   // a CSP-refused picture displays from bytes. See E49.
+        const want = res.display || res.url, was = imgEl.getAttribute('src');
+        imgEl.style.visibility = '';
+        if (!wantsVideo && was && was !== want) {   // the last picture would show, stretched to this one's size, until this one decodes
+            imgEl.style.visibility = 'hidden';
+            const shown = function () { if (imgEl.getAttribute('src') === want) imgEl.style.visibility = ''; };
+            mediaEl.src = want;
+            imgEl.decode().then(shown, shown);
+        } else mediaEl.src = want;   // a CSP-refused picture displays from bytes. See E49.
         if (wantsVideo) {
             // The site's remembered answer, not the last clip's: a fresh tab on a site that has
             // never been unmuted starts silent, which is what AUDIO_DEFAULT is for.
