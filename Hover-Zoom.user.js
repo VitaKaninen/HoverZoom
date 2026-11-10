@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.255.0
+// @version     0.256.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -10417,6 +10417,9 @@
     let galSeen = {}, galLock = null, galMarkTimer = 0, galEdge = false, galHole = null;
     let galOn = false, galTap = false, galAt = null, galMidAt = 0;      // toggled on and locked; Ctrl down with nothing else yet; the result under the pointer {href, hole}
     let galPre = null, galPreStop = false, galPreLog = null;   // the preload in flight; stopped by a refusal; its log row
+    const GAL_PEND_MS = 3000;           // the pressed result lights up only if its gallery is not on screen by then
+    const GAL_AHEAD = 3;                // screens below the window the preload reaches
+    const GAL_BEHIND = 1;               // screens above it
     const GAL_DIAG_MS = 10000;          // an open that shows nothing this long after the press gets the diagnostics popup
     const GAL_USER_HIDE = ['press', 'esc', 'middle', 'ctrl', 'resize', 'mode off', 'scroll'];
     const galTraces = new Map();        // href -> [[ms, what]], sanitised, the last 60 links
@@ -10727,7 +10730,7 @@
             '.blur.on{backdrop-filter:blur(6px) grayscale(.6)}' +
             '.ring{position:absolute;left:0;top:0;box-sizing:border-box;border:3px solid #89b4fa;border-radius:8px;' +
             'box-shadow:0 0 14px 2px rgba(137,180,250,.55)}' +
-            '.pend{position:fixed;box-sizing:border-box;border:3px solid #89b4fa;border-radius:8px;' +
+            '.pend[hidden]{display:none}.pend{position:fixed;box-sizing:border-box;border:3px solid #89b4fa;border-radius:8px;' +
             'box-shadow:0 0 0 200vmax rgba(0,0,0,.55),0 0 16px 3px rgba(137,180,250,.7);animation:hzpend .8s ease-in-out infinite alternate}' +
             '@keyframes hzpend{to{border-color:#cdd6f4;box-shadow:0 0 0 200vmax rgba(0,0,0,.55),0 0 4px 1px rgba(137,180,250,.4)}}' +
             '.diag{position:fixed;right:16px;bottom:16px;width:min(560px,calc(100vw - 32px));box-sizing:border-box;padding:12px;' +
@@ -11135,6 +11138,7 @@
         if (!galHost.isConnected) document.documentElement.appendChild(galHost);
         const el = document.createElement('div'), h = galHole;
         el.className = 'pend';
+        el.hidden = true;
         el.style.cssText = 'left:' + (h.x - 3) + 'px;top:' + (h.y - 3) + 'px;width:' + (h.w + 6) + 'px;height:' + (h.h + 6) + 'px';
         root.appendChild(el);
         const at = 'cache ' + (galCache.has(href) ? 'has this link' : 'empty for this link') +
@@ -11143,6 +11147,7 @@
             '; tab ' + document.visibilityState + '; links tried by preload ' + galPreTried.size;
         galTrace(href, 'press (' + how + ')');
         galPend = { href: href, how: how, t0: performance.now(), el: el, at: at };
+        galPend.lit = setTimeout(function () { el.hidden = false; }, GAL_PEND_MS);
         galPend.timer = setTimeout(function () {
             const p = galPend;
             if (!p || p.href !== href) return;
@@ -11155,6 +11160,7 @@
     function galPendClear() {
         if (!galPend) return;
         clearTimeout(galPend.timer);
+        clearTimeout(galPend.lit);
         galPend.el.remove();
         galPend = null;
     }
@@ -11409,14 +11415,14 @@
 
     function galMarkSoon() {
         clearTimeout(galMarkTimer);
-        galMarkTimer = setTimeout(function () { galMarkAll(); galPreNext(); }, 250);
+        galMarkTimer = setTimeout(function () { galMarkAll(); galPreNext(); setTimeout(galPreNext, 2000); }, 250);   // again once lazily added results land
     }
 
     // ---- preload: every same-origin result's gallery, one page at a time, nearest the pointer first
 
-    // The next result link not yet read, nearest the pointer; null when none is left.
+    // The next result link not yet read: in the window nearest the pointer, then below by distance, then above; within GAL_AHEAD / GAL_BEHIND screens.
     function galPrePick() {
-        const seen = new Set();
+        const seen = new Set(), H = vpH(), diag = Math.hypot(vpW(), H);
         let best = null, bestD = Infinity;
         document.querySelectorAll('a[href] img').forEach(function (img) {
             const h = galLinkOf(img);
@@ -11424,9 +11430,13 @@
             seen.add(h);
             if (galPreTried.has(h) || galCache.has(h)) return;
             try { if (new URL(h).origin !== location.origin) return; } catch (e) { return; }
-            const r = img.getBoundingClientRect();
-            if (!r.width || !r.height) return;
-            const d = Math.hypot(r.left + r.width / 2 - galPt.x, r.top + r.height / 2 - galPt.y);
+            let r = img.getBoundingClientRect();
+            if (!r.width || !r.height) r = img.closest('a[href]').getBoundingClientRect();     // a lazy picture not drawn yet
+            if (!r.width && !r.height && !r.top && !r.left) return;                            // not laid out at all
+            if (r.top > H * (1 + GAL_AHEAD) || r.bottom < -H * GAL_BEHIND) return;
+            const d = r.bottom < 0 ? diag + H * GAL_AHEAD - r.bottom
+                : r.top > H ? diag + r.top - H
+                : Math.hypot(r.left + r.width / 2 - galPt.x, r.top + r.height / 2 - galPt.y);
             if (d < bestD) { bestD = d; best = h; }
         });
         return best;

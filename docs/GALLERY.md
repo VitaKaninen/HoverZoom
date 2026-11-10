@@ -56,9 +56,14 @@ so the user can judge whether that gallery is worth opening. Look only: the floa
   segment beside the hole cannot be justified independently of the rows above and below.
 - Resize hides the set (the hole's rect is stale). Upgrade check uses each picture's drawn width.
 - **Preload** (user, v0.248.0): `galPreNext` reads every same-origin result's gallery (`galLoad`) and
-  then its thumbnails (`galWarm`, into the browser cache), **one page at a time**, nearest the
-  pointer first (`galPrePick`, re-derived each step, so a scroll re-orders it). Kicked at boot +1.5 s,
-  250 ms after a scroll/resize, and by the end of every `galLoad`. It never starts while a frame is
+  then its thumbnails (`galWarm`, into the browser cache), **one page at a time** (`galPrePick`,
+  re-derived each step, so a scroll re-orders it): results in the window nearest the pointer, then
+  below it by distance, then above; only within `GAL_AHEAD` 3 screens below / `GAL_BEHIND` 1 above
+  (user, v0.256.0: sites load 1.5-5 screens of results; keep ~3 ahead). A lazy `<img>` with no size
+  yet is measured by its link's box — skipping it (pre-v0.256.0) left everything below the fold
+  unread. Kicked at boot +1.5 s, 250 ms and 2 s after a scroll/resize (the second for results a
+  site appends late), and by the end of every `galLoad`. Throughput is the limit (one frame + its
+  thumbnails at a time, ~1-5 s each); going parallel is new pacing, so log first. It never starts while a frame is
   loading (`galFrameStop`), so it cannot cancel a hover's frame; a hover's frame does cancel it (that
   page is retried). Tried pages are not retried (`galPreTried`). A hover still loads its own result
   at once after `cfg.hoverDelay`. A 429/503 on any gallery fetch stops preloading for the page
@@ -189,7 +194,8 @@ the drawn size does not change. At most `GAL_TRIES` per picture.
 
 Asked for because an open on one live site does nothing ~1 in 4 presses and a second press works.
 - A middle press or Ctrl tap that opens lights the result (`.pend`: blue ring, the rest dimmed by its
-  200vmax shadow) until `galBuild` shows the set (`galPendStart`/`galPendClear`).
+  200vmax shadow) until `galBuild` shows the set (`galPendStart`/`galPendClear`) — but only from
+  `GAL_PEND_MS` 3 s after the press (user, v0.256.0: a normal open is under 3 s and must look as before).
 - `galTrace(href, what)` records every step of every load, preloads included (`galTraces`, 60 links),
   so a press that hit an in-flight preload still shows the preload's earlier steps (negative ms).
 - The popup (`galDiag`, copy button) opens when: nothing shows `GAL_DIAG_MS` (10 s) after the press;
