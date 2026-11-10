@@ -81,6 +81,12 @@ so the user can judge whether that gallery is worth opening. Look only: the floa
   (in flight, how many for a closed gallery, oldest age) in the diagnostics' `at press` and trace;
   with no thumbnail in `GAL_WAIT_MS`, `galLate` waits `GAL_LATE_MS` 6.5 s more (inside the 10 s
   diagnostics timer), traces whether they came, and shows them if they did.
+- **Short gallery notice** (user, v0.265.0 — "I need to know when that happens"): a set shown with fewer
+  pictures than the page has gets a `.short` pill (fixed, bottom centre, yellow `#f9e2af`) inside
+  `set.el`, so it lives and dies with the set: shown / total / still loading / failed. When the rest
+  settle and the set is still up it changes to "N ready now: middle-click the result twice" (close +
+  reopen reads them from cache) or "the other N failed". Not toast: hovering a cell replaces the tip.
+  No automatic re-layout when they land: the user does not want pictures moving (see `galShow`).
 - **Safeguards** (user, v0.262.0, after gallery mode on YouTube with several tabs open crashed the
   browser — every tab follows the per-site on-state, and each preload frame is a full watch page):
   - Only the tab in view preloads: `galPreNext` returns while `document.visibilityState` is hidden;

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.264.0
+// @version     0.265.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -11012,6 +11012,9 @@
             '.set.on{opacity:1}' +
             '.cell{position:absolute;left:0;top:0;display:flex;align-items:center;justify-content:center}' +
             '.set.live .cell{pointer-events:auto}' +
+            '.short{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);max-width:calc(100vw - 32px);box-sizing:border-box;' +
+            'padding:6px 12px;border-radius:8px;background:#1e1e2e;border:1px solid #f9e2af;color:#f9e2af;font:13px/1.3 system-ui,sans-serif;' +
+            'pointer-events:none;box-shadow:0 4px 14px rgba(0,0,0,.6)}' +
             '.svd{position:absolute;left:4px;top:4px;width:22px;height:22px;pointer-events:none;filter:drop-shadow(0 1px 2px rgba(0,0,0,.7))}' +
             'img{display:block;width:100%;height:100%;object-fit:cover;border-radius:6px;background:#1e1e2e;opacity:0;transition:opacity ' + GAL_FADE_MS + 'ms ease;' +
             'box-shadow:0 8px 22px rgba(0,0,0,.55),0 2px 5px rgba(0,0,0,.4)}' +
@@ -11219,13 +11222,34 @@
             galTrace(href, 'thumbnails: ' + pics.length + ' loaded, ' + failed + ' failed, ' +
                 (list.length - pics.length - failed) + ' still loading after ' + Math.round(performance.now() - t0) + ' ms');
             if (galWant !== href || (galCur && galCur.href === href)) return;
-            if (!pics.length) { galLate(href, all, got, t0); return; }
+            if (!pics.length) { galLate(href, all, got, t0, function () { return failed; }, list.length); return; }
             galBuild(href, pics);
+            if (pics.length < list.length) galShort(href, list.length, pics.length, failed, all, t0);
+        });
+    }
+
+    // Fewer pictures shown than the page has: say so in the gallery, and again once the rest have settled.
+    function galShort(href, total, shown, failed, all, t0) {
+        const set = galCur;
+        if (!set || set.href !== href) return;
+        const el = document.createElement('div');
+        el.className = 'short';
+        const say = function (text) { el.textContent = text; };
+        const left = total - shown - failed;
+        say('Showing ' + shown + ' of ' + total + ' pictures' + (left ? ' · ' + left + ' still loading' : '') + (failed ? ' · ' + failed + ' failed' : ''));
+        set.el.appendChild(el);
+        dbg('gallery short', { href: href, total: total, shown: shown, failed: failed });
+        all.then(function (v) {
+            const ok = v.filter(Boolean).length, ms = Math.round(performance.now() - t0);
+            galTrace(href, 'thumbnails: all settled after ' + ms + ' ms: ' + ok + ' loaded, ' + (v.length - ok) + ' failed');
+            if (galCur !== set) return;
+            say(ok > shown ? 'Showing ' + shown + ' of ' + total + ' · ' + ok + ' ready now: middle-click the result twice to see them'
+                : 'Showing ' + shown + ' of ' + total + ' · the other ' + (total - shown) + ' failed to load');
         });
     }
 
     // Not one thumbnail in GAL_WAIT_MS: wait GAL_LATE_MS more (the diagnostics then say whether they ever came), show them if they do.
-    function galLate(href, all, got, t0) {
+    function galLate(href, all, got, t0, failedOf, total) {
         galTrace(href, 'originals fetching: ' + galHqText());
         let t = 0;
         Promise.race([all, new Promise(function (r) { t = setTimeout(r, GAL_LATE_MS, null); })]).then(function (v) {
@@ -11236,6 +11260,7 @@
             if (galWant !== href || (galCur && galCur.href === href)) return;
             if (!pics.length) { galHide('fail: no thumbnail loaded within ' + ms + ' ms'); return; }
             galBuild(href, pics);
+            if (pics.length < total) galShort(href, total, pics.length, failedOf(), all, t0);
         });
     }
 
