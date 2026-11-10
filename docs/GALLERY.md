@@ -76,6 +76,11 @@ so the user can judge whether that gallery is worth opening. Look only: the floa
   shares an in-flight fetch and a hover finds the answer (and the browser cache the file). `galDrop`
   cancels it (`set.hqTok`); probes in flight finish. us-log kind `origs`, one row per open, on the
   page's host. No pacing beyond the 4: log first.
+  Open questioned (2026-11-10): first failure after it, 41 cached thumbnails on another host neither
+  loaded nor failed in 2.5 s. Suspected: originals tying up that host. v0.264.0 measures it: `galHqLive`
+  (in flight, how many for a closed gallery, oldest age) in the diagnostics' `at press` and trace;
+  with no thumbnail in `GAL_WAIT_MS`, `galLate` waits `GAL_LATE_MS` 6.5 s more (inside the 10 s
+  diagnostics timer), traces whether they came, and shows them if they did.
 - **Safeguards** (user, v0.262.0, after gallery mode on YouTube with several tabs open crashed the
   browser — every tab follows the per-site on-state, and each preload frame is a full watch page):
   - Only the tab in view preloads: `galPreNext` returns while `document.visibilityState` is hidden;

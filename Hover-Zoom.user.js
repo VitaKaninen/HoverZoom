@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.263.0
+// @version     0.264.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -10642,6 +10642,7 @@
     const GAL_PREFER_MS = 2500;         // the frame's report wins only within this; then the plain HTML is used
     const GAL_REPORT_MS = 3000;         // longest wait for its report once loaded (settle + one retry + slack)
     const GAL_HQ_PAR = 4;               // originals fetched at once when a gallery opens
+    const GAL_LATE_MS = 6500;           // extra wait when no thumbnail came in GAL_WAIT_MS; ends before the 10 s diagnostics timer
     const GAL_LAG_TICK = 250;          // while a hidden frame loads, a timer this often measures how late it runs
     const GAL_LAG_MS = 1000;            // later than this = the page froze: the frame goes and preloading stops for the page
     const GAL_SETTLE_MS = 700;          // after the frame's load, before it counts
@@ -11218,7 +11219,22 @@
             galTrace(href, 'thumbnails: ' + pics.length + ' loaded, ' + failed + ' failed, ' +
                 (list.length - pics.length - failed) + ' still loading after ' + Math.round(performance.now() - t0) + ' ms');
             if (galWant !== href || (galCur && galCur.href === href)) return;
-            if (!pics.length) { galHide('fail: no thumbnail loaded within ' + GAL_WAIT_MS + ' ms'); return; }
+            if (!pics.length) { galLate(href, all, got, t0); return; }
+            galBuild(href, pics);
+        });
+    }
+
+    // Not one thumbnail in GAL_WAIT_MS: wait GAL_LATE_MS more (the diagnostics then say whether they ever came), show them if they do.
+    function galLate(href, all, got, t0) {
+        galTrace(href, 'originals fetching: ' + galHqText());
+        let t = 0;
+        Promise.race([all, new Promise(function (r) { t = setTimeout(r, GAL_LATE_MS, null); })]).then(function (v) {
+            clearTimeout(t);
+            const pics = (v || got).filter(Boolean), ms = Math.round(performance.now() - t0);
+            galTrace(href, 'thumbnails after ' + ms + ' ms: ' + pics.length + ' loaded, ' +
+                (v ? (v.length - pics.length) + ' failed, all settled' : 'the rest still loading') + '; originals fetching: ' + galHqText());
+            if (galWant !== href || (galCur && galCur.href === href)) return;
+            if (!pics.length) { galHide('fail: no thumbnail loaded within ' + ms + ' ms'); return; }
             galBuild(href, pics);
         });
     }
@@ -11271,6 +11287,14 @@
         if (set.pv) galHqAll(set, pics.map(function (p) { return p.img; }));
     }
 
+    const galHqLive = new Set();         // originals being fetched now, for the open diagnostics
+    function galHqText() {
+        if (!galHqLive.size) return 'none';
+        let old = Infinity, closed = 0;
+        galHqLive.forEach(function (l) { old = Math.min(old, l.t); if (l.mine.cancelled) closed++; });
+        return galHqLive.size + ' (' + closed + ' for a closed gallery), oldest ' + Math.round((performance.now() - old) / 100) / 10 + ' s';
+    }
+
     // Every cell's original, GAL_HQ_PAR at a time, through the hover's own probe, so a hover finds it loaded.
     function galHqAll(set, imgs) {
         if (!imgs.length) return;
@@ -11288,12 +11312,13 @@
             if (tok.cancelled) { if (!running) end('cut'); return; }
             if (i >= imgs.length) { if (!running) end('done'); return; }
             while (running < GAL_HQ_PAR && i < imgs.length) {
-                const img = imgs[i++], r = lg && lg.req();
+                const img = imgs[i++], r = lg && lg.req(), live = { t: performance.now(), mine: tok };
                 running++;
+                galHqLive.add(live);
                 galResolve(img, tok).then(function (hit) {
                     if (hit) got++;
                     if (r) r.done({ status: hit ? 200 : 0 });
-                }, function () { if (r) r.done({ status: 0 }); }).then(function () { running--; next(); });
+                }, function () { if (r) r.done({ status: 0 }); }).then(function () { galHqLive.delete(live); running--; next(); });
             }
         };
         next();
@@ -11466,7 +11491,7 @@
         const at = 'cache ' + (galCache.has(href) ? 'has this link' : 'empty for this link') +
             '; preload ' + (galPre ? (galPre === href ? 'busy on this link' : 'busy on another link') : galPreStop ? 'stopped by a refusal' : 'idle') +
             '; hidden frame ' + (galFrameStop ? 'busy' : 'idle') + '; gallery on screen ' + (galCur ? 'yes' : 'no') +
-            '; tab ' + document.visibilityState + '; links tried by preload ' + galPreTried.size;
+            '; tab ' + document.visibilityState + '; links tried by preload ' + galPreTried.size + '; originals fetching ' + galHqText();
         galTrace(href, 'press (' + how + ')');
         galPend = { href: href, how: how, t0: performance.now(), el: el, at: at };
         galPend.lit = setTimeout(function () { el.hidden = false; }, GAL_PEND_MS);
