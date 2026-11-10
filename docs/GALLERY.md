@@ -81,12 +81,14 @@ so the user can judge whether that gallery is worth opening. Look only: the floa
   (in flight, how many for a closed gallery, oldest age) in the diagnostics' `at press` and trace;
   with no thumbnail in `GAL_WAIT_MS`, `galLate` waits `GAL_LATE_MS` 6.5 s more (inside the 10 s
   diagnostics timer), traces whether they came, and shows them if they did.
-- **Short gallery notice** (user, v0.265.0 — "I need to know when that happens"): a set shown with fewer
-  pictures than the page has gets a `.short` pill (fixed, bottom centre, yellow `#f9e2af`) inside
-  `set.el`, so it lives and dies with the set: shown / total / still loading / failed. When the rest
-  settle and the set is still up it changes to "N ready now: middle-click the result twice" (close +
-  reopen reads them from cache) or "the other N failed". Not toast: hovering a cell replaces the tip.
-  No automatic re-layout when they land: the user does not want pictures moving (see `galShow`).
+- **A short gallery fills itself in** (user, v0.266.0: "my goal is to just have them all drawn"; a
+  notice only when that fails). Shown with fewer than the page has (at `GAL_WAIT_MS`, or late via
+  `galLate`) → `galRest` waits up to `GAL_REST_MS` 15 s for the rest, retries the failed ones once
+  after `GAL_RETRY_GAP_MS` 1 s (us-log kind `gthumbs`), then **one** `galBuild` with every picture that
+  came — a single redraw, which the user accepted over the no-moving-pictures rule (the same `<img>`
+  elements move into the new cells). Still missing → `galShortNote`: a `.short` pill (fixed, bottom
+  centre, `#f9e2af`) inside `set.el`, "would not load" / "still loading after 15 s". Not a toast:
+  hovering a cell replaces the tip. v0.265.0's "middle-click twice" notice is gone.
 - **Safeguards** (user, v0.262.0, after gallery mode on YouTube with several tabs open crashed the
   browser — every tab follows the per-site on-state, and each preload frame is a full watch page):
   - Only the tab in view preloads: `galPreNext` returns while `document.visibilityState` is hidden;

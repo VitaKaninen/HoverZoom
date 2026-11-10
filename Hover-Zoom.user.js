@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.265.0
+// @version     0.266.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -10642,6 +10642,8 @@
     const GAL_PREFER_MS = 2500;         // the frame's report wins only within this; then the plain HTML is used
     const GAL_REPORT_MS = 3000;         // longest wait for its report once loaded (settle + one retry + slack)
     const GAL_HQ_PAR = 4;               // originals fetched at once when a gallery opens
+    const GAL_REST_MS = 15000;          // a short gallery waits this long for the rest before redrawing with what came
+    const GAL_RETRY_GAP_MS = 1000;      // then the failed thumbnails are tried once more after this
     const GAL_LATE_MS = 6500;           // extra wait when no thumbnail came in GAL_WAIT_MS; ends before the 10 s diagnostics timer
     const GAL_LAG_TICK = 250;          // while a hidden frame loads, a timer this often measures how late it runs
     const GAL_LAG_MS = 1000;            // later than this = the page froze: the frame goes and preloading stops for the page
@@ -11222,34 +11224,55 @@
             galTrace(href, 'thumbnails: ' + pics.length + ' loaded, ' + failed + ' failed, ' +
                 (list.length - pics.length - failed) + ' still loading after ' + Math.round(performance.now() - t0) + ' ms');
             if (galWant !== href || (galCur && galCur.href === href)) return;
-            if (!pics.length) { galLate(href, all, got, t0, function () { return failed; }, list.length); return; }
+            if (!pics.length) { galLate(href, list, all, got, t0); return; }
             galBuild(href, pics);
-            if (pics.length < list.length) galShort(href, list.length, pics.length, failed, all, t0);
+            if (pics.length < list.length) galRest(href, list, all, got, t0, pics.length);
         });
     }
 
-    // Fewer pictures shown than the page has: say so in the gallery, and again once the rest have settled.
-    function galShort(href, total, shown, failed, all, t0) {
+    // Some shown, the rest not yet: wait for them (GAL_REST_MS), try the failed ones once more, then redraw with every one that came.
+    function galRest(href, list, all, got, t0, shown) {
+        const set = galCur;
+        let t = 0;
+        Promise.race([all, new Promise(function (r) { t = setTimeout(r, GAL_REST_MS, null); })]).then(function (v) {
+            clearTimeout(t);
+            const have = list.map(function (it, i) { return (v || got)[i] || null; });
+            const bad = [], hung = [];
+            have.forEach(function (p, i) { if (!p) (v || got[i] === null ? bad : hung).push(i); });
+            galTrace(href, 'thumbnails after ' + Math.round(performance.now() - t0) + ' ms: ' + (list.length - bad.length - hung.length) +
+                ' loaded, ' + bad.length + ' failed, ' + hung.length + ' still loading');
+            const retry = bad.length ? new Promise(function (r) { setTimeout(r, GAL_RETRY_GAP_MS); }).then(function () {
+                usLog.enable(cfg.logRequests !== false);
+                const lg = usLog.start('gthumbs', { host: pageHost(), pace: version().replace(/\?/g, '') + ' retry once', slowed: noRush(pageHost()) });
+                return Promise.all(bad.map(function (i) {
+                    const r = lg && lg.req();
+                    return galImg(list[i]).then(function (p) { if (r) r.done({ status: p ? 200 : 0 }); if (p) have[i] = p; });
+                })).then(function () { if (lg) lg.end('done'); });
+            }) : Promise.resolve();
+            retry.then(function () {
+                const pics = have.filter(Boolean), missing = list.length - pics.length;
+                if (bad.length) galTrace(href, 'retry: ' + (list.length - missing - (list.length - bad.length - hung.length)) + ' of ' + bad.length + ' failed ones loaded');
+                if (galCur !== set || galWant !== href) return;
+                if (pics.length > shown) galBuild(href, pics);
+                if (missing) galShortNote(href, pics.length, list.length, hung.length, missing - hung.length);
+            });
+        });
+    }
+
+    // Shown in the gallery only when, after waiting and one retry, some pictures still could not be drawn.
+    function galShortNote(href, shown, total, hung, failed) {
         const set = galCur;
         if (!set || set.href !== href) return;
         const el = document.createElement('div');
         el.className = 'short';
-        const say = function (text) { el.textContent = text; };
-        const left = total - shown - failed;
-        say('Showing ' + shown + ' of ' + total + ' pictures' + (left ? ' · ' + left + ' still loading' : '') + (failed ? ' · ' + failed + ' failed' : ''));
+        el.textContent = 'Showing ' + shown + ' of ' + total + ' pictures' + (failed ? ' · ' + failed + ' would not load' : '') +
+            (hung ? ' · ' + hung + ' still loading after ' + GAL_REST_MS / 1000 + ' s' : '');
         set.el.appendChild(el);
-        dbg('gallery short', { href: href, total: total, shown: shown, failed: failed });
-        all.then(function (v) {
-            const ok = v.filter(Boolean).length, ms = Math.round(performance.now() - t0);
-            galTrace(href, 'thumbnails: all settled after ' + ms + ' ms: ' + ok + ' loaded, ' + (v.length - ok) + ' failed');
-            if (galCur !== set) return;
-            say(ok > shown ? 'Showing ' + shown + ' of ' + total + ' · ' + ok + ' ready now: middle-click the result twice to see them'
-                : 'Showing ' + shown + ' of ' + total + ' · the other ' + (total - shown) + ' failed to load');
-        });
+        dbg('gallery short', { href: href, total: total, shown: shown, failed: failed, hung: hung });
     }
 
     // Not one thumbnail in GAL_WAIT_MS: wait GAL_LATE_MS more (the diagnostics then say whether they ever came), show them if they do.
-    function galLate(href, all, got, t0, failedOf, total) {
+    function galLate(href, list, all, got, t0) {
         galTrace(href, 'originals fetching: ' + galHqText());
         let t = 0;
         Promise.race([all, new Promise(function (r) { t = setTimeout(r, GAL_LATE_MS, null); })]).then(function (v) {
@@ -11260,7 +11283,7 @@
             if (galWant !== href || (galCur && galCur.href === href)) return;
             if (!pics.length) { galHide('fail: no thumbnail loaded within ' + ms + ' ms'); return; }
             galBuild(href, pics);
-            if (pics.length < total) galShort(href, total, pics.length, failedOf(), all, t0);
+            if (pics.length < list.length) galRest(href, list, all, got, t0, pics.length);
         });
     }
 
