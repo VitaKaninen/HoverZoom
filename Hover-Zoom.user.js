@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.259.0
+// @version     0.260.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -11213,8 +11213,10 @@
         galPendClear();
         if (!galOn) galSteer(galPt.x, galPt.y);
         setTimeout(function () {
-            if (galCur !== set) return;            // hidden or replaced before it counted
+            if (galCur !== set) { dbg('gallery not counted as seen: ' + (galCur ? 'replaced' : 'hidden') + ' within ' + GAL_SEEN_MS + ' ms', { href: href }); return; }
             galListAdd(GAL_SEEN_KEY, href);
+            galSeen[GAL_SEEN_KEY] = null;
+            dbg('gallery seen', { href: href, readBack: galList(GAL_SEEN_KEY).has(href) });
             galMarkAll();
         }, GAL_SEEN_MS);
         pics.forEach(function (p, k) {
@@ -11585,7 +11587,7 @@
     function galMarkImg(img, kind) {
         const at = img.closest('picture') || img;
         const ir = at.getBoundingClientRect();
-        if (ir.width < 48 || ir.height < 24) return;
+        if (ir.width < 48 || ir.height < 24) return null;
         let m = galMarkFind(at, GAL_MARK);
         if (m && m.getAttribute(GAL_MARK) !== kind) { m.remove(); m = null; }
         if (!m) {
@@ -11617,6 +11619,7 @@
         const o = m.getBoundingClientRect();
         m.style.left = (ir.right - w - 4 - o.left) + 'px';
         m.style.top = (ir.top + 4 - o.top) + 'px';
+        return m;
     }
 
     // Our mark of one kind among the few elements right after the picture.
@@ -11647,14 +11650,68 @@
     function galMarkAll() {
         if (!isTopFrame || !galleryListed()) return;
         const seen = galList(GAL_SEEN_KEY), went = galList(GAL_VISITED_KEY), from = galList(GAL_SAVEDFROM_KEY);
-        if (!seen.size && !went.size && !from.size) return;
+        if (!seen.size && !went.size && !from.size) { galMarkLog({ stored: 'none' }); return; }
+        const dbgOn = debugOn(), st = { seenStored: seen.size, visitedStored: went.size, pictures: 0, linked: 0, ticks: 0, tooSmall: 0, hidden: [] };
+        const links = new Set();
         document.querySelectorAll('a[href] img').forEach(function (img) {
+            st.pictures++;
             const h = galLinkOf(img);
             if (!h) return;
-            if (went.has(h)) galMarkImg(img, '2');
-            else if (seen.has(h)) galMarkImg(img, '1');
+            st.linked++;
+            links.add(h);
             if (from.has(h)) galMarkSaved(img);
+            let m;
+            if (went.has(h)) m = galMarkImg(img, '2');
+            else if (seen.has(h)) m = galMarkImg(img, '1');
+            else return;
+            if (!m) { st.tooSmall++; return; }
+            st.ticks++;
+            if (dbgOn && st.hidden.length < 3) { const why = galMarkHidden(m, img); if (why) st.hidden.push({ href: h, why: why }); }
         });
+        if (!dbgOn) return;
+        const last = Array.from(seen).pop();
+        if (last && !links.has(last)) {
+            let lu;
+            try { lu = new URL(last); } catch (e) { lu = new URL(location.href); }
+            const seg = lu.pathname.split('/')[1] || '';
+            st.lastSeenUnmatched = last;
+            st.nearestLinks = Array.from(links).filter(function (h) {
+                try { const u = new URL(h); return u.host === lu.host && (u.pathname.split('/')[1] || '') === seg; } catch (e) { return false; }
+            }).slice(0, 3);
+        }
+        galMarkLog(st);
+    }
+
+    // Debug only: why a drawn tick cannot be seen — zero size, clipped by an ancestor, or something drawn over it.
+    function galMarkHidden(m, img) {
+        const r = m.getBoundingClientRect();
+        if (r.width < 1 || r.height < 1) return 'zero size';
+        const cs = getComputedStyle(m);
+        if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity === 0) return 'style ' + cs.display + '/' + cs.visibility + '/' + cs.opacity;
+        for (let p = m.parentElement; p && p !== document.body; p = p.parentElement) {
+            const ps = getComputedStyle(p);
+            if (ps.overflow === 'visible' && ps.overflowX === 'visible' && ps.overflowY === 'visible') continue;
+            const pr = p.getBoundingClientRect();
+            if (r.left < pr.left || r.right > pr.right || r.top < pr.top || r.bottom > pr.bottom) return 'clipped by ' + galMarkName(p);
+        }
+        const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+        if (cx < 0 || cy < 0 || cx > vpW() || cy > vpH()) return null;
+        const top = document.elementFromPoint(cx, cy);
+        const at = img.closest('picture') || img;
+        if (top && top !== at && !at.contains(top) && !top.contains(m)) return 'covered by ' + galMarkName(top);
+        return null;
+    }
+
+    function galMarkName(el) {
+        return el.tagName.toLowerCase() + (el.className && typeof el.className === 'string' ? '.' + el.className.trim().split(/\s+/).slice(0, 3).join('.') : '');
+    }
+
+    let galMarkLast = '';
+    function galMarkLog(st) {
+        const s = JSON.stringify(st);
+        if (s === galMarkLast) return;
+        galMarkLast = s;
+        dbg('gallery marks', st);
     }
 
     function galMarkSoon() {

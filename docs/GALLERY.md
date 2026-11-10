@@ -109,6 +109,10 @@ so the user can judge whether that gallery is worth opening. Look only: the floa
   absolutely positioned by measuring its own containing block (`galMarkImg`) — so no ancestor's
   `position` is changed. `galMarkAll` re-derives on boot (+1.5 s), 250 ms after a scroll or resize,
   and after each show; it holds no element references.
+  Debug (`debug` on): `gallery seen` (with a storage read-back) or `gallery not counted as seen:
+  hidden/replaced`; `gallery marks` (logged only when it changes) gives counts, `tooSmall`, up to 3
+  drawn-but-`hidden` ticks (clipped/covered/zero size), and `lastSeenUnmatched` + `nearestLinks` when
+  the newest seen link matches no page picture.
 - **Visited = double tick** (user): two of the same ticks, 10 px apart in a 34 × 24 box, both fully
   outlined. Stored in `hoverZoomGalleryVisited` (same list rules, `galList`/`galListAdd`). **Only the
   browser loading the page counts** (user, v0.252.0): at boot, every top-frame page on a
