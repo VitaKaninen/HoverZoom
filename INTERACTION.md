@@ -199,7 +199,8 @@ The window is up and transient.
 - **Placement:** decided once, when it opens, and never revisited. With `position: cursor` (the
   default) it opens beside the pointer and is nudged the smallest distance that puts the pointer
   `REACH_INSET` (10 px) inside its edge. (`cursorGap` was retired in v0.40.0: that nudge always
-  overrode it, so the gap could never survive.) With `position: last` it opens where a pinned
+  overrode it, so the gap could never survive.) With `position: under` (v0.269.0) it opens
+  centred on the pointer, then clamped on screen like the others. With `position: last` it opens where a pinned
   preview was last dropped — the centre until one is (`E64`) — and the pointer is *outside* it, so the press that pins it is the one on the picture
   itself (`E30`). Either way it stays 4 px clear of the viewport's edges and **24 px clear of the
   bottom**, which is where the browser paints the link target it would follow (`STATUS_TIP_H`).

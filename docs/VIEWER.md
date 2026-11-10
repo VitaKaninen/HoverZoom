@@ -888,7 +888,10 @@ time the flip with a `MutationObserver`, not a polling loop. See [`TESTING.md`](
 - **The preview opens beside the pointer, then is nudged until the pointer is `REACH_INSET`
   (10 px) inside it** (`nudgeIntoReach`), on the axis that needs it. Centring it on the cursor
   solves reachability but moves it much further than needed. **This is why `cursorGap` was
-  retired in v0.40.0** — the nudge overrode every value it could hold.
+  retired in v0.40.0** — the nudge overrode every value it could hold. **`position: 'under'`**
+  (v0.269.0, user asked) centres it on the pointer instead; the only reason on record against
+  centring was the travel, and pointer-transparency (`E1`) means covering the picture blocks
+  nothing. Small pictures still go beside (`E73`) in every mode.
 - **A preview that opened away from the pointer is pinned from the picture** (`E30`).
   `pressPinsPreview()` claims a press inside the window's rectangle *or*, in any mode, on the
   element the preview came from. Without it such a preview cannot be kept at all: it is

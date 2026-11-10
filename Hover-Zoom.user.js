@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.268.0
+// @version     0.269.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -289,7 +289,7 @@
         // how to display
         maxSizeMultiple: 1.2,       // how far the frame may GROW, as a multiple of the window.
         zoomLimit: 4,               // ceiling on the opening scale; the window still fits it
-        position: 'last',           // 'cursor' | 'last' (where a pinned one was last dropped; the centre until then)
+        position: 'last',           // 'cursor' | 'under' | 'last' (where a pinned one was last dropped; the centre until then)
         posPerSite: true,           // remembered positions (slideshow, 'last') are kept per site
         fadeMs: 200,
         borderWidth: 1,
@@ -4166,9 +4166,9 @@
         const kind = posKind();
         if (kind) posApply(posLoad(kind));
         else {
-            // Beside the pointer, on whichever side has more room.
+            // Centred on the pointer ('under'), else beside it on whichever side has more room.
             const rightRoom = m.vw - pointer.x;
-            view.left = rightRoom >= ow ? pointer.x : pointer.x - ow;
+            view.left = cfg.position === 'under' ? pointer.x - ow / 2 : rightRoom >= ow ? pointer.x : pointer.x - ow;
             view.top = pointer.y - oh / 2;
             if (!activeSmall) nudgeIntoReach();
         }
@@ -13043,10 +13043,10 @@
         act.el.addEventListener('change', syncModKey);
         syncModKey();
         const pos = pick('position', 'Opens', ' ', [
-            ['cursor', 'Beside the pointer'], ['last', 'Where I last put it']]);
+            ['cursor', 'Beside the pointer'], ['under', 'Under the pointer'], ['last', 'Where I last put it']]);
         const posHint = pos.row.querySelector('.hint');
         function syncPos() {
-            posHint.textContent = pos.el.value === 'cursor'
+            posHint.textContent = pos.el.value !== 'last'
                 ? 'Click the preview to pin it.'
                 : 'Centred until you move one. Click the picture to pin, then drag; later ones open there.';
         }
