@@ -776,6 +776,11 @@ in the download folder (unless the browser always asks). `preventDefault` stops 
 opens a tab. Window state is untouched. Buttons inside the window save too (no `isBoxControl()`).
 Same `saveName()` and fallback as `E9a`; Tampermonkey's Download Mode must be *Browser API* in
 LibreWolf.
+- **Once per picture per page address** (user, v0.271.0): `midSaved` (url → press time, `Infinity`
+  once `done` fires) is cleared when `location.href` changes, so a reload, leaving and coming back,
+  or an SPA navigation saves again. A repeat press shows "Already saved" and still claims the
+  press. A save that never reports done (failed) may be pressed again after `MID_RETRY_MS` (60 s).
+  The context menu's Save is not covered: it is a deliberate choice.
 - **Alt+click was tried first (v0.226.0) and never reached the script in LibreWolf**; cause unknown,
   removed in v0.228.0. Worked with synthetic events in the pane.
 - **Converting on save** (user, v0.257.0; `saveConvert` off/png/jpg/webp, `saveConvertFrom` avif /

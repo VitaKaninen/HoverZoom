@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.270.0
+// @version     0.271.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -5443,6 +5443,9 @@
     let holdTimer = null;
     let watchTimer = null;      // the poll for a player under the picture
     let midSaveAt = 0;          // when the last middle-click save happened; its click is ours
+    const midSaved = new Map(); // url -> when pressed, or Infinity once saved; this page address only
+    let midSavedHref = '';
+    const MID_RETRY_MS = 60000; // a save that never reported back may be pressed again after this
     let swallowMenuAt = 0;      // when the right press that dismissed a preview happened; its menu is ours
     const MENU_CLAIM_MS = 1500; // and only that long, or a press released off-window eats the next menu
     let pointer = { x: 0, y: 0 };
@@ -6977,8 +6980,12 @@
         e.stopImmediatePropagation();
         claimClick();
         midSaveAt = Date.now();
+        if (midSavedHref !== location.href) { midSaved.clear(); midSavedHref = location.href; }
+        const url = view.url, at = midSaved.get(url);
+        if (at && Date.now() - at < MID_RETRY_MS) { toast('Already saved', 2000); return true; }
+        midSaved.set(url, Date.now());
         const gImg = galOwns(active) ? active : null, gHref = gImg && galCur ? galCur.href : null;
-        saveOriginal(view.url, true, gImg ? function () { galSaved(gImg, gHref); } : null, savePage(active));
+        saveOriginal(url, true, function () { midSaved.set(url, Infinity); if (gImg) galSaved(gImg, gHref); }, savePage(active));
         return true;
     }
     // The click half of that press: a hover preview lets it through to the link underneath, which would open a tab.
