@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.266.0
+// @version     0.267.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -11424,9 +11424,11 @@
         timer = setTimeout(async function () {
             if (myToken.cancelled || active !== img) return;
             showSpinner();
+            const t1 = performance.now(), known = !!img.__hzItem.hit;
             const hit = await galResolve(img, myToken);
             if (myToken.cancelled || active !== img) return;
             hideSpinner();
+            dbg('gallery preview found', { ms: Math.round(performance.now() - t1), remembered: known, size: hit ? hit.w + 'x' + hit.h : null });
             if (hit) showViewer(hit, pointer);
         }, cfg.hoverDelay);
     }
@@ -11439,10 +11441,15 @@
         (item.ss || []).forEach(function (v) { list = list.concat(parseSrcset(v).map(abs)); });
         list = list.filter(function (u, i) { return u && list.indexOf(u) === i && !blocked(u); });
         const hitOf = function (u, d) { return { url: u, w: d.w, h: d.h, video: !!d.video, duration: d.duration, display: d.display }; };
+        if (item.hit) {             // found before: the misses ahead of it are not asked again
+            const d = await probe(item.hit.url);
+            if (d) return item.hit;
+            item.hit = null;
+        }
         for (let i = 0; i < list.length; i++) {
             if (tok.cancelled) return null;
             const d = await probe(list[i], tok.fresh);
-            if (d && d.w > nw) return hitOf(list[i], d);
+            if (d && d.w > nw) return (item.hit = hitOf(list[i], d));
         }
         const own = img.currentSrc || img.src;
         const d = own ? await probe(own) : null;
