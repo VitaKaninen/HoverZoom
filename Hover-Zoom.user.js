@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.269.0
+// @version     0.270.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -3831,8 +3831,8 @@
     let spinCentred = false;
 
     // Point the frame at a resolved candidate, picking the face that can display it.
-    function setMedia(res) {
-        swapSeq++;
+    function setMedia(res, stage) {
+        const seq = ++swapSeq;
         dropCover();
         if (blanked) unblank();
         const wantsVideo = !!res.video;
@@ -3845,12 +3845,8 @@
         if (!wantsVideo && noReferrerHere()) imgEl.referrerPolicy = 'no-referrer';
         const want = res.display || res.url, was = imgEl.getAttribute('src');
         imgEl.style.visibility = '';
-        if (!wantsVideo && was && was !== want) {   // the last picture would show, stretched to this one's size, until this one decodes
-            imgEl.style.visibility = 'hidden';
-            const shown = function () { if (imgEl.getAttribute('src') === want) imgEl.style.visibility = ''; };
-            mediaEl.src = want;
-            imgEl.decode().then(shown, shown);
-        } else mediaEl.src = want;   // a CSP-refused picture displays from bytes. See E49.
+        mediaEl.src = want;   // a CSP-refused picture displays from bytes. See E49.
+        if (stage && !wantsVideo && was && was !== want) stageCover(want, seq);
         if (wantsVideo) {
             // The site's remembered answer, not the last clip's: a fresh tab on a site that has
             // never been unmuted starts silent, which is what AUDIO_DEFAULT is for.
@@ -4174,7 +4170,7 @@
         }
         if (activeSmall) besidePicture(ow, oh, m);
 
-        setMedia(res);
+        setMedia(res, true);
         layout();
         deferredCaption(res.url);
 
@@ -4293,6 +4289,20 @@
         const lift = function () { setTimeout(function () { if (seq === swapSeq) dropCover(); }, COVER_HOLD_MS); };
         imgEl.decode().then(lift, lift);
         setTimeout(function () { if (seq === swapSeq) dropCover(); }, 3000);
+    }
+
+    // imgEl may paint its last picture at the new size: hide it, decode off-screen, then show it under coverEl. See VIEWER.md.
+    function stageCover(want, seq) {
+        imgEl.style.visibility = 'hidden';
+        const im = new Image();
+        if (noReferrerHere()) im.referrerPolicy = 'no-referrer';
+        im.src = want;
+        const done = function () {
+            if (seq !== swapSeq || !view || mediaEl !== imgEl || imgEl.getAttribute('src') !== want) return;
+            imgEl.style.visibility = '';
+            showCover(im);
+        };
+        im.decode().then(done, done);
     }
 
     function dropCover() {
