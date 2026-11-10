@@ -70,6 +70,20 @@ so the user can judge whether that gallery is worth opening. Look only: the floa
   (`galPreHalt`). Logged: one `gallery` us-log row per run on the page's host (stored in
   `gallerySites`, so the privacy rule holds); the hidden frame's requests are not counted.
   `GAL_CACHE` is 300 so a long results page is not evicted while it preloads.
+- **Safeguards** (user, v0.262.0, after gallery mode on YouTube with several tabs open crashed the
+  browser — every tab follows the per-site on-state, and each preload frame is a full watch page):
+  - Only the tab in view preloads: `galPreNext` returns while `document.visibilityState` is hidden;
+    going hidden cancels the preload's frame, coming back resumes.
+  - No media in the hidden frame (`galNoMedia`, run by the frame's own copy at the start of
+    `galProbeReport`): every video/audio is emptied (src, `<source>`, srcObject, `load()`), every
+    iframe/embed/object removed, now, on `loadstart`, and via a MutationObserver (allowed here: the
+    frame lives seconds and nothing is kept). Runs at `document-idle`, so a player built before that
+    may have begun fetching. Rejected: refusing pages that have a player — the user's gallery pages
+    carry videos at the bottom.
+  - Lag watchdog in `galRender`: a `GAL_LAG_TICK` 250 ms timer while a frame exists; firing more than
+    `GAL_LAG_MS` 1 s late (tab visible) removes the frame, `galPreHalt('froze')`, and a 3 s toast.
+  - Rejected by the user: stopping on galleries with few pictures (show whatever is there), and a
+    confirm on first enable (the user can't judge whether a site is a bad idea).
 - Hover delay = `cfg.hoverDelay`. Off every result link for `GAL_GRACE_MS` 500 → fade out. Moving
   to another link within that time keeps the old set until the new one is ready, then crossfades
   (`GAL_FADE_MS` 200). A linked page with no pictures clears the old set.

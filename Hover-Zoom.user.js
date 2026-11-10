@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.261.0
+// @version     0.262.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -10641,6 +10641,8 @@
     const GAL_HTML_ENOUGH = 6;          // the plain HTML is trusted at once from this many pictures (a logo group is 1-3)
     const GAL_PREFER_MS = 2500;         // the frame's report wins only within this; then the plain HTML is used
     const GAL_REPORT_MS = 3000;         // longest wait for its report once loaded (settle + one retry + slack)
+    const GAL_LAG_TICK = 250;           // while a hidden frame loads, a timer this often measures how late it runs
+    const GAL_LAG_MS = 1000;            // later than this = the page froze: the frame goes and preloading stops for the page
     const GAL_SETTLE_MS = 700;          // after the frame's load, before it counts
     const GAL_RETRY_MS = 1500;          // one more look when it counted nothing
     const galCache = new Map();         // href -> Promise of [{thumb, ss, cands, base}] | null | 'cancel'
@@ -10839,11 +10841,12 @@
         return new Promise(function (resolve) {
             const token = Math.random().toString(36).slice(2);
             const f = document.createElement('iframe');
-            let done = false, t = 0;
+            let done = false, t = 0, lagT = 0, lagAt = performance.now();
             const fin = function (v, why) {
                 if (done) return;
                 done = true;
                 clearTimeout(t);
+                clearTimeout(lagT);
                 window.removeEventListener('message', onMsg);
                 if (galFrameStop === stop) galFrameStop = null;
                 f.remove();
@@ -10876,16 +10879,58 @@
                 }
             });
             t = setTimeout(function () { fin(null, 'no report in ' + GAL_FRAME_MS + ' ms'); }, GAL_FRAME_MS);
+            const lagCheck = function () {
+                const late = performance.now() - lagAt - GAL_LAG_TICK;
+                if (late > GAL_LAG_MS && document.visibilityState !== 'hidden') {   // a hidden tab's timers are throttled, not frozen
+                    fin(null, 'the page froze for ' + Math.round(late) + ' ms');
+                    galPreHalt('froze');
+                    toast('Gallery preload stopped: the page froze for ' + (late / 1000).toFixed(1) + ' s loading a linked page', 3000);
+                    return;
+                }
+                lagAt = performance.now();
+                lagT = setTimeout(lagCheck, GAL_LAG_TICK);
+            };
+            lagT = setTimeout(lagCheck, GAL_LAG_TICK);
             galTrace(href, 'frame start');
             f.src = href;
             document.documentElement.appendChild(f);
         });
     }
 
+    // Inside the hidden frame: no video, audio or embedded player loads, now or when the page adds one later.
+    function galNoMedia() {
+        const kill = function (el) {
+            const t = el.tagName;
+            if (t === 'VIDEO' || t === 'AUDIO') {
+                if (!el.hasAttribute('src') && !el.querySelector('source') && !el.currentSrc && !el.srcObject) return;   // already emptied: load() again would loop
+                try {
+                    el.pause(); el.muted = true; el.autoplay = false; el.preload = 'none';
+                    el.removeAttribute('src');
+                    if (el.srcObject) el.srcObject = null;
+                    el.querySelectorAll('source').forEach(function (s) { s.remove(); });
+                    el.load();
+                } catch (e) { /* already gone */ }
+            } else if (t === 'IFRAME' || t === 'EMBED' || t === 'OBJECT') el.remove();
+        };
+        const sweep = function (root) {
+            if (root.nodeType !== 1) return;
+            if (/^(VIDEO|AUDIO|IFRAME|EMBED|OBJECT)$/.test(root.tagName)) kill(root);
+            root.querySelectorAll('video,audio,iframe,embed,object').forEach(kill);
+        };
+        sweep(document.documentElement);
+        document.addEventListener('loadstart', function (e) { if (e.target && e.target.tagName) kill(e.target); }, true);
+        try {
+            new MutationObserver(function (recs) {   // the frame is thrown away within seconds; nothing is kept
+                recs.forEach(function (r) { r.addedNodes.forEach(sweep); });
+            }).observe(document.documentElement, { childList: true, subtree: true });
+        } catch (e) { /* loadstart still catches media */ }
+    }
+
     // Inside the hidden frame: once the page has settled, send the parent what the widget would count.
     function galProbeReport() {
         const token = String(window.name).slice(GAL_NAME.length + 1);
         let tries = 0;
+        galNoMedia();
         document.addEventListener('play', function (e) {
             try { e.target.muted = true; e.target.pause(); } catch (x) { /* not media */ }
         }, true);
@@ -11768,7 +11813,7 @@
 
     // One more page, unless one is in flight, a hover's frame is loading, or a refusal stopped it. Kicked by every load's end.
     function galPreNext() {
-        if (galPre || galPreStop || galFrameStop || !galleryHere()) return;
+        if (galPre || galPreStop || galFrameStop || document.visibilityState === 'hidden' || !galleryHere()) return;
         const href = galPrePick();
         if (!href) { if (galPreLog) { galPreLog.end('done'); galPreLog = null; } return; }
         if (!galPreLog) {
@@ -11787,9 +11832,9 @@
     }
 
     // A refusal: no more preloading on this page.
-    function galPreHalt() {
+    function galPreHalt(why) {
         galPreStop = true;
-        if (galPreLog) { galPreLog.end('limited'); galPreLog = null; }
+        if (galPreLog) { galPreLog.end(why || 'limited'); galPreLog = null; }
     }
 
     if (isTopFrame) {
@@ -11808,7 +11853,11 @@
         } catch (e) { /* other tabs follow on their next load */ }
         window.addEventListener('keyup', galKeyUp, true);
         window.addEventListener('blur', function () { galTap = false; if (galPend) galTrace(galPend.href, 'window lost focus'); });
-        document.addEventListener('visibilitychange', function () { if (galPend) galTrace(galPend.href, 'tab ' + document.visibilityState); });
+        document.addEventListener('visibilitychange', function () {
+            if (galPend) galTrace(galPend.href, 'tab ' + document.visibilityState);
+            if (document.visibilityState === 'hidden') { if (galPre && galFrameStop) galFrameStop(); }   // only the tab in view preloads
+            else galPreNext();
+        });
         window.addEventListener('wheel', function () { galTap = false; galInputAt = performance.now(); }, { capture: true, passive: true });
         window.addEventListener('touchstart', function () { galInputAt = performance.now(); }, { capture: true, passive: true });
         window.addEventListener('pagehide', function () { if (galPreLog) { galPreLog.end('cut'); galPreLog = null; } });
