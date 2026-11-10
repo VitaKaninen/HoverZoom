@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.260.0
+// @version     0.261.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -11586,7 +11586,7 @@
     // One green tick in the picture's top-right corner, or two overlapping for a visited gallery.
     function galMarkImg(img, kind) {
         const at = img.closest('picture') || img;
-        const ir = at.getBoundingClientRect();
+        const ir = galMarkRect(img, at);
         if (ir.width < 48 || ir.height < 24) return null;
         let m = galMarkFind(at, GAL_MARK);
         if (m && m.getAttribute(GAL_MARK) !== kind) { m.remove(); m = null; }
@@ -11622,6 +11622,14 @@
         return m;
     }
 
+    // The picture's drawn box: the larger of the <img> and its <picture>, since an inline <picture> measures as a line box.
+    function galMarkRect(img, at) {
+        const a = img.getBoundingClientRect();
+        if (at === img) return a;
+        const b = at.getBoundingClientRect();
+        return a.width * a.height >= b.width * b.height ? a : b;
+    }
+
     // Our mark of one kind among the few elements right after the picture.
     function galMarkFind(at, attr) {
         let m = at.nextElementSibling;
@@ -11632,7 +11640,7 @@
     // The saved mark in the picture's top-left corner.
     function galMarkSaved(img) {
         const at = img.closest('picture') || img;
-        const ir = at.getBoundingClientRect();
+        const ir = galMarkRect(img, at);
         if (ir.width < 48 || ir.height < 24) return;
         let m = galMarkFind(at, GAL_SAVED_MARK);
         if (!m) {
@@ -11664,7 +11672,15 @@
             if (went.has(h)) m = galMarkImg(img, '2');
             else if (seen.has(h)) m = galMarkImg(img, '1');
             else return;
-            if (!m) { st.tooSmall++; return; }
+            if (!m) {
+                st.tooSmall++;
+                if (dbgOn && (st.small || (st.small = [])).length < 3) {
+                    const at = img.closest('picture') || img, a = img.getBoundingClientRect(), b = at.getBoundingClientRect();
+                    st.small.push({ href: h, img: Math.round(a.width) + 'x' + Math.round(a.height), picture: at === img ? null : Math.round(b.width) + 'x' + Math.round(b.height),
+                        natural: img.naturalWidth + 'x' + img.naturalHeight, display: getComputedStyle(img).display, parent: galMarkName(img.parentElement) });
+                }
+                return;
+            }
             st.ticks++;
             if (dbgOn && st.hidden.length < 3) { const why = galMarkHidden(m, img); if (why) st.hidden.push({ href: h, why: why }); }
         });
