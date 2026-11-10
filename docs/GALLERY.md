@@ -185,6 +185,27 @@ the drawn size does not change. At most `GAL_TRIES` per picture.
 - `parseSrcset()` returns **URL strings, widest first — no widths**. `galBigger` parses `w`
   descriptors itself for that reason.
 
+## Open feedback and diagnostics (user, v0.255.0)
+
+Asked for because an open on one live site does nothing ~1 in 4 presses and a second press works.
+- A middle press or Ctrl tap that opens lights the result (`.pend`: blue ring, the rest dimmed by its
+  200vmax shadow) until `galBuild` shows the set (`galPendStart`/`galPendClear`).
+- `galTrace(href, what)` records every step of every load, preloads included (`galTraces`, 60 links),
+  so a press that hit an in-flight preload still shows the preload's earlier steps (negative ms).
+- The popup (`galDiag`, copy button) opens when: nothing shows `GAL_DIAG_MS` (10 s) after the press;
+  a failure ends the open early (`galHide('fail: …')` — no pictures, none loaded in `GAL_WAIT_MS`,
+  load cancelled); or the hide reason is not the user's (`GAL_USER_HIDE`: press, esc, middle, ctrl,
+  resize, mode off, scroll). A scroll counts as the user's only within 600 ms of a wheel, key (not
+  Control), touch or left press (`galInputAt`); the middle press itself must not count, or a page
+  scroll it triggers would be silent. `galMissed`: a middle press whose target is no result but has
+  one under it (`elementsFromPoint`) — an overlay covering the result.
+- Privacy: no URL leaves `galSane()` — scheme, same host / sibling subdomain / other host, path
+  with letter runs → `w` and digit runs → `#`, query keys only. Trace strings never carry a URL
+  (the frame's "landed on <url>" is rewritten). Element chains are `domChain()` (digits → `#`).
+- Unverified: the 10 s timer path (fixture loads never hang). Candidate causes the trace separates:
+  thumbnails slow (2.5 s cap, then a silent hide — a retry hits the browser cache), a cancelled
+  frame, a page scroll, a covering overlay.
+
 ## Requests
 
 Fetched pages are cached by URL (`GAL_CACHE` 300; failures are not cached). A 429/503 is logged

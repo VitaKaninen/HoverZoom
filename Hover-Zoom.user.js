@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.254.0
+// @version     0.255.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -621,7 +621,7 @@
         saveSettings();
         refreshSiteMenu();
         refreshPanel();
-        if (!galleryListed()) galHide();
+        if (!galleryListed()) galHide('mode off');
         galBtnSync();
         twRefresh();
         toast('Gallery button ' + (galleryListed() ? 'shown' : 'hidden') + ' on ' + host, 3000);
@@ -10417,6 +10417,10 @@
     let galSeen = {}, galLock = null, galMarkTimer = 0, galEdge = false, galHole = null;
     let galOn = false, galTap = false, galAt = null, galMidAt = 0;      // toggled on and locked; Ctrl down with nothing else yet; the result under the pointer {href, hole}
     let galPre = null, galPreStop = false, galPreLog = null;   // the preload in flight; stopped by a refusal; its log row
+    const GAL_DIAG_MS = 10000;          // an open that shows nothing this long after the press gets the diagnostics popup
+    const GAL_USER_HIDE = ['press', 'esc', 'middle', 'ctrl', 'resize', 'mode off', 'scroll'];
+    const galTraces = new Map();        // href -> [[ms, what]], sanitised, the last 60 links
+    let galPend = null, galInputAt = 0; // the open waiting for its gallery; the user's last wheel/key/press
     const galPreTried = new Set();
 
     // Gallery mode runs where the gallery list covers the page and ordinary previews are off.
@@ -10439,7 +10443,7 @@
     // Everything that follows the on-state.
     function galApply() {
         if (galleryActive()) { if (placed) unplace(); else cancel(); setTimeout(galPreNext, 0); galMarkAll(); }
-        else galHide();
+        else galHide('mode off');
         twRefresh();
         galBtnSync();
     }
@@ -10598,6 +10602,7 @@
                 window.removeEventListener('message', onMsg);
                 if (galFrameStop === stop) galFrameStop = null;
                 f.remove();
+                galTrace(href, 'frame: ' + String(why).replace(/landed on .*/, 'landed on another page') + (v && v !== 'cancel' ? ' (' + v.length + ' pictures)' : ''));
                 dbg('gallery frame: ' + why, { href: href, pictures: v ? v.length : 0 });
                 resolve(v);
             };
@@ -10617,6 +10622,7 @@
             f.addEventListener('load', function () {
                 let u = '';
                 try { u = f.contentWindow.location.href; } catch (e) { u = 'unreadable: ' + e.name; }
+                galTrace(href, 'frame loaded');
                 if (!u || u === 'about:blank' || /^unreadable/.test(u)) fin(null, 'the page refused to load in a frame, landed on ' + (u || 'nothing'));
                 else {
                     clearTimeout(t);
@@ -10624,6 +10630,7 @@
                 }
             });
             t = setTimeout(function () { fin(null, 'no report in ' + GAL_FRAME_MS + ' ms'); }, GAL_FRAME_MS);
+            galTrace(href, 'frame start');
             f.src = href;
             document.documentElement.appendChild(f);
         });
@@ -10653,7 +10660,8 @@
 
     // Both reads at once: the plain HTML as soon as it holds GAL_HTML_ENOUGH; else the frame's report within GAL_PREFER_MS, else whatever the HTML had.
     function galLoad(href, log) {
-        if (galCache.has(href)) return galCache.get(href);
+        if (galCache.has(href)) { galTrace(href, 'load: already started or cached'); return galCache.get(href); }
+        galTrace(href, 'load start' + (log ? ' (preload)' : ''));
         const frame = galRender(href);
         const stopFrame = galFrameStop;
         const req = log && log.req();
@@ -10664,9 +10672,12 @@
             dbg('gallery page refused', { href: href, status: res.status });
         }).then(function (doc) {
             const busy = !!refused && (refused.status === 429 || refused.status === 503);
+            galTrace(href, 'html: ' + (refused ? 'status ' + refused.status : doc ? 'ok' : 'failed or not html'));
             if (req) req.done(refused ? { status: refused.status, limited: busy, signal: 'hard',
                 retryAfter: busy ? usLog.retryAfterOf(refused.headers) : null } : { status: doc ? 200 : 0 });
-            return doc ? galPick(doc, href) : null;
+            const got = doc ? galPick(doc, href) : null;
+            if (doc) galTrace(href, 'html: ' + (got ? got.length : 0) + ' pictures');
+            return got;
         });
         const p = new Promise(function (resolve) {
             let done = false, late = false, fromHtml, frameOver = false;
@@ -10686,6 +10697,7 @@
             html.then(function (h) { fromHtml = h; if (late || (h && h.length >= GAL_HTML_ENOUGH)) useHtml(); });
             setTimeout(function () { late = true; useHtml(); }, GAL_PREFER_MS);
         }).then(function (v) {
+            galTrace(href, 'load result: ' + (v === 'cancel' ? 'cancelled' : !v ? 'nothing' : v.length + ' pictures'));
             if (v === 'cancel' || !v) galCache.delete(href);
             setTimeout(galPreNext, 0);
             return v;
@@ -10714,7 +10726,18 @@
             '.blur{position:fixed;inset:0;backdrop-filter:blur(0) grayscale(0);transition:backdrop-filter ' + GAL_FADE_MS + 'ms ease}' +
             '.blur.on{backdrop-filter:blur(6px) grayscale(.6)}' +
             '.ring{position:absolute;left:0;top:0;box-sizing:border-box;border:3px solid #89b4fa;border-radius:8px;' +
-            'box-shadow:0 0 14px 2px rgba(137,180,250,.55)}';
+            'box-shadow:0 0 14px 2px rgba(137,180,250,.55)}' +
+            '.pend{position:fixed;box-sizing:border-box;border:3px solid #89b4fa;border-radius:8px;' +
+            'box-shadow:0 0 0 200vmax rgba(0,0,0,.55),0 0 16px 3px rgba(137,180,250,.7);animation:hzpend .8s ease-in-out infinite alternate}' +
+            '@keyframes hzpend{to{border-color:#cdd6f4;box-shadow:0 0 0 200vmax rgba(0,0,0,.55),0 0 4px 1px rgba(137,180,250,.4)}}' +
+            '.diag{position:fixed;right:16px;bottom:16px;width:min(560px,calc(100vw - 32px));box-sizing:border-box;padding:12px;' +
+            'background:#1e1e2e;color:#cdd6f4;border:1px solid #45475a;border-radius:8px;pointer-events:auto;' +
+            'font:13px/1.4 system-ui,sans-serif;box-shadow:0 8px 28px rgba(0,0,0,.6)}' +
+            '.diag b{display:block;margin-bottom:6px;color:#f9e2af}' +
+            '.diag textarea{display:block;width:100%;height:260px;box-sizing:border-box;margin:0 0 8px;padding:6px;' +
+            'background:#313244;color:#cdd6f4;border:0;border-radius:4px;font:11px/1.4 ui-monospace,Consolas,monospace;resize:vertical}' +
+            '.diag button{margin-left:8px;float:right;padding:4px 12px;background:#45475a;color:#cdd6f4;border:0;border-radius:4px;font:inherit;cursor:pointer}' +
+            '.diag button:hover{background:#585b70}';
         galRoot.appendChild(st);
         // Outside the fading .set: an ancestor below opacity 1 is a backdrop root, so the blur would show nothing mid-fade.
         galBlur = document.createElement('div');
@@ -10881,23 +10904,28 @@
 
     // Measure every thumbnail first, then lay the set out once and fade it in.
     function galShow(href, list) {
-        if (list === 'cancel' || galWant !== href || (galCur && galCur.href === href)) return;
+        if (galWant !== href) { galTrace(href, 'show: skipped, another link is wanted now'); return; }
+        if (galCur && galCur.href === href) { galTrace(href, 'show: already on screen'); galPendClear(); return; }
+        if (list === 'cancel') { galHide('fail: the load was cancelled'); return; }
         if (!list || !list.length) {
             dbg('gallery: no pictures on the linked page', { href: href });
-            galHide();
+            galHide('fail: no pictures found on the linked page');
             return;
         }
-        let timer = 0;
-        const got = [];
+        let timer = 0, failed = 0;
+        const got = [], t0 = performance.now();
+        galTrace(href, 'thumbnails: loading ' + list.length + ' (' + galHostMix(list.map(function (it) { return it.thumb; })) + ')');
         const all = Promise.all(list.map(function (item, i) {
-            return galImg(item).then(function (v) { got[i] = v; return v; });
+            return galImg(item).then(function (v) { got[i] = v; if (!v) failed++; return v; });
         }));
         const cap = new Promise(function (r) { timer = setTimeout(r, GAL_WAIT_MS, null); });
         Promise.race([all, cap]).then(function (v) {
             clearTimeout(timer);
-            if (galWant !== href || (galCur && galCur.href === href)) return;
             const pics = (v || got).filter(Boolean);
-            if (!pics.length) { galHide(); return; }
+            galTrace(href, 'thumbnails: ' + pics.length + ' loaded, ' + failed + ' failed, ' +
+                (list.length - pics.length - failed) + ' still loading after ' + Math.round(performance.now() - t0) + ' ms');
+            if (galWant !== href || (galCur && galCur.href === href)) return;
+            if (!pics.length) { galHide('fail: no thumbnail loaded within ' + GAL_WAIT_MS + ' ms'); return; }
             galBuild(href, pics);
         });
     }
@@ -10934,6 +10962,8 @@
         set.el.classList.add('on');
         galBlur.classList.add('on');
         galCur = set;
+        galTrace(href, 'shown: ' + pics.length + ' thumbnails');
+        galPendClear();
         if (!galOn) galSteer(galPt.x, galPt.y);
         setTimeout(function () {
             if (galCur !== set) return;            // hidden or replaced before it counted
@@ -10950,7 +10980,13 @@
         setTimeout(function () { set.el.remove(); }, GAL_FADE_MS + 50);
     }
 
-    function galHide() {
+    function galHide(why) {
+        if (galPend) {
+            const p = galPend;
+            galTrace(p.href, 'hidden: ' + (why || 'pointer left'));
+            galPendClear();
+            if (GAL_USER_HIDE.indexOf(why) < 0) galDiag(p, why || 'hidden: pointer left');
+        }
         clearTimeout(galGraceTimer);
         clearTimeout(galHoverTimer);
         galWant = null;
@@ -11067,7 +11103,7 @@
 
     // Middle press on a result: its gallery, locked; on the open one, closed; on another, switched.
     function galMiddle(t, href) {
-        if (galOn && (galWant === href || (galCur && galCur.href === href))) { galHide(); return; }
+        if (galOn && (galWant === href || (galCur && galCur.href === href))) { galHide('middle'); return; }
         const a = t.closest('a[href]'), pic = t.tagName === 'IMG' ? t : a && a.querySelector('img');
         const hr = (pic || t).getBoundingClientRect();
         galAt = { href: href, hole: { x: hr.left, y: hr.top, w: hr.width, h: hr.height } };
@@ -11077,7 +11113,126 @@
         galWant = href;
         clearTimeout(galHoverTimer);
         clearTimeout(galGraceTimer);
+        galPendStart(href, 'middle press');
         galLoad(href).then(function (list) { galShow(href, list); });
+    }
+
+    // ---- open diagnostics
+    function galTrace(href, what) {
+        let l = galTraces.get(href);
+        if (!l) {
+            l = [];
+            galTraces.set(href, l);
+            if (galTraces.size > 60) galTraces.delete(galTraces.keys().next().value);
+        }
+        if (l.length < 100) l.push([performance.now(), what]);
+    }
+
+    // The pressed result lit, the page dimmed, until its gallery shows; nothing after GAL_DIAG_MS -> the popup.
+    function galPendStart(href, how) {
+        galPendClear();
+        const root = galLayer();
+        if (!galHost.isConnected) document.documentElement.appendChild(galHost);
+        const el = document.createElement('div'), h = galHole;
+        el.className = 'pend';
+        el.style.cssText = 'left:' + (h.x - 3) + 'px;top:' + (h.y - 3) + 'px;width:' + (h.w + 6) + 'px;height:' + (h.h + 6) + 'px';
+        root.appendChild(el);
+        const at = 'cache ' + (galCache.has(href) ? 'has this link' : 'empty for this link') +
+            '; preload ' + (galPre ? (galPre === href ? 'busy on this link' : 'busy on another link') : galPreStop ? 'stopped by a refusal' : 'idle') +
+            '; hidden frame ' + (galFrameStop ? 'busy' : 'idle') + '; gallery on screen ' + (galCur ? 'yes' : 'no') +
+            '; tab ' + document.visibilityState + '; links tried by preload ' + galPreTried.size;
+        galTrace(href, 'press (' + how + ')');
+        galPend = { href: href, how: how, t0: performance.now(), el: el, at: at };
+        galPend.timer = setTimeout(function () {
+            const p = galPend;
+            if (!p || p.href !== href) return;
+            galTrace(href, 'nothing on screen after ' + GAL_DIAG_MS / 1000 + ' s');
+            galPendClear();
+            galDiag(p, 'nothing on screen after ' + GAL_DIAG_MS / 1000 + ' s');
+        }, GAL_DIAG_MS);
+    }
+
+    function galPendClear() {
+        if (!galPend) return;
+        clearTimeout(galPend.timer);
+        galPend.el.remove();
+        galPend = null;
+    }
+
+    // A middle press in gallery mode that found no result link, though one sits under the pointer.
+    function galMissed(e) {
+        let under = [];
+        try { under = document.elementsFromPoint(e.clientX, e.clientY); } catch (x) { return; }
+        const hit = under.find(function (n) { return n !== galHost && galLinkOf(n); });
+        if (!hit) return;
+        galDiag({ how: 'middle press', at: 'pressed ' + domChain(e.target) + '; the result link is on ' + domChain(hit), t0: performance.now() },
+            'the press landed on an element covering the result, not on the result');
+    }
+
+    // A URL with every word and number replaced: only its shape and where it points survive.
+    function galSane(u) {
+        let x;
+        try { x = new URL(u, location.href); } catch (e) { return 'unparsable'; }
+        const word = function (s) { return s.replace(/[0-9]+/g, '#').replace(/[^#\W_]+/g, 'w'); };
+        const where = x.host === location.host ? 'same host' : x.host.split('.').slice(-2).join('.') === location.host.split('.').slice(-2).join('.') ? 'sibling subdomain' : 'other host';
+        const q = Array.from(x.searchParams.keys()).map(word);
+        return x.protocol.replace(':', '') + ', ' + where + ', path ' + (word(x.pathname) || '/') + (q.length ? ', query keys ' + q.join('&') : '');
+    }
+
+    function galHostMix(urls) {
+        const n = {};
+        urls.forEach(function (u) { let k; try { k = galSane(u).split(', ')[1]; } catch (e) { k = '?'; } n[k] = (n[k] || 0) + 1; });
+        return Object.keys(n).map(function (k) { return n[k] + ' ' + k; }).join(', ');
+    }
+
+    function galDiagText(p, why) {
+        const lines = [
+            'Hover Zoom ' + version() + ' - gallery open diagnostics (URLs reduced to shape: w = word, # = number)',
+            'result: ' + why,
+            'trigger: ' + p.how,
+            'page: ' + galSane(location.href),
+        ];
+        if (p.href) lines.push('link: ' + galSane(p.href));
+        lines.push('at press: ' + p.at);
+        lines.push('settings: hover delay ' + cfg.hoverDelay + ' ms, request log ' + (cfg.logRequests !== false ? 'on' : 'off') +
+            ', previews on the linked page ' + (p.href && siteEnabledAt(p.href) ? 'yes' : 'no'));
+        lines.push('browser: ' + navigator.userAgent);
+        if (p.href) {
+            lines.push('trace, ms from the press (negative = before it):');
+            (galTraces.get(p.href) || []).forEach(function (r) { lines.push('  ' + Math.round(r[0] - p.t0) + '  ' + r[1]); });
+        }
+        return lines.join('\n');
+    }
+
+    // The copyable popup: what this open did, step by step.
+    function galDiag(p, why) {
+        const root = galLayer();
+        if (!galHost.isConnected) document.documentElement.appendChild(galHost);
+        const old = root.querySelector('.diag');
+        if (old) old.remove();
+        const d = document.createElement('div'), b = document.createElement('b'), ta = document.createElement('textarea');
+        const copy = document.createElement('button'), close = document.createElement('button');
+        d.className = 'diag';
+        b.textContent = 'Gallery did not open - copy this for Claude';
+        ta.readOnly = true;
+        ta.value = galDiagText(p, why);
+        copy.textContent = 'Copy';
+        close.textContent = 'Close';
+        copy.addEventListener('click', function () {
+            const ok = function () { copy.textContent = 'Copied'; };
+            ta.focus();
+            ta.select();
+            try {
+                navigator.clipboard.writeText(ta.value).then(ok, function () { if (document.execCommand('copy')) ok(); });
+            } catch (e) { if (document.execCommand('copy')) ok(); }
+        });
+        close.addEventListener('click', function () { d.remove(); });
+        d.appendChild(b);
+        d.appendChild(ta);
+        d.appendChild(close);
+        d.appendChild(copy);
+        root.appendChild(d);
+        dbg('gallery diagnostics', ta.value);
     }
 
     // The rest of that press: no new tab.
@@ -11097,7 +11252,7 @@
     function galKeyUp(e) {
         if (e.key !== 'Control' || !galTap) return;
         galTap = false;
-        if (galOn || galWant || galCur) { galHide(); return; }
+        if (galOn || galWant || galCur) { galHide('ctrl'); return; }
         if (!galAt || galLock || galEdge) return;
         galOn = true;
         galHole = galAt.hole;
@@ -11105,6 +11260,7 @@
         clearTimeout(galHoverTimer);
         clearTimeout(galGraceTimer);
         const href = galWant;
+        galPendStart(href, 'Ctrl tap');
         galLoad(href).then(function (list) { galShow(href, list); });
     }
 
@@ -11153,7 +11309,7 @@
         if (t !== document && !(t && t.nodeType === 1 && t.clientHeight >= vpH() / 2)) return;
         galLock = { x: galPt.x, y: galPt.y };
         galAt = null;
-        if (galWant || galCur) galHide();
+        if (galWant || galCur) galHide(performance.now() - galInputAt < 600 ? 'scroll' : 'page scrolled by itself');
         galMarkSoon();
     }
 
@@ -11324,8 +11480,10 @@
             });
         } catch (e) { /* other tabs follow on their next load */ }
         window.addEventListener('keyup', galKeyUp, true);
-        window.addEventListener('blur', function () { galTap = false; });
-        window.addEventListener('wheel', function () { galTap = false; }, { capture: true, passive: true });
+        window.addEventListener('blur', function () { galTap = false; if (galPend) galTrace(galPend.href, 'window lost focus'); });
+        document.addEventListener('visibilitychange', function () { if (galPend) galTrace(galPend.href, 'tab ' + document.visibilityState); });
+        window.addEventListener('wheel', function () { galTap = false; galInputAt = performance.now(); }, { capture: true, passive: true });
+        window.addEventListener('touchstart', function () { galInputAt = performance.now(); }, { capture: true, passive: true });
         window.addEventListener('pagehide', function () { if (galPreLog) { galPreLog.end('cut'); galPreLog = null; } });
         setTimeout(function () {
             if (galleryListed()) galListAdd(GAL_VISITED_KEY, location.href.split('#')[0]);
@@ -11336,6 +11494,7 @@
         document.addEventListener('mousedown', function (e) {
             galTap = false;
             galMidAt = 0;
+            if (e.button === 0) galInputAt = performance.now();      // a scrollbar drag; the middle press itself is not
             if (e.button === 1 && !e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey && galleryHere()) {
                 if (e.target === galHost) { e.preventDefault(); return; }      // no autoscroll over the gallery
                 const href = galLinkOf(e.target);
@@ -11346,18 +11505,20 @@
                     galMiddle(e.target, href);
                     return;
                 }
+                galMissed(e);
             }
             if (e.button !== 0 || (!galWant && !galCur)) return;     // middle and right presses (a tab, the menu) leave it up
             if (e.target === galHost || ours(e.target) || pointInPreview(e.clientX, e.clientY)) return;   // the gallery or the preview
-            galHide();
+            galHide('press');
         }, true);
         window.addEventListener('keydown', function (e) {
-            if (e.key === 'Escape' && galCur && !(view && box && box.classList.contains('on'))) galHide();   // a preview up: Esc closes it first
+            if (e.key !== 'Control') galInputAt = performance.now();
+            if (e.key === 'Escape' && galCur && !(view && box && box.classList.contains('on'))) galHide('esc');   // a preview up: Esc closes it first
         }, true);
         window.addEventListener('resize', function () {
             if ((cfg.gallerySites || []).length) galMarkSoon();
             galAt = null;
-            if (galWant || galCur) galHide();
+            if (galWant || galCur) galHide('resize');
         });
     } else if (String(window.name || '').indexOf(GAL_NAME + ':') === 0) {
         setTimeout(galProbeReport, 0);
