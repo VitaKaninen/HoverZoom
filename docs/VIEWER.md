@@ -778,7 +778,10 @@ LibreWolf.
   cannot decode it, so it falls through. Conversion verified in Chromium; the blob hand-off to the
   manager is not verified.
 - **Renaming on save** (user, v0.258.0; `saveRename` meaningless/always/off, `saveNameTemplate`, default
-  `[site] - ([page_title]) - [date]_[time]-###`). `saveName(url, page, ext)`; tokens in `NAME_TOKENS`,
+  `[site] - [page_title] - [orig_name]` since v0.259.0 — `migrate()` swaps the old default
+  `[site] - ([page_title]) - [date]_[time]-###`, which is stored because the panel saves the whole cfg).
+  `[orig_name]` = the file's own stem (`[name]` is the same, unlisted). Panel: heading, description,
+  4-column grid of term buttons (click inserts at the cursor), input, example — one `.listwrap`. `saveName(url, page, ext)`; tokens in `NAME_TOKENS`,
   pure block `// ---- save names (pure)` … `end` (`meaninglessName`, `titleParts`, `pageIdOf`,
   `fillNameTemplate`), asserted in `test-resolver.js`. Empty tokens drop their brackets and one
   separator. `###` = `saveCount()`, per rendered name, persisted (`hoverZoomSaveCounts`, last 500), so

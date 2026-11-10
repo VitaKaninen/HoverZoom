@@ -1220,6 +1220,7 @@ eq('template: an empty title drops its brackets and one dash', N.fillNameTemplat
 eq('template: hh mm ss', N.fillNameTemplate('[hh][mm][ss]', { now: NOW }), '074836');
 eq('template: forbidden characters go', N.fillNameTemplate('[page_title]', { title: 'A/B: "c"?', now: NOW }), 'A B c');
 eq('template: an unknown token stays', N.fillNameTemplate('[nope] [num]', { num: '7', now: NOW }), '[nope] 7');
+eq('template: the original name', N.fillNameTemplate('[site] - [page_title] - [orig_name]', { site: 'Wikipedia', title: 'Red panda', name: '0001', now: NOW }), 'Wikipedia - Red panda - 0001');
 eq('template: all empty', N.fillNameTemplate('[site] - ([page_title])', { now: NOW }), '');
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

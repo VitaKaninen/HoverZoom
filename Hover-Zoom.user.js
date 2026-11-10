@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.258.0
+// @version     0.259.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -307,7 +307,7 @@
         saveConvertFrom: 'avif',    // ...which files: 'avif' | 'modern' (AVIF, WebP, JPEG XL)
         saveJpegQuality: 92,        // %, for 'jpg' and 'webp'
         saveRename: 'meaningless',  // 'off' | 'meaningless' (0001.jpg, image.jpg) | 'always'
-        saveNameTemplate: '[site] - ([page_title]) - [date]_[time]-###',
+        saveNameTemplate: '[site] - [page_title] - [orig_name]',
         referrerSites: [],          // sites to load previews from WITHOUT a referrer
         scrollSites: [],            // sites that load more when scrolled: learned, or the user's
         videoDelays: {},            // host -> {ms, rules, samples, fixes, user}: wait for the page's
@@ -367,6 +367,7 @@
             o.blockList = withDefaultBlocks(o.blockList, offered);
             o.blockOffered = offered.concat(DEFAULT_BLOCKS.filter(function (e) { return offered.indexOf(e) === -1; }));
         }
+        if (o.saveNameTemplate === '[site] - ([page_title]) - [date]_[time]-###') o.saveNameTemplate = '[site] - [page_title] - [orig_name]';
         // wheelReach's old default (50) becomes wheelRange's (65); a value the user chose carries over.
         if (o.wheelRange === undefined && o.wheelReach !== undefined) {
             o.wheelRange = o.wheelReach === 50 ? 65 : o.wheelReach;
@@ -4774,7 +4775,7 @@
         'image/avif': 'avif', 'image/bmp': 'bmp', 'image/svg+xml': 'svg', 'video/mp4': 'mp4', 'video/webm': 'webm' };
 
     // ---- save names (pure)
-    const NAME_TOKENS = ['site', 'page_title', 'full_title', 'host', 'page_id', 'name', 'num',
+    const NAME_TOKENS = ['site', 'page_title', 'full_title', 'host', 'page_id', 'orig_name', 'name', 'num',
         'date', 'time', 'year', 'month', 'day', 'hh', 'mm', 'ss'];
     const MEANINGLESS_RE = /^(?:image|img|photo|pic|picture|large|big|original|orig|full|fullsize|download|file|index|untitled|default|thumb|media|preview|view|max|hd)?[\d\W_]*$/i;
 
@@ -4823,7 +4824,7 @@
         const d = v.now || new Date(), two = function (n) { return String(n).padStart(2, '0'); };
         const val = {
             site: v.site, page_title: v.title, full_title: v.full, host: v.host, page_id: v.pageId,
-            name: v.name, num: v.num,
+            orig_name: v.name, name: v.name, num: v.num,
             date: d.getFullYear() + '-' + two(d.getMonth() + 1) + '-' + two(d.getDate()),
             time: two(d.getHours()) + two(d.getMinutes()) + two(d.getSeconds()),
             year: String(d.getFullYear()), month: two(d.getMonth() + 1), day: two(d.getDate()),
@@ -11954,6 +11955,10 @@
             'button.danger{color:' + C.red + '}',
             '.listbtns{display:flex;gap:8px;justify-content:flex-end;margin-top:6px}',
             '.listwrap{margin-top:4px}',
+            '.toks{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px 6px;margin:8px 0}',
+            '.toks button{padding:3px 6px;font:11px ui-monospace,Consolas,monospace;text-align:left;border-radius:4px;' +
+            'overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+            '.tplex{margin-top:6px;font-size:11px;color:' + C.sub + ';word-break:break-all}',
             '.listwrap + .listwrap{margin-top:18px}',
             '.listhead{font-size:12.5px;font-weight:600;color:' + C.text + ';margin-bottom:3px}',
             '.listdesc{font-size:12px;color:#9399b2;line-height:1.45}',
@@ -12911,30 +12916,61 @@
         const ren = pick('saveRename', 'Rename saved pictures',
             'Meaningless names are ones like 0001.jpg, 12.png or image.jpg, which pile up as 0001 (1).jpg, 0001 (2).jpg.', [
                 ['meaningless', 'Only meaningless names'], ['always', 'Always'], ['off', 'Never']]);
+        const tplWrap = document.createElement('div');
+        tplWrap.className = 'listwrap';
+        const tplHead = document.createElement('div');
+        tplHead.className = 'listhead';
+        tplHead.textContent = 'File name';
+        const tplDesc = document.createElement('div');
+        tplDesc.className = 'listdesc';
+        tplDesc.textContent = 'Type the name with these terms in it; click one to insert it. ### is a counter, as many digits ' +
+            'as there are #. The extension is added. A term with nothing to fill it is dropped with its brackets.';
+        const toks = document.createElement('div');
+        toks.className = 'toks';
         const tplIn = document.createElement('input');
         tplIn.type = 'text';
         tplIn.value = cfg.saveNameTemplate;
         tplIn.spellcheck = false;
-        tplIn.style.cssText = 'width:100%;box-sizing:border-box';
-        const tplRow = row('File name',
-            '[site] [page_title] [full_title] [host] [page_id] [name] [num] [date] [time] [year] [month] [day] [hh] [mm] [ss]; ' +
-            '### is a counter (as many digits as #). The extension is added.', tplIn);
+        tplIn.style.cssText = 'width:100%;box-sizing:border-box;padding:6px 10px;font-size:13px';
+        [['[site]', 'The site’s name, e.g. Wikipedia'], ['[page_title]', 'The page title without the site’s name'],
+            ['[full_title]', 'The page title as the page has it'], ['[host]', 'e.g. en.wikipedia.org'],
+            ['[page_id]', 'The longest number in the page address, else a 5-character code'],
+            ['[orig_name]', 'The file’s own name, e.g. 0001'], ['[num]', 'The last number in the file’s own name'],
+            ['###', 'A counter: 001, 002 … per name'],
+            ['[date]', '2026-11-10'], ['[time]', '163347'], ['[year]', '2026'], ['[month]', '11'],
+            ['[day]', '10'], ['[hh]', 'Hour, 16'], ['[mm]', 'Minute, 33'], ['[ss]', 'Second, 47']].forEach(function (t) {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.textContent = t[0];
+            setTip(b, t[1]);
+            b.addEventListener('click', function () {
+                const a = tplIn.selectionStart == null ? tplIn.value.length : tplIn.selectionStart;
+                const z = tplIn.selectionEnd == null ? a : tplIn.selectionEnd;
+                tplIn.value = tplIn.value.slice(0, a) + t[0] + tplIn.value.slice(z);
+                tplIn.focus();
+                tplIn.setSelectionRange(a + t[0].length, a + t[0].length);
+                tplIn.dispatchEvent(new Event('change'));
+            });
+            toks.appendChild(b);
+        });
         const tplEx = document.createElement('div');
-        tplEx.className = 'hint';
-        tplEx.style.cssText = 'margin:-4px 0 10px;text-align:right;word-break:break-all';
-        mount.appendChild(tplEx);
+        tplEx.className = 'tplex';
+        tplWrap.appendChild(tplHead);
+        tplWrap.appendChild(tplDesc);
+        tplWrap.appendChild(toks);
+        tplWrap.appendChild(tplIn);
+        tplWrap.appendChild(tplEx);
+        mount.appendChild(tplWrap);
         function syncTpl() {
             const v = tplIn.value.trim() || DEFAULTS.saveNameTemplate;
             const page = location.href.split('#')[0], tp = titleParts(document.title, siteNameOf(document), location.hostname.replace(/^www\./, ''));
             const ex = fillNameTemplate(v, { site: tp.site, title: tp.title, full: tp.full, host: location.hostname.replace(/^www\./, ''),
                 pageId: pageIdOf(page), name: '0001', num: '0001' }).replace(/#+/, function (h) { return '1'.padStart(h.length, '0'); }).replace(/#+/g, '');
-            tplEx.textContent = 'On this page: ' + (ex || '(empty: the original name is kept)') + '.jpg';
-            const off = ren.el.value === 'off';
-            tplRow.hidden = off;
-            tplEx.hidden = off;
+            tplEx.textContent = 'On this page, 0001.jpg would save as: ' + (ex || '0001') + '.jpg';
+            tplWrap.hidden = ren.el.value === 'off';
         }
         tplIn.addEventListener('input', syncTpl);
-        tplIn.addEventListener('change', function () { cfg.saveNameTemplate = tplIn.value.trim() || DEFAULTS.saveNameTemplate; tplIn.value = cfg.saveNameTemplate; persist(); syncTpl(); });
+        tplIn.addEventListener('change', function () { cfg.saveNameTemplate = tplIn.value.trim() || DEFAULTS.saveNameTemplate; if (!tplIn.value.trim()) tplIn.value = cfg.saveNameTemplate; persist(); syncTpl(); });
         tplIn.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); tplIn.blur(); } });
         ren.el.addEventListener('change', syncTpl);
         syncTpl();
