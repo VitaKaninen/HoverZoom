@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.272.0
+// @version     0.273.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -4578,13 +4578,14 @@
     function lockScroll() {
         if (scrollLock) return;
         const de = document.documentElement, bd = document.body;
+        const keep = growsHere();       // overflow:hidden stops a feed loading more under the slideshow. E77.
         scrollLock = {
-            de: de ? de.style.overflow : null, bd: bd ? bd.style.overflow : null,
+            de: de && !keep ? de.style.overflow : null, bd: bd && !keep ? bd.style.overflow : null,
             deBar: de ? de.style.scrollbarWidth : null,
             bdBar: bd ? bd.style.scrollbarWidth : null,
         };
-        if (de) { de.style.overflow = 'hidden'; de.style.scrollbarWidth = 'none'; }
-        if (bd) { bd.style.overflow = 'hidden'; bd.style.scrollbarWidth = 'none'; }
+        if (de) { if (!keep) de.style.overflow = 'hidden'; de.style.scrollbarWidth = 'none'; }
+        if (bd) { if (!keep) bd.style.overflow = 'hidden'; bd.style.scrollbarWidth = 'none'; }
     }
 
     function unlockScroll() {

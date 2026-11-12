@@ -883,8 +883,11 @@ batches, then shows a "See more images" button no scroll passes, so its slidesho
   `excSpent`, which is per slideshow); asking again waits until the page has grown.
 - **Cooldown** `EXC_COOL_MS`, or a watch re-fires on every press while content loads.
 - Scrolls are `behavior:'instant'`: `'auto'` obeys a page's `scroll-behavior:smooth`.
-- **Programmatic scrolling works through `lockScroll()`'s `overflow:hidden`** (measured v0.98.0,
-  fullscreen), so fullscreen needs nothing extra — and `.dim.full` hides the page anyway.
+- **On a `growsHere()` site `lockScroll()` skips `overflow:hidden`** (`E77`, v0.273.0). Our scrolling
+  moved through it (measured v0.98.0), but a feed loaded nothing until fullscreen ended (user,
+  LibreWolf, 2026-11-12: walk reached the bottom, 190 → 190, exit loaded the batch). Whether the
+  site gates on the overflow or the page scrolls inside `body` is unmeasured. `scrollbar-width:none`
+  alone frees the strip in fullscreen (`E42`); `.dim.full` hides the page.
 - `twStarting` guards the page-scroll `cancel()`, since a start from the widget is not yet placed;
   a scroll WE make fires `mouseout`/`mouseover` under a still pointer (CLAUDE.md trap).
 - **Virtualised feeds** (Twitter, Reddit) keep ~20 posts in the DOM; only a moving viewport reaches

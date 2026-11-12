@@ -553,6 +553,7 @@ this table is a table.
 | `E9` | The browser's own context menu is the one that can save and copy | [`docs/VIEWER.md`](docs/VIEWER.md) |
 | `E9a` | …except on a picture shown from bytes (`E49`): right-click there opens our own Save / Open / Copy, acting on the real URL | [`docs/VIEWER.md`](docs/VIEWER.md) |
 | `E76` | Middle-click on the window saves the original to the default download folder (`GM_download`, no dialog) | [`docs/VIEWER.md`](docs/VIEWER.md) |
+| `E77` | **Fullscreen on a site that scrolls along with the slideshow does not set `overflow:hidden`** (v0.273.0) — only `scrollbar-width:none`, which is what frees the strip there (`E42`). The lock stopped the page loading more: the walk reached the bottom, nothing came, and leaving fullscreen loaded the batch | [`docs/TOUR.md`](docs/TOUR.md) §9 |
 | `E10` | The status bar fades itself out | [`docs/VIEWER.md`](docs/VIEWER.md) |
 | `E11` | The ⊘ button, and why it is not on a hover preview | [`docs/GATES.md`](docs/GATES.md) |
 | `E12` | A wall of playing clips is a picture page, not a video site | [`docs/GATES.md`](docs/GATES.md) |
