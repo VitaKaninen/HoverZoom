@@ -80,6 +80,18 @@ is still undecided.
   widget's list since v0.188.0; the start-picture scope only serves pictures the widget does not
   count, TOUR.md §1a) and the lightbox cap vs `E21` — both need the user's call.
 
+- **v0.313.0** (user's design, 2026-11-13; most of E and part of F): the wheel flips anywhere off a
+  pinned window (over it, it zooms); the blue ⇅ button starts the slideshow (at the pinned picture)
+  and a second click closes it; arrows and `[ ]` always step, nothing pans from the keyboard (the
+  `tourKeys` and `panStep` settings gone); `{ }` and the post/reply scope gone; the "scroll the page
+  along on these sites" list and its learning gone (every site scrolls; `growsHere` removed); the frame
+  is capped at the viewport pinned or touring (`maxSizeMultiple` gone); a click off the window never
+  reaches the page except the sibling scripts' widgets; the widget gets a page row (◀ Page n / N ▶):
+  it scrolls like Page Down and an open window jumps ahead by the pictures on that screen. Checked in
+  the pane by synthetic events (widget wheel starts at 1, wheel off the window steps, over it does not,
+  page ▶ jumped 2 and scrolled, button closes). Not tried in Tampermonkey; click-off not tried; the
+  gallery was not touched. TOUR.md §1a and INTERACTION.md S25 prose still describe the old scope.
+
 ## Not verified
 
 Not tried in LibreWolf + Tampermonkey (incl. v0.300.0–v0.309.0).

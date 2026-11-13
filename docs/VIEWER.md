@@ -37,14 +37,7 @@ on it.
   listening there would see a phantom click. Use `e.composedPath()[0]`, **not** `e.target` —
   outside the shadow tree the target is retargeted to the host.
 - A click outside usually lands on the thumbnail, so it suppresses (`E2`).
-- **A press meant for a page control goes through (`E70`, v0.152.0, user).** Over a button, field,
-  label, control role or another userscript's docked widget (`[data-us-dock]`, e.g. Forum Stumbler's
-  ▶ next page), `thruSync()` sets `.dim.thru` (pointer-events none), so the press reaches it and the
-  window-capture `mousedown` dismisses. Links and pictures are excluded — there the first click only
-  closes, since that is what a click away usually means. Decided before the press, because a press that
-  has already targeted the backdrop cannot be redirected (a `click` goes to the common ancestor): on
-  mousemove, trusted mouseover, and in `layout()` from `twPtr`. Mousemove alone missed a slideshow
-  opened by the wheel after the pointer had already come to rest on FS ▶ (v0.172.0 fix).
+- **A click off a pinned window only closes it (`E70`, narrowed v0.313.0, user).** Nothing under the pointer gets the press — not a link, button or field — except another userscript's docked widget (`[data-us-dock]`, e.g. Forum Stumbler's ▶ next page), where `thruSync()` sets `.dim.thru` (pointer-events none). Decided before the press, because a press already on the backdrop cannot be redirected: on mousemove, trusted mouseover, and in `layout()` from `twPtr`.
 
 `bottomReserve` is retired: `usableHeight()` is now just the viewport, floored at 64 px because the
 Browser pane reports `clientHeight` 0 while hidden. It survives as the single answer to "where is

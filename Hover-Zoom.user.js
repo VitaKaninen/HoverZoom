@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.312.0
+// @version     0.313.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -274,7 +274,6 @@
         tourButtons: true,          // the widget: ◀ ▶ and the counter, in its own box
         tourFade: false,            // the widget is faint until the pointer comes near
         tourFadeTo: 35,             // ...at this opacity, %
-        tourKeys: true,             // arrows navigate when the picture cannot pan sideways
         tourKeyStart: true,         // → (←) with nothing open starts the slideshow at the first (last) picture
         tourMinDisplayed: 128,      // the tour's own floor: longer side as drawn, px; emoji and badges fall under it
         preloadAhead: 0,            // slideshow pictures loaded ahead of (and behind) the current one; 0 = all
@@ -288,12 +287,10 @@
 
         // placed mode
         wheelZoomStep: 15,          // % per wheel notch
-        panStep: 80,                // px per arrow-key press (Shift = 3x)
         maxZoom: 32,                // hard ceiling, multiples of natural size
         displayScale: 1,            // the OS display scaling, divided back out of the readout
 
         // how to display
-        maxSizeMultiple: 1.2,       // how far the frame may GROW, as a multiple of the window.
         zoomLimit: 4,               // ceiling on the opening scale; the window still fits it
         position: 'last',           // 'cursor' | 'under' | 'last' (where a pinned one was last dropped; the centre until then)
         posPerSite: true,           // remembered positions (slideshow, 'last') are kept per site
@@ -315,7 +312,6 @@
         saveRename: 'meaningless',  // 'off' | 'meaningless' (0001.jpg, image.jpg) | 'always'
         saveNameTemplate: '[site] - [page_title] - [orig_name]',
         referrerSites: [],          // sites to load previews from WITHOUT a referrer
-        scrollSites: [],            // sites that load more when scrolled: learned, or the user's
         videoDelays: {},            // host -> {ms, rules, samples, fixes, user}: wait for the page's
                                     // own player before previewing; learned, or set by the user
         avatarAreas: {},            // host -> {rules, samples, idleDays}: small pictures there preview as ordinary ones
@@ -2805,14 +2801,10 @@
     window.addEventListener('wheel', function () { if (tipFor || (tipEl && tipEl.parentNode)) hideTip(); }, { capture: true, passive: true });
     window.addEventListener('keydown', function () { if (tipFor || (tipEl && tipEl.parentNode)) hideTip(); }, true);
 
-    const MAX_MULTIPLE_ABS = 4;
-
-    // How far the frame may grow. Deliberately bigger than the window — see the setting.
-    // A tour is the exception: it is a lightbox, centred and capped at the viewport. See TOUR.md.
+    // How far the frame may grow: the viewport, pinned or touring alike.
     function growBox() {
-        const m = tourActive() ? 1 : Math.max(1, Math.min(cfg.maxSizeMultiple || 1, MAX_MULTIPLE_ABS));
         const b = viewportBox();
-        return { vw: b.vw, vh: b.vh, w: b.w * m, h: b.h * m };
+        return { vw: b.vw, vh: b.vh, w: b.w, h: b.h };
     }
 
     function pannable() {
@@ -4595,7 +4587,7 @@
     function lockScroll() {
         if (scrollLock) return;
         const de = document.documentElement, bd = document.body;
-        const keep = growsHere();       // overflow:hidden stops a feed loading more under the slideshow. E77.
+        const keep = true;       // overflow:hidden stops a feed loading more under the slideshow. E77.
         scrollLock = {
             de: de && !keep ? de.style.overflow : null, bd: bd && !keep ? bd.style.overflow : null,
             deBar: de ? de.style.scrollbarWidth : null,
@@ -5421,27 +5413,15 @@
             e.stopPropagation();
             return;
         }
-        const step = e.shiftKey ? cfg.panStep * 3 : cfg.panStep;
         let handled = true;
         switch (e.key) {
             case 'Escape': unplace(); break;
             case ' ': if (mediaEl === vidEl) togglePlay(); else handled = false; break;
             case 'f': case 'F': toggleFull(); break;
             case 'm': case 'M': if (mediaEl === vidEl) toggleMute(); else handled = false; break;
-            // Left/Right step through the page's pictures unless the picture itself can pan
-            // sideways. Up/Down always pan. See TOUR.md §5.
-            case 'ArrowLeft':
-                if (tourOwnsArrows()) tourNav(-1, e.repeat, true); else panBy(step, 0); break;
-            case 'ArrowRight':
-                if (tourOwnsArrows()) tourNav(1, e.repeat, true); else panBy(-step, 0); break;
-            case 'ArrowUp': panBy(0, step); break;
-            case 'ArrowDown': panBy(0, -step); break;
-            // The always-navigates pair, or zooming in traps you on the current picture.
-            case '[': tourNav(-1, e.repeat, true); break;
-            case ']': tourNav(1, e.repeat, true); break;
-            // The tour's area: one level of the page narrower or wider. See TOUR.md §1a.
-            case '{': if (!e.repeat) tourRescope(-1); break;
-            case '}': if (!e.repeat) tourRescope(1); break;
+            // The arrows and [ ] always step; the keyboard never pans.
+            case 'ArrowLeft': case 'ArrowUp': case '[': tourNav(-1, e.repeat, true); break;
+            case 'ArrowRight': case 'ArrowDown': case ']': tourNav(1, e.repeat, true); break;
             case '+': case '=': zoomCentre(view.scale * KEY_ZOOM); break;
             case '-': case '_': zoomCentre(view.scale / KEY_ZOOM); break;
             case '0': zoomCentre(view.fitScale); break;
@@ -5605,10 +5585,7 @@
     // A control the press was meant for — a button, a field, another userscript's widget — not a link or picture.
     function pageControlAt(x, y) {
         const el = pageElAt(x, y);
-        if (!el) return false;
-        if (closestComposed(el, '[data-us-dock]')) return true;
-        if (closestComposed(el, 'a[href],img,video,picture,svg image')) return false;
-        return !!closestComposed(el, PASS_CONTROL);
+        return !!el && !!closestComposed(el, '[data-us-dock]');     // a click off the window only closes it; only the sibling scripts' widgets get the press
     }
 
     // Over a page control, the backdrop lets the press through; the press then closes the window. See E70.
@@ -7303,7 +7280,7 @@
         // A nav key on a preview we are only HOVERING pins it and starts the tour. onPinKey has
         // already taken the placed case; this one acts only on a window of ours that is up.
         const dir = TOUR_KEYS[e.key];
-        if (dir && !placed && cfg.tourKeys && view && box && box.classList.contains('on') &&
+        if (dir && !placed && view && box && box.classList.contains('on') &&
             !e.ctrlKey && !e.metaKey && !e.altKey && !panelHost && !typingIn(e)) {
             lastUserAct = Date.now();       // the close this causes is not a player's; see E62
             place();
@@ -8433,29 +8410,6 @@
         return s;
     }
 
-    // `{` narrows the scope one level, `}` widens it; neither goes below two pictures.
-    function tourRescope(dir) {
-        if (!tour) return;
-        const pics = tourPics(tourFloor());
-        const start = tourStartEl();
-        if (!start) return;
-        const levels = tourLevels(start, pics);
-        let min = 0;
-        while (min < levels.length - 1 && levels[min].n < 2) min++;
-        let cur = levels.length - 1;
-        if (tour.scope) for (let i = 0; i < levels.length; i++) if (levels[i].el.contains(tour.scope)) { cur = i; break; }
-        const to = Math.max(min, Math.min(levels.length - 1, cur + dir));
-        if (to === cur && dir > 0 && tour.postOnly) tour.postOnly = false;     // } at the whole page: the replies too
-        else if (to === cur) { dbg('tour scope: already ' + (dir > 0 ? 'the whole page' : 'as narrow as it goes')); return; }
-        tour.level = to;
-        tour.scope = levels[to].el;
-        tour.mainOnly = false;
-        const list = tourSync();
-        twSync();
-        dbg('tour scope: ' + describeEl(tour.scope), { level: to + 1 + ' of ' + levels.length, pictures: list.length });
-        if (tour.on && tour.index >= 0) plFill(list, tour.index, scrubDir);
-    }
-
     // Everything in the scope a hover would preview, in reading order. Derived on every press;
     // sorted in DOCUMENT coordinates, or the order changes as the page scrolls.
     // tourEntriesNow(), reused for TOUR_LIST_MS while the page's shape key is unchanged. See TOUR.md §3.
@@ -8763,7 +8717,7 @@
     // Ahead, as a reader scrolls: the picture near the top, so the page shows what comes next.
     const FOLLOW_TOP = 0.1, FOLLOW_BAND = 0.4;      // fractions of the viewport height
     function tourFollow(el, entry) {
-        if (!el || el.__hzBase || !growsHere()) return;
+        if (!el || el.__hzBase) return;
         const ghost = !el.isConnected;
         if (ghost && !(entry && entry.ghost)) return;
         const h = vpH();
@@ -8825,7 +8779,6 @@
         clearTimeout(tourRestTimer);
         seamDir = 0;
         if (seamNoteEl) seamNoteEl.classList.remove('on');
-        twWheelSet(false);
         tour = null;
         plStop();
         crossReset();
@@ -8850,7 +8803,6 @@
         '⇅  wheel near it flips; click: wheel flips anywhere\n' +
         'Drag to move; Ctrl: no snapping';
     let twGalOpen = false;      // a gallery is open: its own strip steps it, so the widget goes
-    let twWheelArmed = null;    // the URL the wheel button was clicked on; the wheel then steps anywhere
     let twWheelIn = false;      // the pointer is within wheelRange of the button
     let twWheelAcc = 0;         // wheel travel not yet stepped on, px
     let twWheelLast = 0;        // the last wheel event we took
@@ -8909,11 +8861,15 @@
         const style = document.createElement('style');
         style.textContent = [
             ':host{all:initial}',
-            '.tw{display:flex;align-items:center;justify-content:center;gap:' + NAV_GAP + 'px;box-sizing:border-box;',
-            'height:' + VCTL_H + 'px;padding:0 ' + VCTL_PAD + 'px;border-radius:8px;',
+            '.tw{display:flex;flex-direction:column;align-items:stretch;box-sizing:border-box;border-radius:8px;',
+            '--tw-row:' + VCTL_H + 'px;',
             'background:var(--bg);border:1px solid var(--border);box-shadow:var(--shadow);',
             'font:13px/16px ' + usDock.FONT + ';color:var(--text);white-space:nowrap;cursor:move;',
             'user-select:none;transition:opacity .15s ease}',
+            '.tr{display:flex;align-items:center;justify-content:center;gap:' + NAV_GAP + 'px;height:var(--tw-row);padding:0 ' + VCTL_PAD + 'px}',
+            '.tp{display:none}',
+            '.tp.on{display:flex}',
+            '.pg{flex:none;padding:0 4px;font-variant-numeric:tabular-nums;color:var(--text)}',
             '.count{flex:none;padding:0 4px;font-variant-numeric:tabular-nums;color:var(--text)}',
             '.load{flex:none;padding:0 2px;font-size:11px;font-variant-numeric:tabular-nums;color:var(--muted)}',
             '.load.done{color:var(--done)}',
@@ -8950,13 +8906,26 @@
         wheel.classList.add('wheel');
         const load = document.createElement('span');
         load.className = 'load';
-        box.appendChild(prev);
-        box.appendChild(count);
-        box.appendChild(next);
-        box.appendChild(wheel);
-        box.appendChild(load);
+        const row = document.createElement('div');
+        row.className = 'tr';
+        row.appendChild(prev);
+        row.appendChild(count);
+        row.appendChild(next);
+        row.appendChild(wheel);
+        row.appendChild(load);
+        const pageRow = document.createElement('div');
+        pageRow.className = 'tr tp';
+        const pgPrev = mkVBtn(ICON_PREV, null, function () { twPage(-1); });
+        const pgNum = document.createElement('span');
+        pgNum.className = 'pg';
+        const pgNext = mkVBtn(ICON_NEXT, null, function () { twPage(1); });
+        pageRow.appendChild(pgPrev);
+        pageRow.appendChild(pgNum);
+        pageRow.appendChild(pgNext);
+        box.appendChild(pageRow);
+        box.appendChild(row);
         sr.appendChild(box);
-        tw = { host: host, box: box, prev: prev, count: count, num: num, dup: dup, dead: deadEl, next: next, wheel: wheel, load: load, dock: null, rect: null, near: false };
+        tw = { host: host, box: box, pageRow: pageRow, pgNum: pgNum, prev: prev, count: count, num: num, dup: dup, dead: deadEl, next: next, wheel: wheel, load: load, dock: null, rect: null, near: false };
         // A pointer already resting where the widget appears sends no mousemove, only this.
         host.addEventListener('mouseover', function (e) { twNear(e.clientX, e.clientY); });
         document.body.appendChild(host);
@@ -9015,7 +8984,6 @@
         const was = twTotal;
         if (!tour) twTotal = twPics >= 2 ? widgetEntries().length : 0;
         if (!tour && twTotal !== was && debugOn()) dbg('widget count ' + twTotal, twReport());
-        if (twWheelArmed && twWheelArmed !== location.href) twWheelSet(false);
         const on = twWanted();
         if (on) twTheme();
         if (on) setTimeout(twWarmFirst, 0);     // never during boot: it reads `let`s declared further down
@@ -9109,6 +9077,35 @@
         if (twPics >= 2) { twTotal = widgetEntries().length; twSync(); }
     }
 
+    // The page as PageDown counts it: screens of height, and which one the top of the view is on.
+    function twPages() {
+        const h = vpH(), dh = docHeight();
+        if (!(h > 0)) return { at: 1, n: 1 };
+        const n = Math.max(1, Math.ceil((dh - 1) / h));
+        return { at: Math.max(1, Math.min(n, Math.floor(((window.scrollY || 0) + 1) / h) + 1)), n: n };
+    }
+
+    // ◀ / ▶ on the page row: what Page Down does, and a window that is open jumps ahead by the pictures on that screen.
+    function twPage(dir) {
+        const h = vpH();
+        if (!(h > 0)) return;
+        if (!(placed && view && tour)) { window.scrollBy({ left: 0, top: dir * Math.round(h * 0.875), behavior: 'instant' }); twRecount(); return; }
+        const now = Date.now();
+        if (!tour.fast && now - userStepAt < STEP_GAP_MS) return;
+        userStepAt = now;
+        tourTurnOn();
+        const list = tourEntries();
+        const top = window.scrollY || 0;
+        let k = 0;
+        list.forEach(function (e) { if (e.y >= top && e.y < top + h) k++; });
+        const to = Math.max(0, Math.min(list.length - 1, tour.index + dir * Math.max(1, k)));
+        if (to === tour.index || tour.index < 0) { tourNav(dir, false, true); return; }
+        tour.total = list.length;
+        seamDir = 0;
+        plVidLeft();
+        tourGo(list, to, dir, false);
+    }
+
     // Counter and buttons: the slideshow's position (`–` when its picture is not in the list), else the page's total.
     function twSync() {
         if (!tw) return;
@@ -9125,7 +9122,10 @@
         tw.prev.classList.toggle('faint', !n);      // faint only with nothing to show; at either end a press wraps
         tw.next.classList.toggle('faint', !n);
         tw.wheel.classList.toggle('faint', !n);
-        tw.wheel.classList.toggle('armed', !!twWheelArmed || twWheelIn);
+        tw.wheel.classList.toggle('armed', !!(placed && view) || twWheelIn);
+        const pages = twPages();
+        tw.pageRow.classList.toggle('on', pages.n >= 2);
+        tw.pgNum.textContent = 'Page ' + pages.at + ' / ' + pages.n;
         const fade = Math.max(0, Math.min(100, +cfg.tourFadeTo || 0)) / 100;
         tw.box.style.opacity = cfg.tourFade && !tw.near ? String(fade) : '1';
         if (tw.host.style.display !== 'none') tw.dock.sizeChanged();     // the counter's width
@@ -9186,25 +9186,27 @@
         return x >= r.left - pad && x <= r.right + pad && y >= r.top - pad && y <= r.bottom + pad;
     }
 
-    function twWheelSet(on) {
-        twWheelArmed = on ? location.href : null;
-        twSync();
-    }
-
-    // The wheel button: arm and start the slideshow, or disarm and leave it open.
+    // The wheel button: close a running slideshow; start one at the pinned picture; else start at the first.
     function twWheelClick() {
-        if (twWheelArmed) { twWheelSet(false); return; }
-        twWheelSet(true);
-        if (!(placed && view)) tourFromStart(1);
+        if (placed && view) {
+            if (tour && tour.on) { unplace(); return; }
+            if (!tour) tourStart();
+            tourTurnOn();
+            tourSync();
+            twSync();
+            return;
+        }
+        tourFromStart(1);
     }
 
     // Window capture, bound at boot so it runs before onPinWheel: a wheel within wheelRange of the
-    // button, or anywhere while armed, steps the slideshow instead of scrolling or zooming.
+    // button, or anywhere off a pinned window, steps the slideshow instead of scrolling; over the window it zooms.
     function twWheel(e) {
         if (!e.deltaY || !tw) return;
         twNear(e.clientX, e.clientY);
-        if (twWheelArmed === location.href) { if (panelOwns(e)) return; }
-        else if (!twWheelZone(e.clientX, e.clientY, cfg.wheelRange)) return;
+        if (!twWheelZone(e.clientX, e.clientY, cfg.wheelRange)) {
+            if (!(placed && view) || twGalOpen || panelOwns(e) || pointInPreview(e.clientX, e.clientY)) return;
+        }
         e.preventDefault();
         e.stopImmediatePropagation();       // the tip's own wheel listener never sees this one
         hideTip();
@@ -9754,12 +9756,6 @@
         if (window.navigation) window.navigation.addEventListener('navigatesuccess', twRecount);
     }
 
-    // Left/Right navigate when the picture cannot pan sideways, and pan when it can. Per axis,
-    // not pannable(): a tall picture at fit-width pans up and down while the arrows still step.
-    function tourOwnsArrows() {
-        return !!tour && !!view && cfg.tourKeys && !(view.imgW > view.frameW + 0.5);
-    }
-
     let scrubAt = 0, scrubDir = 1;
     let wallBusy = false;       // ▶ at the last picture is asking the page for more
     let seamDir = 0;            // the end the last step stopped at; the next one wraps
@@ -9778,6 +9774,14 @@
         if (!tour || tour.fast) return;
         tour.fast = true;
         dbg('slideshow: no gap between steps until it closes — ' + why);
+    }
+
+    // The slideshow begins: from a step, or from the wheel button on a pinned picture.
+    function tourTurnOn() {
+        if (!tour || tour.on) return;
+        tour.on = true;
+        if (!view.anchor) tour.hold = posSpec(null);      // a window placed by hand or beside the pointer stays where it is
+        dbg('tour entered: ' + describeEl(tourScopeNow(tourPics(tourFloor()))), { floor: tour.floor + 'px' });
     }
 
     // One press of ◀ / ▶ or a navigating arrow. A HELD key scrubs: the anchor moves at the scrub
@@ -9800,11 +9804,7 @@
         }
         scrubAt = Date.now();
         scrubDir = dir;
-        if (!tour.on) {
-            tour.on = true;
-            if (!view.anchor) tour.hold = posSpec(null);      // a window placed by hand or beside the pointer stays where it is
-            dbg('tour entered: ' + describeEl(tourScopeNow(tourPics(tourFloor()))), { floor: tour.floor + 'px' });
-        }
+        tourTurnOn();
         const list = tourEntries();
         const to = tourTarget(list, dir);
         tour.total = list.length;
@@ -10075,115 +10075,11 @@
             docHeight() <= excDead.h && mediaCount() <= excDead.n;
     }
 
-    // ---- which sites load more when scrolled: learned from the user's own scrolling
-
-    const GROWS_OLD_KEY = 'hoverZoomGrowsOnScroll';    // v0.141.0-v0.142.0's list, moved into cfg
-    const GROWS_MISS_KEY = 'hoverZoomScrollMisses';     // host -> page loads in a row that loaded nothing
-    const GROWS_FORGET = 5;
-    const GROWS_INPUT_MS = 1000;    // a scroll this soon after wheel/key/touch/press is the user's
-    const GROWS_SETTLE_MS = 600;
-    const GROWS_LATE_MS = 2000;     // a second look, for a batch that lands after scrolling stops
-    let growsBase = null, growsHad = null, growsNear = false, growsTimer = 0, userInputAt = 0, growsMoved = false;
-    let growsH = 0;         // the page's height when growsBase was taken
-
-    function growsMigrate() {
-        if (growsMoved) return;
-        growsMoved = true;
-        let old = [];
-        try { old = JSON.parse(GM_getValue(GROWS_OLD_KEY, '') || '[]'); } catch (e) { /* unreadable: nothing to move */ }
-        if (!old.length) return;
-        reloadSettings();
-        cfg.scrollSites = (cfg.scrollSites || []).concat(old.filter(function (h) { return (cfg.scrollSites || []).indexOf(h) === -1; }));
-        saveSettings();
-        GM_setValue(GROWS_OLD_KEY, '');
-    }
-
-    function growsHere() {
-        growsMigrate();
-        const host = pageHost();
-        return (cfg.scrollSites || []).some(function (k) { return entryCovers(k, host); });
-    }
-
-    function growsPics() { return mainPics(tourPics(idleFloor())); }
-    function growsCount() { return growsPics().length; }
-
-    function growsMisses() {
-        try { return JSON.parse(GM_getValue(GROWS_MISS_KEY, '') || '{}'); } catch (e) { return {}; }
-    }
-
-    function growsLearn(from, to) {
-        const host = pageHost();
-        reloadSettings();
-        if ((cfg.scrollSites || []).indexOf(host) === -1) cfg.scrollSites = (cfg.scrollSites || []).concat([host]);
-        saveSettings();
-        refreshPanel();
-        growsHit('learned from your scrolling, ' + from + ' → ' + to);
-    }
-
-    // Evidence the site does load more: its run of empty page loads starts again.
-    function growsHit(why) {
-        const host = pageHost(), m = growsMisses();
-        if (m[host]) { delete m[host]; GM_setValue(GROWS_MISS_KEY, JSON.stringify(m)); }
-        dbg('this site loads more when scrolled — ' + why, { host: host });
-    }
-
-    // A page here that loaded nothing when asked; GROWS_FORGET in a row and the site is forgotten.
-    function growsMiss() {
-        const host = pageHost(), m = growsMisses();
-        m[host] = (m[host] || 0) + 1;
-        const forget = m[host] >= GROWS_FORGET;
-        if (forget) delete m[host];
-        GM_setValue(GROWS_MISS_KEY, JSON.stringify(m));
-        dbg('this page loaded nothing when scrolled', { host: host, inARow: forget ? GROWS_FORGET : m[host] });
-        if (!forget) return;
-        reloadSettings();
-        cfg.scrollSites = (cfg.scrollSites || []).filter(function (k) { return k !== host; });
-        saveSettings();
-        refreshPanel();
-        dbg('forgot this site as one that loads more — ' + GROWS_FORGET + ' page loads in a row loaded nothing', { host: host });
-    }
-
-    // Pictures added after the user scrolled near the bottom: this site needs the excursion.
-    function growsCheck(late) {
-        if (growsBase === null) return;
-        const now = growsPics(), n = now.length;
-        // New elements, not a lazy page filling in the ones it already had.
-        const added = now.some(function (p) { return !growsHad.has(p); });
-        const longer = vpH() > 0 && docHeight() >= growsH + vpH();     // a recycling feed: count flat, page longer
-        if ((n > growsBase || longer) && added && growsNear) {
-            if (growsHere()) growsHit('seen again as you scrolled, ' + growsBase + ' → ' + n);
-            else growsLearn(growsBase, n);
-            growsBase = null;
-            growsHad = null;
-            return;
-        }
-        if (late) { growsBase = null; growsHad = null; growsNear = false; return; }
-        growsTimer = setTimeout(function () { growsCheck(true); }, GROWS_LATE_MS);
-    }
-
-    function growsOnScroll() {
-        if (tour || twStarting || excBusy || Date.now() - userInputAt > GROWS_INPUT_MS) return;
-        if (!cfg.tourLoadMore || !siteEnabled()) return;
-        if (growsBase === null) { const had = growsPics(); growsBase = had.length; growsHad = new Set(had); growsNear = false; growsH = docHeight(); }
-        const h = vpH();
-        if (h > 0 && (window.scrollY || 0) + 2 * h >= docHeight()) growsNear = true;
-        clearTimeout(growsTimer);
-        growsTimer = setTimeout(function () { growsCheck(false); }, GROWS_SETTLE_MS);
-    }
-
-    if (isTopFrame) {
-        ['wheel', 'keydown', 'touchmove', 'mousedown'].forEach(function (t) {
-            window.addEventListener(t, function () { userInputAt = Date.now(); }, { capture: true, passive: true });
-        });
-        window.addEventListener('scroll', perfWrap(growsOnScroll, 'event'), { passive: true });
-    }
-
     // Watch for the batch the page loads once following has brought its bottom on screen. At the
     // wall (`force`) the page is scrolled on by a screen, as a reader would: never to the bottom,
     // which skips the middle of a feed that mounts only near the viewport (Google in Firefox).
     async function tourAskMore(force) {
         if (excBusy || excSpent || !cfg.tourLoadMore) return false;
-        if (!growsHere()) { excSpent = true; dbg('load more: not on this site, which has not been seen to load more when scrolled'); return false; }
         if (!force && Date.now() - excAt < EXC_COOL_MS) return false;
         if (excStillDead()) { excSpent = true; dbg('load more: this page loaded nothing last time and has not grown'); return false; }
         if (!force && !excBottomShown()) return false;
@@ -10197,7 +10093,7 @@
         } finally { excBusy = false; }
         dbg('load more: watched the bottom of the page', { was: before.n, now: seen.now, height: before.h + ' → ' + seen.h,
             grew: seen.grew, atWall: !!force });
-        if (seen.grew) { growsHit('the slideshow found more'); return true; }
+        if (seen.grew) return true;
         if (!excBottomShown()) return false;        // a screen further on at the next press
         excGaveNothing();
         return false;
@@ -10217,7 +10113,6 @@
         excSpent = true;
         const first = !excDead || excDead.url !== location.href;
         excDead = { url: location.href, h: docHeight(), n: mediaCount() };
-        if (first) growsMiss();
     }
 
     // ---- crossing to the next page
@@ -13875,7 +13770,7 @@
     let panelOpened = null;     // Undo's snapshot — see openPanel(); MUST outlive a re-render
 
     // What the user entered per site, not knobs: `Reset to defaults` leaves these alone.
-    const RESET_KEEPS = ['siteList', 'blockList', 'referrerSites', 'siteAudio', 'videoDelays', 'avatarAreas', 'ownPlayerAreas', 'linkAreas', 'doorAreas', 'areasAgedOn', 'scrollSites', 'taughtRules'];
+    const RESET_KEEPS = ['siteList', 'blockList', 'referrerSites', 'siteAudio', 'videoDelays', 'avatarAreas', 'ownPlayerAreas', 'linkAreas', 'doorAreas', 'areasAgedOn', 'taughtRules'];
 
     // Open/closed, the fold, scroll and position for this TAB — sessionStorage is per tab and
     // per origin, so it follows a same-site link or a refresh and dies with the tab.
@@ -14952,8 +14847,6 @@
             sync();
             row('Fade the widget', 'Until the pointer nears it; the number is opacity, in %. (default: on, 35)', pair);
         })();
-        check('tourKeys', 'Arrow keys step through the page',
-            'Unless zoomed in enough to pan. [ ] always step; { } narrow or widen the area.');
         check('tourKeyStart', '→ or ← with nothing open starts the slideshow',
             'Like ▶ and ◀ on the widget, unless the page uses the arrows.');
         num('tourMinDisplayed', 'Leave out pictures smaller than',
@@ -15090,13 +14983,8 @@
         section('The preview window');
         num('wheelZoomStep', 'Wheel zoom step',
             'Per wheel notch, in %. The + and − keys step 25%. (default: 15)', 2, 100, 1);
-        num('panStep', 'Arrow-key pan step',
-            'Per press, in px; Shift triples it. (default: 80)', 5, 500, 5);
         num('maxZoom', 'Maximum zoom',
             'In multiples of the original’s size. (default: 32)', 1, 64, 1);
-        num('maxSizeMultiple', 'Maximum window size',
-            'In multiples of the browser window. A preview never opens larger than the browser ' +
-            'window. (default: 1.2)', 1, 4, 0.25);
 
         section('Appearance');
         num('fadeMs', 'Preview fade', 'In and out, in ms. (default: 200)', 0, 1000, 10);
@@ -15165,16 +15053,6 @@
             examples: 'example.com also covers www.example.com. Adding a site again replaces its entry.',
         });
         doorRow();
-        list('scrollSites', {
-            heading: 'Scroll the page along with the slideshow on these sites',
-            description: 'Learned when your scrolling raises the widget’s count; dropped after ' +
-                GROWS_FORGET + ' loads that find nothing more.',
-            examples: 'example.com also covers www.example.com',
-            placeholder: 'e.g. example.com',
-            addCurrentLabel: '+ This site',
-            addCurrentTitle: pageHost(),
-            currentValue: function () { return pageHost(); },
-        });
 
         section('Galleries');
         check('galleryMiddle', 'Middle-click opens a gallery',
