@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.313.0
+// @version      0.314.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -4426,7 +4426,7 @@
         CAP_TARGET.addEventListener('keydown', onPinKey, true);
         // The wheel becomes the window's only now — see enableWheelZoom.
         enableWheelZoom();
-        if (!tour && !galOwns(active)) tourStart();     // a tour begun from the widget brings its own; a gallery picture steps through its gallery (galStep)
+        if (!tour && !galOwns(active)) { tourStart(); tourSync(); }     // a tour begun from the widget brings its own; a gallery picture steps through its gallery (galStep)
         if (galCur && galOwns(active)) { const i = galShownAt(galCur); if (i >= 0) { galCur.at = i; galPageNote(galCur); } }
         reflow();       // the controls appear with `placed`, and minFrameW() grows with them
         layout();
@@ -9109,7 +9109,7 @@
     // Counter and buttons: the slideshow's position (`–` when its picture is not in the list), else the page's total.
     function twSync() {
         if (!tw) return;
-        const on = !!tour && tour.on;
+        const on = !!tour && (tour.on || (placed && tour.index >= 0));      // a pinned picture counts too
         const at = on ? tour.index : -1, n = on ? tour.total : twTotal;
         tw.num.nodeValue = (at >= 0 ? at + 1 : '–') + ' / ' + (n >= 0 ? n : '–');
         const dupes = tour ? tourDupes : widgetDupes;
@@ -9204,6 +9204,16 @@
     function twWheel(e) {
         if (!e.deltaY || !tw) return;
         twNear(e.clientX, e.clientY);
+        if (view && !placed && !twGalOpen && !e.ctrlKey && !panelOwns(e) && !twWheelZone(e.clientX, e.clientY, cfg.wheelRange) &&
+            box && box.classList.contains('on') &&
+            (pointInPreview(e.clientX, e.clientY) || (active && e.target instanceof Node && active.contains(e.target)))) {
+            e.preventDefault();         // a wheel over a hover preview or its picture pins it and zooms it
+            e.stopImmediatePropagation();
+            place();
+            const f = 1 + cfg.wheelZoomStep / 100;
+            zoomAt(view.scale * (e.deltaY < 0 ? f : 1 / f), e.clientX, e.clientY);
+            return;
+        }
         if (!twWheelZone(e.clientX, e.clientY, cfg.wheelRange)) {
             if (!(placed && view) || twGalOpen || panelOwns(e) || pointInPreview(e.clientX, e.clientY)) return;
         }

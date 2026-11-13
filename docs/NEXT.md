@@ -92,6 +92,8 @@ is still undecided.
   page ▶ jumped 2 and scrolled, button closes). Not tried in Tampermonkey; click-off not tried; the
   gallery was not touched. TOUR.md §1a and INTERACTION.md S25 prose still describe the old scope.
 
+- **v0.314.0**: a pinned picture shows its number in the widget (`tourSync` at `place()`); a wheel over a hover preview or its picture pins and zooms it (`twWheel`) instead of scrolling the page. Pane-checked by synthetic events.
+
 ## Not verified
 
 Not tried in LibreWolf + Tampermonkey (incl. v0.300.0–v0.309.0).
