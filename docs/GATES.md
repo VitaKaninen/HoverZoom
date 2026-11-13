@@ -936,6 +936,17 @@ recheck finding a leaf in a door area hides a real preview, so it `areaDrop`s at
 `P16`; an area whose samples disagree (look-alike pages that differ) never forms a rule. Add a user
 teach/override per area. Gallery mode could switch on per door area instead of per site.
 
-Unmeasured assumptions — check on the user's example sites (adult; pane first, console snippet
-dumping structure only as fallback; age gates need the user's yes per site): gallery images link to
-a page carrying the same filename stem; gallery pages hold many distinct pictures.
+**Measured 2026-11-12 — the test is "a BIGGER copy of this picture on the linked page", nothing
+weaker.** "Same stem there" and "many pictures there" both fail: eporner's listing → gallery has the
+cover thumb (same URL) in a 113-grid, and its gallery → `/photo/…` viewer ALSO carries that 113-grid,
+plus the full `.jpg` and `og:image`. So: leaf = `E15` finds a bigger same-picture (`trusted`), or
+the link is an image file; door = HTML fetched, no bigger copy.
+- eporner `/pics/` (99-grid) → `/gallery/ID/` (no bigger cover; og = logo) → `/photo/ID/` (full jpg).
+- girlstop.info `/` (40-grid) → `psto.php?id=` (41-grid, cover thumb only) → `.avif` files direct.
+- nsfw.xxx `/` (`a.user` masonry) → `/user/NAME`: Nuxt, HTML = logo + 180 px avatar of the same
+  stem (smaller, so the size test is what calls it a door); posts are script-built and **unlinked**
+  (no link = leaf).
+- Refused by the Browser pane ("safety restrictions"): pornpics.com, porntrex.com,
+  xmoviesforyou.com — needs the user's console snippet.
+- Open: a door whose thumbnail a URL rule upgrades without the linked page would still preview, and
+  a leaf whose viewer is script-built has no bigger copy in HTML (would read as door). Not seen yet.
