@@ -180,7 +180,7 @@ picture. The user wants **the widget's own rules** (it counted 20 there and left
 layout and lazy loading run, `sandbox="allow-scripts allow-same-origin"` = no top navigation or
 popups, `allow="autoplay 'none'"`). `window.name` = `hz-gallery-probe:<token>`. Our own copy runs
 in that frame (no `@noframes`); seeing the name it runs `galProbeReport()`: after `load` +
-`GAL_SETTLE_MS` (one retry after `GAL_RETRY_MS` if empty) it posts `widgetEntries()`'s `<img>`s as
+once no `<img>` has been added or changed `src`/`srcset` for `GAL_SETTLE_MS` (a MutationObserver; empty → keeps waiting; `GAL_QUIET_CAP_MS` 4 s from DOMContentLoaded sends whatever it has — v0.275.0: nsfw.xxx mounts posts in batches of 10 ~1.5 s in, a fixed 700 ms after DOMContentLoaded reported 0–2) it posts `widgetEntries()`'s `<img>`s as
 plain items `{thumb, ss, cands, base}` (`galItem`). It also mutes and pauses anything that plays.
 No `allow="autoplay 'none'"`: Gecko logs "Skipping unsupported feature name autoplay" for it
 (removed v0.235.0; the play listener does the job).
@@ -198,7 +198,7 @@ Nuxt page whose HTML holds only the profile avatar, the frame loads in ~1.6 s + 
 
 The frame **fails** → the plain HTML read below: load lands on an error page or another origin
 (cross-origin links always do), the page not loaded in `GAL_FRAME_MS` (10 s), or no report
-`GAL_REPORT_MS` (3 s) after it loaded. During that wait the previous set stays up.
+`GAL_REPORT_MS` (4.5 s) after it loaded. During that wait the previous set stays up.
 
 - The 3 s post-load cap exists because the user saw a very long pause in their main browser
   (v0.234.0): the frame almost certainly never reported, and the wait ran the full 10 s.

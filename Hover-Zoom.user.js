@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.274.0
+// @version     0.275.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -10688,15 +10688,15 @@
     const GAL_FRAME_MS = 10000;         // longest wait for the hidden frame's page to load
     const GAL_HTML_ENOUGH = 6;          // the plain HTML is trusted at once from this many pictures (a logo group is 1-3)
     const GAL_PREFER_MS = 2500;         // the frame's report wins only within this; then the plain HTML is used
-    const GAL_REPORT_MS = 3000;         // longest wait for its report once loaded (settle + one retry + slack)
+    const GAL_REPORT_MS = 4500;         // longest wait for its report once loaded (the frame's own cap + slack)
     const GAL_HQ_PAR = 4;               // originals fetched at once when a gallery opens
     const GAL_REST_MS = 15000;          // a short gallery waits this long for the rest before redrawing with what came
     const GAL_RETRY_GAP_MS = 1000;      // then the failed thumbnails are tried once more after this
     const GAL_LATE_MS = 6500;           // extra wait when no thumbnail came in GAL_WAIT_MS; ends before the 10 s diagnostics timer
     const GAL_LAG_TICK = 250;          // while a hidden frame loads, a timer this often measures how late it runs
     const GAL_LAG_MS = 1000;            // later than this = the page froze: the frame goes and preloading stops for the page
-    const GAL_SETTLE_MS = 700;          // after the frame's load, before it counts
-    const GAL_RETRY_MS = 1500;          // one more look when it counted nothing
+    const GAL_SETTLE_MS = 700;          // the frame counts once no picture has arrived for this long
+    const GAL_QUIET_CAP_MS = 4000;      // from DOMContentLoaded: the frame reports by then whatever it has
     const galCache = new Map();         // href -> Promise of [{thumb, ss, cands, base}] | null | 'cancel'
     let galFrameStop = null;
     let galHost = null, galRoot = null, galBlur = null, galCur = null, galWant = null;
@@ -10979,26 +10979,44 @@
         } catch (e) { /* loadstart still catches media */ }
     }
 
-    // Inside the hidden frame: once the page has settled, send the parent what the widget would count.
+    // Inside the hidden frame: once no picture has arrived for GAL_SETTLE_MS (or at GAL_QUIET_CAP_MS), send the parent what the widget would count.
     function galProbeReport() {
         const token = String(window.name).slice(GAL_NAME.length + 1);
-        let tries = 0;
+        let sent = false, quietT = 0, capT = 0, obs = null;
         galNoMedia();
         document.addEventListener('play', function (e) {
             try { e.target.muted = true; e.target.pause(); } catch (x) { /* not media */ }
         }, true);
-        const send = function () {
+        const send = function (final) {
+            if (sent) return;
             let items = [];
             try {
                 items = widgetEntries().filter(function (e) { return e.el && e.el.tagName === 'IMG'; })
                     .map(function (e) { return galItem(e.el, shownUrl(e.el) || e.url, location.href); })
                     .filter(function (x) { return x.thumb && !/^(data|blob):/.test(x.thumb); }).slice(0, GAL_MAX);
             } catch (err) { dbg('gallery frame could not list the page', String(err)); }
-            if (!items.length && ++tries < 2) { setTimeout(send, GAL_RETRY_MS); return; }
+            if (!items.length && !final) return;
+            sent = true;
+            clearTimeout(quietT); clearTimeout(capT);
+            if (obs) obs.disconnect();
             try { window.parent.postMessage({ hzGallery: token, items: items, title: document.title, site: siteNameOf(document) }, location.origin); }
             catch (e) { /* parent gone */ }
         };
-        const go = function () { setTimeout(send, GAL_SETTLE_MS); };
+        const bump = function () { clearTimeout(quietT); quietT = setTimeout(function () { send(false); }, GAL_SETTLE_MS); };
+        const isPic = function (n) { return n.nodeType === 1 && (n.tagName === 'IMG' || (n.querySelector && !!n.querySelector('img'))); };
+        const go = function () {
+            try {
+                obs = new MutationObserver(function (recs) {   // the frame is thrown away within seconds; nothing is kept
+                    for (let i = 0; i < recs.length; i++) {
+                        const r = recs[i];
+                        if (r.type === 'attributes' ? r.target.tagName === 'IMG' : Array.prototype.some.call(r.addedNodes, isPic)) { bump(); return; }
+                    }
+                });
+                obs.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['src', 'srcset'] });
+            } catch (e) { /* the timers still report */ }
+            bump();
+            capT = setTimeout(function () { send(true); }, GAL_QUIET_CAP_MS);
+        };
         if (document.readyState !== 'loading') go(); else document.addEventListener('DOMContentLoaded', go);
     }
 
