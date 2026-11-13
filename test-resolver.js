@@ -1280,7 +1280,7 @@ const galPH = function (min) {
 // ---- resizing the clicked picture: snaps to row edges, gap middles and the window's centre lines; Alt (not here) is free.
 {
     const cut = function (from, to) { const a = src.indexOf(from), b = src.indexOf(to, a); return src.slice(a, b); };
-    const S = new Function('const GAL_GAP = 12, GAL_MIN_H = 120, GAL_FLY_FRAC = 0.2, POS_SNAP_EDGE = 16, POS_SNAP_CENTRE = 40, cfg = {};' + NL +
+    const S = new Function('const GAL_GAP = 12, GAL_MIN_H = 120, GAL_FLY_FRAC = 0.2, POS_SNAP_EDGE = 16, POS_SNAP_CENTRE = 40, GAL_STRIP_H = 60, cfg = {};' + NL +
         cut('    function posPt(', '    // The window placed by a spec') +
         cut('    function galRowLines(', '    // The strip\'s box') + cut('    function galSnapH(', '    function galFlyPut(') +
         NL + 'return {galRowLines, galSnapH, galPagedRows, galLines, galEdgeOn, galEdgeAt, galPlace, galBoxSnap};')();
