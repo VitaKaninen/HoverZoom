@@ -364,6 +364,8 @@ row starts under a 350 px header), and the user kept wheeling, crossed the seam 
 
 ## 1a. The scope and the floor — BUILT, v0.100.0
 
+**Superseded v0.313.0: the slideshow has one scope, the whole page; `{ }`, `tourRescope` and the post/reply split are gone. What follows is the history of why the start-picture scope existed.**
+
 **Since v0.188.0 this applies only to a pin on a picture the widget does not count** (§1d); a pin on
 one it counts opens the widget's list. The post end (§1c) now does the "post's ten" job for that case.
 
@@ -473,13 +475,7 @@ nav controls any more — they are in the widget.
 
 `onPinKey()`.
 
-- **Left/Right navigate when the picture cannot pan horizontally**, and pan when it can. Test
-  `view.imgW > view.frameW + 0.5` — per-axis, not `pannable()`, which is either-axis.
-  Correct edge case falls out: a tall picture at fit-width pans vertically, so Up/Down pan while
-  Left/Right navigate.
-- **Up/Down always pan.** Unchanged.
-- **`[` / `]` always navigate**, or zooming in would trap the user on the current picture.
-- **`{` / `}` narrow and widen the scope** (§1a). Not on repeat.
+- **Arrows (← → ↑ ↓) and `[` `]` always step** (v0.313.0); the keyboard never pans — drag does. `{ }` are gone.
 - `capOwns()` already stands the arrows down while the zoom field, scrubber or volume
   slider has focus. Unchanged, works for free.
 

@@ -248,12 +248,11 @@ growth ceiling, and only a hand resize pins its edges** (`E22`, `E23`).
 - **The page underneath stays alive to read.** It still scrolls — the window is fixed and stays
   put while the page moves under it. What it does not do is act on clicks, and no new preview
   opens while this one is up (`R2`).
-- **Accepts:** wheel **over the frame** → grow the whole window about the pointer to the growth
-  ceiling, then zoom the picture inside it, also about the pointer (`wheelZoomStep`, 15 % per
-  notch, `E22`); a wheel anywhere else
-  scrolls the page; `+` / `−` → zoom about the frame centre (1.25× per press), **down past the
+- **Accepts:** wheel **over the frame** → grow the whole window about the pointer to the viewport,
+  then zoom the picture inside it, also about the pointer (`wheelZoomStep`, 15 % per
+  notch, `E22`); a wheel anywhere else flips pictures (`S25`); `+` / `−` → zoom about the frame centre (1.25× per press), **down past the
   fit and into the frame's background** (`E26`); `0` → fit the picture to the current frame;
-  arrows → pan (`panStep` 80 px, Shift for 3×); **a corner or an edge → resize** (`S19`, `E23`);
+  arrows step pictures (the keyboard never pans — drag does); **a corner or an edge → resize** (`S19`, `E23`);
   **the frame margin or the status bar → move, always** (`S14`, `E25`, `E21`); **the middle
   → move the frame, or pan the picture once it is spilling** (`S14` / `S13`).
 - **Its status bar carries five buttons, and only here**, right to left: ✕ close (`E68`), ⛶ fill the screen
@@ -278,9 +277,7 @@ growth ceiling, and only a hand resize pins its edges** (`E22`, `E23`).
   is placed-only. **A placed frame is never narrower than its bar's controls** —
   288 px, or 312 px while the no-play button is there (`barMinW()`), and wider still if the
   frame margin is raised — the controls always clear the grab bands (`E37`).
-- **May hang off the edges of the screen** (`E21`), which is the point of the growth ceiling
-  being above 1×: shoved aside or upwards, the picture still reaches the screen edges instead of
-  leaving a strip of empty page behind it.
+- **May be dragged partly off the screen** (`E21`); the frame itself never grows past the viewport.
 - **Ends on:** a press anywhere outside it, either button — a right press there brings no menu
   (`E65`) — Escape, either ✕ (`E68`), or the hotkey (`K9`, `E66`). **Right-click on the window does
   not close it** — it raises the browser's own menu over the picture instead (`T21`, `E9`).
@@ -288,7 +285,7 @@ growth ceiling, and only a hand resize pins its edges** (`E22`, `E23`).
   and any sibling userscript.
 
 #### S12 · placed, image spilling
-The frame has reached the growth ceiling, or has been pinned by a hand resize, so zooming in
+The frame has reached the viewport, or has been pinned by a hand resize, so zooming in
 pushes the image out past its edges. That is the moment panning starts to mean something — and the moment the frame around the
 picture becomes what moves the window, because the middle is now the pan surface (`E25`, `E21`).
 - **Cursor:** `grab` over the image.
@@ -392,15 +389,17 @@ Hover the sound button and a vertical column appears above it; clicking the butt
 A placed window stepping through a queue of the page's pictures. Each step swaps a different
 picture into the same window, at the slideshow's spot (`E64`); the page scrolls behind it to keep
 the current picture on screen (`T35`).
-- **Entered from:** ▶ on the widget or → with nothing open, which starts at the **first**
-  picture of the area holding all the page's pictures — the article, not the sidebar (`T38`); ◀ or ←
-  starts at the **last**; or ◀ / ▶ or a navigating arrow on a hovered or placed window, which
-  steps from that picture (`T29`, `T30`). The entering press advances.
-- **The widget** (`E63`) is ◀ `n / N` ▶ in a box of its own, placed by the shared dock that
-  Forum Stumbler and RNFP also use. Faint until the pointer is within 60 px (a setting, with its
-  opacity); shown on pages with
-  two pictures at the slideshow's floor, or while a slideshow runs. It floats over the picture.
-  After the count: a yellow `(N)` for skipped duplicates, then an orange ⚠ when most pictures looked
+- **Entered from:** the blue ⇅ button or the wheel near the widget (starts at the pinned picture, else
+  picture 1; a second ⇅ click closes it — `T38`); ▶ on the widget or → with nothing open (the
+  **first** picture), ◀ or ← (the **last**); or ◀ / ▶, the arrows (← → ↑ ↓ and `[ ]`) or the wheel off
+  the window on a hovered or placed window, which step from that picture (`T29`, `T30`). A wheel over
+  the window zooms it instead.
+- **The widget** (`E63`) is a page row `◀ Page n / N ▶` (scrolls like Page Down; with a window open
+  it also jumps ahead by the pictures on that screen) above `◀ n / N ▶` and the blue ⇅ button, in a
+  box of its own, placed by the shared dock that Forum Stumbler and RNFP also use. Faint until the
+  pointer is within 60 px (a setting, with its opacity); shown on pages with two pictures at the
+  slideshow's floor, or while a slideshow runs. A pinned picture shows its own number. After the
+  count: a yellow `(N)` for skipped duplicates, then an orange ⚠ when most pictures looked
   up on this site had links to a larger file that all failed to load (TOUR.md "Dead-link ⚠").
 - **The list is derived on every press and kept nowhere** (`E54`). Lazy-loaded and newly appended
   images are picked up for free, and a virtualised feed deleting the picture under you is
@@ -409,13 +408,10 @@ the current picture on screen (`T35`).
   hovered, and it inherits every gate — `videoMode`, the block list, the banner and furniture
   rules — with no separate list. Clips and images share one list. Elements with a CSS background
   image are hoverable but not in the slideshow.
-- **Then the slideshow's own two gates, both read off the picture it started on** (`E60`): a floor on
-  the longer side as drawn (`tourMinDisplayed`, 128 — emoji, badges and avatars fall under it;
-  a start picture smaller than that lowers it to its own size), and a **scope** — the smallest
-  area of the page around the start picture that holds two or more pictures and is not merely a
-  wrapper for them, so a forum post's ten pictures tour without the replies, the sidebar or the
-  avatars. `{` and `}` move the scope a level in or out (`T37`). Started from the widget, the
-  scope is the smallest area holding every picture outside the sidebars, re-derived on every step.
+- **One scope: the whole page** (v0.313.0; `{ }` and the post/reply scope are gone), minus sidebars,
+  with a floor on the longer side as drawn (`tourMinDisplayed`, 128 — emoji, badges and avatars
+  fall under it; a start picture smaller than that lowers it to its own size). The page scrolls
+  along on every site; there is no per-site list.
 - **Nothing is ever dropped for failing to resolve** (`E56`): a page of 50 gives a slideshow of 50, so
   the counter means what it says and a picture spotted half way down stays where it was.
 - **Every picture opens at the slideshow's spot** — the centre until a slideshow picture is dragged
@@ -569,7 +565,7 @@ this table is a table.
 | `E1` | A press on a hover preview is claimed by geometry, not by hit-testing | [`docs/VIEWER.md`](docs/VIEWER.md) |
 | `E2` | A click outside a placed window suppresses the image it came from | [`docs/VIEWER.md`](docs/VIEWER.md) |
 | `E6` | Leaving mid-search does not abort probes already in flight | [`docs/RESOLVER.md`](docs/RESOLVER.md) |
-| `E7` | The growth ceiling — `maxSizeMultiple`, 2× the browser window | [`docs/VIEWER.md`](docs/VIEWER.md) |
+| `E7` | The growth ceiling — the viewport (the `maxSizeMultiple` setting is gone, v0.313.0) | [`docs/VIEWER.md`](docs/VIEWER.md) |
 | `E8` | An upgrade is almost never visible | [`docs/RESOLVER.md`](docs/RESOLVER.md) |
 | `E9` | The browser's own context menu is the one that can save and copy | [`docs/VIEWER.md`](docs/VIEWER.md) |
 | `E9a` | …except on a picture shown from bytes (`E49`): right-click there opens our own Save / Open / Copy, acting on the real URL | [`docs/VIEWER.md`](docs/VIEWER.md) |
