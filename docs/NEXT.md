@@ -22,12 +22,12 @@ waits on the user's yes. Ask before building, quote the old reason where one is 
 
 ## Proposal (recommendations, in build order)
 
-A. **Door/leaf decides, not a mode** — learning + refusal BUILT v0.281.0 (`GATES.md` `P17`); the peek and
-   retiring the per-site gallery switch are not. Leaf: preview. Door: no preview; a
+A. **Door/leaf decides, not a mode** — learning + refusal BUILT v0.281.0 (`GATES.md` `P17`), peek v0.282.0;
+   retiring the per-site gallery switch is not done (gallery mode still exists beside it). Leaf: preview. Door: no preview; a
    click follows the link (fixes previews pinning on search pages); a peek opens its contact sheet.
    Replaces the per-site gallery switch and "previews off" state. Peek gesture: middle-click (as now)
    plus a small visible chip on a hovered door, for discoverability.
-B. **The contact sheet is a page**: inside it hover/pin/slideshow work as anywhere; the widget stays
+B. BUILT v0.282.0 except the widget inside the gallery (INTERACTION.md `G1`-`G8`). **The contact sheet is a page**: inside it hover/pin/slideshow work as anywhere; the widget stays
    and counts that gallery's pictures. Huge galleries: pages of readable cells (pending question
    "Which layout for huge galleries?" — recommend pages, wheel flips, "page 2 / 20" on the sheet).
    Originals preload for the visible page only (683 × `galHqAll` today).

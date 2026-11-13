@@ -49,6 +49,8 @@ class SlowHandler(SimpleHTTPRequestHandler):
             return self.serve_limited()
         if urlparse(self.path).path == "/rotate.php":
             return self.serve_rotating()
+        if urlparse(self.path).path.startswith("/many/"):
+            return self.serve_many()
         if self.headers.get("Range", "").startswith("bytes="):
             return self.serve_range()
         return SimpleHTTPRequestHandler.do_GET(self)
@@ -93,6 +95,29 @@ class SlowHandler(SimpleHTTPRequestHandler):
         if urlparse(self.path).path == "/rotate.php":
             return self.serve_rotating(head=True)
         return SimpleHTTPRequestHandler.do_HEAD(self)
+
+    # /many/<name>.jpg is a 200x150 picture drawn from the name: a gallery of distinct pictures (the
+    # duplicate check compares bytes, so one file under many paths would fold into one).
+    def serve_many(self):
+        import hashlib
+        import io
+        from PIL import Image, ImageDraw
+        name = urlparse(self.path).path
+        seed = hashlib.md5(name.encode("utf-8")).digest()
+        im = Image.new("RGB", (200, 150), (seed[0], seed[1], seed[2]))
+        d = ImageDraw.Draw(im)
+        for i in range(6):
+            x, y = seed[3 + i] % 180, seed[9 + i] % 130
+            d.rectangle([x, y, x + 20 + seed[i] % 40, y + 20], fill=(seed[i + 4], seed[i + 2], seed[i]))
+        d.text((8, 8), name.rsplit("/", 1)[-1], fill=(255, 255, 255))
+        buf = io.BytesIO()
+        im.save(buf, "JPEG", quality=80)
+        body = buf.getvalue()
+        self.send_response(200)
+        self.send_header("Content-Type", "image/jpeg")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def serve_rotating(self, head=False):
         name = BANNER if urlparse(self.path).query else GENERAL

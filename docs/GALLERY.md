@@ -7,7 +7,7 @@ so the user can judge whether that gallery is worth opening. Look only: the floa
 ## Where it runs (user, v0.252.0)
 
 - `gallerySites` (Settings → Advanced → Gallery mode; `RESET_KEEPS`) = the sites that get the **gallery
-  button**, a 26 px docked widget (`galBtnBuild`, dock id `hover-zoom-gallery`, own per-site position
+  button** (peeking a door needs none of this — see above), a 26 px docked widget (`galBtnBuild`, dock id `hover-zoom-gallery`, own per-site position
   in `hoverZoomGalleryDock`, first placed top-right). Menu item `toggleGallery()`: "Show / Hide gallery
   button on this site" (removes every entry covering the page, else adds the host). Elsewhere nothing
   shows, nothing preloads, nothing listens for Ctrl or the middle button.
@@ -20,6 +20,36 @@ so the user can judge whether that gallery is worth opening. Look only: the floa
   are off on that page** (`siteEnabled()` is false; the slideshow widget hides). Off = the page as it
   is without gallery mode. Seen/visited/saved marks show either way (`galMarkAll` needs only the list).
 - `galOnHosts` / `GAL_ON_KEY` are `var`s: `siteEnabled()` reads it and can run before its line.
+## Peek, pages, reading on (v0.282.0; INTERACTION.md `G1`, `G6`, `G7`)
+
+- **Peek**: the document mousedown handler, outside gallery mode and where `siteEnabled()`: a plain
+  middle press on `doorAt()` sets `galPeek` and calls `galMiddle()`. While `galPeek`, `galOver` does
+  not hide the set, a Ctrl tap closes it (and `galPeekTapAt` keeps the previews hotkey from also
+  toggling), `galScroll` runs. `onOver` returns while `galCur || (galOn && galWant)`: with previews
+  on, the page under the set would otherwise preview through the gaps. `galHide` clears `galPeek`.
+- **Door hover** (`doorHover` → `galDoorHover`): `galHintShow` chip (`.hint`, top-left of the door,
+  text for the first `GAL_HINT_TIMES` 3 per site, count in GM `hoverZoomPeekHints`), hidden by
+  `galMove` off the door, any press, any scroll; `galLoad` after `cfg.hoverDelay` reads ahead.
+- **Pages** (`galRows(asp, hole, page)` → `{out, pages, page}`): if everything fits at
+  `GAL_MIN_H` 120 the old binary search runs from there up; else pages of `GAL_MIN_H` rows with
+  `GAL_PG_TOP` kept for the `.pg` line. Tested in `test-resolver.js` (683 at 1920×1080 → 10 pages of
+  ~73). `set.page` survives a rebuild of the same href. `galPageWork` = upgrades and `galHqAll`
+  for the page on screen only (was every cell). `galWheel` on `CAP_TARGET` capture, non-passive:
+  60 px of delta, one flip per `GAL_FLIP_MS`; skipped over a pinned preview.
+- **Reading on** (`galGrow`, after `galBuild` of a locked open): `galRender(href, onMore, onEnd)` names
+  the frame `…:<token>:grow`; the frame's `galProbeReport` reports as before, then `readOn()`:
+  every `GAL_GROW_TICK` it posts only new items, scrolls `scrollingElement` 0.9 screen and
+  dispatches a `scroll` event (a frame not painted, as in the Browser pane, sends none; pages that
+  load on `scroll` then work, IntersectionObserver ones do not there), and posts `done` after
+  `GAL_GROW_IDLE_MS` at the bottom or `GAL_GROW_MAX_MS`. Parent: `galMore` merges into
+  `galLists` (the cached list, mutated) by URL path of thumb + every srcset entry (`galItemKeys`,
+  so an HTML read and a frame read of one picture match), `galAppend` adds cells in
+  `GAL_APPEND_MS` batches, relayout keeps the page. `galGrown` = read to the end this visit, not
+  read again. The frame holds `galFrameStop`, so no preload runs meanwhile; `galHide` ends it.
+  Cost: the open's page loads a second time (the first frame, if any, is gone by then).
+- Why the 683-picture gallery showed 9–15: the frame reported once, 4 s after load, and the page
+  mounts posts as it is scrolled. Unverified on nsfw.xxx itself.
+
 ## Behaviour (user's numbers, 2026-11-09)
 
 - Every picture the page has (`GAL_MAX` = Infinity, user v0.251.0: galleries run 10-100 and a cap

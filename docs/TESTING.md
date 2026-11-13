@@ -332,3 +332,16 @@ it rejects outright. (Counts drift; `grep -c 'class="case"' test-page.html` is t
   animation frames while claiming to be visible. Pin a viewport with `resize_window` before
   measuring anything geometric, and never use `requestAnimationFrame` for something that must
   animate. More of these in [`docs/TESTING.md`](docs/TESTING.md).
+
+## Gallery fixtures — traps (2026-11-12)
+
+- `test-pages/door-search.html`: doors d1-d7 (d6 → `door-big.html`, 240 static; d7 → `door-grow.html`,
+  150 mounted 10 per scroll), leaves l1-l2. Seed a door rule in `hoverZoomSettings.doorAreas` to skip learning.
+- **Gallery pictures must be distinct files.** The slideshow's duplicate check compares bytes, so
+  one file under many `?query` addresses folds into one entry in the frame's read. Use the test
+  server's `/many/<name>.jpg` (a picture drawn from the name, needs PIL).
+- **A wrapper class `post` makes the widget count one forum post**, not the page. Name fixture
+  wrappers `tile`/`item`.
+- `photo-200x150.jpg` upgrades by URL rule to a 1600 px `photo.jpg`: a leaf. Doors use `mural.jpg`.
+- Synthetic middle presses need a `mouseup` too, or `mouseDown` stays set and no hover previews.
+

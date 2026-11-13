@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.281.0
+// @version     0.282.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -5801,6 +5801,7 @@
 
     // A refused door hover: stamp its area, and on a LINK_RECHECK share check it silently against the linked page.
     function doorHover(el) {
+        galDoorHover(el);
         if (doorCheckEl === el) return;
         const chain = domChain(el), path = pagePath();
         areaApply('doorAreas', areaTouch, chain, path);
@@ -6807,6 +6808,7 @@
     function onOver(e) {
         if (e.isTrusted) { twNear(e.clientX, e.clientY); if (placed) thruSync(e.clientX, e.clientY); }
         if (placed || priming || hotQuiet) return;
+        if (galCur || (galOn && galWant)) return;      // an open gallery: its cells preview on their own
         if (drag || twBusy()) return;
         if (ours(e.target)) return;         // on our own overlay
         if (!siteEnabled() || CAPTCHA_HERE) return;
@@ -7267,7 +7269,7 @@
             cancel();
             return;
         }
-        if (hotTap && cfg.hotkeyToggle && isTopFrame && !(e.key === 'Control' && galleryHere())) setOff(!hzOff);   // Ctrl there is the gallery's key
+        if (hotTap && cfg.hotkeyToggle && isTopFrame && !(e.key === 'Control' && (galleryHere() || galPeek || Date.now() - galPeekTapAt < 100))) setOff(!hzOff);   // Ctrl there is the gallery's key
         hotTap = false;
     }, true);
 
@@ -10764,6 +10766,17 @@
     const GAL_LAG_MS = 1000;            // later than this = the page froze: the frame goes and preloading stops for the page
     const GAL_SETTLE_MS = 700;          // the frame counts once no picture has arrived for this long
     const GAL_QUIET_CAP_MS = 4000;      // from DOMContentLoaded: the frame reports by then whatever it has
+    const GAL_MIN_H = 120;              // rows never shorter: a bigger gallery is laid out as pages
+    const GAL_PG_TOP = 30;              // px kept above a paged gallery's rows for the page line
+    const GAL_FLIP_MS = 250;            // at most one page per this long on the wheel
+    const GAL_APPEND_MS = 300;          // thumbnails that load late join the set in batches this far apart
+    const GAL_GROW_TICK = 400;          // the reading frame scrolls a screen this often
+    const GAL_GROW_IDLE_MS = 4000;      // at its bottom with nothing new this long, the page is read
+    const GAL_GROW_MAX_MS = 180000;     // longest a gallery's page is read on
+    const GAL_HINT_TIMES = 3;           // door hovers per site that spell the gesture out
+    const GAL_HINT_KEY = 'hoverZoomPeekHints';
+    let galPeek = false, galPeekTapAt = 0, galGrowing = null, galGrowEnd = null, galHintEl = null, galHintFor = null;
+    const galGrown = new Set(), galLists = new Map();
     const galCache = new Map();         // href -> Promise of [{thumb, ss, cands, base}] | null | 'cancel'
     let galFrameStop = null;
     let galHost = null, galRoot = null, galBlur = null, galCur = null, galWant = null;
@@ -10788,6 +10801,13 @@
     const galTraces = new Map();        // href -> [[ms, what]], sanitised, the last 60 links
     let galPend = null, galInputAt = 0; // the open waiting for its gallery; the user's last wheel/key/press
     const galPreTried = new Set();
+
+    // Seen / visited / saved marks: sites with the gallery button, and sites with learned doors.
+    function galMarksHere() {
+        if (galleryListed()) return true;
+        const e = (cfg.doorAreas || {})[pageHost()];
+        return !!(e && e.rules && e.rules.length);
+    }
 
     // Gallery mode runs where the gallery list covers the page and ordinary previews are off.
     function galleryHere() {
@@ -10955,39 +10975,53 @@
     }
 
     // The rendered page's pictures, by the widget's own rules, from a hidden frame. null = the frame failed.
-    function galRender(href) {
+    // With onMore the frame stays after its first report and scrolls its page, reporting what joins (onEnd says why it stopped).
+    function galRender(href, onMore, onEnd) {
         if (galFrameStop) galFrameStop();
         return new Promise(function (resolve) {
             const token = Math.random().toString(36).slice(2);
             const f = document.createElement('iframe');
-            let done = false, t = 0, lagT = 0, lagAt = performance.now();
-            const fin = function (v, why) {
-                if (done) return;
-                done = true;
+            let done = false, gone = false, t = 0, lagT = 0, lagAt = performance.now();
+            const end = function (why) {
+                if (gone) return;
+                gone = true;
                 clearTimeout(t);
                 clearTimeout(lagT);
                 window.removeEventListener('message', onMsg);
                 if (galFrameStop === stop) galFrameStop = null;
+                if (galGrowEnd === end) galGrowEnd = null;
                 f.remove();
+                if (done && onEnd) onEnd(why);
+            };
+            const fin = function (v, why, keep) {
+                if (done) return;
+                done = true;
                 galTrace(href, 'frame: ' + String(why).replace(/landed on .*/, 'landed on another page') + (v && v !== 'cancel' ? ' (' + v.length + ' pictures)' : ''));
                 dbg('gallery frame: ' + why, { href: href, pictures: v ? v.length : 0 });
                 resolve(v);
+                if (keep) { clearTimeout(t); t = setTimeout(function () { end('timed out'); }, GAL_GROW_MAX_MS + GAL_REPORT_MS); }
+                else end(why);
             };
-            const stop = function () { fin('cancel', 'replaced by a newer hover'); };
+            const stop = function () { if (done) end('cancelled'); else fin('cancel', 'replaced by a newer hover'); };
             const onMsg = function (e) {
                 if (e.source !== f.contentWindow || !e.data || e.data.hzGallery !== token) return;
                 if (e.data.title) keepPageInfo(href, e.data.title, e.data.site);
-                fin(Array.isArray(e.data.items) ? e.data.items : [], 'reported');
+                const items = Array.isArray(e.data.items) ? e.data.items : [];
+                if (!done) { fin(items, 'reported', !!onMore && !e.data.done); return; }
+                if (items.length) onMore(items);
+                if (e.data.done) end('grown');
             };
             galFrameStop = stop;
+            if (onMore) galGrowEnd = end;
             window.addEventListener('message', onMsg);
-            f.name = GAL_NAME + ':' + token;
+            f.name = GAL_NAME + ':' + token + (onMore ? ':grow' : '');
             f.setAttribute('sandbox', 'allow-scripts allow-same-origin');     // no top navigation, no popups
             f.setAttribute('aria-hidden', 'true');
             f.tabIndex = -1;
             f.style.cssText = 'all:initial;position:fixed;left:0;top:0;width:' + vpW() + 'px;height:' + vpH() +
                 'px;border:0;opacity:0;pointer-events:none;z-index:-2147483647';
             f.addEventListener('load', function () {
+                if (done) return;
                 let u = '';
                 try { u = f.contentWindow.location.href; } catch (e) { u = 'unreadable: ' + e.name; }
                 galTrace(href, 'frame loaded');
@@ -11001,7 +11035,7 @@
             const lagCheck = function () {
                 const late = performance.now() - lagAt - GAL_LAG_TICK;
                 if (late > GAL_LAG_MS && document.visibilityState !== 'hidden') {   // a hidden tab's timers are throttled, not frozen
-                    fin(null, 'the page froze for ' + Math.round(late) + ' ms');
+                    if (done) end('froze'); else fin(null, 'the page froze for ' + Math.round(late) + ' ms');
                     galPreHalt('froze');
                     toast('Gallery preload stopped: the page froze for ' + (late / 1000).toFixed(1) + ' s loading a linked page', 3000);
                     return;
@@ -11047,26 +11081,56 @@
 
     // Inside the hidden frame: once no picture has arrived for GAL_SETTLE_MS (or at GAL_QUIET_CAP_MS), send the parent what the widget would count.
     function galProbeReport() {
-        const token = String(window.name).slice(GAL_NAME.length + 1);
+        const tag = String(window.name).slice(GAL_NAME.length + 1).split(':');
+        const token = tag[0], grow = tag[1] === 'grow';
         let sent = false, quietT = 0, capT = 0, obs = null;
+        const known = new Set();
         galNoMedia();
         document.addEventListener('play', function (e) {
             try { e.target.muted = true; e.target.pause(); } catch (x) { /* not media */ }
         }, true);
-        const send = function (final) {
-            if (sent) return;
-            let items = [];
+        const list = function () {
             try {
-                items = widgetEntries().filter(function (e) { return e.el && e.el.tagName === 'IMG'; })
+                return widgetEntries().filter(function (e) { return e.el && e.el.tagName === 'IMG'; })
                     .map(function (e) { return galItem(e.el, shownUrl(e.el) || e.url, location.href); })
                     .filter(function (x) { return x.thumb && !/^(data|blob):/.test(x.thumb); }).slice(0, GAL_MAX);
-            } catch (err) { dbg('gallery frame could not list the page', String(err)); }
+            } catch (err) { dbg('gallery frame could not list the page', String(err)); return []; }
+        };
+        const post = function (items, done) {
+            items.forEach(function (x) { known.add(x.thumb); });
+            try { window.parent.postMessage({ hzGallery: token, items: items, done: done, title: document.title, site: siteNameOf(document) }, location.origin); }
+            catch (e) { /* parent gone */ }
+        };
+        // Reading on: a screen further down every GAL_GROW_TICK, new pictures sent as they mount, done once the bottom stays quiet.
+        const readOn = function () {
+            const t0 = Date.now();
+            let idle = 0;
+            const tick = function () {
+                const fresh = list().filter(function (x) { return !known.has(x.thumb); });
+                if (fresh.length) { idle = 0; post(fresh, false); }
+                const se = document.scrollingElement || document.documentElement, max = se.scrollHeight - window.innerHeight;
+                if (se.scrollTop < max - 4) {
+                    se.scrollTop = Math.min(max, se.scrollTop + Math.round(window.innerHeight * 0.9));
+                    idle = 0;
+                    try { window.dispatchEvent(new Event('scroll')); } catch (e) { /* the real one follows */ }     // a frame not painted sends none
+                } else {
+                    if (idle % 2000 === 0) { try { window.dispatchEvent(new Event('scroll')); } catch (e) { /* as above */ } }
+                    idle += GAL_GROW_TICK;
+                }
+                if (idle >= GAL_GROW_IDLE_MS || Date.now() - t0 > GAL_GROW_MAX_MS) { post([], true); return; }
+                setTimeout(tick, GAL_GROW_TICK);
+            };
+            setTimeout(tick, GAL_GROW_TICK);
+        };
+        const send = function (final) {
+            if (sent) return;
+            const items = list();
             if (!items.length && !final) return;
             sent = true;
             clearTimeout(quietT); clearTimeout(capT);
             if (obs) obs.disconnect();
-            try { window.parent.postMessage({ hzGallery: token, items: items, title: document.title, site: siteNameOf(document) }, location.origin); }
-            catch (e) { /* parent gone */ }
+            post(items, !grow);
+            if (grow) readOn();
         };
         const bump = function () { clearTimeout(quietT); quietT = setTimeout(function () { send(false); }, GAL_SETTLE_MS); };
         const isPic = function (n) { return n.nodeType === 1 && (n.tagName === 'IMG' || (n.querySelector && !!n.querySelector('img'))); };
@@ -11126,6 +11190,10 @@
         }).then(function (v) {
             galTrace(href, 'load result: ' + (v === 'cancel' ? 'cancelled' : !v ? 'nothing' : v.length + ' pictures') + (weak ? ' (HTML only, not kept)' : ''));
             if (v === 'cancel' || !v || weak) galCache.delete(href);
+            if (Array.isArray(v)) {
+                galLists.set(href, v);
+                if (galLists.size > GAL_CACHE) galLists.delete(galLists.keys().next().value);
+            }
             setTimeout(galPreNext, 0);
             return v;
         });
@@ -11149,6 +11217,14 @@
             'padding:6px 12px;border-radius:8px;background:#1e1e2e;border:1px solid #f9e2af;color:#f9e2af;font:13px/1.3 system-ui,sans-serif;' +
             'pointer-events:none;box-shadow:0 4px 14px rgba(0,0,0,.6)}' +
             '.svd{position:absolute;left:4px;top:4px;width:22px;height:22px;pointer-events:none}' +
+            '.pg[hidden],.hint[hidden]{display:none}' +
+            '.pg{position:fixed;left:50%;top:' + (GAL_GAP - 4) + 'px;transform:translateX(-50%);max-width:calc(100vw - 32px);box-sizing:border-box;' +
+            'padding:3px 12px;border-radius:8px;background:#1e1e2e;border:1px solid #45475a;color:#cdd6f4;font:12px/1.4 system-ui,sans-serif;' +
+            'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none;box-shadow:0 4px 14px rgba(0,0,0,.6)}' +
+            '.hint{position:fixed;display:flex;align-items:center;gap:6px;box-sizing:border-box;height:22px;padding:0 6px;border-radius:6px;' +
+            'background:rgba(30,30,46,.92);border:1px solid #45475a;color:#cdd6f4;font:12px/1 system-ui,sans-serif;white-space:nowrap;' +
+            'pointer-events:none;box-shadow:0 2px 8px rgba(0,0,0,.5)}' +
+            '.hint svg{display:block;width:12px;height:12px;fill:#89b4fa}' +
             'img{display:block;width:100%;height:100%;object-fit:cover;border-radius:6px;background:#1e1e2e;opacity:0;transition:opacity ' + GAL_FADE_MS + 'ms ease;' +
             'box-shadow:0 8px 22px rgba(0,0,0,.55),0 2px 5px rgba(0,0,0,.4)}' +
             'img.ok{opacity:1}' +
@@ -11176,8 +11252,9 @@
         return galRoot;
     }
 
-    // Rows of one height spread over the viewport, each split around the hole; the largest height that fits every shape.
-    function galRows(asp, hole) {
+    // Rows of one height spread over the viewport, split around the hole: the largest height that fits every shape,
+    // or, when that is under GAL_MIN_H, pages of GAL_MIN_H rows. {out: slots by index for `page`, pages: [[from, to]], page}.
+    function galRows(asp, hole, page) {
         const G = GAL_GAP, W = vpW(), H = vpH(), bars = [hole];
         const free = function (y, h) {
             let segs = [[G, W - G]];
@@ -11193,13 +11270,14 @@
             });
             return segs;
         };
-        const place = function (h) {
-            const n = Math.max(1, Math.floor((H - G) / (h + G)));
-            const pitch = n > 1 ? (H - 2 * G - h) / (n - 1) : 0;
+        const place = function (h, from, top) {
+            top = top || G;
+            const n = Math.max(1, Math.floor((H - top) / (h + G)));
+            const pitch = n > 1 ? (H - top - G - h) / (n - 1) : 0;
             const out = [];
-            let i = 0;
+            let i = from || 0;
             for (let k = 0; k < n && i < asp.length; k++) {
-                const y = G + k * pitch;
+                const y = top + k * pitch;
                 free(y, h).forEach(function (s) {
                     const row = [];
                     let used = 0;
@@ -11218,14 +11296,25 @@
                     });
                 });
             }
-            return { out: out, all: i === asp.length };
+            return { out: out, all: i === asp.length, next: i };
         };
-        let lo = 8, hi = H - 2 * G, best = place(lo);
-        for (let k = 0; k < 24; k++) {
-            const mid = (lo + hi) / 2, p = place(mid);
-            if (p.all) { best = p; lo = mid; } else hi = mid;
+        const minH = Math.min(GAL_MIN_H, H - 2 * G);
+        if (place(minH).all) {
+            let lo = minH, hi = H - 2 * G, best = place(lo);
+            for (let k = 0; k < 24; k++) {
+                const mid = (lo + hi) / 2, p = place(mid);
+                if (p.all) { best = p; lo = mid; } else hi = mid;
+            }
+            return { out: best.out, pages: [[0, asp.length]], page: 0 };
         }
-        return best.out;
+        const top = G + GAL_PG_TOP, pages = [];
+        for (let s = 0; s < asp.length;) {
+            const e = Math.max(place(minH, s, top).next, s + 1);
+            pages.push([s, e]);
+            s = e;
+        }
+        const k = Math.min(Math.max(0, page | 0), pages.length - 1);
+        return { out: place(minH, pages[k][0], top).out, pages: pages, page: k };
     }
 
     // The hole's shading: the page dark and blurred except the hole, which gets a ring.
@@ -11242,7 +11331,9 @@
 
     // Lay the set out around one hole; returns the slots.
     function galLayout(set, hole) {
-        const L = galRows(set.asp, hole);
+        const R = galRows(set.asp, hole, set.page || 0), L = R.out;
+        set.pages = R.pages;
+        set.page = R.page;
         set.open = hole;
         galShade(set, hole);
         set.cells.forEach(function (cell, k) {
@@ -11253,7 +11344,73 @@
             cell.style.height = r.h + 'px';
             cell.style.transform = 'translate(' + r.x + 'px,' + r.y + 'px)';
         });
+        galPageNote(set);
         return L;
+    }
+
+    // The page line, top centre: only when the gallery has pages, or is still being read.
+    function galPageNote(set) {
+        if (!set) return;
+        const many = set.pages && set.pages.length > 1, reading = galGrowing === set.href;
+        if (!many && !reading) { if (set.pg) set.pg.hidden = true; return; }
+        if (!set.pg) {
+            set.pg = document.createElement('div');
+            set.pg.className = 'pg';
+            set.el.appendChild(set.pg);
+        }
+        set.pg.hidden = false;
+        const n = set.cells.length;
+        set.pg.textContent = (many ? 'Page ' + (set.page + 1) + ' / ' + set.pages.length + (reading ? '+' : '') + ' · ' : '') +
+            n + ' picture' + (n === 1 ? '' : 's') + (reading ? ', finding more…' : '') + (many ? ' · mouse wheel turns pages' : '');
+    }
+
+    // The cells of the page on screen, as their pics.
+    function galPagePics(set) {
+        const p = set.pages && set.pages[set.page];
+        return p ? set.pics.slice(p[0], p[1]) : set.pics.slice();
+    }
+
+    // Work owed to the page on screen: bigger files for cells drawn large, and every cell's original.
+    function galPageWork(set, L) {
+        const p = set.pages[set.page] || [0, set.pics.length];
+        for (let k = p[0]; k < p[1]; k++) {
+            const pic = set.pics[k], r = L[k];
+            if (pic && r && !pic.up && r.w > pic.nw * GAL_UPGRADE) { pic.up = true; galUpgrade(pic.item, pic.img, pic.nw, r.w); }
+        }
+        if (!set.pv) return;
+        if (set.hqTok) set.hqTok.cancelled = true;
+        galHqAll(set, galPagePics(set).map(function (q) { return q.img; }));
+    }
+
+    // One page on (+1) or back (-1). False at either end.
+    function galFlip(dir) {
+        const set = galCur;
+        if (!set || !set.pages || set.pages.length < 2) return false;
+        const to = Math.min(Math.max(0, set.page + dir), set.pages.length - 1);
+        if (to === set.page) return false;
+        if (galOwns(active) && !placed) cancel();
+        set.page = to;
+        galPageWork(set, galLayout(set, set.open));
+        return true;
+    }
+
+    let galFlipAt = 0, galWheelSum = 0, galWheelAt = 0;
+
+    // The wheel turns a paged gallery's pages; over a pinned preview it stays the preview's.
+    function galWheel(e) {
+        const set = galCur;
+        if (!set || !set.pages || set.pages.length < 2) return;
+        if (placed && pointInPreview(e.clientX, e.clientY)) return;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        const now = performance.now();
+        if (now - galWheelAt > 300) galWheelSum = 0;
+        galWheelAt = now;
+        galWheelSum += e.deltaMode ? e.deltaY * 40 : e.deltaY;
+        if (Math.abs(galWheelSum) < 60 || now - galFlipAt < GAL_FLIP_MS) return;
+        galFlip(galWheelSum > 0 ? 1 : -1);
+        galFlipAt = now;
+        galWheelSum = 0;
     }
 
     // Every visible linked picture on the page, as rects.
@@ -11384,7 +11541,7 @@
                 const pics = have.filter(Boolean), missing = list.length - pics.length;
                 if (bad.length) galTrace(href, 'retry: ' + (list.length - missing - (list.length - bad.length - hung.length)) + ' of ' + bad.length + ' failed ones loaded');
                 if (galCur !== set || galWant !== href) return;
-                if (pics.length > shown) galBuild(href, pics);
+                if (pics.length > shown && set.cells.length < pics.length) galBuild(href, pics);
                 if (missing) galShortNote(href, pics.length, list.length, hung.length, missing - hung.length);
             });
         });
@@ -11418,32 +11575,38 @@
         });
     }
 
+    // One thumbnail's cell, appended to the set.
+    function galCell(set, p, saved) {
+        const cell = document.createElement('div');
+        cell.className = 'cell';
+        p.img.classList.add('ok');
+        p.img.__hzItem = p.item;
+        cell.appendChild(p.img);
+        if (saved.has(p.item.thumb)) cell.appendChild(galSavedIcon('svd'));
+        cell.addEventListener('mouseenter', function () { if (set.pv) galPv(p.img); else galNoPv(set); });
+        cell.addEventListener('mouseleave', function () { if (!placed && active === p.img) cancel(); });
+        set.cells.push(cell);
+        set.asp.push(p.asp);
+        set.pics.push(p);
+        set.el.appendChild(cell);
+    }
+
     function galBuild(href, pics) {
         const root = galLayer();
         if (!galHost.isConnected) document.documentElement.appendChild(galHost);
+        const page = galCur && galCur.href === href ? galCur.page : 0;
         if (galCur) galDrop(galCur);
-        const set = { href: href, el: document.createElement('div'), shade: document.createElement('div'), ring: document.createElement('div'), cells: [], asp: [] };
+        const set = { href: href, el: document.createElement('div'), shade: document.createElement('div'), ring: document.createElement('div'),
+            cells: [], asp: [], pics: [], page: page };
         set.el.className = 'set';
         set.shade.className = 'shade';
         set.ring.className = 'ring';
         set.el.appendChild(set.shade);
         set.el.appendChild(set.ring);
         const saved = galList(GAL_SAVED_KEY);
-        pics.forEach(function (p) {
-            const cell = document.createElement('div');
-            cell.className = 'cell';
-            p.img.classList.add('ok');
-            p.img.__hzItem = p.item;
-            cell.appendChild(p.img);
-            if (saved.has(p.item.thumb)) cell.appendChild(galSavedIcon('svd'));
-            cell.addEventListener('mouseenter', function () { if (set.pv) galPv(p.img); else galNoPv(set); });
-            cell.addEventListener('mouseleave', function () { if (!placed && active === p.img) cancel(); });
-            set.cells.push(cell);
-            set.asp.push(p.asp);
-            set.el.appendChild(cell);
-        });
-        const L = galLayout(set, galHole);
+        pics.forEach(function (p) { galCell(set, p, saved); });
         set.pv = siteEnabledAt(href);       // the linked page previews: so do its thumbnails
+        const L = galLayout(set, galHole);
         set.el.classList.add('live');
         root.appendChild(set.el);
         void set.el.offsetWidth;
@@ -11460,10 +11623,92 @@
             dbg('gallery seen', { href: href, readBack: galList(GAL_SEEN_KEY).has(href) });
             galMarkAll();
         }, GAL_SEEN_MS);
-        pics.forEach(function (p, k) {
-            if (L[k] && L[k].w > p.nw * GAL_UPGRADE) galUpgrade(p.item, p.img, p.nw, L[k].w);
+        galPageWork(set, L);
+        if (galOn) { galCatchUp(set); galGrow(href); }
+    }
+
+    // Pictures of this gallery already known but not in the set (read after it was built): add them.
+    function galCatchUp(set) {
+        const base = galLists.get(set.href);
+        if (!base) return;
+        const keys = galKeys(set.pics.map(function (p) { return p.item; }));
+        const add = base.filter(function (it) { return !galKeyHit(keys, it); });
+        if (add.length) galAppend(set, add);
+    }
+
+    // The URL paths an item is known by: its thumbnail and every srcset entry.
+    function galItemKeys(it) {
+        const out = [];
+        const path = function (u) { try { const x = new URL(u, it.base); return x.host + x.pathname; } catch (e) { return ''; } };
+        out.push(path(it.thumb));
+        (it.ss || []).forEach(function (v) { parseSrcset(v).forEach(function (u) { out.push(path(u)); }); });
+        return out.filter(Boolean);
+    }
+
+    function galKeys(items) {
+        const s = new Set();
+        items.forEach(function (it) { galItemKeys(it).forEach(function (k) { s.add(k); }); });
+        return s;
+    }
+
+    function galKeyHit(keys, it) {
+        return galItemKeys(it).some(function (k) { return keys.has(k); });
+    }
+
+    // New pictures for an open set: their thumbnails load (up to GAL_WAIT_MS), then one relayout on the same page.
+    function galAppend(set, items) {
+        let pending = [], timer = 0;
+        const flush = function () {
+            timer = 0;
+            if (galCur !== set) return;
+            const batch = pending.sort(function (a, b) { return a.k - b.k; });
+            pending = [];
+            const saved = galList(GAL_SAVED_KEY), keys = galKeys(set.pics.map(function (p) { return p.item; }));
+            const before = set.pages && set.pages[set.page] ? set.pages[set.page].join('-') : '';
+            let n = 0;
+            batch.forEach(function (b) { if (!galKeyHit(keys, b.p.item)) { galCell(set, b.p, saved); n++; } });
+            if (!n) return;
+            galTrace(set.href, 'appended ' + n + ' (' + set.cells.length + ' in all)');
+            const L = galLayout(set, set.open);
+            if (set.pages[set.page].join('-') !== before) galPageWork(set, L);
+        };
+        items.forEach(function (it, k) {
+            galImg(it).then(function (p) {
+                if (!p || galCur !== set) return;
+                pending.push({ p: p, k: k });
+                if (!timer) timer = setTimeout(flush, GAL_APPEND_MS);
+            });
         });
-        if (set.pv) galHqAll(set, pics.map(function (p) { return p.img; }));
+    }
+
+    // While a gallery is open its page is read on in a frame that scrolls it, so pictures it mounts late join the set.
+    function galGrow(href) {
+        if (galGrowing === href || galGrown.has(href)) return;
+        galGrowing = href;
+        galTrace(href, 'reading on: start');
+        if (galCur && galCur.href === href) galPageNote(galCur);
+        galRender(href, function (items) { galMore(href, items); }, function (why) {
+            if (galGrowing === href) galGrowing = null;
+            if (why === 'grown') galGrown.add(href);
+            galTrace(href, 'reading on: ' + why);
+            if (galCur && galCur.href === href) galPageNote(galCur);
+        }).then(function (v) { if (Array.isArray(v)) galMore(href, v); });
+    }
+
+    // The reading frame's pictures: those not known yet join the stored list and, if it is open, the set.
+    function galMore(href, items) {
+        const base = galLists.get(href);
+        if (!base) return;
+        const keys = galKeys(base), add = [];
+        items.forEach(function (it) {
+            if (!it || !it.thumb || blocked(it.thumb) || galKeyHit(keys, it)) return;
+            galItemKeys(it).forEach(function (k) { keys.add(k); });
+            add.push(it);
+        });
+        if (!add.length) return;
+        add.forEach(function (it) { base.push(it); });
+        galTrace(href, 'reading on: +' + add.length + ' (' + base.length + ' known)');
+        if (galCur && galCur.href === href) galAppend(galCur, add);
     }
 
     const galHqLive = new Set();         // originals being fetched now, for the open diagnostics
@@ -11520,6 +11765,8 @@
         clearTimeout(galHoverTimer);
         galWant = null;
         galOn = false;
+        galPeek = false;
+        if (galGrowEnd) galGrowEnd('closed');
         if (galOwns(active)) cancel();
         if (galCur) { galDrop(galCur); galCur = null; galBlur.classList.remove('on'); }
     }
@@ -11621,7 +11868,7 @@
 
     function galOver(e) {
         if (!galWant && !galCur && !(cfg.gallerySites || []).length) return;
-        if (!galleryHere()) { if (galWant || galCur) galHide(); return; }
+        if (!galleryHere()) { if ((galWant || galCur) && !galPeek) galHide(); return; }
         if (galLock || galAtEdge(e.clientX, e.clientY)) return;
         const href = galLinkOf(e.target);
         if (!href) return;
@@ -11651,6 +11898,52 @@
         clearTimeout(galGraceTimer);
         galPendStart(href, 'middle press');
         galLoad(href).then(function (list) { galShow(href, list); });
+    }
+
+    // A hovered door: its pictures are read ahead, and a chip on its corner says a middle-click shows them.
+    function galDoorHover(el) {
+        if (!isTopFrame || galCur || galWant) return;
+        const href = galLinkOf(el);
+        if (!href) return;
+        galHintShow(el);
+        clearTimeout(galHoverTimer);
+        galHoverTimer = setTimeout(function () {
+            if (galHintFor !== el) return;
+            galLoad(href).then(function (list) { if (Array.isArray(list)) galWarm(list); });
+        }, cfg.hoverDelay);
+    }
+
+    function galHintShow(el) {
+        if (galHintFor === el) return;
+        const root = galLayer();
+        if (!galHost.isConnected) document.documentElement.appendChild(galHost);
+        if (!galHintEl) {
+            galHintEl = document.createElement('div');
+            galHintEl.className = 'hint';
+            root.appendChild(galHintEl);
+        }
+        let seen = {};
+        try { seen = JSON.parse(GM_getValue(GAL_HINT_KEY, '') || '{}') || {}; } catch (e) { /* fresh */ }
+        const host = pageHost(), n = seen[host] || 0;
+        while (galHintEl.firstChild) galHintEl.firstChild.remove();
+        galHintEl.appendChild(mkIcon(ICON_GALLERY));
+        if (n < GAL_HINT_TIMES) {
+            const t = document.createElement('span');
+            t.textContent = 'Middle-click to see its pictures';
+            galHintEl.appendChild(t);
+            seen[host] = n + 1;
+            try { GM_setValue(GAL_HINT_KEY, JSON.stringify(seen)); } catch (e) { /* this page only */ }
+        }
+        const r = el.getBoundingClientRect();
+        galHintEl.style.left = Math.max(4, r.left + 6) + 'px';
+        galHintEl.style.top = Math.max(4, r.top + 6) + 'px';
+        galHintEl.hidden = false;
+        galHintFor = el;
+    }
+
+    function galHintHide() {
+        galHintFor = null;
+        if (galHintEl) galHintEl.hidden = true;
     }
 
     // ---- open diagnostics
@@ -11797,13 +12090,14 @@
     function galKeyDown(e) {
         if (e.key !== 'Control') { galTap = false; return; }
         if (e.repeat) return;
-        galTap = !e.shiftKey && !e.altKey && !e.metaKey && !typingIn(e) && galleryHere();
+        galTap = !e.shiftKey && !e.altKey && !e.metaKey && !typingIn(e) && (galleryHere() || (galPeek && !!(galWant || galCur)));
     }
 
     function galKeyUp(e) {
         if (e.key !== 'Control' || !galTap) return;
         galTap = false;
-        if (galOn || galWant || galCur) { galHide('ctrl'); return; }
+        if (galOn || galWant || galCur) { if (galPeek) galPeekTapAt = Date.now(); galHide('ctrl'); return; }
+        if (!galleryHere()) return;
         if (!galAt || galLock || galEdge) return;
         galOn = true;
         galHole = galAt.hole;
@@ -11835,6 +12129,7 @@
     function galMove(e) {
         galPt.x = e.clientX;
         galPt.y = e.clientY;
+        if (galHintFor && !holds(galHintFor.getBoundingClientRect(), galPt.x, galPt.y)) galHintHide();
         if (galAtEdge(galPt.x, galPt.y)) {
             if (!galEdge) { galEdge = true; galAt = null; if (!galOn && (galWant || galCur)) galHide(); }
             return;
@@ -11855,7 +12150,8 @@
 
     // A page scroll hides the set; nothing shows again until the pointer itself moves.
     function galScroll(e) {
-        if (!(cfg.gallerySites || []).length) return;
+        galHintHide();
+        if (!galMarksHere() && !galWant && !galCur) return;
         const t = e.target;
         if (t !== document && !(t && t.nodeType === 1 && t.clientHeight >= vpH() / 2)) return;
         galLock = { x: galPt.x, y: galPt.y };
@@ -12018,7 +12314,7 @@
     }
 
     function galMarkAll() {
-        if (!isTopFrame || !galleryListed()) return;
+        if (!isTopFrame || !galMarksHere()) return;
         const seen = galList(GAL_SEEN_KEY), went = galList(GAL_VISITED_KEY), from = galList(GAL_SAVEDFROM_KEY);
         if (!seen.size && !went.size && !from.size) { galMarkLog({ stored: 'none' }); return; }
         const dbgOn = debugOn(), st = { seenStored: seen.size, visitedStored: went.size, pictures: 0, linked: 0, ticks: 0, tooSmall: 0, hidden: [] };
@@ -12189,7 +12485,7 @@
         window.addEventListener('touchstart', function () { galInputAt = performance.now(); }, { capture: true, passive: true });
         window.addEventListener('pagehide', function () { if (galPreLog) { galPreLog.end('cut'); galPreLog = null; } });
         setTimeout(function () {
-            if (galleryListed()) galListAdd(GAL_VISITED_KEY, location.href.split('#')[0]);
+            if (galMarksHere()) galListAdd(GAL_VISITED_KEY, location.href.split('#')[0]);
         }, 0);
         document.addEventListener('mouseover', galOver, true);
         document.addEventListener('mouseout', galOut, true);
@@ -12198,7 +12494,9 @@
             galTap = false;
             galMidAt = 0;
             if (e.button === 0) galInputAt = performance.now();      // a scrollbar drag; the middle press itself is not
-            if (e.button === 1 && !e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey && galleryHere()) {
+            galHintHide();
+            const plain = e.button === 1 && !e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey;
+            if (plain && galleryHere()) {
                 if (e.target === galHost) { e.preventDefault(); return; }      // no autoscroll over the gallery
                 const href = galLinkOf(e.target);
                 if (href) {
@@ -12209,6 +12507,17 @@
                     return;
                 }
                 galMissed(e);
+            } else if (plain && !CAPTCHA_HERE && siteEnabled()) {
+                if (e.target === galHost && galCur) { e.preventDefault(); return; }
+                const door = doorAt(e.target, e.clientX, e.clientY), href = door && galLinkOf(door);
+                if (href) {     // a door, anywhere: peek at its pictures. See P17.
+                    e.preventDefault();
+                    e.stopImmediatePropagation();
+                    galMidAt = Date.now();
+                    galPeek = true;
+                    galMiddle(door, href);
+                    return;
+                }
             }
             if (e.button !== 0 || (!galWant && !galCur)) return;     // middle and right presses (a tab, the menu) leave it up
             if (e.target === galHost || ours(e.target) || pointInPreview(e.clientX, e.clientY)) return;   // the gallery or the preview
@@ -12217,9 +12526,15 @@
         window.addEventListener('keydown', function (e) {
             if (e.key !== 'Control') galInputAt = performance.now();
             if (e.key === 'Escape' && galCur && !(view && box && box.classList.contains('on'))) galHide('esc');   // a preview up: Esc closes it first
+            if ((e.key === 'PageDown' || e.key === 'PageUp') && galCur && galCur.pages && galCur.pages.length > 1 && !typingIn(e)) {
+                e.preventDefault();
+                e.stopImmediatePropagation();
+                galFlip(e.key === 'PageDown' ? 1 : -1);
+            }
         }, true);
+        CAP_TARGET.addEventListener('wheel', galWheel, WHEEL_OPTS);
         window.addEventListener('resize', function () {
-            if ((cfg.gallerySites || []).length) galMarkSoon();
+            if (galMarksHere()) galMarkSoon();
             galAt = null;
             if (galWant || galCur) galHide('resize');
         });

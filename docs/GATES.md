@@ -929,7 +929,7 @@ the widget count too. Refused hover → `doorHover()`: `areaTouch`, and on `LINK
 `resolve()` (`token.recheck` forces the linked fetch, no `onHit`) whose leaf verdict drops the rule.
 Settings → Per-site fixes: `doorRow()` says what is learned for this site, Forget clears it.
 Fixture: `test-pages/door-search.html` (d1-d3 preview and teach, d4-d5 then refused; leaf row
-always previews). Not built yet: peeking a door's gallery without gallery mode (NEXT.md B).
+always previews). Peek at a door's gallery: v0.282.0, `GALLERY.md` (middle-click, any site).
 **Fixture trap:** `photo-200x150.jpg` is upgraded to a 1600 px `photo.jpg` by a URL rule — a leaf;
 door fixtures use `mural.jpg`.
 

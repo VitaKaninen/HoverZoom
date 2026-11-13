@@ -1241,5 +1241,27 @@ eq('template: forbidden characters go', N.fillNameTemplate('[page_title]', { tit
 eq('template: an unknown token stays', N.fillNameTemplate('[nope] [num]', { num: '7', now: NOW }), '[nope] 7');
 eq('template: the original name', N.fillNameTemplate('[site] - [page_title] - [orig_name]', { site: 'Wikipedia', title: 'Red panda', name: '0001', now: NOW }), 'Wikipedia - Red panda - 0001');
 eq('template: all empty', N.fillNameTemplate('[site] - ([page_title])', { now: NOW }), '');
+// ---- gallery pages: rows never under GAL_MIN_H; past that the set is laid out as pages.
+{
+    const a = src.indexOf('    function galRows('), b = src.indexOf('    // The hole\'s shading');
+    const rows = new Function('vpW', 'vpH', 'GAL_GAP', 'GAL_MIN_H', 'GAL_PG_TOP', src.slice(a, b) + NL + 'return galRows;')
+        (function () { return 1920; }, function () { return 1080; }, 12, 120, 30);
+    const hole = { x: 100, y: 100, w: 160, h: 120 }, four3 = function (n) { return Array(n).fill(4 / 3); };
+    const small = rows(four3(20), hole, 0);
+    eq('gallery: 20 pictures fit on one page', small.pages.length, 1);
+    eq('  every one placed', small.out.filter(Boolean).length, 20);
+    eq('  rows taller than the floor', small.out[0].h >= 120, true);
+    const big = rows(four3(683), hole, 0);
+    eq('gallery: 683 pictures make pages', big.pages.length > 1, true);
+    eq('  the pages cover every picture once', big.pages.reduce(function (n, p) { return n + p[1] - p[0]; }, 0), 683);
+    eq('  rows at the floor', big.out[big.pages[0][0]].h, 120);
+    eq('  page 1 places only its own', big.out.filter(Boolean).length, big.pages[0][1] - big.pages[0][0]);
+    const last = rows(four3(683), hole, 999), lp = big.pages[big.pages.length - 1];
+    eq('  a page past the end is the last', last.page, big.pages.length - 1);
+    eq('  the last page places its own', last.out.filter(Boolean).length, lp[1] - lp[0]);
+    eq('  no cell overlaps the hole', last.out.filter(Boolean).every(function (r) {
+        return r.x + r.w <= hole.x || r.x >= hole.x + hole.w || r.y + r.h <= hole.y || r.y >= hole.y + hole.h; }), true);
+    console.log('  (683 pictures: ' + big.pages.length + ' pages of about ' + (big.pages[0][1] - big.pages[0][0]) + ')');
+}
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);
