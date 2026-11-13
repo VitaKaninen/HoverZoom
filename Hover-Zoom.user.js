@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.286.0
+// @version     0.287.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -10997,7 +10997,7 @@
         const key = domChain(el);
         if (galKinds.has(key)) return galKinds.get(key);
         const p = galKindRead(href).then(function (k) {
-            if (k) galKindDone.set(key, k); else galKinds.delete(key);
+            galKindDone.set(key, k);
             return k;
         });
         galKinds.set(key, p);
@@ -12021,6 +12021,7 @@
         try { seen = JSON.parse(GM_getValue(GAL_HINT_KEY, '') || '{}') || {}; } catch (e) { /* fresh */ }
         const host = pageHost(), n = seen[host] || 0;
         while (galHintEl.firstChild) galHintEl.firstChild.remove();
+        const r = galMarkRect(el, el.closest('picture') || el);
         galHintEl.appendChild(mkIcon(ICON_GALLERY));
         if (n < GAL_HINT_TIMES) {
             const t = document.createElement('span');
@@ -12029,7 +12030,6 @@
             seen[host] = n + 1;
             try { GM_setValue(GAL_HINT_KEY, JSON.stringify(seen)); } catch (e) { /* this page only */ }
         }
-        const r = el.getBoundingClientRect();
         galHintEl.style.left = Math.max(4, r.left + 6) + 'px';
         galHintEl.style.top = Math.max(4, r.top + 6) + 'px';
         galHintEl.hidden = false;
@@ -12316,7 +12316,7 @@
         for (let i = 0; i < corners.length; i++) {
             const p = pt(corners[i]);
             if (p.x < 0 || p.y < 0 || p.x > vpW() || p.y > vpH()) continue;
-            const top = document.elementFromPoint(p.x, p.y);
+            const top = document.elementsFromPoint(p.x, p.y).find(function (n) { return n !== m && n !== galHost && !ours(n); });   // the gallery's own cells are not the page's
             if (!top || top === at || at.contains(top) || top.contains(at) || top.hasAttribute(GAL_SAVED_MARK) || top.closest('[' + GAL_SAVED_MARK + ']')) { pick = corners[i]; break; }
         }
         m.style.pointerEvents = 'auto';
