@@ -128,6 +128,7 @@ arrives — nothing is decided in advance.
 | `P12` | Anything that moves is allowed to reach the frame at all — a video file by its URL, an animated GIF/WebP/APNG by sniffing its first 4 KB (`E27`, `E31`, `E32`) | `videoMode` ≠ `none` |
 | `P13` | The frame is not a captcha — reCAPTCHA, hCaptcha, Cloudflare, Arkose, Google's `/sorry/` page — judged by the frame's own URL, once, at load ([`docs/GATES.md`](docs/GATES.md)) | — |
 | `P10` | Not a **band** across the top of the page (`E20`) — a masthead, channel banner or leaderboard ad. The one furniture rule that applies to an `<img>` as well | `skipFurniture` on |
+| `P17` | Not a **door**: a thumbnail in a learned door area for this site — same-origin link to a page that, for three thumbnails of this structure, held no copy more than 1.5× bigger than drawn (search results, gallery covers). Refused silently, so a click follows the link; out of the slideshow too. Learned only from hovers; 10 % of refused hovers recheck silently and a leaf drops the area at once; ageing as `P16`; Settings → Per-site fixes → Forget ([`docs/GATES.md`](docs/GATES.md)) | learned, none at first |
 
 The element tested is not always the one under the pointer. When the hover target fails `P1`, a
 single picture directly beneath it in the same card is tried instead (`E18`), and that picture
@@ -153,7 +154,7 @@ shows no ring.
 `aria-hidden`, and those are real pictures on screen that a user will hover.
 
 *Code: `eligible`, `eligibleDirect`, `coveredMedia`, `wallpaperReason`, `decorativeReason`,
-`blockMatch`, `playerSurfaceReason`, `videoLinkReason`, `overVideoSurface`, `siteEnabled`, `onOver`.*
+`blockMatch`, `playerSurfaceReason`, `videoLinkReason`, `overVideoSurface`, `siteEnabled`, `onOver`, `doorReason`/`doorVerdict`/`doorLearn`/`doorHover`/`doorAt`.*
 
 ---
 

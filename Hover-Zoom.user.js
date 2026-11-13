@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.280.0
+// @version     0.281.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -315,6 +315,7 @@
         avatarAreas: {},            // host -> {rules, samples, idleDays}: small pictures there preview as ordinary ones
         ownPlayerAreas: {},         // host -> {rules, samples, idleDays}: video-link thumbnails the site's own player lands on
         linkAreas: {},              // host -> {rules, samples, idleDays}: thumbnails whose linked page never holds the original
+        doorAreas: {},              // host -> {rules, samples, idleDays}: thumbnails that lead to other pages, not a bigger copy (P17)
         taughtRules: {},            // image host -> [{re, to, ex, one?, made}]: where the original lives, shown by the user
         areasAgedOn: 0,             // the day areaAgeAll() last ran
         siteAudio: {},              // host -> {muted, volume}; absent means muted, which is the
@@ -1973,7 +1974,7 @@
         const lt = !skipLinkedPage(el) && el.ownerDocument === document ? linkTarget(el) : null;
         const lchain = lt ? domChain(el) : '', lpath = pagePath();
         let lfetched = false;
-        const lskip = lt && areaRule('linkAreas', lchain, lpath) && Math.random() >= LINK_RECHECK;
+        const lskip = lt && !token.recheck && areaRule('linkAreas', lchain, lpath) && Math.random() >= LINK_RECHECK;
         if (lskip) dbg('linked page skipped — pages linked from here have never held the original', { link: lt.href });
         const linked = skipLinkedPage(el) || lskip ? Promise.resolve(null) : linkedMedia(el).then(async function (page) {
             if (!page || token.cancelled) return null;
@@ -2068,6 +2069,9 @@
             if (trusted) areaApply('linkAreas', areaDrop, lchain, lpath);
             else areaApply('linkAreas', areaLearn, lchain, lpath, lt.href);
         }
+        if (lt && full && token.door && !token.cancelled) doorLearn(doorVerdict({
+            linked: lfetched ? 'fetched' : lskip ? 'skipped' : null, trusted: trusted, best: best,
+            displayed: displayed, failed: !!failure }), lchain, lpath, lt.href);
         if (trusted) {
             // The linked page names the picture, but the page's own copy of it may be bigger.
             const own = shown && !trusted.video && !token.cancelled && !unstable.has(shown) ? await probe(shown, false) : null;
@@ -5775,6 +5779,49 @@
     }
 
     const LINK_RECHECK = 0.1;       // share of hovers in a skip area that fetch the linked page anyway
+
+    // A thumbnail in a learned door area: it leads to a page of other pictures, so it is the page's link, not a preview. See P17.
+    function doorReason(el) {
+        const e = (cfg.doorAreas || {})[pageHost()];
+        if (!e || !e.rules || !e.rules.length || el.ownerDocument !== document) return null;
+        if (skipLinkedPage(el) || !linkTarget(el)) return null;
+        const r = vdRuleFor(e, domChain(el), pagePath());
+        return r ? 'it leads to a page of other pictures, as thumbnails like it here have (' + r.dom + ' on ' + r.path + ')' : null;
+    }
+
+    // A hover's door verdict into doorAreas; a rule appearing or going recounts the widget.
+    function doorLearn(verdict, chain, path, id) {
+        if (!verdict) return;
+        const c = verdict === 'leaf' ? areaApply('doorAreas', areaDrop, chain, path)
+            : areaApply('doorAreas', areaLearn, chain, path, id);
+        if (c && c !== 'sampled' && c !== 'used' && c !== 'confirmed') setTimeout(twRecount, 0);
+    }
+
+    let doorCheckEl = null;
+
+    // A refused door hover: stamp its area, and on a LINK_RECHECK share check it silently against the linked page.
+    function doorHover(el) {
+        if (doorCheckEl === el) return;
+        const chain = domChain(el), path = pagePath();
+        areaApply('doorAreas', areaTouch, chain, path);
+        if (Math.random() >= LINK_RECHECK) return;
+        doorCheckEl = el;
+        dbg('door area: rechecking this thumbnail against the page it links to');
+        resolve(el, sizeOf(el), { cancelled: false, fresh: false, door: true, recheck: true }, null)
+            .catch(function () { return null; })
+            .then(function () { if (doorCheckEl === el) doorCheckEl = null; });
+    }
+
+    // The door-refused picture at the pointer: the target, or the one its cover hides.
+    function doorAt(t, x, y) {
+        const e = (cfg.doorAreas || {})[pageHost()];
+        if (!e || !e.rules || !e.rules.length) return null;
+        if (!t || t.nodeType !== 1 || !/^doorGate/.test(refusal(t) || '')) {
+            const under = t && t.nodeType === 1 ? coveredMedia(t, x, y) : null;
+            return under && /^doorGate/.test(refusal(under) || '') ? under : null;
+        }
+        return t;
+    }
     const OP_WATCH_MS = 3000;       // how long a refused video-link hover watches for the site's player
     let opWatchEl = null, opWatchTimer = 0;
 
@@ -6067,6 +6114,19 @@
         return { entry: e, change: 'aged' };
     }
 
+    const DOOR_BIGGER = 1.5;        // a copy this much bigger than drawn, on either side, makes a leaf
+
+    // One hover's ground truth for door areas: 'leaf' (a bigger copy exists), 'door', or null (no evidence). See P17.
+    function doorVerdict(r) {
+        if (!r.linked) return null;
+        const big = [r.trusted, r.best].some(function (h) {
+            return h && (h.w > r.displayed.w * DOOR_BIGGER || h.h > r.displayed.h * DOOR_BIGGER);
+        });
+        if (big) return 'leaf';
+        if (!r.trusted && !r.best && r.failed) return null;
+        return 'door';
+    }
+
     // The entry for a host: its own, else the most specific user entry covering it.
     function vdEntryFor(host) {
         const all = cfg.videoDelays || {};
@@ -6139,7 +6199,7 @@
 
     function vdRecord(chain, path, elapsed) { vdApply(vdLearn, chain, path, elapsed); }
 
-    const AREA_STORES = ['avatarAreas', 'ownPlayerAreas', 'linkAreas', 'videoDelays'];
+    const AREA_STORES = ['avatarAreas', 'ownPlayerAreas', 'linkAreas', 'doorAreas', 'videoDelays'];
 
     // The learned rule in cfg[key] covering this chain on this site, or null.
     function areaRule(key, chain, path) {
@@ -6433,6 +6493,7 @@
         if (NEVER[el.tagName]) return 'a <' + el.tagName.toLowerCase() + '> is never previewed';
         if ((why = playerSurfaceReason(el))) return 'playerGate: ' + why;
         if ((why = videoLinkRefused(el))) return 'videoLinkGate: ' + why;
+        if ((why = doorReason(el))) return 'doorGate: ' + why;
         if (cfg.skipFurniture && (why = decorativeReason(el))) return 'decorativeGate (skipFurniture is on): ' + why;
         // Before the <img> branch, because these are the furniture rules that apply to one.
         if (cfg.skipFurniture && (why = bannerReason(el))) return 'bannerGate (skipFurniture is on): ' + why;
@@ -6488,6 +6549,7 @@
             videoMode: cfg.videoMode + (playVideos ? '' : ' (turned off in this tab)'),
             playerGate: playerSurfaceReason(t) || 'none — no player on this page covers it',
             videoLinkGate: videoLinkReason(t) || 'none — does not lead to a video page',
+            doorGate: doorReason(t) || 'none — no learned door area covers it',
             dormantPlayer: dormantPlayer(),
             lateWait: (function () {
                 const w = vdEntryFor(pageHost());
@@ -6756,6 +6818,7 @@
         const el = eligible(e.target, e.clientX, e.clientY);
         if (debugOn()) dbg('hover', hoverReport(e.target, el, e));
         if (!el && e.target.tagName === 'IMG' && /^videoLinkGate/.test(refusal(e.target) || '')) opWatch(e.target);
+        if (!el) { const door = doorAt(e.target, e.clientX, e.clientY); if (door) doorHover(door); }
         if (!el) {
             if (!active || active.contains(e.target)) return;
             if (activeCovered && stillUnderPointer(active, e.clientX, e.clientY)) return;
@@ -6807,7 +6870,7 @@
             playerArrived(el);
         }, VDELAY_POLL_MS);
         // A hover is a user gesture, and a gesture always retries a cached miss. See TOUR.md §7.
-        const myToken = token = { cancelled: false, fresh: true };
+        const myToken = token = { cancelled: false, fresh: true, door: true };
         let heldHit = null;     // the best hit so far, kept back until the wait is over
         let resolving = false;  // the resolve has started; the ring belongs to it, not to the wait
         function paint(hit) {
@@ -12230,7 +12293,7 @@
     let panelOpened = null;     // Undo's snapshot — see openPanel(); MUST outlive a re-render
 
     // What the user entered per site, not knobs: `Reset to defaults` leaves these alone.
-    const RESET_KEEPS = ['siteList', 'gallerySites', 'blockList', 'referrerSites', 'siteAudio', 'videoDelays', 'avatarAreas', 'ownPlayerAreas', 'linkAreas', 'areasAgedOn', 'scrollSites', 'taughtRules'];
+    const RESET_KEEPS = ['siteList', 'gallerySites', 'blockList', 'referrerSites', 'siteAudio', 'videoDelays', 'avatarAreas', 'ownPlayerAreas', 'linkAreas', 'doorAreas', 'areasAgedOn', 'scrollSites', 'taughtRules'];
 
     // Open/closed, the fold, scroll and position for this TAB — sessionStorage is per tab and
     // per origin, so it follows a same-site link or a refresh and dies with the tab.
@@ -12652,6 +12715,41 @@
         }
 
         // The request log's count and its three ways out: copy with hosts replaced, show as stored, clear.
+        // This site's learned door areas, with a way to forget them. See P17.
+        function doorRow() {
+            const host = pageHost();
+            const e = (cfg.doorAreas || {})[host];
+            const n = e && e.rules ? e.rules.length : 0;
+            const text = document.createElement('span');
+            text.className = 'hint';
+            text.textContent = n ? 'On ' + host + ', ' + n + (n === 1 ? ' kind' : ' kinds') +
+                ' of thumbnail learned as a link to a page of other pictures. They show no preview; a click opens the page.'
+                : 'Thumbnails that lead to a page of other pictures (search results, gallery covers) stop previewing ' +
+                  'once three of a kind are seen. None learned on ' + (host || 'this site') + ' yet.';
+            const r = document.createElement('div');
+            r.className = 'row';
+            r.appendChild(text);
+            if (n) {
+                const b = document.createElement('button');
+                b.type = 'button';
+                b.textContent = 'Forget';
+                b.style.flex = 'none';
+                setTip(b, 'Preview these thumbnails again on this site, and start learning afresh');
+                b.addEventListener('click', function () {
+                    reloadSettings();
+                    const all = Object.assign({}, cfg.doorAreas);
+                    delete all[host];
+                    cfg.doorAreas = all;
+                    saveSettings();
+                    b.remove();
+                    text.textContent = 'Forgotten. Thumbnails on ' + host + ' preview again.';
+                    twRecount();
+                });
+                r.appendChild(b);
+            }
+            mount.appendChild(r);
+        }
+
         function requestLogRow() {
             const count = document.createElement('span');
             count.className = 'hint';
@@ -13481,6 +13579,7 @@
                 'one to set the wait by hand, 0 ms to stop learning it.',
             examples: 'example.com also covers www.example.com. Adding a site again replaces its entry.',
         });
+        doorRow();
         list('scrollSites', {
             heading: 'Scroll the page along with the slideshow on these sites',
             description: 'Learned when your scrolling raises the widget’s count; dropped after ' +

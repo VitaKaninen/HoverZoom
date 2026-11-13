@@ -1,0 +1,38 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Door areas</title>
+<!--
+  P17 door areas. Top row: results linking to gallery pages that hold no bigger copy (doors); after
+  three are hovered to completion the area is learned and the rest show no preview. Bottom row:
+  a different structure linking to a page that declares the 800x600 original (leaves), always
+  previews. Clear localStorage to reset.
+-->
+<style>
+  body { font: 14px system-ui, sans-serif; background: #1e1e2e; color: #cdd6f4; padding: 20px; }
+  .results, .finals { display: flex; flex-wrap: wrap; gap: 40px; margin-bottom: 40px; }
+  img { width: 160px; height: 120px; display: block; }
+</style>
+<div class="results">
+  <div class="result"><a id="d1" href="gallery-a.html"><img src="/test-images/mural.jpg?d1"></a></div>
+  <div class="result"><a id="d2" href="gallery-b.html"><img src="/test-images/mural.jpg?d2"></a></div>
+  <div class="result"><a id="d3" href="gallery-lazy.html"><img src="/test-images/mural.jpg?d3"></a></div>
+  <div class="result"><a id="d4" href="gallery-mixed.html"><img src="/test-images/mural.jpg?d4"></a></div>
+  <div class="result"><a id="d5" href="gallery-empty.html"><img src="/test-images/mural.jpg?d5"></a></div>
+</div>
+<div class="finals">
+  <figure class="final"><a id="l1" href="door-leaf.html?1"><img src="/test-images/mural.jpg?l1"></a></figure>
+  <figure class="final"><a id="l2" href="door-leaf.html?2"><img src="/test-images/mural.jpg?l2"></a></figure>
+</div>
+<script>
+  if (!localStorage.getItem('hoverZoomSettings'))
+    localStorage.setItem('hoverZoomSettings', JSON.stringify({ debug: true }));
+  var GM_getValue = function (key, dflt) {
+    var v = localStorage.getItem(key);
+    return v === null ? dflt : v;
+  };
+  var GM_setValue = function (key, val) { localStorage.setItem(key, val); };
+  var GM_addValueChangeListener = function () {};
+  var GM_registerMenuCommand = function () { return 'x'; };
+  var GM_unregisterMenuCommand = function () {};
+</script>
+<script src="../Hover-Zoom.user.js"></script>

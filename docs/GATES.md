@@ -916,7 +916,24 @@ Measured on an Amazon search page: 16 sprite uses flagged, one missed by the syn
 backgrounds are all `cover`, unaffected. Regression page: `test-pages/sprite.html` (#s1–#s4 refused,
 #c1/#c2 controls preview).
 
-## Door areas — navigation thumbnails stay quiet · `P17` · PLANNED, not built (user, 2026-11-12)
+## Door areas — navigation thumbnails stay quiet · `P17` · BUILT v0.281.0 (user, 2026-11-12)
+
+**As built:** store `doorAreas` (`AREA_STORES`, `RESET_KEEPS`). Verdict `doorVerdict()` (pure, tested),
+taken at the end of a **hover's** full `resolve()` only (`token.door`; slideshow resolves never learn,
+so a rule cannot form under a running slideshow): no linked page → none; any hit (linked page's or a
+candidate's) > `DOOR_BIGGER` 1.5 × drawn on a side → leaf → `areaDrop` at once; nothing found and
+something failed → none; else door → `areaLearn` (id = link). The linked page "skipped" by a
+`linkAreas` rule counts as fetched-with-nothing (that rule caches the same fetch; its own 10 % recheck
+keeps it honest). Gate `doorReason()` in `refusal()` (`doorGate:`), so doors leave the slideshow and
+the widget count too. Refused hover → `doorHover()`: `areaTouch`, and on `LINK_RECHECK` a silent
+`resolve()` (`token.recheck` forces the linked fetch, no `onHit`) whose leaf verdict drops the rule.
+Settings → Per-site fixes: `doorRow()` says what is learned for this site, Forget clears it.
+Fixture: `test-pages/door-search.html` (d1-d3 preview and teach, d4-d5 then refused; leaf row
+always previews). Not built yet: peeking a door's gallery without gallery mode (NEXT.md B).
+**Fixture trap:** `photo-200x150.jpg` is upgraded to a 1600 px `photo.jpg` by a URL rule — a leaf;
+door fixtures use `mural.jpg`.
+
+### The plan as approved
 
 The user wants previews only on the **final product**. Classify each thumbnail by what its link
 leads to, never the page type (a gallery page holds both kinds: its pictures, and a rotating

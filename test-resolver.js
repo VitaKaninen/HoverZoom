@@ -876,7 +876,7 @@ const vdStart = src.indexOf('    const VDELAY_SAMPLES');
 const vdEnd = src.indexOf('    // The entry for a host');
 if (vdStart < 0 || vdEnd < 0) { console.error('vdLearn markers not found'); process.exit(1); }
 const vd = new Function(src.slice(vdStart, vdEnd) +
-    NL + 'return {vdLearn, vdRound, vdRuleFor, chainPrefix, pathPrefix, chainMatches, pathMatches, sharedHead, vdWaitOf, vdForget, vdWorked, areaLearn, areaTouch, areaAge, areaDrop, VDELAY_SAMPLES, VDELAY_FORGET};')();
+    NL + 'return {vdLearn, vdRound, vdRuleFor, chainPrefix, pathPrefix, chainMatches, pathMatches, sharedHead, vdWaitOf, vdForget, vdWorked, areaLearn, areaTouch, areaAge, areaDrop, doorVerdict, VDELAY_SAMPLES, VDELAY_FORGET};')();
 
 eq('vdRound rounds up to 50 ms', vd.vdRound(1001), 1050);
 eq('vdRound never goes under one step', vd.vdRound(10), 250);
@@ -1001,6 +1001,25 @@ eq('two misses are strikes', avf.entry.rules[0].idle, 2);
 eq('  a confirmed avatar clears them', vd.areaLearn(avf.entry, AV2, '/watch').entry.rules[0].idle, undefined);
 eq('  a third removes the area and the site', vd.vdForget(avf.entry, AV1, '/watch').change, 'forgot the site');
 eq('an avatar elsewhere is not covered', vd.vdRuleFor(av.entry, SIDE, '/watch'), null);
+
+// ---- door areas (P17): the verdict, then the same area learning.
+const DV = function (o) { return vd.doorVerdict(Object.assign({ linked: 'fetched', trusted: null, best: null,
+    displayed: { w: 200, h: 150 }, failed: false }, o)); };
+eq('door: linked page fetched, nothing bigger', DV({}), 'door');
+eq('door: only about the drawn size', DV({ best: { url: 'https://x.com/t/1.jpg', w: 240, h: 180 } }), 'door');
+eq('door: the linked page holds the same small file', DV({ trusted: { w: 200, h: 150 } }), 'door');
+eq('leaf: the linked page declares a bigger copy', DV({ trusted: { w: 1600, h: 1200 } }), 'leaf');
+eq('leaf: a URL rule found a bigger file', DV({ best: { url: 'https://x.com/o/1.jpg', w: 1600, h: 1200 } }), 'leaf');
+eq('no verdict: no linked page', DV({ linked: null }), null);
+eq('no verdict: nothing found because something failed', DV({ failed: true }), null);
+eq('door from a learned skip of the linked page', DV({ linked: 'skipped' }), 'door');
+const DR1 = 'img>a.card>div.item-#>div.grid', DR2 = 'img>a.card>div.item-#.hot>div.grid', DR3 = 'img>a.card.new>div.item-#>div.grid';
+let door = vd.areaLearn(null, DR1, '/search', 7, 'https://x.com/g/1');
+door = vd.areaLearn(door.entry, DR1, '/search', 7, 'https://x.com/g/1');
+eq('door: one result hovered twice is one sample', door.change, null);
+door = vd.areaLearn(vd.areaLearn(door.entry, DR2, '/search', 7, 'https://x.com/g/2').entry, DR3, '/search', 7, 'https://x.com/g/3');
+eq('door: three results make an area', door.change, 'learned');
+eq('door: a leaf in it drops the area at once', vd.areaDrop(door.entry, DR1, '/search').change, 'forgot the site');
 const SB1 = 'img>span.chan-icon>a.channel>div.sidebar-item-#>div.sidebar';
 const SB2 = 'img>span.chan-icon>a.channel>div.sidebar-item-#.watched>div.sidebar';
 let mix = null;

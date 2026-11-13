@@ -22,7 +22,8 @@ waits on the user's yes. Ask before building, quote the old reason where one is 
 
 ## Proposal (recommendations, in build order)
 
-A. **Door/leaf decides, not a mode** — build `GATES.md` `P17`. Leaf: preview. Door: no preview; a
+A. **Door/leaf decides, not a mode** — learning + refusal BUILT v0.281.0 (`GATES.md` `P17`); the peek and
+   retiring the per-site gallery switch are not. Leaf: preview. Door: no preview; a
    click follows the link (fixes previews pinning on search pages); a peek opens its contact sheet.
    Replaces the per-site gallery switch and "previews off" state. Peek gesture: middle-click (as now)
    plus a small visible chip on a hovered door, for discoverability.
