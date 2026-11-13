@@ -128,6 +128,7 @@ arrives — nothing is decided in advance.
 | `P12` | Anything that moves is allowed to reach the frame at all — a video file by its URL, an animated GIF/WebP/APNG by sniffing its first 4 KB (`E27`, `E31`, `E32`) | `videoMode` ≠ `none` |
 | `P13` | The frame is not a captcha — reCAPTCHA, hCaptcha, Cloudflare, Arkose, Google's `/sorry/` page — judged by the frame's own URL, once, at load ([`docs/GATES.md`](docs/GATES.md)) | — |
 | `P10` | Not a **band** across the top of the page (`E20`) — a masthead, channel banner or leaderboard ad. The one furniture rule that applies to an `<img>` as well | `skipFurniture` on |
+| `P18` | A picture the page already draws at least as large as a preview would be: no preview, but a ⌕ chip on its corner opens one pinned, to zoom ([`docs/SETTINGS.md`](docs/SETTINGS.md) `bigChip`) | `bigChip` on |
 | `P17` | Not a **door**: a thumbnail in a learned door area for this site — same-origin link to a page that, for three thumbnails of this structure, held no copy more than 1.5× bigger than drawn (search results, gallery covers). Refused silently, so a click follows the link; out of the slideshow too. Learned only from hovers; 10 % of refused hovers recheck silently and a leaf drops the area at once; ageing as `P16`; Settings → Per-site fixes → Forget ([`docs/GATES.md`](docs/GATES.md)) | learned, none at first |
 
 The element tested is not always the one under the pointer. When the hover target fails `P1`, a

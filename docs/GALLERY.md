@@ -122,6 +122,14 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   (`doorReason`) or link to a page shaped like this one (`galPathShape`: first segment kept,
   others `#`/`w` — /user/PogiOne vs /user/x); **anything else is the gallery's own** (no evidence
   = keep reading, as before). `GAL_FOREIGN_END` 4 such pictures in a row end the reading.
+  **The first list is judged too** (v0.305.0, verified in Chrome on nsfw.xxx /post/351243: 1 own
+  picture, then 16 feed cards linking `/post/#`): when its shapes split into own and other
+  galleries, only the own ones count; when none judge own, all do, as before (a page whose own
+  thumbnails link to sibling pages of its own shape keeps working).
+  nsfw.xxx `/user/alternativealt1` (card count 3, 500+ read; user reported as endless) is **not** a
+  feed: the 3 is the creator's *picture* count, and the page lists their hundreds of video posts
+  (`div.post.video`, all labelled with their name). Whether galleries should leave video posts out
+  was put to the user (2026-11-13).
   Not used (tried in v0.298.0's draft): `galLeafAt` on the shape's links — a video post's page has
   no bigger *picture*, so it called the gallery's own video posts "more thumbnails" and cut a
   37-post gallery at 15. Every verdict and the end reason go into the open's trace as `frame: …`

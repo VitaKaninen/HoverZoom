@@ -79,6 +79,16 @@ off, `bigEnough()` asks whether the window would draw it larger than the page do
 (4) replaced `zoomFactor` (2), retired so a stored 2 does not survive. The slideshow shows every
 picture either way — a rejected candidate there falls back to the page's own (`tourFallback`).
 
+## `bigChip` — preview a picture already shown full size (user, v0.306.0)
+
+A picture the page draws at least as large as the window would (nsfw.xxx post pages draw it
+window-tall) stays refused by `bigEnough()`. `resolve` keeps the biggest candidate turned down
+only for size (not video) on `token.small`; when the hover found nothing, `bigChipShow` puts a ⌕
+chip (`.bigchip`, viewer root) on the picture's top-right corner. A press opens that file pinned
+(`bigChipOpen`, as `galPin` does), to zoom. It goes when the pointer is off both picture and chip
+(`bigChipWatch`, document mousemove) or on any scroll. Both ends of the hover call it: after the
+resolve, and in the player-wait timer when the wait outlasts the resolve (the common path).
+
 ## `showEvenIfNotLarger` retired — it is `minRatio` below 1 (v0.43.0)
 
 *Preview pictures that are already full size* asked the same question as the row above it.

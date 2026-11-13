@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.305.0
+// @version     0.306.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -262,6 +262,7 @@
         emojiSize: 200,             // px
         sizeGate: false,            // only preview when the original is minRatio times what is drawn
         minRatio: 1,                // full size must be this much bigger; below 1 previews anything
+        bigChip: true,              // a picture the page already draws full size: a chip on it opens the preview anyway
         videoMode: 'clips',         // 'none' | 'clips' (animated clips) | 'all' (+ links to a video page)
         skipFurniture: true,        // never preview the page's own furniture: its background, a
         siteMode: 'blacklist',      // 'blacklist' | 'whitelist'
@@ -2047,6 +2048,8 @@
                 continue;
             }
             if (!bigEnough(dim, displayed)) {
+                if (!dim.video && (!token.small || dim.w * dim.h > token.small.w * token.small.h))
+                    token.small = { url: url, w: dim.w, h: dim.h, display: dim.display, from: c.from };
                 dbg('rejected — under the required upsize', {
                     url: url, from: c.from, minRatio: cfg.minRatio,
                     onScreen: displayed.w + '×' + displayed.h,
@@ -2439,6 +2442,9 @@
             'pointer-events:none;white-space:nowrap;color:#fff;font:600 22px/1.2 system-ui,sans-serif;',
             'text-shadow:0 0 3px #000,0 1px 8px rgba(0,0,0,.85);opacity:0;transition:opacity .5s ease}',
             '.seamnote.on{opacity:.9;transition:none}',
+            '.bigchip{position:fixed;z-index:3;display:none;width:28px;height:28px;box-sizing:border-box;align-items:center;justify-content:center;' +
+                'border-radius:8px;background:#1e1e2e;border:1px solid #45475a;cursor:pointer;pointer-events:auto;box-shadow:0 2px 8px rgba(0,0,0,.6)}',
+            '.bigchip.on{display:flex}.bigchip:hover{background:#313244}.bigchip svg{width:16px;height:16px;fill:#89b4fa}',
             '.spin{position:fixed;width:' + SPIN_SIZE + 'px;height:' + SPIN_SIZE + 'px;',
             'display:none;pointer-events:none;',
             'filter:drop-shadow(0 2px 6px rgba(0,0,0,.5))}',
@@ -6904,6 +6910,7 @@
             holding = false;
             if (heldHit) { paint(heldHit); return; }
             if (!myToken.done) { if (resolving) showSpinner(); return; }   // hits paint directly from here
+            if (myToken.small && cfg.bigChip) bigChipShow(el, myToken.small);
             if (myToken.failure) await showFallback(el, myToken, myToken.failure);
         }, holdMs);
         timer = setTimeout(async function () {
@@ -6929,12 +6936,69 @@
                 myToken.done = true;
                 if (avArea && !myToken.cancelled && !avSeen) areaApply('avatarAreas', vdForget, chain, path);
                 if (holding) return;            // the wait's timer paints, or shows the failure
+                if (!got && !myToken.cancelled && active === el && myToken.small && cfg.bigChip) bigChipShow(el, myToken.small);
                 if (!got && !myToken.cancelled && active === el && myToken.failure)
                     await showFallback(el, myToken, myToken.failure);
             } finally {
                 if (!myToken.cancelled && !holding) hideSpinner();
             }
         }, keyed ? 0 : cfg.hoverDelay);
+    }
+
+    let bigChipEl = null, bigChipFor = null;
+
+    // A picture the page already draws as large as a preview would be: a chip on its corner opens the preview anyway, pinned, to zoom in.
+    function bigChipShow(el, hit) {
+        buildViewer();
+        if (!bigChipEl) {
+            bigChipEl = document.createElement('div');
+            bigChipEl.className = 'bigchip';
+            bigChipEl.appendChild(mkIcon(ICON_FIND));
+            setTip(bigChipEl, 'Preview it anyway — the page already shows this picture as large as a preview would be');
+            ['mousedown', 'mouseup', 'click', 'auxclick', 'dblclick'].forEach(function (t) {
+                bigChipEl.addEventListener(t, function (e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (t === 'mousedown' && e.button === 0) bigChipOpen();
+                });
+            });
+            root.appendChild(bigChipEl);
+        }
+        bigChipFor = { el: el, hit: hit };
+        const r = el.getBoundingClientRect();
+        bigChipEl.style.left = Math.round(Math.min(r.right, vpW()) - 36) + 'px';
+        bigChipEl.style.top = Math.round(Math.max(r.top, 0) + 8) + 'px';
+        bigChipEl.classList.add('on');
+        document.addEventListener('mousemove', bigChipWatch, true);
+        window.addEventListener('scroll', bigChipHide, { capture: true, passive: true });
+    }
+
+    function bigChipHide() {
+        if (!bigChipEl) return;
+        bigChipEl.classList.remove('on');
+        bigChipFor = null;
+        document.removeEventListener('mousemove', bigChipWatch, true);
+        window.removeEventListener('scroll', bigChipHide, { capture: true, passive: true });
+    }
+
+    // The chip goes once the pointer is off both the picture and the chip.
+    function bigChipWatch(e) {
+        const f = bigChipFor;
+        if (f && (holds(f.el.getBoundingClientRect(), e.clientX, e.clientY) || holds(bigChipEl.getBoundingClientRect(), e.clientX, e.clientY))) return;
+        bigChipHide();
+    }
+
+    function bigChipOpen() {
+        const f = bigChipFor;
+        bigChipHide();
+        if (!f || !f.el.isConnected) return;
+        if (placed) unplace(); else cancel();
+        active = f.el;
+        activeShown = shownUrl(f.el);
+        hoverAt = Date.now();
+        token = { cancelled: false, fresh: true };
+        showViewer(f.hit, pointer);
+        place();
     }
 
     // A player now covers the picture we are previewing. Chromium's mouseover for a layout change
@@ -14730,6 +14794,9 @@
         num('minRatio', 'Minimum size ratio',
             'Used only with the box above. Original ÷ the image on the page. 1 previews anything ' +
             'larger; below 1 previews smaller originals too. (default: 1)', 0.1, 100, 0.1);
+        check('bigChip', 'Offer a preview of pictures already shown full size',
+            'A picture the page draws as large as a preview would be does not preview. With this on, a ' +
+            'button on its corner opens it anyway, so you can zoom in. (default: on)');
         num('minDisplayed', 'Ignore images smaller than',
             'As drawn on the page, in px. Nothing smaller ever previews. (default: 16)', 0, 2000, 1);
         num('smallBelow', 'Small pictures: under',

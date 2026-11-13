@@ -43,8 +43,6 @@ is still undecided.
 - **v0.294.0**: middle press on the corner picture closes again; right-click menu on it; move /
   resize mode remembered per site (`GALLERY.md`); ticks and saved discs can be switched off.
   Checked in Chrome by synthetic events; the user's stored place was reset after the test.
-  Not changed: nsfw.xxx post pages refuse the preview because the page already draws the picture
-  as tall as the window (`bigEnough`) — offered to the user, no answer yet.
 - **v0.295.0–v0.298.0**: the gallery eats the wheel with one page; dark from the flight; the first
   page of every gallery on screen read ahead (setting, on); reading stops at the site's appended feed.
 - **v0.299.0** (user's design, 2026-11-13; this is B-rest and C, settled): the dock widget's `– / 0`
@@ -59,10 +57,16 @@ is still undecided.
   also snap to the gallery's margin; an edge on a line follows that line on a window resize; the
   menu's "Put it back…" is "Reset position". Checked in the pane on `door-big.html` (detach, dock,
   join, keep apart, margin snap, centre/margin anchors after 1024×768 → 1400×900, Ctrl, reset).
+- **v0.301.0–v0.306.0** (user, 2026-11-13): row floor setting; strip above a pinned preview (second
+  ◀ ▶ press landed on the preview); a still pointer no longer moves the counter; no move/resize
+  mode (drag anytime, invisible corners, drop saves, Reset position gone); page row only with 2+
+  pages; text squeezes; detached strip text-wide; rows touching the picture stay whole; first-list
+  feed judged (Chrome-verified on a post page); ⌕ chip previews a picture shown full size
+  (`bigChip`). All but the feed checked in the pane by synthetic events.
 
 ## Not verified
 
-Not tried in LibreWolf + Tampermonkey (incl. v0.300.0's strip and Ctrl-free drags).
+Not tried in LibreWolf + Tampermonkey (incl. v0.300.0–v0.306.0).
 The pane sends no scroll events, so the reading frame dispatches its own; pages that load via
 IntersectionObserver are untested. Row floor is a setting since v0.301.0 (user: 120 is a good start). On a one-page gallery the snapped corner picture
 stops lining up after ✓ (rows grow to fill) — told the user in v0.299.0's report, no answer. A row-line
@@ -79,7 +83,7 @@ F. Newcomer: first-use hint line in the bar, a `?` gesture sheet, tooltips on se
 
 ## Last exchange
 
-2026-11-13: user designed the gallery strip + snapping resize + resize-keeps-open (v0.299.0), then the
-joined strip, detach/dock/join, margin lines and line-following memory (v0.300.0; Ctrl now frees both
-the widget and the picture). Then the row-floor setting (v0.301.0). The nsfw.xxx `bigEnough` question
-was re-explained in plain words (user didn't follow it); answer pending.
+2026-11-13: gallery strip and snapping (v0.299.0–v0.300.0), row floor (v0.301.0), then the user's
+seven-point round (v0.302.0–v0.306.0, see above). Asked, unanswered: nsfw.xxx /user/alternativealt1
+reads 500+ pictures because the creator has hundreds of *video* posts (card's 3 = pictures only) —
+should galleries leave video posts out?
