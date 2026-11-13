@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.308.0
+// @version     0.309.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -6966,12 +6966,26 @@
             root.appendChild(bigChipEl);
         }
         bigChipFor = { el: el, hit: hit };
-        const r = el.getBoundingClientRect();
-        bigChipEl.style.left = Math.round(Math.min(r.right, vpW()) - 36) + 'px';
+        const r = drawnRect(el);
+        bigChipEl.style.left = Math.round(Math.max(r.left, 0) + 8) + 'px';
         bigChipEl.style.top = Math.round(Math.max(r.top, 0) + 8) + 'px';
         bigChipEl.classList.add('on');
         document.addEventListener('mousemove', bigChipWatch, true);
         window.addEventListener('scroll', bigChipHide, { capture: true, passive: true });
+    }
+
+    // Where a picture is actually drawn in its box: object-fit contain, scale-down or none leave bars around it.
+    function drawnRect(el) {
+        const r = el.getBoundingClientRect(), nw = el.naturalWidth || el.videoWidth, nh = el.naturalHeight || el.videoHeight;
+        if (!nw || !nh) return r;
+        const cs = getComputedStyle(el), fit = cs.objectFit;
+        if (fit !== 'contain' && fit !== 'scale-down' && fit !== 'none') return r;
+        let k = fit === 'none' ? 1 : Math.min(r.width / nw, r.height / nh);
+        if (fit === 'scale-down') k = Math.min(k, 1);
+        const w = nw * k, h = nh * k, pos = String(cs.objectPosition || '50% 50%').split(' ');
+        const at = function (v, room) { const n = parseFloat(v); return /%$/.test(v) ? room * n / 100 : isNaN(n) ? room / 2 : n; };
+        const left = r.left + at(pos[0] || '50%', r.width - w), top = r.top + at(pos[1] || '50%', r.height - h);
+        return { left: left, top: top, right: left + w, bottom: top + h, width: w, height: h };
     }
 
     function bigChipHide() {
@@ -10863,7 +10877,7 @@
     const GAL_CARD_DEPTH = 4;           // levels of the ancestor chain that make a card's shape
     const GAL_DOOR_MARK = 'data-hz-door';      // the ▦ chip, in the card like the marks
     const GAL_PILL = 'data-hz-marks';          // one dark pill per picture holding chip, tick, disc
-    let galPeek = false, galPeekTapAt = 0, galGrowing = null, galGrowEnd = null, galGrowHold = null, galChipHot = null, galLeftAt = 0;
+    let galPeek = false, galPeekTapAt = 0, galGrowing = null, galGrowEnd = null, galChipHot = null, galLeftAt = 0;
     const galGrown = new Set(), galLists = new Map();
     const galCache = new Map();         // href -> Promise of [{thumb, ss, cands, base}] | null | 'cancel'
     let galFrameStop = null;
@@ -11077,7 +11091,6 @@
                 window.removeEventListener('message', onMsg);
                 if (galFrameStop === stop) galFrameStop = null;
                 if (galGrowEnd === end) galGrowEnd = null;
-                if (galGrowHold === hold) galGrowHold = null;
                 f.remove();
                 if (done && onEnd) onEnd(why);
                 setTimeout(galPreNext, 0);
@@ -11091,17 +11104,7 @@
                 if (keep) { clearTimeout(t); t = setTimeout(function () { end('timed out'); }, GAL_GROW_MAX_MS + GAL_REPORT_MS); }
                 else end(why);
             };
-            let held = false;
-            // Reading on waits (on) or goes on (off); an open gallery's wait does not count towards its time limit, a closed one's does.
-            const hold = function (on, closed) {
-                if (!done || gone) return;
-                clearTimeout(t);
-                if (!on || closed) t = setTimeout(function () { end('timed out'); }, GAL_GROW_MAX_MS + GAL_REPORT_MS);
-                if (on === held) return;
-                held = on;
-                galTrace(href, 'reading on: ' + (on ? 'waits' + (closed ? ', the gallery closed' : ', the next page is full') : 'goes on'));
-                try { f.contentWindow.postMessage({ hzGalleryHold: token, hold: on }, new URL(href).origin); } catch (e) { /* frame gone */ }
-            };
+
             const stop = function () { if (done) end('cancelled'); else fin('cancel', 'replaced by a newer hover'); };
             const onMsg = function (e) {
                 if (e.source !== f.contentWindow || !e.data || e.data.hzGallery !== token) return;
@@ -11113,7 +11116,7 @@
                 if (e.data.done) end('grown');
             };
             galFrameStop = stop;
-            if (onMore) { galGrowEnd = end; galGrowHold = hold; }
+            if (onMore) galGrowEnd = end;
             window.addEventListener('message', onMsg);
             f.name = GAL_NAME + ':' + token + (onMore ? ':grow' : '');
             f.setAttribute('sandbox', 'allow-scripts allow-same-origin');     // no top navigation, no popups
@@ -11193,11 +11196,8 @@
     function galProbeReport() {
         const tag = String(window.name).slice(GAL_NAME.length + 1).split(':');
         const token = tag[0], grow = tag[1] === 'grow';
-        let sent = false, quietT = 0, capT = 0, obs = null, held = false;
+        let sent = false, quietT = 0, capT = 0, obs = null;
         const known = new Set();
-        window.addEventListener('message', function (e) {
-            if (e.source === window.parent && e.data && e.data.hzGalleryHold === token) held = !!e.data.hold;
-        });
         galNoMedia();
         document.addEventListener('play', function (e) {
             try { e.target.muted = true; e.target.pause(); } catch (x) { /* not media */ }
@@ -11261,14 +11261,46 @@
             try { window.parent.postMessage({ hzGallery: token, items: items, done: done, notes: notes.splice(0), title: document.title, site: siteNameOf(document) }, location.origin); }
             catch (e) { /* parent gone */ }
         };
+        const BLANK = 'data:image/gif;base64,R0lGODlhAQABAAAAACw=', hushed = [];
+        // A picture of a card shape already judged is listed as it mounts and its file never loads, so reading to the end costs no downloads.
+        const hush = function (img) {
+            if (!shapes || !img || img.tagName !== 'IMG') return;
+            const v = shapes.get(galCardSig(img));
+            if (!v) return;
+            const src = img.getAttribute('src') || '';
+            const raw = src && !/^(data|blob):/.test(src) ? src : GAL_LAZY.map(function (a) { return img.getAttribute(a); }).find(Boolean);
+            if (!raw) return;
+            let u;
+            try { u = new URL(raw, location.href).href; } catch (e) { return; }
+            if (!known.has(u)) { known.add(u); hushed.push(v === 'own' ? galItem(img, u, location.href) : null); }
+            img.removeAttribute('srcset');
+            const pic = img.closest('picture');
+            if (pic) pic.querySelectorAll('source[srcset]').forEach(function (x) { x.removeAttribute('srcset'); });
+            if (src !== BLANK) img.setAttribute('src', BLANK);
+        };
         // Reading on: a screen further down every GAL_GROW_TICK, new pictures sent as they mount, done once the bottom stays quiet or the site's feed begins.
         const readOn = function () {
-            let t0 = Date.now(), idle = 0;
+            const t0 = Date.now();
+            let idle = 0;
+            try {
+                new MutationObserver(function (recs) {
+                    recs.forEach(function (r) {
+                        if (r.type === 'attributes') { hush(r.target); return; }
+                        r.addedNodes.forEach(function (n) {
+                            if (n.nodeType !== 1) return;
+                            if (n.tagName === 'IMG') hush(n); else n.querySelectorAll('img').forEach(hush);
+                        });
+                    });
+                }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['src', 'srcset'].concat(GAL_LAZY) });
+            } catch (e) { /* pictures then load as before */ }
+            document.querySelectorAll('img').forEach(hush);
             const tick = function () {
-                if (held) { t0 += GAL_GROW_TICK; setTimeout(tick, GAL_GROW_TICK); return; }
+                const quiet = [];
+                hushed.splice(0).forEach(function (x) { if (x) { quiet.push(x); foreign = 0; } else foreign++; });
                 const fresh = list().filter(function (x) { return !known.has(x.thumb); });
                 (fresh.length ? mine(fresh) : Promise.resolve([])).then(function (ok) {
-                    if (fresh.length) idle = 0;
+                    if (fresh.length || quiet.length) idle = 0;
+                    ok = quiet.concat(ok);
                     if (ok.length) post(ok, false);
                     if (foreign >= GAL_FOREIGN_END) { post([], true, 'read on: stopped, ' + foreign + ' pictures in a row were not the gallery\u2019s'); return; }
                     const se = document.scrollingElement || document.documentElement, max = se.scrollHeight - window.innerHeight;
@@ -11497,8 +11529,8 @@
                         used += add;
                         i++;
                     }
-                    const spare = (s[1] - s[0] - used) / (row.length + 1);
-                    let x = s[0] + spare;
+                    const spare = row.length > 1 && i < asp.length ? (s[1] - s[0] - used) / (row.length - 1) : 0;     // the margins keep G; the rest goes between pictures
+                    let x = s[0];
                     row.forEach(function (j) {
                         out[j] = { x: x, y: y, w: asp[j] * h, h: h };
                         x += asp[j] * h + G + spare;
@@ -11570,15 +11602,43 @@
         });
         set.rows = galRowLines(L);
         galPageNote(set);
-        galGrowPace(set);
+        galFeed(set);
         return L;
     }
 
-    // Reading on keeps one page ahead of the page on screen: it waits once that page is full.
-    function galGrowPace(set) {
-        if (!galGrowHold || galGrowing !== set.href) return;
-        const P = set.pages || [], per = P.length > 1 ? P[0][1] - P[0][0] : 0;
-        galGrowHold(!!per && set.cells.length >= (set.page + 2) * per);
+    // Pictures a page holds: the first page's count, else a guess from the window and the shapes so far.
+    function galPer(set) {
+        const P = set && set.pages;
+        if (P && P.length > 1) return P[0][1] - P[0][0];
+        const G = GAL_GAP, ph = galPagedH(vpH()), a = set && set.asp.length ? set.asp.reduce(function (x, y) { return x + y; }, 0) / set.asp.length : 0.75;
+        return ph.n * Math.max(1, Math.floor((vpW() - G) / (a * ph.h + G)));
+    }
+
+    // How many pictures the set should hold: through the furthest page reached plus the pages ahead (1 at first, then more the further the user goes: page 3 keeps 2 ahead, page 5 on as many as its number).
+    function galWantN(set) {
+        const far = set.far = Math.max(set.far || 0, set.page || 0), at = far + 1;
+        const ahead = at <= 1 ? 1 : at < 5 ? at - 1 : at;
+        return (at + ahead) * galPer(set);
+    }
+
+    // The stored list's pictures not in the set yet join it, as many as galWantN asks; the rest stay unloaded.
+    function galFeed(set) {
+        const base = galLists.get(set.href);
+        if (!base || galCur !== set) return;
+        let room = galWantN(set) - set.cells.length - (set.inflight || 0);
+        if (room <= 0 || set.fed >= base.length) return;
+        const keys = galKeys(set.pics.map(function (q) { return q.item; })), add = [];
+        while (set.fed < base.length && add.length < room) {
+            const it = base[set.fed++];
+            if (!galKeyHit(keys, it)) add.push(it);
+        }
+        if (add.length) galAppend(set, add);
+    }
+
+    // Every picture the gallery's page holds is in the set (none still to read or load).
+    function galWhole(set) {
+        const base = galLists.get(set.href);
+        return galGrowing !== set.href && (!base || set.fed >= base.length) && !set.inflight;
     }
 
     // What the rows keep clear of: the clicked picture with its attached strip, and a strip of its own.
@@ -11810,9 +11870,10 @@
     function galStripText(set) {
         const s = galSt;
         if (!s || !set) return;
-        const reading = galGrowing === set.href, n = set.cells.length;
+        const reading = galGrowing === set.href, base = galLists.get(set.href), n = Math.max(set.cells.length, base ? base.length : 0);
         galStripRows(set);
-        const total = set.pages ? set.pages.length : 1, page = set.page || 0, at = set.at >= 0 && set.at < n ? set.at : -1;
+        const more = n - set.cells.length, page = set.page || 0, at = set.at >= 0 && set.at < n ? set.at : -1;
+        const total = (set.pages ? set.pages.length : 1) + (more > 0 ? Math.ceil(more / galPer(set)) : 0);
         const pg = (page + 1) + ' / ' + total + (reading ? '+' : '');
         s.pgT.textContent = 'Page ' + pg;
         s.picT.textContent = (at >= 0 ? at + 1 : '–') + ' / ' + n + (reading ? '+' : '');
@@ -11911,6 +11972,7 @@
         const n = set.pics.length, p = (set.pages && set.pages[set.page]) || [0, n];
         let k = placed ? galShownAt(set) : -1;
         if (k < 0 && set.at >= p[0] && set.at < p[1]) k = set.at;
+        if (k >= 0 && (k + dir < 0 || k + dir >= n) && !galWhole(set)) return true;     // the end is not loaded yet
         k = k < 0 ? p[0] : (k + dir + n) % n;
         set.at = k;
         const pg = galPageOf(set, k);
@@ -11974,14 +12036,22 @@
 
     let galFlipAt = 0, galWheelSum = 0, galWheelAt = 0;
 
-    // The wheel steps an open gallery's pictures and never scrolls the page; over a pinned preview it zooms that instead.
+    // The wheel steps an open gallery's pictures and never scrolls the page; over a preview it zooms that instead (a hover one is pinned first).
     function galWheel(e) {
         const set = galCur;
         if (!set) return;
         if (e.ctrlKey) return;      // the preview's zoom over a pinned one (onPinWheel), else the browser's own zoom
 
         if (panelOwns(e)) return;
-        if (placed && view && pointInPreview(e.clientX, e.clientY)) return;     // zooms it (onPinWheel)
+        if (view && galOwns(active) && box && box.classList.contains('on') && pointInPreview(e.clientX, e.clientY)) {
+            if (placed) return;     // zooms it (onPinWheel)
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            place();
+            const f = 1 + cfg.wheelZoomStep / 100;
+            zoomAt(view.scale * (e.deltaY < 0 ? f : 1 / f), e.clientX, e.clientY);
+            return;
+        }
         e.preventDefault();
         e.stopImmediatePropagation();
         const now = performance.now();
@@ -12069,6 +12139,7 @@
             galHide('fail: no pictures found on the linked page');
             return;
         }
+        if (list.length > 2 * galPer(null)) list = list.slice(0, 2 * galPer(null));     // the first two pages; galFeed brings the rest as they are wanted
         let timer = 0, failed = 0;
         const got = [], t0 = performance.now();
         galTrace(href, 'thumbnails: loading ' + list.length + ' (' + galHostMix(list.map(function (it) { return it.thumb; })) + ')');
@@ -12179,7 +12250,7 @@
         const page = galCur && galCur.href === href ? galCur.page : 0;
         if (galCur) galDrop(galCur);
         const set = { href: href, el: document.createElement('div'), shade: document.createElement('div'),
-            cells: [], asp: [], pics: [], page: page };
+            cells: [], asp: [], pics: [], page: page, fed: 0, far: page };
         set.el.className = 'set';
         set.shade.className = 'shade';
         ['mousedown', 'mouseup', 'click', 'auxclick', 'dblclick'].forEach(function (t) {
@@ -12218,8 +12289,7 @@
         const base = galLists.get(set.href);
         if (!base) return;
         const keys = galKeys(set.pics.map(function (p) { return p.item; }));
-        const add = base.filter(function (it) { return !galKeyHit(keys, it); });
-        if (add.length) galAppend(set, add);
+        if (base.some(function (it) { return !galKeyHit(keys, it); })) galFeed(set);
     }
 
     // The URL paths an item is known by: its thumbnail and every srcset entry.
@@ -12259,9 +12329,12 @@
             const L = galLayout(set, set.open);
             if (set.pages[set.page].join('-') !== before) galPageWork(set, L);
         };
+        set.inflight = (set.inflight || 0) + items.length;
         items.forEach(function (it, k) {
             galImg(it).then(function (p) {
-                if (!p || galCur !== set) return;
+                set.inflight--;
+                if (galCur !== set) return;
+                if (!p) { galFeed(set); return; }
                 pending.push({ p: p, k: k });
                 if (!timer) timer = setTimeout(flush, GAL_APPEND_MS);
             });
@@ -12295,7 +12368,7 @@
         if (!add.length) return;
         add.forEach(function (it) { base.push(it); });
         galTrace(href, 'reading on: +' + add.length + ' (' + base.length + ' known)');
-        if (galCur && galCur.href === href) galAppend(galCur, add);
+        if (galCur && galCur.href === href) { galFeed(galCur); galPageNote(galCur); }
     }
 
     const galHqLive = new Set();         // originals being fetched now, for the open diagnostics
@@ -12356,7 +12429,7 @@
         galPeek = false;
         if (galOwns(active)) cancel();
         if (galCur) { galDrop(galCur); galCur = null; }
-        if (galGrowHold) galGrowHold(true, true);
+        if (galOwns(active) && placed) { unplace(); cancel(); }
         if (galBlur) galBlur.classList.remove('on');
         galVeil(false);
         galFlyBack();

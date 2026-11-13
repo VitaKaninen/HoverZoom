@@ -1277,6 +1277,11 @@ const galPH = function (min) {
         return r.x + r.w <= hole.x || r.x >= hole.x + hole.w || r.y + r.h <= hole.y || r.y >= hole.y + hole.h; }), true);
     const touch = rows(four3(683), { x: 1700, y: 133, w: 200, h: 200 }, 0).out.filter(function (r) { return r && r.y < 20; });
     eq('gallery: a bar whose top is on a row bottom leaves that row whole', touch.some(function (r) { return r.x + r.w > 1700; }), true);
+    const y0 = Math.min.apply(null, big.out.filter(function (r) { return r && r.y >= hole.y + hole.h; }).map(function (r) { return r.y; }));
+    const row0 = big.out.filter(function (r) { return r && r.y === y0; }).sort(function (a, b) { return a.x - b.x; });
+    eq('gallery: a full row starts and ends at the margin', [Math.round(row0[0].x), Math.round(row0[row0.length - 1].x + row0[row0.length - 1].w)], [12, 1908]);
+    const nextTo = big.out.filter(function (r) { return r && r.y > hole.y && r.y < hole.y + hole.h && r.x > hole.x; }).sort(function (a, b) { return a.x - b.x; });
+    eq('  the picture right of the hole sits one gap from it', Math.round(nextTo[0].x), hole.x + hole.w + 12);
     console.log('  (683 pictures: ' + big.pages.length + ' pages of about ' + (big.pages[0][1] - big.pages[0][0]) + ')');
 }
 // ---- resizing the clicked picture: snaps to row edges, gap middles and the window's centre lines; Alt (not here) is free.

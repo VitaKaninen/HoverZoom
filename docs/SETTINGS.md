@@ -84,7 +84,8 @@ picture either way — a rejected candidate there falls back to the page's own (
 A picture the page draws at least as large as the window would (nsfw.xxx post pages draw it
 window-tall) stays refused by `bigEnough()`. `resolve` keeps the biggest candidate turned down
 only for size (not video) on `token.small`; when the hover found nothing, `bigChipShow` puts a ⌕
-chip (`.bigchip`, viewer root) on the picture's top-right corner. A press opens that file pinned
+chip (`.bigchip`, viewer root) on the *drawn* picture's top-left corner (`drawnRect`: object-fit
+contain / scale-down / none leave bars, user v0.309.0 — it sat over nsfw.xxx's modal's black bar). A press opens that file pinned
 (`bigChipOpen`, as `galPin` does), to zoom. It goes when the pointer is off both picture and chip
 (`bigChipWatch`, document mousemove) or on any scroll. Both ends of the hover call it: after the
 resolve, and in the player-wait timer when the wait outlasts the resolve (the common path).
