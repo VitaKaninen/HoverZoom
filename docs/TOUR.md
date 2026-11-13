@@ -31,8 +31,9 @@ fight that. They are deleted. Do not put nav controls back on the frame.
   — and again when the pointer comes near, which catches a page that changed without
   scrolling (no MutationObserver: design invariant). With `debug` on, a changed count logs
   `twReport()`: every drawn picture and the gate that dropped it, URLs replaced by `U1…` labels
-  (the user diagnoses private sites with it — keep it URL-free). Faint (`tourFade`, at `TW_FADE_TO` 35 %) until the
-  pointer is within `TW_NEAR`; under a window that covers it the widget sits at `TW_COVER_OPACITY` (0.25, `twOpacity`, not a setting) unless the pointer is near; a `mouseover` on the host covers a pointer resting where it appears.
+  (the user diagnoses private sites with it — keep it URL-free). With `tourFade` both widgets (this and a gallery's) fade by the pointer's
+  distance from their edges: 1 over them, 0 at `TW_FADE_PX` 75 (`twFadeAt`, `twOpacity`, `galStripFade`; user v0.319.0 — a
+  step at a fixed distance was the complaint). Without it, under a window that covers it the widget sits at `TW_COVER_OPACITY` (0.25) unless the pointer is within `TW_NEAR`; a `mouseover` on the host covers a pointer resting where it appears.
 - **The idle widget always shows the start number** `twStartAt` (`twStartOf`: the first picture at or below the top of the screen; `1 / N` on arrival, `21 / 50` after Page ▶ past 20). The wheel button and the wheel over the widget open at that number; ▶ at number+1, ◀ at number−1 (wrapping) — `tourFromStart(dir, same)` (v0.316.0, user). `twWarmFirst` only warms entry 0, so a start elsewhere resolves cold. **→ / ← do the same as ▶ / ◀** (`tourKeyStart`, default on):
   window bubble phase, so a page that preventDefaults or stops → keeps it; not while focus is in a
   form control, media, or a slider/tab/menu role. Starting from a chosen picture = hover or pin it.
@@ -65,8 +66,9 @@ fight that. They are deleted. Do not put nav controls back on the frame.
   **The opening spin is dropped** (`twWheelHush`, v0.172.0, user's call): after the tick that starts
   a slideshow, wheel events in reach are swallowed until the wheel rests 300 ms or 500 ms pass, so
   one flick opens at picture 1.
-- **Typed numbers** (`twAsk`, v0.317.0, user; Forum Stumbler's counter box): click the picture or page
-  number; Enter or leaving the box goes, Esc cancels. A window-capture keydown registered before every
+- **Typed numbers** (`twAsk(kind, holder)`, v0.317.0, user; Forum Stumbler's counter box; the gallery widget too):
+  click the picture or page number; Enter, leaving the box or a press anywhere else goes (window-capture
+  mousedown — widget presses are preventDefault'ed, so blur alone never came; v0.319.0), Esc cancels. A window-capture keydown registered before every
   other key listener of ours gives the box the keyboard. Past what is loaded → the last loaded, and
   more is asked for (`twLoadFurther`: `tourMoreOnce(true)` / a gallery's `far`). Page k on a page =
   scroll to screen k; with a slideshow up, its first picture there (`twGoPage`).
@@ -1014,7 +1016,7 @@ The keys in `DEFAULTS`. Remember the hoisting trap in `../CLAUDE.md`: every
 | Key | Default | What |
 |---|---|---|
 | `tourButtons` | `true` | show the widget |
-| `tourFade` | `false` | the widget faint (35 %) until the pointer nears |
+| `tourFade` | `false` | both widgets fade with the pointer's distance, gone at 75 px |
 | `tourKeyStart` | `true` | → / ← with nothing open start at the first / last picture |
 | `tourKeys` | `true` | arrows navigate when the picture cannot pan horizontally |
 | `tourMinDisplayed` | `128` | the tour's floor on the longer side as drawn, px (§1a) |

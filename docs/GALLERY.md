@@ -47,7 +47,9 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   it overlaps vertically: one touching a row, e.g. snapped to its bottom line, leaves that row whole
   (user v0.304.0; the old `G` margin cut it and left a gap above the picture). `galRows` takes several bars (the clicked picture and its strip). Tested in `test-resolver.js`.
   `set.page` survives a rebuild of the same href. `galPageWork` = upgrades and `galHqAll` for the page
-  on screen only (was every cell).
+  on screen, then the pages ahead by `galAhead` (the thumbnails' ramp: 1, then page−1, then page; user
+  v0.319.0: "preload the first 2 pages"). Re-run after every append (`set.pv`); `item.hqTried` skips
+  cells already answered.
 - **The strip** (user, v0.299.0–v0.303.0; replaced the top `.pg` line): one element for every
   gallery (`galSt`, built once by `galStripBuild`, filled by `galStripText`): ◀ Page n / N ▶
   (`galFlip`, PageUp/PageDown; the `.pg` row, 16 px, user: "rarely used") and ◀ picture n / N ▶

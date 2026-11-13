@@ -21,12 +21,14 @@ widget change was wrong: v0.318.0 brings the strip back (in the picture's frame,
 prompt, own memory) and hides the page widget in a gallery again; everything else of v0.317.0 stays,
 including stepping through the slideshow engine (the strip's picture row → `galStep` → `twPress`).
 
-**Next:** the user asked for a list of how the strip and the page widget differ in function (not
-shape, not its place with the clicked picture), to approve before implementing. Given in chat:
-idle number (`–` vs start number; ▶ from idle lands on picture 2 under a `–`), hold-to-repeat,
-typed numbers, ⇅, wheel over it (widget flips, strip turns the page), fade, page buttons (`galFlip`
-vs `galPageStep`: a pinned preview does not follow, no loading past the last page, ends stop vs
-wrap), dragging (dock snapping vs detach/dock/join), help tip. Await the user's picks.
+**v0.319.0 (user's picks from that list):** the gallery widget got the start number, hold-to-repeat,
+typed numbers, the page row as `galPageStep`, and the fade. The typed box closes on any press outside it.
+The wheel flips pictures over either widget or the gallery's clicked picture, and never turns pages.
+The fade is by distance (0 at 75 px). The page widget uses the gallery's palette and 4 px edge.
+Originals preload for the page on screen plus `galAhead` pages.
+**Open:** the user asked whether ⇅ is worth keeping (my answer: no, the wheel over the widget already
+opens at the start number) and awaits their call. Typed numbers past what is loaded still to be
+tested in Chrome on Google Images and other sites (user asked).
 
 ---
 
