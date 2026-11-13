@@ -920,9 +920,12 @@ backgrounds are all `cover`, unaffected. Regression page: `test-pages/sprite.htm
 
 **As built:** store `doorAreas` (`AREA_STORES`, `RESET_KEEPS`). Verdict `doorVerdict()` (pure, tested),
 taken at the end of a **hover's** full `resolve()` only (`token.door`; slideshow resolves never learn,
-so a rule cannot form under a running slideshow): no linked page → none; any hit (linked page's or a
-candidate's) > `DOOR_BIGGER` 1.5 × drawn on a side → leaf → `areaDrop` at once; nothing found and
-something failed → none; else door → `areaLearn` (id = link). The linked page "skipped" by a
+so a rule cannot form under a running slideshow): no linked page → none; the linked page's own copy
+(`trusted`) > `DOOR_BIGGER` 1.5 × drawn on a side → leaf → `areaDrop` at once; no `trusted` and one of
+the linked page's candidates failed → none; else door → `areaLearn` (id = link). **Only `trusted`
+counts (v0.283.0):** the thumbnail's own file or a URL-rule upgrade being bigger says nothing about
+where the link goes — sexygirlspics.com draws 683–920 px `/460/` files at 298 px, so counting `best`
+made every gallery link a leaf and no door ever formed. The linked page "skipped" by a
 `linkAreas` rule counts as fetched-with-nothing (that rule caches the same fetch; its own 10 % recheck
 keeps it honest). Gate `doorReason()` in `refusal()` (`doorGate:`), so doors leave the slideshow and
 the widget count too. Refused hover → `doorHover()`: `areaTouch`, and on `LINK_RECHECK` a silent
@@ -965,5 +968,7 @@ the link is an image file; door = HTML fetched, no bigger copy.
   (no link = leaf).
 - Refused by the Browser pane ("safety restrictions"): pornpics.com, porntrex.com,
   xmoviesforyou.com — needs the user's console snippet.
-- Open: a door whose thumbnail a URL rule upgrades without the linked page would still preview, and
-  a leaf whose viewer is script-built has no bigger copy in HTML (would read as door). Not seen yet.
+- sexygirlspics.com `/` (category tiles) → `/young/` (gallery list) → `/pics/NAME-ID/` (~26 `/460/`
+  thumbs, each linking a `/1280/` file; the listing's cover is not among them) → doors, then leaves.
+- Open: a leaf whose viewer is script-built has no bigger copy in HTML, so it reads as a door and
+  stops previewing; the recheck reads the same HTML and cannot catch it — Forget in Settings. Not seen yet.

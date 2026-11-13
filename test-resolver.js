@@ -1003,13 +1003,13 @@ eq('  a third removes the area and the site', vd.vdForget(avf.entry, AV1, '/watc
 eq('an avatar elsewhere is not covered', vd.vdRuleFor(av.entry, SIDE, '/watch'), null);
 
 // ---- door areas (P17): the verdict, then the same area learning.
-const DV = function (o) { return vd.doorVerdict(Object.assign({ linked: 'fetched', trusted: null, best: null,
+const DV = function (o) { return vd.doorVerdict(Object.assign({ linked: 'fetched', trusted: null,
     displayed: { w: 200, h: 150 }, failed: false }, o)); };
 eq('door: linked page fetched, nothing bigger', DV({}), 'door');
-eq('door: only about the drawn size', DV({ best: { url: 'https://x.com/t/1.jpg', w: 240, h: 180 } }), 'door');
-eq('door: the linked page holds the same small file', DV({ trusted: { w: 200, h: 150 } }), 'door');
+eq('door: the linked page holds the same small file', DV({ trusted: { w: 240, h: 180 } }), 'door');
 eq('leaf: the linked page declares a bigger copy', DV({ trusted: { w: 1600, h: 1200 } }), 'leaf');
-eq('leaf: a URL rule found a bigger file', DV({ best: { url: 'https://x.com/o/1.jpg', w: 1600, h: 1200 } }), 'leaf');
+eq('door: the thumbnail\'s own file is big but the linked page has no copy', DV({ best: { w: 683, h: 1024 } }), 'door');
+eq('no verdict: no linked copy because one failed to load', DV({ failed: true, best: { w: 1600, h: 1200 } }), null);
 eq('no verdict: no linked page', DV({ linked: null }), null);
 eq('no verdict: nothing found because something failed', DV({ failed: true }), null);
 eq('door from a learned skip of the linked page', DV({ linked: 'skipped' }), 'door');

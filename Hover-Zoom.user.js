@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.282.0
+// @version     0.283.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -1957,6 +1957,7 @@
         let trusted = null;
         let emitted = null;
         let failure = null;      // a candidate that FAILED, as opposed to one merely rejected
+        let lfailed = false;     // one of the linked page's own candidates failed
 
         // Both paths below emit through here, so a later hit can never downgrade the frame.
         function emit(hit) {
@@ -1998,7 +1999,7 @@
                 const dim = await probe(t.url, token.fresh);
                 leads.tried++;
                 if (dim) leads.ok = true;
-                if (!dim) { failure = failure || failureText(t.url); continue; }
+                if (!dim) { failure = failure || failureText(t.url); lfailed = true; continue; }
                 if (token.cancelled) continue;
                 // A matching filename already proves identity; the thumbnail may be a fixed-shape crop.
                 if (!t.named && !sameShape(native, dim)) {
@@ -2070,8 +2071,8 @@
             else areaApply('linkAreas', areaLearn, lchain, lpath, lt.href);
         }
         if (lt && full && token.door && !token.cancelled) doorLearn(doorVerdict({
-            linked: lfetched ? 'fetched' : lskip ? 'skipped' : null, trusted: trusted, best: best,
-            displayed: displayed, failed: !!failure }), lchain, lpath, lt.href);
+            linked: lfetched ? 'fetched' : lskip ? 'skipped' : null, trusted: trusted,
+            displayed: displayed, failed: lfailed }), lchain, lpath, lt.href);
         if (trusted) {
             // The linked page names the picture, but the page's own copy of it may be bigger.
             const own = shown && !trusted.video && !token.cancelled && !unstable.has(shown) ? await probe(shown, false) : null;
@@ -6117,14 +6118,12 @@
 
     const DOOR_BIGGER = 1.5;        // a copy this much bigger than drawn, on either side, makes a leaf
 
-    // One hover's ground truth for door areas: 'leaf' (a bigger copy exists), 'door', or null (no evidence). See P17.
+    // One hover's ground truth for door areas: 'leaf' (the linked page holds a bigger copy), 'door', or null (no evidence). See P17.
     function doorVerdict(r) {
         if (!r.linked) return null;
-        const big = [r.trusted, r.best].some(function (h) {
-            return h && (h.w > r.displayed.w * DOOR_BIGGER || h.h > r.displayed.h * DOOR_BIGGER);
-        });
-        if (big) return 'leaf';
-        if (!r.trusted && !r.best && r.failed) return null;
+        const h = r.trusted;
+        if (h && (h.w > r.displayed.w * DOOR_BIGGER || h.h > r.displayed.h * DOOR_BIGGER)) return 'leaf';
+        if (!h && r.failed) return null;
         return 'door';
     }
 

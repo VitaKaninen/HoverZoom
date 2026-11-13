@@ -17,6 +17,9 @@ is still undecided.
   a door peeks on any site (▦ hint chip on hover); galleries page at 120 px rows (wheel,
   PageUp/PageDown, "Page n / N" line); an open gallery's page is read on by a scrolling hidden frame;
   originals preload for the page on screen only.
+- **v0.283.0** — door verdict counts only the linked page's own copy (`trusted`); the thumbnail's own
+  file / URL-rule upgrade no longer makes a leaf. Found on sexygirlspics.com (no door ever learned:
+  no ▦ chip, gallery links kept previewing). User tests it there next.
 - INTERACTION.md was out of date (no gallery IDs at all); the `G` section now covers it.
 
 ## Not verified
@@ -41,5 +44,6 @@ F. Newcomer: first-use hint line in the bar, a `?` gesture sheet, tooltips on se
 
 ## Last exchange
 
-Asked "Build B next?" — the user said yes; B was built and reported. No question is outstanding.
-The old pending question "Which layout for huge galleries?" was settled (pages) and its file deleted.
+User tested B on sexygirlspics.com: expected the gallery widget and menu item gone (that is "Retire
+gallery mode" above — never built, still waits on a yes), and saw no chip. v0.283.0 fixes the chip
+cause; no question is outstanding.
