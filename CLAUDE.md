@@ -173,7 +173,7 @@ the time you would look one up the symptom has already been misdiagnosed. (The s
 
 ```bash
 node --check Hover-Zoom.user.js     # syntax
-node test-resolver.js               # 584 assertions: the pure URL and video-link logic, the
+node test-resolver.js               # 585 assertions: the pure URL and video-link logic, the
                                     # banner gate's shape test against every measured page in
                                     # banner-test-sites.md, the tour's next-page detector, the
                                     # learned wait's arithmetic and the captcha gate

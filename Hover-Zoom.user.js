@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.303.0
+// @version     0.304.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -11380,7 +11380,7 @@
         const free = function (y, h) {
             let segs = [[G, W - G]];
             bars.forEach(function (b) {
-                if (b.y >= y + h + G || b.y + b.h <= y - G) return;
+                if (b.y >= y + h - 0.5 || b.y + b.h <= y + 0.5) return;     // a bar touching a row (snapped to its edge) leaves it whole
                 const l = b.x - G, r = b.x + b.w + G, next = [];
                 segs.forEach(function (s) {
                     if (r <= s[0] || l >= s[1]) { next.push(s); return; }

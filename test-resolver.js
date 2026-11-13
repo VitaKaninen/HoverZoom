@@ -1275,6 +1275,8 @@ const galPH = function (min) {
     eq('  the last page places its own', last.out.filter(Boolean).length, lp[1] - lp[0]);
     eq('  no cell overlaps the hole', last.out.filter(Boolean).every(function (r) {
         return r.x + r.w <= hole.x || r.x >= hole.x + hole.w || r.y + r.h <= hole.y || r.y >= hole.y + hole.h; }), true);
+    const touch = rows(four3(683), { x: 1700, y: 133, w: 200, h: 200 }, 0).out.filter(function (r) { return r && r.y < 20; });
+    eq('gallery: a bar whose top is on a row bottom leaves that row whole', touch.some(function (r) { return r.x + r.w > 1700; }), true);
     console.log('  (683 pictures: ' + big.pages.length + ' pages of about ' + (big.pages[0][1] - big.pages[0][0]) + ')');
 }
 // ---- resizing the clicked picture: snaps to row edges, gap middles and the window's centre lines; Alt (not here) is free.

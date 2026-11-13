@@ -43,7 +43,9 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   the binary search grows the rows from there; else pages, whose rows also grow to fill the height
   (`galPagedH`: as many rows as fit at the floor, then the spare height shared out; user: "any extra
   room is taken up by expanding the images, they never go smaller"). A settings change while a
-  gallery is open runs `galRefit`. `galRows` takes several bars (the clicked picture and its strip). Tested in `test-resolver.js`.
+  gallery is open runs `galRefit`. A bar (the clicked picture, a detached strip) cuts only the rows
+  it overlaps vertically: one touching a row, e.g. snapped to its bottom line, leaves that row whole
+  (user v0.304.0; the old `G` margin cut it and left a gap above the picture). `galRows` takes several bars (the clicked picture and its strip). Tested in `test-resolver.js`.
   `set.page` survives a rebuild of the same href. `galPageWork` = upgrades and `galHqAll` for the page
   on screen only (was every cell).
 - **The strip** (user, v0.299.0–v0.303.0; replaced the top `.pg` line): one element for every
