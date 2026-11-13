@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.278.0
+// @version     0.279.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -11826,7 +11826,7 @@
         try { GM_setValue(key, JSON.stringify(Array.from(s))); } catch (e) { /* storage unavailable */ }
     }
 
-    // A click on a tick: the link is no longer seen or visited, and its ticks go.
+    // A click on a tick or a saved disc: the link is no longer seen, visited or saved-from, and its marks go.
     function galMarkClear(m, e) {
         e.preventDefault();
         e.stopImmediatePropagation();
@@ -11834,10 +11834,21 @@
         if (!h || e.type !== 'click') return;
         galListDel(GAL_SEEN_KEY, h);
         galListDel(GAL_VISITED_KEY, h);
-        document.querySelectorAll('[' + GAL_MARK + ']').forEach(function (x) { if (x.__hzHref === h) x.remove(); });
+        galListDel(GAL_SAVEDFROM_KEY, h);
+        document.querySelectorAll('[' + GAL_MARK + '],[' + GAL_SAVED_MARK + ']').forEach(function (x) { if (x.__hzHref === h) x.remove(); });
         hideTip();
         toast('Marked as not seen', 3000);
         dbg('gallery mark cleared', { href: h });
+    }
+
+    function galMarkClickable(m) {
+        ['mousedown', 'mouseup', 'click', 'auxclick', 'dblclick'].forEach(function (t) {
+            m.addEventListener(t, function (e) {
+                if (t === 'mousedown') document.documentElement.setAttribute('data-userscript-click-claim', String(Date.now()));
+                galMarkClear(m, e);
+            }, true);
+        });
+        setTip(m, 'Click: mark as not seen and not saved');
     }
 
     // The first corner where the mark is not under something of the page's own (a badge, a caption); top-right if none is clear or the spot is off screen.
@@ -11850,7 +11861,7 @@
         let pick = corners[0];
         for (let i = 0; i < corners.length; i++) {
             const p = pt(corners[i]);
-            if (p.x < 0 || p.y < 0 || p.x > vpW() || p.y > vpH()) break;
+            if (p.x < 0 || p.y < 0 || p.x > vpW() || p.y > vpH()) continue;
             const top = document.elementFromPoint(p.x, p.y);
             if (!top || top === at || at.contains(top) || top.contains(at) || top.hasAttribute(GAL_SAVED_MARK) || top.closest('[' + GAL_SAVED_MARK + ']')) { pick = corners[i]; break; }
         }
@@ -11886,18 +11897,12 @@
                 });
             });
             m.appendChild(svg);
-            ['mousedown', 'mouseup', 'click', 'auxclick', 'dblclick'].forEach(function (t) {
-                m.addEventListener(t, function (e) {
-                    if (t === 'mousedown') document.documentElement.setAttribute('data-userscript-click-claim', String(Date.now()));
-                    galMarkClear(m, e);
-                }, true);
-            });
-            setTip(m, 'Click: mark as not seen');
+            galMarkClickable(m);
             at.after(m);
         }
         m.__hzHref = h;
         const w = kind === '2' ? 34 : 24, s = 24;
-        m.style.cssText = 'all:initial;position:absolute;left:0;top:0;z-index:2;pointer-events:auto;cursor:pointer;display:block;' +
+        m.style.cssText = 'all:initial;position:absolute;left:0;top:0;z-index:3;pointer-events:auto;cursor:pointer;display:block;' +
             'width:' + w + 'px;height:' + s + 'px;filter:drop-shadow(0 1px 2px rgba(0,0,0,.7))';
         const c = galMarkCorner(m, ir, at, w, s, galMarkFind(at, GAL_SAVED_MARK) ? 'lt' : '');
         const o = m.getBoundingClientRect();
@@ -11922,7 +11927,7 @@
     }
 
     // The saved mark in the picture's top-left corner.
-    function galMarkSaved(img) {
+    function galMarkSaved(img, h) {
         const at = img.closest('picture') || img;
         const ir = galMarkRect(img, at);
         if (ir.width < 48 || ir.height < 24) return;
@@ -11930,9 +11935,11 @@
         if (!m) {
             m = galSavedIcon('');
             m.setAttribute(GAL_SAVED_MARK, '');
+            galMarkClickable(m);
             at.after(m);
         }
-        m.style.cssText = 'all:initial;position:absolute;left:0;top:0;z-index:2;pointer-events:none;display:block;' +
+        m.__hzHref = h;
+        m.style.cssText = 'all:initial;position:absolute;left:0;top:0;z-index:3;pointer-events:auto;cursor:pointer;display:block;' +
             'width:22px;height:22px';
         const o = m.getBoundingClientRect();
         m.style.left = (ir.left + 4 - o.left) + 'px';
@@ -11961,7 +11968,7 @@
                 [GAL_MARK, GAL_SAVED_MARK].forEach(function (k) { const x = galMarkFind(at, k); if (x) x.remove(); });
                 return;
             }
-            if (from.has(h)) galMarkSaved(img);
+            if (from.has(h)) galMarkSaved(img, h);
             let m;
             if (went.has(h)) m = galMarkImg(img, '2', h);
             else if (seen.has(h)) m = galMarkImg(img, '1', h);
