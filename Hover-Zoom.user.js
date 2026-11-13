@@ -4435,6 +4435,7 @@
         // The wheel becomes the window's only now — see enableWheelZoom.
         enableWheelZoom();
         if (!tour && !galOwns(active)) tourStart();     // a tour begun from the widget brings its own; a gallery picture steps through its gallery (galStep)
+        if (galCur && galOwns(active)) { const i = galShownAt(galCur); if (i >= 0) { galCur.at = i; galPageNote(galCur); } }
         reflow();       // the controls appear with `placed`, and minFrameW() grows with them
         layout();
         twSync();
@@ -10862,7 +10863,7 @@
     const GAL_CARD_DEPTH = 4;           // levels of the ancestor chain that make a card's shape
     const GAL_DOOR_MARK = 'data-hz-door';      // the ▦ chip, in the card like the marks
     const GAL_PILL = 'data-hz-marks';          // one dark pill per picture holding chip, tick, disc
-    let galPeek = false, galPeekTapAt = 0, galGrowing = null, galGrowEnd = null, galChipHot = null, galLeftAt = 0;
+    let galPeek = false, galPeekTapAt = 0, galGrowing = null, galGrowEnd = null, galGrowHold = null, galChipHot = null, galLeftAt = 0;
     const galGrown = new Set(), galLists = new Map();
     const galCache = new Map();         // href -> Promise of [{thumb, ss, cands, base}] | null | 'cancel'
     let galFrameStop = null;
@@ -11076,6 +11077,7 @@
                 window.removeEventListener('message', onMsg);
                 if (galFrameStop === stop) galFrameStop = null;
                 if (galGrowEnd === end) galGrowEnd = null;
+                if (galGrowHold === hold) galGrowHold = null;
                 f.remove();
                 if (done && onEnd) onEnd(why);
                 setTimeout(galPreNext, 0);
@@ -11089,6 +11091,16 @@
                 if (keep) { clearTimeout(t); t = setTimeout(function () { end('timed out'); }, GAL_GROW_MAX_MS + GAL_REPORT_MS); }
                 else end(why);
             };
+            let held = false;
+            // Reading on waits (on) or goes on (off); a wait does not count towards its time limit.
+            const hold = function (on) {
+                if (!done || gone || on === held) return;
+                held = on;
+                clearTimeout(t);
+                if (!on) t = setTimeout(function () { end('timed out'); }, GAL_GROW_MAX_MS + GAL_REPORT_MS);
+                galTrace(href, 'reading on: ' + (on ? 'waits, the next page is full' : 'goes on'));
+                try { f.contentWindow.postMessage({ hzGalleryHold: token, hold: on }, new URL(href).origin); } catch (e) { /* frame gone */ }
+            };
             const stop = function () { if (done) end('cancelled'); else fin('cancel', 'replaced by a newer hover'); };
             const onMsg = function (e) {
                 if (e.source !== f.contentWindow || !e.data || e.data.hzGallery !== token) return;
@@ -11100,7 +11112,7 @@
                 if (e.data.done) end('grown');
             };
             galFrameStop = stop;
-            if (onMore) galGrowEnd = end;
+            if (onMore) { galGrowEnd = end; galGrowHold = hold; }
             window.addEventListener('message', onMsg);
             f.name = GAL_NAME + ':' + token + (onMore ? ':grow' : '');
             f.setAttribute('sandbox', 'allow-scripts allow-same-origin');     // no top navigation, no popups
@@ -11180,8 +11192,11 @@
     function galProbeReport() {
         const tag = String(window.name).slice(GAL_NAME.length + 1).split(':');
         const token = tag[0], grow = tag[1] === 'grow';
-        let sent = false, quietT = 0, capT = 0, obs = null;
+        let sent = false, quietT = 0, capT = 0, obs = null, held = false;
         const known = new Set();
+        window.addEventListener('message', function (e) {
+            if (e.source === window.parent && e.data && e.data.hzGalleryHold === token) held = !!e.data.hold;
+        });
         galNoMedia();
         document.addEventListener('play', function (e) {
             try { e.target.muted = true; e.target.pause(); } catch (x) { /* not media */ }
@@ -11247,9 +11262,9 @@
         };
         // Reading on: a screen further down every GAL_GROW_TICK, new pictures sent as they mount, done once the bottom stays quiet or the site's feed begins.
         const readOn = function () {
-            const t0 = Date.now();
-            let idle = 0;
+            let t0 = Date.now(), idle = 0;
             const tick = function () {
+                if (held) { t0 += GAL_GROW_TICK; setTimeout(tick, GAL_GROW_TICK); return; }
                 const fresh = list().filter(function (x) { return !known.has(x.thumb); });
                 (fresh.length ? mine(fresh) : Promise.resolve([])).then(function (ok) {
                     if (fresh.length) idle = 0;
@@ -11375,7 +11390,7 @@
             'pointer-events:none;box-shadow:0 4px 14px rgba(0,0,0,.6)}' +
             '.svd{position:absolute;left:4px;top:4px;width:22px;height:22px;pointer-events:none}' +
             '.strip[hidden]{display:none}' +
-            '.strip{position:fixed;z-index:4;display:flex;flex-direction:column;justify-content:center;gap:3px;padding:0 4px;box-sizing:border-box;cursor:move;' +
+            '.strip{position:fixed;z-index:4;display:flex;flex-direction:column;justify-content:space-evenly;padding:0 4px;box-sizing:border-box;cursor:move;' +
             'background:#1e1e2e;border:1px solid #45475a;border-radius:8px;color:#cdd6f4;' +
             'font:12px/1 system-ui,sans-serif;pointer-events:auto;box-shadow:0 4px 14px rgba(0,0,0,.6);user-select:none}' +
             '.strip .r{display:flex;align-items:center;gap:4px;height:24px}' +
@@ -11554,7 +11569,15 @@
         });
         set.rows = galRowLines(L);
         galPageNote(set);
+        galGrowPace(set);
         return L;
+    }
+
+    // Reading on keeps one page ahead of the page on screen: it waits once that page is full.
+    function galGrowPace(set) {
+        if (!galGrowHold || galGrowing !== set.href) return;
+        const P = set.pages || [], per = P.length > 1 ? P[0][1] - P[0][0] : 0;
+        galGrowHold(!!per && set.cells.length >= (set.page + 2) * per);
     }
 
     // What the rows keep clear of: the clicked picture with its attached strip, and a strip of its own.
@@ -11853,7 +11876,7 @@
             el.appendChild(r);
         };
         row('pg', 'pgP', 'pgT', 'pgN', 'Previous page · PageUp', 'Next page · PageDown', galFlip);
-        row('pic', 'picP', 'picT', 'picN', 'Previous picture · ← or wheel up', 'Next picture · → or wheel down', galStep);
+        row('pn', 'picP', 'picT', 'picN', 'Previous picture · ← or wheel up', 'Next picture · → or wheel down', galStep);
         ['mousedown', 'mouseup', 'click', 'auxclick', 'dblclick', 'contextmenu'].forEach(function (t) {
             el.addEventListener(t, function (e) {
                 e.preventDefault();
@@ -11880,14 +11903,14 @@
 
     let galStepTok = null;
 
-    // One picture on (+1) or back (-1), its page following; with none in the preview it starts from the last one seen on this page, else the page's first (last going back).
+    // One picture on (+1) or back (-1), its page following: from a pinned preview, else the last one stepped to on this page, else the page's first is shown (a hover moves nothing).
     function galStep(dir) {
         const set = galCur;
         if (!set || !set.pics.length) return false;
         const n = set.pics.length, p = (set.pages && set.pages[set.page]) || [0, n];
-        let k = galShownAt(set);
+        let k = placed ? galShownAt(set) : -1;
         if (k < 0 && set.at >= p[0] && set.at < p[1]) k = set.at;
-        k = k < 0 ? (dir > 0 ? p[0] : p[1] - 1) : (k + dir + n) % n;
+        k = k < 0 ? p[0] : (k + dir + n) % n;
         set.at = k;
         const pg = galPageOf(set, k);
         if (pg !== set.page) {
@@ -11950,13 +11973,14 @@
 
     let galFlipAt = 0, galWheelSum = 0, galWheelAt = 0;
 
-    // The wheel steps an open gallery's pictures, over the preview too, and never scrolls the page; Ctrl + wheel over a pinned preview zooms it.
+    // The wheel steps an open gallery's pictures and never scrolls the page; over a pinned preview it zooms that instead.
     function galWheel(e) {
         const set = galCur;
         if (!set) return;
         if (e.ctrlKey) return;      // the preview's zoom over a pinned one (onPinWheel), else the browser's own zoom
 
         if (panelOwns(e)) return;
+        if (placed && view && pointInPreview(e.clientX, e.clientY)) return;     // zooms it (onPinWheel)
         e.preventDefault();
         e.stopImmediatePropagation();
         const now = performance.now();
@@ -12331,6 +12355,7 @@
         galPeek = false;
         if (galOwns(active)) cancel();
         if (galCur) { galDrop(galCur); galCur = null; }
+        if (galGrowEnd) galGrowEnd('closed');
         if (galBlur) galBlur.classList.remove('on');
         galVeil(false);
         galFlyBack();
@@ -12378,8 +12403,6 @@
             dbg('gallery preview found', { ms: Math.round(performance.now() - t1), remembered: known, size: hit ? hit.w + 'x' + hit.h : null });
             if (!hit) return;
             showViewer(hit, pointer);
-            const set = galCur, i = set ? set.pics.findIndex(function (p) { return p.img === img; }) : -1;
-            if (i >= 0) { set.at = i; galPageNote(set); }      // the picture row counts from what was looked at
         }, cfg.hoverDelay);
     }
 
