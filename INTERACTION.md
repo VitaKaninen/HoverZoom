@@ -3,7 +3,7 @@
 What the preview **window** does, as a state machine. Menus, buttons, the status bar contents and
 the loading ring are out of scope except where they change what the window itself accepts.
 
-Describes `Hover-Zoom.user.js` **v0.319.0**.
+Describes `Hover-Zoom.user.js` **v0.320.0**.
 
 **Two words the user uses:** *the widget* is the floating ◀ `n / N` ▶ box; *the slideshow* is the pinned
 preview stepping through a queue of the page's pictures. The code and `docs/` say `tour` for the slideshow.
