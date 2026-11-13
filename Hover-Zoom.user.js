@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.288.0
+// @version     0.289.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -11966,7 +11966,7 @@
         if (!galOn) clearTimeout(galGraceTimer);
         if (galAt && galAt.href === href) return;
         const a = e.target.closest('a[href]'), pic = e.target.tagName === 'IMG' ? e.target : a && a.querySelector('img');
-        const hr = (pic || e.target).getBoundingClientRect();
+        const hr = galHoleRect(pic || e.target);
         galAt = { href: href, hole: { x: hr.left, y: hr.top, w: hr.width, h: hr.height } };
         if (galOn) return;                          // locked on its target
         clearTimeout(galHoverTimer);
@@ -11975,11 +11975,16 @@
         }, cfg.hoverDelay);
     }
 
+    // The result's visible box: clipped like a mark's, since a site may scale the picture under the pointer (nsfw.xxx 1.1×).
+    function galHoleRect(el) {
+        return galMarkRect(el, el.closest('picture') || el);
+    }
+
     // Middle press on a result: its gallery, locked; on the open one, closed; on another, switched.
     function galMiddle(t, href) {
         if (galOn && (galWant === href || (galCur && galCur.href === href))) { galHide('middle'); return; }
         const a = t.closest('a[href]'), pic = t.tagName === 'IMG' ? t : a && a.querySelector('img');
-        const hr = (pic || t).getBoundingClientRect();
+        const hr = galHoleRect(pic || t);
         galAt = { href: href, hole: { x: hr.left, y: hr.top, w: hr.width, h: hr.height } };
         if (galOwns(active)) cancel();
         galOn = true;
