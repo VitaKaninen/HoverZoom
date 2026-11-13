@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.289.0
+// @version     0.290.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -12036,9 +12036,14 @@
             seen[host] = n + 1;
             try { GM_setValue(GAL_HINT_KEY, JSON.stringify(seen)); } catch (e) { /* this page only */ }
         }
-        galHintEl.style.left = Math.max(4, r.left + 6) + 'px';
-        galHintEl.style.top = Math.max(4, r.top + 6) + 'px';
+        galHintEl.style.left = '0px';
+        galHintEl.style.top = '0px';
         galHintEl.hidden = false;
+        const at = el.closest('picture') || el, hr = galHintEl.getBoundingClientRect();
+        const own = [GAL_MARK, GAL_SAVED_MARK].map(function (k) { const x = galMarkFind(at, k); return x && x.getBoundingClientRect(); }).filter(Boolean);
+        const spot = galCorners(r, galMarkBlockers(at, r), [{ w: hr.width, h: hr.height, order: GAL_HINT_ORDER }], 6, own)[0];
+        galHintEl.style.left = Math.max(4, spot.left) + 'px';
+        galHintEl.style.top = Math.max(4, spot.top) + 'px';
         galHintFor = el;
     }
 
@@ -12311,22 +12316,66 @@
         setTip(m, 'Click: mark as not seen and not saved');
     }
 
-    // The first corner where the mark is not under something of the page's own (a badge, a caption); top-right if none is clear or the spot is off screen.
-    function galMarkCorner(m, ir, at, w, s, avoid) {
-        const corners = [['r', 't'], ['r', 'b'], ['l', 'b'], ['l', 't']].filter(function (c) { return !avoid || c.join('') !== avoid; });
-        const pt = function (c) {
-            return { x: c[0] === 'r' ? ir.right - 4 - w / 2 : ir.left + 4 + w / 2, y: c[1] === 't' ? ir.top + 4 + s / 2 : ir.bottom - 4 - s / 2 };
-        };
-        m.style.pointerEvents = 'none';
-        let pick = corners[0];
-        for (let i = 0; i < corners.length; i++) {
-            const p = pt(corners[i]);
-            if (p.x < 0 || p.y < 0 || p.x > vpW() || p.y > vpH()) continue;
-            const top = document.elementsFromPoint(p.x, p.y).find(function (n) { return n !== m && n !== galHost && !ours(n); });   // the gallery's own cells are not the page's
-            if (!top || top === at || at.contains(top) || top.contains(at) || top.hasAttribute(GAL_SAVED_MARK) || top.closest('[' + GAL_SAVED_MARK + ']')) { pick = corners[i]; break; }
+    const GAL_TICK_ORDER = ['rt', 'rb', 'lb', 'lt'], GAL_SAVED_ORDER = ['lt', 'lb', 'rb', 'rt'], GAL_HINT_ORDER = ['lt', 'rt', 'lb', 'rb'];
+
+    function galOverlap(a, b) {
+        return Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left)) * Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
+    }
+
+    // Spots for marks {w, h, order} in box ir: each takes its first corner clear of the blockers and earlier marks (prior: ones already drawn), else beside one, else the least covered.
+    function galCorners(ir, blockers, marks, pad, prior) {
+        const p = pad === undefined ? 4 : pad, taken = (prior || []).slice();
+        return marks.map(function (k) {
+            const at = function (left, top) { return { left: left, top: top, right: left + k.w, bottom: top + k.h }; };
+            const cands = k.order.map(function (c) {
+                return at(c[0] === 'r' ? ir.right - p - k.w : ir.left + p, c[1] === 't' ? ir.top + p : ir.bottom - p - k.h);
+            });
+            taken.forEach(function (t) { cands.push(at(t.right + p, t.top), at(t.left - p - k.w, t.top)); });
+            let best = cands[0], cov = Infinity;
+            cands.forEach(function (c) {
+                if (c.left < ir.left || c.right > ir.right) return;
+                const v = blockers.concat(taken).reduce(function (s, b) { return s + galOverlap(c, b); }, 0);
+                if (v < cov) { cov = v; best = c; }
+            });
+            taken.push(best);
+            return best;
+        });
+    }
+
+    // The page's own elements over the picture's box (a count badge, a name bar): read from the card's tree, so it holds off screen too.
+    function galMarkBlockers(at, ir) {
+        const area = ir.width * ir.height, out = [];
+        let scope = galMarkHost(at);
+        if (!scope) return out;
+        for (let i = 0; i < 2 && scope.parentElement && scope.parentElement !== document.body; i++) {
+            const pr = scope.parentElement.getBoundingClientRect();
+            if (pr.width * pr.height > area * 2) break;
+            scope = scope.parentElement;
         }
-        m.style.pointerEvents = 'auto';
-        return pick;
+        const mine = '[' + GAL_MARK + '],[' + GAL_SAVED_MARK + ']';
+        scope.querySelectorAll('*').forEach(function (n) {
+            if (n === at || n.contains(at) || at.contains(n) || n.closest(mine)) return;
+            const r = n.getBoundingClientRect();
+            if (r.width < 1 || r.height < 1 || r.width * r.height > area / 2 || galOverlap(r, ir) <= 0) return;
+            const cs = getComputedStyle(n);
+            if (cs.visibility === 'hidden' || +cs.opacity === 0) return;
+            out.push(r);
+        });
+        return out;
+    }
+
+    // Our saved disc and tick on one picture, laid out together clear of the page's badges.
+    function galMarkPlace(img, saved, tick) {
+        const at = img.closest('picture') || img, ir = galMarkRect(img, at);
+        const marks = [saved, tick].filter(Boolean);
+        const spots = galCorners(ir, galMarkBlockers(at, ir), marks.map(function (m) {
+            return m === saved ? { w: 22, h: 22, order: GAL_SAVED_ORDER } : { w: m.getAttribute(GAL_MARK) === '2' ? 34 : 24, h: 24, order: GAL_TICK_ORDER };
+        }));
+        marks.forEach(function (m, i) {
+            const o = m.getBoundingClientRect();
+            m.style.left = (spots[i].left - o.left) + 'px';
+            m.style.top = (spots[i].top - o.top) + 'px';
+        });
     }
 
     // One green tick in the picture's first uncovered corner (top-right first), or two overlapping for a visited gallery; a click clears it.
@@ -12365,10 +12414,6 @@
         const w = kind === '2' ? 34 : 24, s = 24;
         m.style.cssText = 'all:initial;position:absolute;left:0;top:0;z-index:3;pointer-events:auto;cursor:pointer;display:block;' +
             'width:' + w + 'px;height:' + s + 'px;filter:drop-shadow(0 1px 2px rgba(0,0,0,.7))';
-        const c = galMarkCorner(m, ir, at, w, s, galMarkFind(at, GAL_SAVED_MARK) ? 'lt' : '');
-        const o = m.getBoundingClientRect();
-        m.style.left = ((c[0] === 'r' ? ir.right - w - 4 : ir.left + 4) - o.left) + 'px';
-        m.style.top = ((c[1] === 't' ? ir.top + 4 : ir.bottom - s - 4) - o.top) + 'px';
         return m;
     }
 
@@ -12405,11 +12450,11 @@
         return null;
     }
 
-    // The saved mark in the picture's top-left corner.
+    // The saved mark (placed by galMarkPlace, top-left first).
     function galMarkSaved(img, h) {
         const at = img.closest('picture') || img;
         const ir = galMarkRect(img, at);
-        if (ir.width < 48 || ir.height < 24) return;
+        if (ir.width < 48 || ir.height < 24) return null;
         let m = galMarkFind(at, GAL_SAVED_MARK);
         if (!m) {
             m = galSavedIcon('');
@@ -12421,9 +12466,7 @@
         m.__hzHref = h;
         m.style.cssText = 'all:initial;position:absolute;left:0;top:0;z-index:3;pointer-events:auto;cursor:pointer;display:block;' +
             'width:22px;height:22px';
-        const o = m.getBoundingClientRect();
-        m.style.left = (ir.left + 4 - o.left) + 'px';
-        m.style.top = (ir.top + 4 - o.top) + 'px';
+        return m;
     }
 
     function galMarkAll() {
@@ -12448,11 +12491,12 @@
                 [GAL_MARK, GAL_SAVED_MARK].forEach(function (k) { const x = galMarkFind(at, k); if (x) x.remove(); });
                 return;
             }
-            if (from.has(h)) galMarkSaved(img, h);
-            let m;
+            const saved = from.has(h) ? galMarkSaved(img, h) : null;
+            let m = null;
             if (went.has(h)) m = galMarkImg(img, '2', h);
             else if (seen.has(h)) m = galMarkImg(img, '1', h);
-            else return;
+            if (saved || m) galMarkPlace(img, saved, m);
+            if (!went.has(h) && !seen.has(h)) return;
             if (!m) {
                 st.tooSmall++;
                 if (dbgOn && (st.small || (st.small = [])).length < 3) {

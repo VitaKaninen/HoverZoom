@@ -34,7 +34,8 @@ so the user can judge whether that gallery is worth opening. Look only: the floa
   mouseover lands before the mousemove that sets it, and a cached `galKindOf()` would test a stale
   point and skip the chip. `galKindOf()` settles once per area per page, unknown included (nsfw.xxx
   profiles are script-built: always unknown, ~1 s per read). `galHintShow` chip (`.hint`, clickable,
-  top-left of `galMarkRect()` of the door — the visible card, not a hover-scaled picture,
+  placed by `galCorners` on `galMarkRect()` of the door (the visible card, not a hover-scaled picture),
+  top-left first, beside our marks, clear of the page's badges,
   text for the first `GAL_HINT_TIMES` 3 per site, count in GM `hoverZoomPeekHints`), hidden by
   `galMove` off the door, any press, any scroll; `galLoad` after `cfg.hoverDelay` reads ahead.
 - **Pages** (`galRows(asp, hole, page)` → `{out, pages, page}`): if everything fits at
@@ -188,14 +189,17 @@ so the user can judge whether that gallery is worth opening. Look only: the floa
   drawn-but-`hidden` ticks (clipped/covered/zero size), up to 3 `small` (img and picture sizes), and `lastSeenUnmatched` + `nearestLinks` when
   the newest seen link matches no page picture.
 - **Mark rules (user, v0.278.0–v0.280.0):** only the **biggest** picture linking to a result is marked
-  (nsfw.xxx cards hold the profile avatar too); corner = first on-screen one not under a page element
-  (`galMarkCorner`: top-right, bottom-right, bottom-left, top-left; the saved disc's top-left is skipped),
-  re-derived when any `<img>` loads (masonry relayouts move cards). `galMarkRect` clips the picture by
+  (nsfw.xxx cards hold the profile avatar too). Corners: `galMarkPlace` lays the saved disc (top-left
+  first) and the tick (top-right first) out together with `galCorners` (pure, in `test-resolver.js`):
+  first corner clear of page elements and earlier marks, else beside an earlier mark, else least
+  covered. Page elements = `galMarkBlockers`, read from the card's tree (link + up to 2 ancestors no
+  bigger than 2x the picture), not hit-tested: `elementsFromPoint` failed off screen (tick drawn on
+  the badge, moved after scrolling), under the link's `::before` overlay, and for `pointer-events:none`.
+  nsfw.xxx: badge top-right, name bar across the bottom, so a saved card shows disc and tick side by
+  side top-left (a fixed top-left disc pushed the tick onto the badge). Re-derived when any `<img>` loads (masonry relayouts move cards). `galMarkRect` clips the picture by
   every overflow-hiding ancestor up to the link: nsfw.xxx scales `.user--content` 1.1× on `:hover`,
   so the raw rect put the tick ~22 px past the card's edge, clipped off. `galHoleRect()` (the gallery's hole and
-  ring) and the chip use the same clipped box. `galMarkCorner` reads
-  `elementsFromPoint` past our own layers: the opening gallery's cells covered every corner, so the
-  first gallery's tick fell back to top-right, over the site's badge. **Marks go in the link, not beside
+  ring) and the chip use the same clipped box. **Marks go in the link, not beside
   the picture:** nsfw.xxx's card container is a z-index 1 layer under the link's z-index 2 gradient
   `::before`, so a mark inside it was dimmed and unclickable at any z-index. z-index 3.
   **A click on a tick or saved disc clears the link** from seen, visited and saved-from (`galMarkClear`,

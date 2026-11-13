@@ -1270,5 +1270,23 @@ eq('template: all empty', N.fillNameTemplate('[site] - ([page_title])', { now: N
         return r.x + r.w <= hole.x || r.x >= hole.x + hole.w || r.y + r.h <= hole.y || r.y >= hole.y + hole.h; }), true);
     console.log('  (683 pictures: ' + big.pages.length + ' pages of about ' + (big.pages[0][1] - big.pages[0][0]) + ')');
 }
+// ---- mark corners: clear of the page's badges, beside each other when one corner is left (nsfw.xxx card, measured).
+{
+    const a = src.indexOf('    const GAL_TICK_ORDER'), b = src.indexOf('    // The page\'s own elements over the picture');
+    const M = new Function(src.slice(a, b) + NL + 'return {galCorners, GAL_TICK_ORDER, GAL_SAVED_ORDER, GAL_HINT_ORDER};')();
+    const R = function (l, t, w, h) { return { left: l, top: t, right: l + w, bottom: t + h, width: w, height: h }; };
+    const ir = R(12, 175, 448, 233), badge = R(384, 185, 65, 32), info = R(12, 338, 448, 70);
+    const tick = { w: 24, h: 24, order: M.GAL_TICK_ORDER }, disc = { w: 22, h: 22, order: M.GAL_SAVED_ORDER };
+    const one = M.galCorners(ir, [badge, info], [tick])[0];
+    eq('marks: a tick avoids the count badge and the name bar', [one.left, one.top], [16, 179]);
+    eq('marks: no badges, the tick goes top-right', M.galCorners(ir, [], [tick])[0].left, 432);
+    const two = M.galCorners(ir, [badge, info], [disc, tick]);
+    eq('marks: the saved disc takes top-left', [two[0].left, two[0].top], [16, 179]);
+    eq('marks: the tick sits beside it, not on the badge', [two[1].left, two[1].top], [42, 179]);
+    const wide = M.galCorners(R(0, 0, 100, 100), [], [{ w: 300, h: 22, order: M.GAL_HINT_ORDER }], 6)[0];
+    eq('marks: a chip wider than the card stays top-left', [wide.left, wide.top], [6, 6]);
+    const chip = M.galCorners(ir, [badge, info], [{ w: 30, h: 22, order: M.GAL_HINT_ORDER }], 6, two)[0];
+    eq('marks: the chip sits beside the disc and tick', [chip.left, chip.top], [72, 179]);
+}
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);
