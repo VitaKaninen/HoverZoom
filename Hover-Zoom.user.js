@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.284.0
+// @version     0.285.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -5814,8 +5814,8 @@
     let doorCheckEl = null;
 
     // A refused door hover: stamp its area, and on a LINK_RECHECK share check it silently against the linked page.
-    function doorHover(el) {
-        galDoorHover(el);
+    function doorHover(el, x, y) {
+        galDoorHover(el, x, y);
         if (doorCheckEl === el) return;
         const chain = domChain(el), path = pagePath();
         areaApply('doorAreas', areaTouch, chain, path);
@@ -6842,7 +6842,7 @@
         const el = eligible(e.target, e.clientX, e.clientY);
         if (debugOn()) dbg('hover', hoverReport(e.target, el, e));
         if (!el && e.target.tagName === 'IMG' && /^videoLinkGate/.test(refusal(e.target) || '')) opWatch(e.target);
-        if (!el) { const door = doorAt(e.target, e.clientX, e.clientY); if (door) doorHover(door); }
+        if (!el) { const door = doorAt(e.target, e.clientX, e.clientY); if (door) doorHover(door, e.clientX, e.clientY); }
         if (!el) {
             if (!active || active.contains(e.target)) return;
             if (activeCovered && stillUnderPointer(active, e.clientX, e.clientY)) return;
@@ -11990,8 +11990,9 @@
     }
 
     // A hovered door: its pictures are read ahead, and a chip on its corner says a middle-click shows them.
-    function galDoorHover(el) {
+    function galDoorHover(el, x, y) {
         if (!isTopFrame || galCur || galWant) return;
+        if (x !== undefined) { galPt.x = x; galPt.y = y; }    // mouseover lands before the mousemove that would set it
         const href = galLinkOf(el);
         if (!href || galHintFor === el) return;
         galKindOf(el, href).then(function (kind) {
