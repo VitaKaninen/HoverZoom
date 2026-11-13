@@ -202,7 +202,7 @@ The window is up and transient.
   default) it opens beside the pointer and is nudged the smallest distance that puts the pointer
   `REACH_INSET` (10 px) inside its edge. (`cursorGap` was retired in v0.40.0: that nudge always
   overrode it, so the gap could never survive.) With `position: under` (v0.269.0) it opens
-  centred on the pointer, then clamped on screen like the others. With `position: last` it opens where a pinned
+  centred on the pointer, then clamped on screen like the others. With `position: remember` it opens where a pinned
   preview was last dropped — the centre until one is (`E64`) — and the pointer is *outside* it, so the press that pins it is the one on the picture
   itself (`E30`). Either way it stays 4 px clear of the viewport's edges and **24 px clear of the
   bottom**, which is where the browser paints the link target it would follow (`STATUS_TIP_H`).
@@ -496,7 +496,7 @@ inert.
 | `T39` | any | Drag the widget (Ctrl held: no snapping) | It moves, snapping 8 px to window edges, the window's centre and other scripts' widgets; widgets attached to it move with it. The drop is remembered for this site and as the default for new ones (`E63`) |
 | `T41` | any | The widget's ⇅ button: wheel over it, or click it | Wheel over it steps like ◀ ▶ (starting the slideshow from idle always at the first picture, either direction, v0.186.0). The wheel always steps within `wheelRange` (65 px) of the button, lit even when the pointer arrived there without moving (a still pointer carried over a navigation), and unlit when the pointer leaves the window. The tick that starts the slideshow drops the rest of its spin until the wheel rests 300 ms or 500 ms pass. A click starts the slideshow and **arms** it (filled blue — as it also is while the pointer is in reach): the wheel then steps anywhere on the page, the settings panel excepted. A second click disarms and leaves the slideshow open; any close, navigation or reload disarms (`E72`) |
 | `T42` | `S10`/`S25` | The magnifier, then paste or drop the original's address | The window upgrades to it in place, and the pattern from the small address to the big one is kept for that image host (`E75`) |
-| `T40` | `S10`/`S25` | Drag a pinned window and let go (Ctrl held: no snapping) | It snaps to the window's corners and edge middles (16 px) and centre (40 px) on the axes the drag moved, and stays where it is dropped. In a slideshow the drop becomes the slideshow's spot, under `position: last` where previews open — but only on an axis moved 40 px or more with 80 px (10%) of room to spare; otherwise nothing is remembered (`E64`) |
+| `T40` | `S10`/`S25` | Drag a pinned window and let go (Ctrl held: no snapping) | It snaps to the window's corners and edge middles (16 px) and centre (40 px) on the axes the drag moved, and stays where it is dropped. A drop is kept for the tab (`sessionStorage`; for good under `position: remember`) and holds the axes moved — but only on an axis moved 40 px or more with 80 px (10%) of room to spare; otherwise nothing is remembered (`E64`) |
 | `T43` | `S05`/`S06`/`S10`/`S25` | Middle-click the window | The original (`view.url`) saves to the browser's download folder with no dialog; the window is left as it was — a hover preview is not pinned (`E76`) |
 | `T25` | — | *Retired in v0.34.0.* Moving the window used to freeze its size as a ceiling; it no longer touches the size at all (`E22`) |
 

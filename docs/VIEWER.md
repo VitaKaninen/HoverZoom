@@ -72,20 +72,15 @@ area. Found v0.78.0.
 
 ### The bottom gap is bigger than the other three · `STATUS_TIP_H`
 
-Every side keeps `EDGE_GAP` (4 px) clear; the bottom keeps `bottomGap()` — `EDGE_GAP +
-STATUS_TIP_H`, 24 px. The browser paints the link target it is about to follow over the bottom-left
-of the viewport, and a hover preview's status bar is the first thing that covers. Flat pixels, not
-a fraction: the strip the browser paints is a fixed height.
+Every side keeps `EDGE_GAP` (4 px) clear; the bottom keeps `bottomGap()`: `EDGE_GAP`, plus `STATUS_TIP_H` only
+under `keepClearStatus` (v0.315.0, default off, user: most people do not use the link bar, and it covering a
+picture is cosmetic). The browser paints the link target over the bottom-left of the viewport. Flat pixels,
+not a fraction: the strip is a fixed height.
 
 **This is not `bottomReserve` coming back.** What was retired was a *setting* — a knob in the same
 sweep as `maxWidthPct`, `maxHeightPct` and `dimOpacity` — and the invariant the retirement bought
 was that only one expression decides where the bottom is. `bottomGap()` keeps that: `viewportBox()`
 (the opening size) and `clampPosition()`'s hover branch both call it, so they cannot disagree.
-
-**It costs the placed growth ceiling 20 px × `maxSizeMultiple`**, because `growBox()` multiplies
-`viewportBox()`. Accepted rather than special-cased: at the 1.2 default the ceiling is still far
-past the viewport, and a second height that means "the same but without the reserve" is exactly the
-drift the single-answer rule exists to prevent.
 
 The gap only binds a **hover** preview. `clampPosition()`'s placed branch is `KEEP_ON_SCREEN` and
 lets a window sit wherever it was put, tip or no tip. The loading ring is nudged up by the same
@@ -93,19 +88,8 @@ amount, since it is a hover-time thing too.
 
 ### The status bar stays off the ◀ ▶ widget · `E69`
 
-The widget floats over the preview (it is re-appended after the preview host), so a bar under it
-loses its right-hand buttons. Two cases, two answers, asked for by the user 2026-09-23:
-
-- **Widget docked at the window's bottom** → `widgetFloor()` feeds `bottomGap()`, so the dead strip
-  at the bottom becomes the widget's height instead of `STATUS_TIP_H`. `fitFull()` subtracts it too.
-  Shrinking is the only answer here: a window filling the height has nowhere to move.
-- **Widget higher up** → `clearWidget()`, run at the end of both branches of `clampPosition()`,
-  moves the window up or down by the smaller amount that clears the bar and keeps it whole on screen
-  and out of the `bottomGap()` strip — a bump down into that strip loses to a bump up.
-  If neither fits, the window shrinks from the bottom to end above the widget: `view.capH` caps the
-  frame in `reflow()` and `fitScaleFor()`, and a picture at fit scale is refitted, so it shrinks
-  rather than crops (a zoomed one keeps its zoom and pans). `swapViewer()` clears the cap for the next
-  picture. Skipped during a drag (it would fight the pointer) and in fullscreen.
+Superseded by v0.315.0: see "Widget and link bar vs the window" at the end of this file. The widget no
+longer sets a floor under the window; `clearWidget()` nudges instead, and `keepClearWidget` shrinks.
 
 ## The wheel grows a PLACED window, about the POINTER · `E22`
 
@@ -119,7 +103,7 @@ loses its right-hand buttons. Two cases, two answers, asked for by the user 2026
 **Nothing else pins the size. Not placing, not moving.** v0.29.0–v0.33.0 froze it on the move; that
 became unreachable once the wheel went back to the page while hovering, because zooming then
 requires placing, placing is a press, and a press almost always wanders the 3 px that counted as a
-move. Every window was frozen at its opening size and `maxSizeMultiple` could not be reached at
+move. Every window was frozen at its opening size and the growth ceiling could not be reached at
 all. *(The general shape is worth remembering: a rule correct in isolation was made vacuous by a
 change elsewhere, and the symptom was not an error but a capability that silently stopped being
 reachable.)*
@@ -216,9 +200,10 @@ Old `last`/`center` values migrate to `auto`. One memory (`spot`; was `tour` + `
   so a drop too small to be remembered lasts until the next step and no longer.
 - `posApply` keeps the window whole on screen when it fits; `view.anchor` remembers the spec so an
   upgrade and a window resize re-place from it instead of keeping the centre. A hover preview still
-  goes through `clampPosition()`, so at the bottom it sits `STATUS_TIP_H` higher than the pinned drop.
-- **Storage** `hoverZoomPos` = `{spot:{sites,last}}`. A site gets an entry only
-  when something is dropped there; `last` is the fallback. `posPerSite` off: `last` only. The user's
+  goes through `clampPosition()`, so under `keepClearStatus` it sits `STATUS_TIP_H` higher than the pinned drop.
+- **Storage** only under `position: remember`: GM `hoverZoomPos` = `{spot:{sites,last}}`. A site gets an entry only
+  when something is dropped there; `last` is the fallback. `posPerSite` off: `last` only. Otherwise a drop is
+  kept in `sessionStorage` (`hoverZoomTabSpot`) for the tab. The user's
   idea of consolidating a common default and storing only exceptions was declined: ~60 bytes a site,
   and a site matching today's default would silently follow a later change.
 
@@ -487,28 +472,12 @@ live and the window follows the pointer back with no button held. **`e.buttons =
 move is the only thing that can notice**, and it must end through the same `endDrag()` the ordinary
 release uses, or the two paths drift.
 
-### `maxSizeMultiple` · `E7`
+### The growth ceiling is the viewport · `E7`
 
-Replaces `maxWidthPct`/`maxHeightPct` (92 each), which bought an 8 % margin for reachability that a
-freely-movable window does not need.
-
-```
-growW = viewportBox().w * m            // the ceiling the wheel and corners may reach
-openW = min(growW, viewportBox().w)    // never OPEN bigger than the screen
-```
-
-**Without that `min`, a large picture at 2× would open taller than the screen** — and a preview
-appears without being asked for.
-
-The default is above 1× for a geometric reason, not a preference for big pictures: a frame exactly
-the window's height, shoved up to see under it, leaves a strip of empty page along the bottom, and
-lining it back up is fiddly. A frame larger than the window in both axes reaches the screen edges
-from any position.
-
-`RETIRED` in `readSettings()` **deletes** old keys rather than ignoring them — `cfg` is DEFAULTS
-merged with storage and the whole object is written back on Save, so a retired key survives every
-save forever. They are not converted: the old pair capped the size a preview *opened* at, the new
-one caps how far it may *grow*, and there is no honest arithmetic between them.
+`growBox()` is `viewportBox()`: the wheel and corners may reach the screen's edges and no further, pinned or
+touring (v0.313.0; `maxSizeMultiple`, which allowed a frame wider than the screen, is gone and `RETIRED`
+deletes the stored key). A frame exactly the window's height, shoved up to see under it, once left an empty
+strip that was fiddly to line up; with the cap, the window is moved instead of the picture hanging off.
 
 ### The viewport is `<body>` on a quirks-mode page
 
@@ -625,7 +594,7 @@ picture were welded at the fit. Both limits had to go together.
 
 ## A pan that runs out continues as a window move · `E32`
 
-`maxSizeMultiple` above 1 means the frame can be wider than the screen, with its edges off it.
+A frame larger than the screen (a hand resize or an old stored size) has its edges off it.
 `reflow()` clamps the pan so the frame never shows past the picture's edges — and that clamp used
 to be the end of the gesture, which left the edges of the picture **unreachable**: they sit at the
 frame's edges, which are off-screen.
@@ -637,7 +606,7 @@ can be brought into view.
 
 *(Where the handover happens: `pannable()` — the picture larger than the frame — is what the
 middle of the frame does on a press, and it becomes true once the frame stops growing, i.e. at
-the `maxSizeMultiple` ceiling or after a hand resize pins the frame. The cursor says which:
+the viewport ceiling or after a hand resize pins the frame. The cursor says which:
 `move` (four arrows) = the window moves, `grab` (hand) = the picture pans.)*
 
 ## Every open fades from a settled zero

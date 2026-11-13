@@ -853,31 +853,19 @@ see TESTING.md on pace. ← from nothing (lands on #100, bottom on screen): batc
 → gave 101/200. Bing: the second batch loaded at step 29 (41 → 84); Bing auto-loads only two
 batches, then shows a "See more images" button no scroll passes, so its slideshow ends there.
 
-- **Only on a learned host** (`growsHere()`); elsewhere the page never moves during a slideshow
-  (v0.142.0, user: "disable both until we need them"). `cfg.scrollSites` is the list — panel,
-  Per-site fixes, ✕ per row, kept by Reset (v0.141.0–v0.142.0 kept it in GM key
-  `hoverZoomGrowsOnScroll`; `growsMigrate()` moves it once). A host is learned when the **user**
-  scrolls (wheel/key/touch/press within 1 s before the `scroll`), is within two viewports of the
-  bottom, and the widget's count (`growsCount()` = `twTotal`'s derivation, not `mediaCount()`: ads
-  and pixels move the raw count) rises within 0.6 s or 2.6 s **with elements not there before**
-  (`growsHad`): a lazy page filling in placeholders it already had raises the count too, and was
-  learned as a feed (v0.152.0).
-  **A recycling feed (Imgur) keeps ~8-15 pictures mounted at any scroll position**, so its count
-  never rises; near the bottom it lengthens the page instead (29,755 → 52,127 px, measured Chrome
-  2026-09-27). So "grew" is `pageGrew()`: count up, **or** the page one viewport longer — in the
-  learner (`growsH`), `excWatch` and `excWalk`. Count-only, the watch logged a miss per page and
-  `GROWS_FORGET` dropped Imgur after five. The user-input test excludes our own
-  scrolls and scroll restoration. No built-in list of feeds, by design: the first slideshow on
-  Google Images ends at 100 until the user has scrolled once.
-- **Not a one-way gate (v0.143.0, user).** `hoverZoomScrollMisses` {host: n}: a watch at the
-  bottom that finds nothing counts one miss per page URL (`excGaveNothing`); `GROWS_FORGET` (5) in
-  a row removes the host. A batch found, or a hand scroll that raises the count, clears the run.
-  A site with feed and finite pages (Reddit feed vs a post) may be forgotten and relearned — fine.
+- **Every site scrolls** (v0.313.0, user). The per-site list (`scrollSites`, `growsHere()`, its learner and
+  `GROWS_FORGET` misses) is gone; `tourLoadMore` is the only switch. **A recycling feed (Imgur) keeps ~8-15
+  pictures mounted at any scroll position**, so its count never rises; near the bottom it lengthens the
+  page instead (29,755 → 52,127 px, measured Chrome 2026-09-27). So "grew" is `pageGrew()`: count up,
+  **or** the page one viewport longer — in `excWatch` and `excWalk`. Count-only judged Imgur empty.
+  No built-in list of feeds, by design.
+- A watch at the bottom that finds nothing (`excGaveNothing`) spends the slideshow's ask and marks the
+  page dead (below) until it grows.
 - **A page that loaded nothing** is `excDead {url, docHeight, mediaCount}` (never reset, unlike
   `excSpent`, which is per slideshow); asking again waits until the page has grown.
 - **Cooldown** `EXC_COOL_MS`, or a watch re-fires on every press while content loads.
 - Scrolls are `behavior:'instant'`: `'auto'` obeys a page's `scroll-behavior:smooth`.
-- **On a `growsHere()` site `lockScroll()` skips `overflow:hidden`** (`E77`, v0.273.0). Our scrolling
+- **`lockScroll()` never sets `overflow:hidden`** (`keep = true`, `E77`, v0.273.0; now on every site). Our scrolling
   moved through it (measured v0.98.0), but a feed loaded nothing until fullscreen ended (user,
   LibreWolf, 2026-11-12: walk reached the bottom, 190 → 190, exit loaded the batch). Whether the
   site gates on the overflow or the page scrolls inside `body` is unmeasured. `scrollbar-width:none`
