@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.285.0
+// @version     0.286.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -248,6 +248,7 @@
         modifierKey: 'ctrl',        // the hotkey: 'ctrl' | 'alt' | 'shift'
         hotkeyToggle: false,        // 'hover': a lone tap turns previews off in this tab until the next
         hoverDelay: 120,            // ms before resolving
+        galleryMiddle: false,       // a middle-click on a result opens its gallery (else the ▦ chip's click does)
         hoverPreload: true,         // load the page's pictures ahead of the user, as far as they show interest
         minDisplayed: 16,           // ignore images displayed smaller than this, whatever they are
         smallBelow: 48,             // px: smaller pictures preview only as an avatar or an emoji
@@ -11312,7 +11313,7 @@
             'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none;box-shadow:0 4px 14px rgba(0,0,0,.6)}' +
             '.hint{position:fixed;display:flex;align-items:center;gap:6px;box-sizing:border-box;height:22px;padding:0 6px;border-radius:6px;' +
             'background:rgba(30,30,46,.92);border:1px solid #45475a;color:#cdd6f4;font:12px/1 system-ui,sans-serif;white-space:nowrap;' +
-            'pointer-events:none;box-shadow:0 2px 8px rgba(0,0,0,.5)}' +
+            'pointer-events:auto;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.5)}' +
             '.hint svg{display:block;width:12px;height:12px;fill:#89b4fa}' +
             'img{display:block;width:100%;height:100%;object-fit:cover;border-radius:6px;background:#1e1e2e;opacity:0;transition:opacity ' + GAL_FADE_MS + 'ms ease;' +
             'box-shadow:0 8px 22px rgba(0,0,0,.55),0 2px 5px rgba(0,0,0,.4)}' +
@@ -12023,7 +12024,7 @@
         galHintEl.appendChild(mkIcon(ICON_GALLERY));
         if (n < GAL_HINT_TIMES) {
             const t = document.createElement('span');
-            t.textContent = 'Middle-click to see its pictures';
+            t.textContent = cfg.galleryMiddle ? 'Click here or middle-click to see its pictures' : 'Click to see its pictures';
             galHintEl.appendChild(t);
             seen[host] = n + 1;
             try { GM_setValue(GAL_HINT_KEY, JSON.stringify(seen)); } catch (e) { /* this page only */ }
@@ -12366,11 +12367,23 @@
     }
 
     // The picture's drawn box: the larger of the <img> and its <picture>, since an inline <picture> measures as a line box.
+    // Clipped by every ancestor up to the result's link that hides overflow: nsfw.xxx scales the picture 1.1× under the pointer.
     function galMarkRect(img, at) {
-        const a = img.getBoundingClientRect();
-        if (at === img) return a;
-        const b = at.getBoundingClientRect();
-        return a.width * a.height >= b.width * b.height ? a : b;
+        const a = img.getBoundingClientRect(), b = at === img ? a : at.getBoundingClientRect();
+        let l, t, r, btm;
+        const big = a.width * a.height >= b.width * b.height ? a : b;
+        l = big.left; t = big.top; r = big.right; btm = big.bottom;
+        const host = galMarkHost(at);
+        for (let e = at.parentElement; e; e = e.parentElement) {
+            const cs = getComputedStyle(e);
+            if (cs.overflowX !== 'visible' || cs.overflowY !== 'visible') {
+                const c = e.getBoundingClientRect();
+                if (c.width > 0 && c.height > 0) { l = Math.max(l, c.left); t = Math.max(t, c.top); r = Math.min(r, c.right); btm = Math.min(btm, c.bottom); }
+            }
+            if (e === host) break;
+        }
+        if (r <= l || btm <= t) return big;
+        return { left: l, top: t, right: r, bottom: btm, width: r - l, height: btm - t };
     }
 
     // Where a picture's marks live: the result's link itself, above any layer the card makes inside it (nsfw.xxx: a z-index 1 container under the link's z-index 2 overlay).
@@ -12588,8 +12601,16 @@
             galTap = false;
             galMidAt = 0;
             if (e.button === 0) galInputAt = performance.now();      // a scrollbar drag; the middle press itself is not
+            const chip = galHintEl && !galHintEl.hidden && galHintEl.contains(e.composedPath()[0]) ? galHintFor : null;
             galHintHide();
-            const plain = e.button === 1 && !e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey;
+            if (chip && e.button === 0) {       // the ▦ chip: its door's gallery, as a peek
+                e.preventDefault();
+                e.stopImmediatePropagation();
+                const href = galLinkOf(chip);
+                if (href) { galPeek = true; galMiddle(chip, href); }
+                return;
+            }
+            const plain = e.button === 1 && cfg.galleryMiddle && !e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey;
             if (plain && galleryHere()) {
                 if (e.target === galHost) { e.preventDefault(); return; }      // no autoscroll over the gallery
                 const href = galLinkOf(e.target);
@@ -14001,6 +14022,8 @@
         });
 
         section('Gallery mode');
+        check('galleryMiddle', 'Middle-click opens a gallery',
+            'Off: middle-click opens the link in a new tab as usual, and clicking the ▦ chip on a result opens its gallery.');
         const gallerySites = list('gallerySites', {
             heading: 'Sites with the gallery button',
             description: 'The button sits top right on these sites and turns gallery mode on or off for the page it is on. ' +

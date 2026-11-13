@@ -544,10 +544,10 @@ in a blue ring. Detail: [`docs/GALLERY.md`](docs/GALLERY.md).
 
 | ID | What | Behaviour |
 |---|---|---|
-| `G1` | Peek | Middle-click on a **door** (`P17`) opens its gallery on any site, no mode needed. Hovering a door shows a ▦ chip on its corner (spelled out the first 3 times per site) and reads its gallery ahead |
-| `G2` | Gallery mode | Per site, by the gallery button (sites in Settings → Advanced): ordinary previews off, the widget hidden; middle-click or a Ctrl tap opens any result's gallery, hover only reads ahead |
+| `G1` | Peek | A click on the ▦ chip of a **gallery door** (`P17`; not a door to more results) opens its gallery on any site, no mode needed; middle-click does too when Settings → Gallery mode → *Middle-click opens a gallery* is on (off by default). Hovering the door shows the chip on its corner (spelled out the first 3 times per site) and reads its gallery ahead |
+| `G2` | Gallery mode | Per site, by the gallery button (sites in Settings → Advanced): ordinary previews off, the widget hidden; a Ctrl tap (or middle-click, when that setting is on) opens any result's gallery, hover only reads ahead |
 | `G3` | Open | Locked on the result it was opened from; the page under it takes no hovers |
-| `G4` | Closes on | Middle-click on the same result (another result switches), Esc (after any preview), a left press on the page, a Ctrl tap, a resize, a page scroll |
+| `G4` | Closes on | Middle-click on the same result, when middle-click opens galleries (another result switches), Esc (after any preview), a left press on the page, a Ctrl tap, a resize, a page scroll |
 | `G5` | Cells | Hover = the ordinary hover preview of the cell's original (`S05`); a press pins it (`S10`); middle-click on the preview saves |
 | `G6` | Pages | Rows never under 120 px; more pictures than fit become pages. Wheel (not over a pinned preview) or PageUp/PageDown turns them; top line "Page n / N · count". One page: the wheel scrolls the page, which closes it (`G4`) |
 | `G7` | Reading on | While open, a hidden frame scrolls the linked page a screen every 0.4 s and adds pictures it mounts late; the line says "N+ … finding more…" until 4 s at its bottom with nothing new (cap 3 min). Closing stops it |

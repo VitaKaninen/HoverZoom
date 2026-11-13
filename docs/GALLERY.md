@@ -22,12 +22,17 @@ so the user can judge whether that gallery is worth opening. Look only: the floa
 - `galOnHosts` / `GAL_ON_KEY` are `var`s: `siteEnabled()` reads it and can run before its line.
 ## Peek, pages, reading on (v0.282.0; INTERACTION.md `G1`, `G6`, `G7`)
 
-- **Peek**: the document mousedown handler, outside gallery mode and where `siteEnabled()`: a plain
-  middle press on `doorAt()` sets `galPeek` and calls `galMiddle()`. While `galPeek`, `galOver` does
+- **Peek**: the document mousedown handler: a left press on the `.hint` chip (`composedPath()[0]`,
+  read before `galHintHide()`) peeks at `galHintFor`; outside gallery mode and where `siteEnabled()`,
+  a plain middle press on `doorAt()` does too, but only with `cfg.galleryMiddle` (default off, user
+  2026-11-12 — it gates gallery mode's middle press as well; Ctrl tap still opens there). Both set
+  `galPeek` and call `galMiddle()`. A door whose `galKindOf()` is `results` gets neither. While `galPeek`, `galOver` does
   not hide the set, a Ctrl tap closes it (and `galPeekTapAt` keeps the previews hotkey from also
   toggling), `galScroll` runs. `onOver` returns while `galCur || (galOn && galWant)`: with previews
   on, the page under the set would otherwise preview through the gaps. `galHide` clears `galPeek`.
-- **Door hover** (`doorHover` → `galDoorHover`): `galHintShow` chip (`.hint`, top-left of the door,
+- **Door hover** (`doorHover(el, x, y)` → `galDoorHover`): the event's x, y go into `galPt` first —
+  mouseover lands before the mousemove that sets it, and a cached `galKindOf()` would test a stale
+  point and skip the chip. `galHintShow` chip (`.hint`, clickable, top-left of the door,
   text for the first `GAL_HINT_TIMES` 3 per site, count in GM `hoverZoomPeekHints`), hidden by
   `galMove` off the door, any press, any scroll; `galLoad` after `cfg.hoverDelay` reads ahead.
 - **Pages** (`galRows(asp, hole, page)` → `{out, pages, page}`): if everything fits at
@@ -183,7 +188,9 @@ so the user can judge whether that gallery is worth opening. Look only: the floa
 - **Mark rules (user, v0.278.0–v0.280.0):** only the **biggest** picture linking to a result is marked
   (nsfw.xxx cards hold the profile avatar too); corner = first on-screen one not under a page element
   (`galMarkCorner`: top-right, bottom-right, bottom-left, top-left; the saved disc's top-left is skipped),
-  re-derived when any `<img>` loads (masonry relayouts move cards). **Marks go in the link, not beside
+  re-derived when any `<img>` loads (masonry relayouts move cards). `galMarkRect` clips the picture by
+  every overflow-hiding ancestor up to the link: nsfw.xxx scales `.user--content` 1.1× on `:hover`,
+  so the raw rect put the tick ~22 px past the card's edge, clipped off. **Marks go in the link, not beside
   the picture:** nsfw.xxx's card container is a z-index 1 layer under the link's z-index 2 gradient
   `::before`, so a mark inside it was dimmed and unclickable at any z-index. z-index 3.
   **A click on a tick or saved disc clears the link** from seen, visited and saved-from (`galMarkClear`,
