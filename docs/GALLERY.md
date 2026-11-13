@@ -186,15 +186,14 @@ No `allow="autoplay 'none'"`: Gecko logs "Skipping unsupported feature name auto
 (removed v0.235.0; the play listener does the job).
 One frame at a time (`galFrameStop`); a newer hover cancels it (`'cancel'`, not cached).
 
-**Both reads start at once** (`galLoad`, v0.236.0). The plain HTML wins as soon as it holds
-`GAL_HTML_ENOUGH` (6) pictures — the frame is stopped. Otherwise the frame's report wins if it comes
-within `GAL_PREFER_MS` (2.5 s); after that any non-empty HTML result is used; an empty HTML waits for
-the frame. Why: on the user's site the frame's page never reaches `load` (ads keep it loading), so
-every hover waited the full 10 s; the user wants no wait at all. **Once the frame's page has loaded
-its report is awaited** (capped by `GAL_REPORT_MS`), 2.5 s or not (v0.274.0): nsfw.xxx `/user/X` is a
-Nuxt page whose HTML holds only the profile avatar, the frame loads in ~1.6 s + settle, and the
-1-picture HTML won — the user saw "only the banner". The frame's copy reports from
-`DOMContentLoaded` + settle, not `load`, for the same reason.
+**Both reads start at once** (`galLoad`). The plain HTML wins as soon as it holds `GAL_HTML_ENOUGH`
+(6) pictures — the frame is stopped. Under 6 (a logo, an avatar) **the frame decides**, however long
+it takes within its own caps; if it fails, the HTML's few are shown but **not cached**, so the next
+press reads again (v0.277.0). Cutting the frame off at 2.5 s (`GAL_PREFER_MS`, v0.236.0–v0.276.0)
+cached nsfw.xxx's 1-picture logo read for every result: its frames take 2.5–3.3 s. The frame's copy
+reports from `DOMContentLoaded`, not `load` (ads keep some pages loading forever).
+Diagnose with `document.dispatchEvent(new CustomEvent('hover-zoom:gallery-state'))`: one console
+line with listed/on/here/open and every load's trace (`galStateText`, URLs reduced by `galSane`).
 
 The frame **fails** → the plain HTML read below: load lands on an error page or another origin
 (cross-origin links always do), the page not loaded in `GAL_FRAME_MS` (10 s), or no report
