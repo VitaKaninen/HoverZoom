@@ -38,9 +38,12 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   cleared by `galMove`/`galScroll`) — the tick and disc then shift by one slot when it appears.
   Open door's chip = yellow ✕, `galChipsSync()` on every open/close. No first-uses text (user: "just
   show the icon"; GM `hoverZoomPeekHints` left unread).
-- **Pages** (`galRows(asp, hole, page)` → `{out, pages, page}`): if everything fits at
-  `GAL_MIN_H` 120 the old binary search runs from there up; else pages of `GAL_MIN_H` rows from the
-  top. `galRows` takes several bars (the clicked picture and its strip). Tested in `test-resolver.js`.
+- **Pages** (`galRows(asp, hole, page)` → `{out, pages, page}`): the row floor is `galMinH()` =
+  `cfg.galleryRowMin` (user v0.301.0, default 120, never under 48). If everything fits at the floor
+  the binary search grows the rows from there; else pages, whose rows also grow to fill the height
+  (`galPagedH`: as many rows as fit at the floor, then the spare height shared out; user: "any extra
+  room is taken up by expanding the images, they never go smaller"). A settings change while a
+  gallery is open runs `galRefit`. `galRows` takes several bars (the clicked picture and its strip). Tested in `test-resolver.js`.
   `set.page` survives a rebuild of the same href. `galPageWork` = upgrades and `galHqAll` for the page
   on screen only (was every cell).
 - **The strip** (user, v0.299.0–v0.300.0; replaced the top `.pg` line): one element for every

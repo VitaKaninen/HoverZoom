@@ -1248,11 +1248,15 @@ eq('template: forbidden characters go', N.fillNameTemplate('[page_title]', { tit
 eq('template: an unknown token stays', N.fillNameTemplate('[nope] [num]', { num: '7', now: NOW }), '[nope] 7');
 eq('template: the original name', N.fillNameTemplate('[site] - [page_title] - [orig_name]', { site: 'Wikipedia', title: 'Red panda', name: '0001', now: NOW }), 'Wikipedia - Red panda - 0001');
 eq('template: all empty', N.fillNameTemplate('[site] - ([page_title])', { now: NOW }), '');
-// ---- gallery pages: rows never under GAL_MIN_H; past that the set is laid out as pages.
+// ---- gallery pages: rows never under the minimum (cfg.galleryRowMin); past that the set is laid out as pages, rows grown to fill.
+const galPH = function (min) {
+    const a = src.indexOf('    function galMinH('), b = src.indexOf('    // The row lines of a paged gallery');
+    return new Function('cfg', 'GAL_GAP', 'GAL_MIN_H', src.slice(a, b) + NL + 'return galPagedH;')({ galleryRowMin: min }, 12, 120);
+};
 {
     const a = src.indexOf('    function galRows('), b = src.indexOf('    // The shading: the page dark');
-    const rows = new Function('vpW', 'vpH', 'GAL_GAP', 'GAL_MIN_H', 'GAL_PG_TOP', src.slice(a, b) + NL + 'return galRows;')
-        (function () { return 1920; }, function () { return 1080; }, 12, 120, 30);
+    const rows = new Function('vpW', 'vpH', 'GAL_GAP', 'galMinH', 'galPagedH', 'GAL_PG_TOP', src.slice(a, b) + NL + 'return galRows;')
+        (function () { return 1920; }, function () { return 1080; }, 12, function () { return 120; }, galPH(120), 30);
     const hole = { x: 100, y: 100, w: 160, h: 120 }, four3 = function (n) { return Array(n).fill(4 / 3); };
     const small = rows(four3(20), hole, 0);
     eq('gallery: 20 pictures fit on one page', small.pages.length, 1);
@@ -1261,7 +1265,10 @@ eq('template: all empty', N.fillNameTemplate('[site] - ([page_title])', { now: N
     const big = rows(four3(683), hole, 0);
     eq('gallery: 683 pictures make pages', big.pages.length > 1, true);
     eq('  the pages cover every picture once', big.pages.reduce(function (n, p) { return n + p[1] - p[0]; }, 0), 683);
-    eq('  rows at the floor', big.out[big.pages[0][0]].h, 120);
+    const bh = big.out[big.pages[0][0]].h;
+    eq('  rows at least the floor, grown to fill the height', bh >= 120 && 8 * (bh + 12) + 12 <= 1080 && 8 * (bh + 13) + 12 > 1080, true);
+    eq('row minimum: 200 px gives fewer, taller rows', galPH(200)(1080), { n: 5, h: 201 });
+    eq('row minimum: under 48 is held at 48', galPH(10)(400).h >= 48, true);
     eq('  page 1 places only its own', big.out.filter(Boolean).length, big.pages[0][1] - big.pages[0][0]);
     const last = rows(four3(683), hole, 999), lp = big.pages[big.pages.length - 1];
     eq('  a page past the end is the last', last.page, big.pages.length - 1);
@@ -1273,19 +1280,19 @@ eq('template: all empty', N.fillNameTemplate('[site] - ([page_title])', { now: N
 // ---- resizing the clicked picture: snaps to row edges, gap middles and the window's centre lines; Alt (not here) is free.
 {
     const cut = function (from, to) { const a = src.indexOf(from), b = src.indexOf(to, a); return src.slice(a, b); };
-    const S = new Function('const GAL_GAP = 12, GAL_MIN_H = 120, GAL_FLY_FRAC = 0.2, POS_SNAP_EDGE = 16, POS_SNAP_CENTRE = 40;' + NL +
+    const S = new Function('const GAL_GAP = 12, GAL_MIN_H = 120, GAL_FLY_FRAC = 0.2, POS_SNAP_EDGE = 16, POS_SNAP_CENTRE = 40, cfg = {};' + NL +
         cut('    function posPt(', '    // The window placed by a spec') +
         cut('    function galRowLines(', '    // The strip\'s box') + cut('    function galSnapH(', '    function galFlyPut(') +
         NL + 'return {galRowLines, galSnapH, galPagedRows, galLines, galEdgeOn, galEdgeAt, galPlace, galBoxSnap};')();
     const r768 = S.galPagedRows(768), r900 = S.galPagedRows(900);
-    eq('anchor: paged row lines come from the window height alone', r768, [12, 132, 150, 168, 288, 306, 324, 444, 462, 480, 600, 618, 636, 756]);
+    eq('anchor: paged row lines come from the window height alone', r768, [12, 151, 157, 163, 302, 309, 315, 454, 460, 466, 605, 611, 617, 756]);
     eq('anchor: an edge on the margin is the margin, not the row line under it', S.galEdgeOn(756, S.galLines(768, r768)), { k: 'w', e: 'e', o: 12 });
-    const onRow = S.galEdgeOn(618, S.galLines(768, r768));
+    const onRow = S.galEdgeOn(611, S.galLines(768, r768));
     eq('anchor: an edge on a low row line counts from the bottom', onRow, { k: 'r', e: 'e', i: 2 });
-    eq('anchor: that line in a taller window', S.galEdgeAt(onRow, 900, r900), 753);
+    eq('anchor: that line in a taller window', S.galEdgeAt(onRow, 900, r900), 746);
     eq('anchor: a line past the rows is gone', S.galEdgeAt({ k: 'r', e: 's', i: 40 }, 900, r900), null);
     const rec = { ey: { t: onRow, b: { k: 'w', e: 'e', o: 12 } }, ex: { r: { k: 'w', e: 'e', o: 12 } } };
-    eq('anchor: both y edges on lines set the height, the strip included', S.galPlace(rec, 0.75, 60, 1400, 900, r900), { x: 1332, y: 753, w: 56, h: 135 });
+    eq('anchor: both y edges on lines set the height, the strip included', S.galPlace(rec, 0.75, 60, 1400, 900, r900), { x: 1327, y: 746, w: 62, h: 142 });
     eq('anchor: a fixed box follows its edge line', S.galPlace({ ex: { l: { k: 'c' } }, y: { m: 's', o: 20 } }, 1, 0, 1000, 800, [], { w: 190, h: 60 }), { x: 500, y: 20, w: 190, h: 60 });
     eq('anchor: nothing on a line falls back to the remembered third and size', S.galPlace({ x: { m: 'e', o: -12 }, y: { m: 'e', o: -12 }, hf: 0.2 }, 1, 60, 1000, 800, []), { x: 828, y: 568, w: 160, h: 220 });
     eq('move snap: the right edge goes to the margin', S.galBoxSnap(1205, 300, 180, 100, 1400, 900, r900).x, 1208);

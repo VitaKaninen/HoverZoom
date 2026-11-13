@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.300.0
+// @version     0.301.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -253,6 +253,7 @@
         galleryTicks: true,         // seen / visited ticks on results
         gallerySavedMarks: true,    // saved discs on results and in galleries
         galleryPreload: true,       // read the first page of every gallery on screen ahead of a click
+        galleryRowMin: 120,         // px: gallery rows never shorter; spare room grows them; past that, pages
         hoverPreload: true,         // load the page's pictures ahead of the user, as far as they show interest
         minDisplayed: 16,           // ignore images displayed smaller than this, whatever they are
         smallBelow: 48,             // px: smaller pictures preview only as an avatar or an emoji
@@ -10778,7 +10779,7 @@
     const GAL_LAG_MS = 1000;            // later than this = the page froze: the frame goes and preloading stops for the page
     const GAL_SETTLE_MS = 700;          // the frame counts once no picture has arrived for this long
     const GAL_QUIET_CAP_MS = 4000;      // from DOMContentLoaded: the frame reports by then whatever it has
-    const GAL_MIN_H = 120;              // rows never shorter: a bigger gallery is laid out as pages
+    const GAL_MIN_H = 120;              // rows never shorter: a bigger gallery is laid out as pages (cfg.galleryRowMin)
     const GAL_FLIP_MS = 200;            // at most one picture per this long on the wheel
     const GAL_STRIP_H = 60;             // the page and picture rows under the clicked picture
     const GAL_STRIP_W = 190;            // their least width; wider under a wider picture
@@ -11406,7 +11407,7 @@
             }
             return { out: out, all: i === asp.length, next: i };
         };
-        const minH = Math.min(GAL_MIN_H, H - 2 * G);
+        const minH = Math.min(galMinH(), H - 2 * G);
         if (place(minH).all) {
             let lo = minH, hi = H - 2 * G, best = place(lo);
             for (let k = 0; k < 24; k++) {
@@ -11415,14 +11416,14 @@
             }
             return { out: best.out, pages: [[0, asp.length]], page: 0 };
         }
-        const top = G, pages = [];
+        const top = G, pages = [], ph = galPagedH(H).h;
         for (let s = 0; s < asp.length;) {
-            const e = Math.max(place(minH, s, top).next, s + 1);
+            const e = Math.max(place(ph, s, top).next, s + 1);
             pages.push([s, e]);
             s = e;
         }
         const k = Math.min(Math.max(0, page | 0), pages.length - 1);
-        return { out: place(minH, pages[k][0], top).out, pages: pages, page: k };
+        return { out: place(ph, pages[k][0], top).out, pages: pages, page: k };
     }
 
     // The shading: the page dark and blurred, except the corner where the clicked picture waits.
@@ -11489,9 +11490,20 @@
         return out;
     }
 
+    // The smallest row height the user allows.
+    function galMinH() {
+        return Math.max(48, +cfg.galleryRowMin || GAL_MIN_H);
+    }
+
+    // A paged gallery's rows in a window H tall: as many as fit at the minimum, grown to fill the height.
+    function galPagedH(H) {
+        const G = GAL_GAP, m = Math.min(galMinH(), H - 2 * G), n = Math.max(1, Math.floor((H - G) / (m + G)));
+        return { n: n, h: Math.max(m, Math.floor((H - G) / n - G)) };
+    }
+
     // The row lines of a paged gallery in a window H tall: they depend on nothing else.
     function galPagedRows(H) {
-        const G = GAL_GAP, h = Math.min(GAL_MIN_H, H - 2 * G), n = Math.max(1, Math.floor((H - G) / (h + G)));
+        const G = GAL_GAP, P = galPagedH(H), h = P.h, n = P.n;
         const pitch = n > 1 ? (H - 2 * G - h) / (n - 1) : 0, L = [];
         for (let k = 0; k < n; k++) L.push({ y: G + k * pitch, h: h });
         return galRowLines(L);
@@ -14901,6 +14913,9 @@
             'A blue disc on the result, and on each saved picture in its gallery.').el.addEventListener('change', galMarkSoon);
         check('galleryPreload', 'Read the galleries on screen ahead of a click',
             'One at a time, nearest the pointer first, so a gallery opens at once. Stops on this page if the site refuses a request.').el.addEventListener('change', galMarkSoon);
+        num('galleryRowMin', 'Smallest gallery row',
+            'In px. Rows grow to fill the window but never get shorter than this; a gallery that would need shorter rows is split into pages. (default: 120)', 48, 2000, 1)
+            .el.addEventListener('change', function () { if (galCur) galRefit(); });
         const foot = document.createElement('div');
         foot.className = 'foot';
 

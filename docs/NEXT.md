@@ -64,8 +64,7 @@ is still undecided.
 
 Not tried in LibreWolf + Tampermonkey (incl. v0.300.0's strip and Ctrl-free drags).
 The pane sends no scroll events, so the reading frame dispatches its own; pages that load via
-IntersectionObserver are untested. ~100-picture galleries now take 2 pages (row floor 120) — asked
-whether `GAL_MIN_H` should go lower, unanswered. On a one-page gallery the snapped corner picture
+IntersectionObserver are untested. Row floor is a setting since v0.301.0 (user: 120 is a good start). On a one-page gallery the snapped corner picture
 stops lining up after ✓ (rows grow to fill) — told the user in v0.299.0's report, no answer. A row-line
 anchor was checked by unit test only, not live.
 
@@ -82,5 +81,5 @@ F. Newcomer: first-use hint line in the bar, a `?` gesture sheet, tooltips on se
 
 2026-11-13: user designed the gallery strip + snapping resize + resize-keeps-open (v0.299.0), then the
 joined strip, detach/dock/join, margin lines and line-following memory (v0.300.0; Ctrl now frees both
-the widget and the picture). Still unanswered: nsfw.xxx post pages previewing a picture drawn
-window-tall (`bigEnough`); `GAL_MIN_H`.
+the widget and the picture). Then the row-floor setting (v0.301.0). The nsfw.xxx `bigEnough` question
+was re-explained in plain words (user didn't follow it); answer pending.
