@@ -43,11 +43,28 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   top. `galRows` takes several bars (the clicked picture and its strip). Tested in `test-resolver.js`.
   `set.page` survives a rebuild of the same href. `galPageWork` = upgrades and `galHqAll` for the page
   on screen only (was every cell).
-- **The strip** (user, v0.299.0; replaced the top `.pg` line): `galPageNote` draws two rows under the
-  clicked picture (over it when no room, `galStripRect`, ≥ `GAL_STRIP_W`): ◀ Page n / N ▶ (`galFlip`,
-  PageUp/PageDown) and ◀ picture n / N ▶ (`galStep`); `+` while reading on. It is a bar in `galRows`
-  so no cell lands under it; hidden while moving/resizing. The dock widget hides while a gallery is
-  open (`twGalOpen`) — never two ◀ ▶ on screen.
+- **The strip** (user, v0.299.0–v0.300.0; replaced the top `.pg` line): one element for every
+  gallery (`galSt`, built once by `galStripBuild`, filled by `galStripText`): ◀ Page n / N ▶
+  (`galFlip`, PageUp/PageDown) and ◀ picture n / N ▶ (`galStep`); `+` while reading on; "Page" dropped
+  under 170 px. Three places (`galStripM.m`, placed by `galStripPlace`):
+  - `in` (default): inside the clicked picture's frame, above or below the picture (`.pic`), same
+    width, no border of its own. The `.fly` box then includes it (flex column), so it never covers
+    the picture.
+  - `dock`: against the picture's top or bottom with its own blue border (`.own`), the picture's width,
+    following the picture.
+  - `out`: anywhere, `GAL_STRIP_W` wide, own border.
+  `in` and `dock` share one geometry, the "unit" (`galUnitRect`/`galUnitPut`, `galAttH`): what
+  `galHole` holds, what the rows avoid and what the memory places. An `out` strip is a second bar
+  in `galRows` (`galBars`). With no clicked picture (no `<img>` on the door) it sits under the hole
+  (`galStripRect`). The dock widget hides while a gallery is open (`twGalOpen`) — never two ◀ ▶.
+- **Detach / dock / join** (user, v0.300.0), only in move-and-resize mode, where the strip's buttons
+  are faded and dead and each piece has its own dashed outline (inside the frame when joined).
+  Dragging the strip (`galStripDown`) detaches it (`galDetach`, the picture keeps its own box);
+  dragging the picture never detaches. Dropping the strip — or moving the picture — so the strip's
+  edge is within `POS_SNAP_EDGE` of the picture's top or bottom, overlapping it, docks it
+  (`galDockFor`, `galDock`) at the picture's width, and the picture shows ✓ / ✕ "Join the strip to the
+  picture?" (`.bt.ask`, `galJoin`): ✓ → `in`, ✕ → stays `dock`. A new press in edit mode answers ✕.
+  Ctrl drops the snapping, docking included. "Reset position" puts it back `in`, bottom.
 - **Stepping** (`galStep`): wheel anywhere (also over the preview — Ctrl + wheel over a pinned one
   zooms it, elsewhere the browser zooms), ← → [ ] (always step in a gallery, never pan), the picture
   row. From the preview's picture, else `set.at` (last viewed/stepped) if on the page on screen, else
@@ -125,24 +142,35 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
 - **A left or middle press on it closes** (v0.294.0: middle had stopped closing once the hole left
   the card — the document handler's middle branch only `preventDefault`s presses on our layer;
   the `.fly` listener closes and sets `galMidAt` so `galMidEat` eats the auxclick).
-- **Right-click = our menu** (`galMenuShow`, `.menu` in the layer): Move or resize this picture…,
-  Put it back in the bottom-right corner, then ✓ toggles for `galleryChips`, `galleryTicks`,
+- **Right-click = our menu** (`galMenuShow`, `.menu` in the layer; also on the strip): Move or resize
+  this picture…, Reset position, then ✓ toggles for `galleryChips`, `galleryTicks`,
   `gallerySavedMarks` (also in Settings → Galleries), `galleryMiddle`, then Close the gallery.
   Closed by any press outside it or Esc.
 - **Move or resize** (`galEditStart`/`galEditDown`/`galEditStop`, user v0.294.0): the set fades
-  (`.faded`), the picture gets a dashed outline, four corner handles (resize, own shape kept,
-  48 px … 90 % of the window tall) and ✓ / ✕ in its middle. A move snaps with the preview's
-  `boxSnap`. **A corner drag always snaps** (user, v0.299.0, `galSnapH`): the moving edge to a row's
-  top or bottom or a gap's middle (`set.rows` from `galRowLines`), or the window's centre line on
-  either axis; the nearest to the free height wins. **Alt = free**, move and resize (Alt keydown/keyup
-  `preventDefault` while editing, so the menu bar stays shut — unverified in LibreWolf). Lines come
-  from the layout on screen: on a one-page gallery the rows' height changes after ✓, so the edges
-  stop lining up; paged rows (`GAL_MIN_H`) stay put. Esc or ✕ restores. ✓ saves and lays the set out.
-- **Its memory** (GM `hoverZoomGalleryAnchor` = `{last, sites: {host: {x, y, hf}}}`; x/y are the
-  preview's per-axis `{m: s|c|e, o}` via `galAnchorAx`, applied with `posAxis`; hf = height ÷ window
-  height). A save writes this site and `last`. **A site's first open copies `last` (or the corner
+  (`.faded`), the picture gets a dashed outline, four corner handles on the unit (resize, the
+  picture's own shape kept, 48 px … 90 % of the window tall) and ✓ / ✕ in its middle. **Lines**
+  (`galLines`): the window's edges, the gallery's margin (`GAL_GAP` in from each edge, so the gap to
+  the window matches the cells'), the centre, and on y the row lines (`galAnchorRows`). A move snaps
+  edges to any line within `POS_SNAP_EDGE` and the middle to the centre within `POS_SNAP_CENTRE`
+  (`galBoxSnap`). **A corner drag always snaps** (`galSnapH`, the strip's height counted): the moving
+  edge to the nearest line, x lines via the aspect. **Ctrl = free** (user v0.300.0; Alt was v0.299.0
+  and moved the whole browser window on the user's system). `galKeyDown` ignores Ctrl while editing,
+  or a Ctrl tap mid-drag would close the gallery. Esc or ✕ restores the unit and the strip's place.
+  ✓ saves and lays the set out.
+- **Row lines for snapping and memory** (`galAnchorRows`): a paged gallery's are `galPagedRows(H)`,
+  which only the window height decides (a partial last page draws fewer rows but the lines stay);
+  a one-page gallery's are its own `set.rows`, which move with the picture, so `galRefit` places it
+  a second time on the new rows and it can still drift a little.
+- **Its memory** (GM `hoverZoomGalleryAnchor` = `{last, sites: {host: {x, y, hf, ex, ey, strip}}}`;
+  x/y are the preview's per-axis `{m: s|c|e, o}` via `galAnchorAx`, applied with `posAxis`; hf = the
+  picture's height ÷ window height). **An edge on a line stays on that line** (user v0.300.0,
+  `galEdges`/`galEdgeOn` save `ex.{l,r}`, `ey.{t,b}`; `galPlace`/`galEdgeAt` resolve): window edge or
+  margin `{k:'w', e, o}`, centre `{k:'c'}`, row line `{k:'r', e, i}` counted from the nearer end. Both
+  edges of an axis on lines set the size (y first), one sets the place, none falls back to x/y/hf.
+  A row line missing in the new window falls back too. `strip` = `{m, side}`, or for `out` its own
+  x/y/ex/ey (`galStripRec`/`galStripLoad`). The unit includes an attached strip. A save writes this site and `last`. **A site's first open copies `last` (or the corner
   default) into its own entry** (`galAnchorRec`), so a later save on another site never moves it
-  (user: the new place is the default for new sites only). "Put it back" resets this site and
+  (user: the new place is the default for new sites only). "Reset position" resets this site and
   deletes `last`.
 - **The hole** (`galHole`) is the corner; the old hole on the card itself was v0.291.0–v0.292.0. The moving slot that followed the
   pointer was v0.240.0, commit de9996a ("take it back to here" means that).

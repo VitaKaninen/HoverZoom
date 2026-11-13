@@ -53,14 +53,21 @@ is still undecided.
   ← → step pictures in a pinned preview, the page follows; corner resize snaps to row edges, gap
   middles and the window's centre lines (Alt free); a browser-window resize keeps the gallery and
   lays it out again. Checked in the Browser pane by synthetic events on `door-big.html` (240).
+- **v0.300.0** (user's design, 2026-11-13): Ctrl (not Alt, which moved the browser window) frees the
+  snapping; the strip sits inside the picture's blue frame by default; in move-and-resize mode it
+  detaches by dragging it, docks to the picture's top/bottom at its width and asks to join; edges
+  also snap to the gallery's margin; an edge on a line follows that line on a window resize; the
+  menu's "Put it back…" is "Reset position". Checked in the pane on `door-big.html` (detach, dock,
+  join, keep apart, margin snap, centre/margin anchors after 1024×768 → 1400×900, Ctrl, reset).
 
 ## Not verified
 
-Not tried in LibreWolf + Tampermonkey (incl. v0.299.0: does Alt held during a resize still open the menu bar?).
+Not tried in LibreWolf + Tampermonkey (incl. v0.300.0's strip and Ctrl-free drags).
 The pane sends no scroll events, so the reading frame dispatches its own; pages that load via
 IntersectionObserver are untested. ~100-picture galleries now take 2 pages (row floor 120) — asked
 whether `GAL_MIN_H` should go lower, unanswered. On a one-page gallery the snapped corner picture
-stops lining up after ✓ (rows grow to fill) — not raised with the user yet.
+stops lining up after ✓ (rows grow to fill) — told the user in v0.299.0's report, no answer. A row-line
+anchor was checked by unit test only, not live.
 
 ## Remaining proposal (recommendations, each waits on the user's yes)
 
@@ -73,7 +80,7 @@ F. Newcomer: first-use hint line in the bar, a `?` gesture sheet, tooltips on se
 
 ## Last exchange
 
-2026-11-13: user designed the gallery strip + snapping resize + resize-keeps-open; built as v0.299.0.
-Still unanswered: nsfw.xxx post pages previewing a picture drawn window-tall (`bigEnough`);
-`GAL_MIN_H`. Flagged to the user: Alt frees the corner picture, but the dock widget uses Ctrl for
-"no snapping" — one key for both is a consistency question for them.
+2026-11-13: user designed the gallery strip + snapping resize + resize-keeps-open (v0.299.0), then the
+joined strip, detach/dock/join, margin lines and line-following memory (v0.300.0; Ctrl now frees both
+the widget and the picture). Still unanswered: nsfw.xxx post pages previewing a picture drawn
+window-tall (`bigEnough`); `GAL_MIN_H`.
