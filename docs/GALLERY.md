@@ -190,7 +190,10 @@ One frame at a time (`galFrameStop`); a newer hover cancels it (`'cancel'`, not 
 `GAL_HTML_ENOUGH` (6) pictures — the frame is stopped. Otherwise the frame's report wins if it comes
 within `GAL_PREFER_MS` (2.5 s); after that any non-empty HTML result is used; an empty HTML waits for
 the frame. Why: on the user's site the frame's page never reaches `load` (ads keep it loading), so
-every hover waited the full 10 s; the user wants no wait at all. The frame's copy reports from
+every hover waited the full 10 s; the user wants no wait at all. **Once the frame's page has loaded
+its report is awaited** (capped by `GAL_REPORT_MS`), 2.5 s or not (v0.274.0): nsfw.xxx `/user/X` is a
+Nuxt page whose HTML holds only the profile avatar, the frame loads in ~1.6 s + settle, and the
+1-picture HTML won — the user saw "only the banner". The frame's copy reports from
 `DOMContentLoaded` + settle, not `load`, for the same reason.
 
 The frame **fails** → the plain HTML read below: load lands on an error page or another origin

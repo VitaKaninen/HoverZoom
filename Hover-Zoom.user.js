@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.273.0
+// @version     0.274.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -10888,7 +10888,7 @@
     }
 
     // The rendered page's pictures, by the widget's own rules, from a hidden frame. null = the frame failed.
-    function galRender(href) {
+    function galRender(href, onLoaded) {
         if (galFrameStop) galFrameStop();
         return new Promise(function (resolve) {
             const token = Math.random().toString(36).slice(2);
@@ -10928,6 +10928,7 @@
                 else {
                     clearTimeout(t);
                     t = setTimeout(function () { fin(null, 'no report ' + GAL_REPORT_MS + ' ms after the page loaded'); }, GAL_REPORT_MS);
+                    if (onLoaded) onLoaded();
                 }
             });
             t = setTimeout(function () { fin(null, 'no report in ' + GAL_FRAME_MS + ' ms'); }, GAL_FRAME_MS);
@@ -11001,11 +11002,12 @@
         if (document.readyState !== 'loading') go(); else document.addEventListener('DOMContentLoaded', go);
     }
 
-    // Both reads at once: the plain HTML as soon as it holds GAL_HTML_ENOUGH; else the frame's report within GAL_PREFER_MS, else whatever the HTML had.
+    // Both reads at once: the plain HTML as soon as it holds GAL_HTML_ENOUGH; else the frame's report (awaited once its page loaded, else only within GAL_PREFER_MS), else whatever the HTML had.
     function galLoad(href, log) {
         if (galCache.has(href)) { galTrace(href, 'load: already started or cached'); return galCache.get(href); }
         galTrace(href, 'load start' + (log ? ' (preload)' : ''));
-        const frame = galRender(href);
+        let frameLoaded = false;
+        const frame = galRender(href, function () { frameLoaded = true; });
         const stopFrame = galFrameStop;
         const req = log && log.req();
         let refused = null;
@@ -11038,8 +11040,8 @@
                 if (v && v.length) return finish(v);
                 html.then(function (h) { finish(h); });
             });
-            html.then(function (h) { fromHtml = h; if (late || (h && h.length >= GAL_HTML_ENOUGH)) useHtml(); });
-            setTimeout(function () { late = true; useHtml(); }, GAL_PREFER_MS);
+            html.then(function (h) { fromHtml = h; if ((late && !frameLoaded) || (h && h.length >= GAL_HTML_ENOUGH)) useHtml(); });
+            setTimeout(function () { late = true; if (!frameLoaded) useHtml(); }, GAL_PREFER_MS);
         }).then(function (v) {
             galTrace(href, 'load result: ' + (v === 'cancel' ? 'cancelled' : !v ? 'nothing' : v.length + ' pictures'));
             if (v === 'cancel' || !v) galCache.delete(href);
