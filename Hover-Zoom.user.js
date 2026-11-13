@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.279.0
+// @version     0.280.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -11898,7 +11898,8 @@
             });
             m.appendChild(svg);
             galMarkClickable(m);
-            at.after(m);
+            m.__hzAt = at;
+            galMarkHost(at).appendChild(m);
         }
         m.__hzHref = h;
         const w = kind === '2' ? 34 : 24, s = 24;
@@ -11919,10 +11920,16 @@
         return a.width * a.height >= b.width * b.height ? a : b;
     }
 
-    // Our mark of one kind among the few elements right after the picture.
+    // Where a picture's marks live: the result's link itself, above any layer the card makes inside it (nsfw.xxx: a z-index 1 container under the link's z-index 2 overlay).
+    function galMarkHost(at) {
+        return at.closest('a[href]') || at.parentElement;
+    }
+
+    // Our mark of one kind for this picture.
     function galMarkFind(at, attr) {
-        let m = at.nextElementSibling;
-        for (let i = 0; m && i < 3; i++, m = m.nextElementSibling) if (m.hasAttribute(attr)) return m;
+        const host = galMarkHost(at);
+        if (!host) return null;
+        for (let m = host.lastElementChild; m; m = m.previousElementSibling) if (m.hasAttribute(attr) && m.__hzAt === at) return m;
         return null;
     }
 
@@ -11936,7 +11943,8 @@
             m = galSavedIcon('');
             m.setAttribute(GAL_SAVED_MARK, '');
             galMarkClickable(m);
-            at.after(m);
+            m.__hzAt = at;
+            galMarkHost(at).appendChild(m);
         }
         m.__hzHref = h;
         m.style.cssText = 'all:initial;position:absolute;left:0;top:0;z-index:3;pointer-events:auto;cursor:pointer;display:block;' +
