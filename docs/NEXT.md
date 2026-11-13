@@ -26,8 +26,7 @@ typed numbers, the page row as `galPageStep`, and the fade. The typed box closes
 The wheel flips pictures over either widget or the gallery's clicked picture, and never turns pages.
 The fade is by distance (0 at 75 px). The page widget uses the gallery's palette and 4 px edge.
 Originals preload for the page on screen plus `galAhead` pages.
-**Open:** the user asked whether ⇅ is worth keeping (my answer: no, the wheel over the widget already
-opens at the start number) and awaits their call. Typed numbers past what is loaded tested in Chrome
+⇅ stays for now (user, after being told the wheel over the widget does the same). Typed numbers past what is loaded tested in Chrome
 (v0.320.0): Google Images 100 → 300 → 380 over three tries, Bing 43 → 135; first try ~5 s cold, later ~0.2 s.
 
 ---

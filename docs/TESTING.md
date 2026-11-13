@@ -364,9 +364,12 @@ hovers passed where real ones failed twice — finish on real hovers.
 - Synthetic middle presses need a `mouseup` too, or `mouseDown` stays set and no hover previews.
 
 
-## Live sites in Claude in Chrome (no manager there)
+## Live sites in Claude in Chrome
 
-The user's Chrome has no Hover Zoom installed. To test a pushed version on a live page: in the tab's
+The user's Chrome HAS Tampermonkey with Hover Zoom tracking the file on disk, but in the tabs Claude in
+Chrome opens it showed no sign of running on Google Images (no widget, no shadow host, no preview
+after a synthetic hover; cause unknown — not checked whether it is the tool's tab or a site setting).
+Never tell the user it is not installed. To test a pushed version on a live page anyway: in the tab's
 `javascript_tool`, `fetch('https://raw.githubusercontent.com/VitaKaninen/HoverZoom/<commit>/Hover-Zoom.user.js')`,
 define `window.GM_getValue/GM_setValue` over `localStorage` keys prefixed `hzt:` (plus no-op
 `GM_addValueChangeListener`, `GM_registerMenuCommand`, `GM_unregisterMenuCommand`), and append a
