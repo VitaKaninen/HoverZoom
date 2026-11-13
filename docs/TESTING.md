@@ -323,6 +323,13 @@ it rejects outright. (Counts drift; `grep -c 'class="case"' test-page.html` is t
 (`.claude/launch.json` wraps the same command as
 `hover-zoom-test`, but `.claude/` is gitignored — a fresh clone has only the direct command.)
 
+**Boot after load, as the manager does: `test-pages/boot-late.html`** (`?s=<path from root>`, default
+`Hover-Zoom.user.js`). It injects the script 300 ms after `load` and keeps errors in
+`window.__errs`. The menu stand-ins (`.gm-cmd`) must appear and `__errs` must be empty. The other
+test pages load the script while the document is still `loading`, which defers the boot, so they
+pass a TDZ break that kills the script under Tampermonkey. v0.310.0 died that way: `latePlayerArea`
+read `GAL_NAME`. Run it after any change to a function the boot path can reach.
+
 ## Live sites in Chrome — run a pushed build without Tampermonkey
 
 A live https page cannot fetch the working copy from `localhost` (Chrome's Local Network Access
