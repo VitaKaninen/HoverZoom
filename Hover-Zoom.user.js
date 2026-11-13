@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.304.0
+// @version     0.305.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -11140,17 +11140,25 @@
             if (items.filter(function (x) { const u = linkOf(x); return u && galPathShape(u.pathname) === here; }).length > half) return 'other galleries (links shaped like this page, ' + here + ')';
             return 'own';
         };
-        // The gallery's own pictures: the commonest card shape and every shape up to its last card, from the first list holding any; a shape after it is judged once.
+        // The gallery's own pictures: the commonest card shape and every shape up to its last card, from the first list holding any, less a shape there that leads to other galleries while another does not (a post page's own pictures, then the site's feed); a shape after it is judged once.
         const mine = async function (items) {
             if (!items.length) return [];
             if (!shapes) {
                 shapes = new Map();
-                const n = {};
+                const n = {}, by = new Map();
                 items.forEach(function (x) { n[x.sig] = (n[x.sig] || 0) + 1; });
                 let dom = null, last = -1;
                 Object.keys(n).forEach(function (k) { if (!dom || n[k] > n[dom]) dom = k; });
                 items.forEach(function (x, i) { if (x.sig === dom) last = i; });
-                items.forEach(function (x, i) { if (i <= last) shapes.set(x.sig, 'own'); });
+                items.forEach(function (x, i) { if (i <= last) { if (!by.has(x.sig)) by.set(x.sig, []); by.get(x.sig).push(x); } });
+                const v = new Map();
+                if (by.size > 1) for (const [sig, xs] of by) v.set(sig, await judge(sig, xs));
+                const some = Array.from(v.values()).some(function (x) { return x === 'own'; });
+                by.forEach(function (xs, sig) {
+                    const k = some ? v.get(sig) : 'own';
+                    shapes.set(sig, k);
+                    if (k !== 'own') notes.push('a card shape among the gallery\u2019s first pictures (' + xs.length + ') is ' + k);
+                });
             }
             const fresh = new Map();
             items.forEach(function (x) { if (!shapes.has(x.sig)) { if (!fresh.has(x.sig)) fresh.set(x.sig, []); fresh.get(x.sig).push(x); } });
