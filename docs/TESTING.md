@@ -363,3 +363,13 @@ hovers passed where real ones failed twice — finish on real hovers.
 - `photo-200x150.jpg` upgrades by URL rule to a 1600 px `photo.jpg`: a leaf. Doors use `mural.jpg`.
 - Synthetic middle presses need a `mouseup` too, or `mouseDown` stays set and no hover previews.
 
+
+## Live sites in Claude in Chrome (no manager there)
+
+The user's Chrome has no Hover Zoom installed. To test a pushed version on a live page: in the tab's
+`javascript_tool`, `fetch('https://raw.githubusercontent.com/VitaKaninen/HoverZoom/<commit>/Hover-Zoom.user.js')`,
+define `window.GM_getValue/GM_setValue` over `localStorage` keys prefixed `hzt:` (plus no-op
+`GM_addValueChangeListener`, `GM_registerMenuCommand`, `GM_unregisterMenuCommand`), and append a
+`<script>` whose text comes from a `trustedTypes.createPolicy(...).createScript` (Google enforces Trusted
+Types) with the page's `script[nonce]` nonce. Works on Google Images and Bing (2026-11-13). Remove the
+`hzt:` keys before closing the tab. Bing redirects once after load: inject in its own call.
