@@ -89,6 +89,23 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   item that is this picture (same URL, `sameStem`, or `galSameFile` — one file name ends with the
   other, nsfw.xxx prefixes `amateur-`) → `galLinkedHit`, else the card's URL-rule candidates. The yellow
   ring and Close tab of v0.292.0 are gone (user: blue again).
+- **A left or middle press on it closes** (v0.294.0: middle had stopped closing once the hole left
+  the card — the document handler's middle branch only `preventDefault`s presses on our layer;
+  the `.fly` listener closes and sets `galMidAt` so `galMidEat` eats the auxclick).
+- **Right-click = our menu** (`galMenuShow`, `.menu` in the layer): Move or resize this picture…,
+  Put it back in the bottom-right corner, then ✓ toggles for `galleryChips`, `galleryTicks`,
+  `gallerySavedMarks` (also in Settings → Galleries), `galleryMiddle`, then Close the gallery.
+  Closed by any press outside it or Esc.
+- **Move or resize** (`galEditStart`/`galEditDown`/`galEditStop`, user v0.294.0): the set fades
+  (`.faded`), the picture gets a dashed outline, four corner handles (resize, own shape kept,
+  48 px … 90 % of the window tall) and ✓ / ✕ in its middle. A drag snaps with the preview's
+  `boxSnap`; Esc or ✕ restores. ✓ saves and lays the set out around the new place.
+- **Its memory** (GM `hoverZoomGalleryAnchor` = `{last, sites: {host: {x, y, hf}}}`; x/y are the
+  preview's per-axis `{m: s|c|e, o}` via `galAnchorAx`, applied with `posAxis`; hf = height ÷ window
+  height). A save writes this site and `last`. **A site's first open copies `last` (or the corner
+  default) into its own entry** (`galAnchorRec`), so a later save on another site never moves it
+  (user: the new place is the default for new sites only). "Put it back" resets this site and
+  deletes `last`.
 - **The hole** (`galHole`) is the corner; the old hole on the card itself was v0.291.0–v0.292.0. The moving slot that followed the
   pointer was v0.240.0, commit de9996a ("take it back to here" means that).
 - `galShow` loads every thumbnail first (`galImg`, up to `GAL_WAIT_MS` 2.5 s; late or failed ones are

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.293.0
+// @version     0.294.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -250,6 +250,8 @@
         hoverDelay: 120,            // ms before resolving
         galleryMiddle: false,       // a middle-click on a result opens its gallery (else the ▦ chip's click does)
         galleryChips: true,         // the ▦ chip on every gallery thumbnail; off: only on the one under the pointer
+        galleryTicks: true,         // seen / visited ticks on results
+        gallerySavedMarks: true,    // saved discs on results and in galleries
         hoverPreload: true,         // load the page's pictures ahead of the user, as far as they show interest
         minDisplayed: 16,           // ignore images displayed smaller than this, whatever they are
         smallBelow: 48,             // px: smaller pictures preview only as an avatar or an emoji
@@ -10805,7 +10807,7 @@
     let galOn = false, galTap = false, galMidAt = 0;      // a peek is up and locked; Ctrl down with nothing else yet
     const GAL_PEND_MS = 3000;           // the pressed result lights up only if its gallery is not on screen by then
     const GAL_DIAG_MS = 10000;          // an open that shows nothing this long after the press gets the diagnostics popup
-    const GAL_USER_HIDE = ['press', 'esc', 'middle', 'ctrl', 'resize', 'scroll', 'chip', 'hole'];
+    const GAL_USER_HIDE = ['press', 'esc', 'middle', 'ctrl', 'resize', 'scroll', 'chip', 'hole', 'menu'];
     const galTraces = new Map();        // href -> [[ms, what]], sanitised, the last 60 links
     let galPend = null, galInputAt = 0; // the open waiting for its gallery; the user's last wheel/key/press
 
@@ -10816,6 +10818,7 @@
     }
 
     const ICON_GALLERY = 'M4 4h7v7H4V4zm9 0h7v7h-7V4zM4 13h7v7H4v-7zm9 0h7v7h-7v-7z';
+    const ICON_TICK = 'M9 16.2l-4.2-4.2-1.4 1.4L9 19 21 7l-1.4-1.4z';
 
     // The page a hovered picture links to, or null.
     function galLinkOf(t) {
@@ -11234,10 +11237,26 @@
             '.set.live .shade{pointer-events:auto}' +
             '.blur{position:fixed;inset:0;backdrop-filter:blur(0) grayscale(0);transition:backdrop-filter ' + GAL_FADE_MS + 'ms ease}' +
             '.blur.on{backdrop-filter:blur(6px) grayscale(.6)}' +
-            '.fly{position:fixed;box-sizing:border-box;border:3px solid #89b4fa;border-radius:8px;overflow:hidden;background:#1e1e2e;' +
+            '.fly{position:fixed;z-index:3;box-sizing:border-box;border:3px solid #89b4fa;border-radius:8px;overflow:hidden;background:#1e1e2e;' +
             'box-shadow:0 0 14px 2px rgba(137,180,250,.55),0 8px 22px rgba(0,0,0,.6);transform-origin:0 0;cursor:pointer;pointer-events:auto}' +
             '.fly.on{transition:transform ' + GAL_FLY_MS + 'ms ease,opacity ' + GAL_FLY_MS + 'ms ease}' +
             '.fly img{width:100%;height:100%;object-fit:cover;border-radius:0;box-shadow:none;opacity:1}' +
+            '.fly.edit{cursor:move;outline:2px dashed #f9e2af;outline-offset:3px}' +
+            '.fly .hd,.fly .bt{display:none}' +
+            '.fly.edit .hd{display:block;position:absolute;width:14px;height:14px;box-sizing:border-box;background:#f9e2af;border:2px solid #11111b;border-radius:3px}' +
+            '.fly .hd.tl{left:0;top:0;cursor:nwse-resize}.fly .hd.br{right:0;bottom:0;cursor:nwse-resize}' +
+            '.fly .hd.tr{right:0;top:0;cursor:nesw-resize}.fly .hd.bl{left:0;bottom:0;cursor:nesw-resize}' +
+            '.fly.edit .bt{display:flex;gap:8px;position:absolute;left:50%;top:50%;transform:translate(-50%,-50%)}' +
+            '.fly .bt span{display:flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:16px;' +
+            'background:#1e1e2e;border:1px solid #45475a;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.6)}' +
+            '.fly .bt svg{width:18px;height:18px;fill:#a6e3a1}.fly .bt .no svg{fill:#f38ba8}' +
+            '.set.faded{opacity:.25}' +
+            '.menu[hidden]{display:none}' +
+            '.menu{position:fixed;z-index:5;min-width:240px;padding:4px;box-sizing:border-box;background:#1e1e2e;border:1px solid #45475a;border-radius:8px;' +
+            'box-shadow:0 8px 28px rgba(0,0,0,.6);color:#cdd6f4;font:13px/1.3 system-ui,sans-serif;pointer-events:auto}' +
+            '.menu .it{display:flex;align-items:center;gap:6px;padding:5px 10px 5px 6px;border-radius:5px;cursor:pointer;white-space:nowrap}' +
+            '.menu .it:hover{background:#313244}.menu .ck{width:16px;text-align:center;color:#89b4fa}' +
+            '.menu .sep{height:1px;margin:4px 6px;background:#45475a}' +
             '.pend[hidden]{display:none}.pend{position:fixed;box-sizing:border-box;border:3px solid #89b4fa;border-radius:8px;' +
             'box-shadow:0 0 0 200vmax rgba(0,0,0,.55),0 0 16px 3px rgba(137,180,250,.7);animation:hzpend .8s ease-in-out infinite alternate}' +
             '@keyframes hzpend{to{border-color:#cdd6f4;box-shadow:0 0 0 200vmax rgba(0,0,0,.55),0 0 4px 1px rgba(137,180,250,.4)}}' +
@@ -11573,7 +11592,7 @@
         p.img.classList.add('ok');
         p.img.__hzItem = p.item;
         cell.appendChild(p.img);
-        if (saved.has(p.item.thumb)) cell.appendChild(galSavedIcon('svd'));
+        if (cfg.gallerySavedMarks && saved.has(p.item.thumb)) cell.appendChild(galSavedIcon('svd'));
         cell.addEventListener('mouseenter', function () { if (set.pv) galPv(p.img); else galNoPv(set); });
         cell.addEventListener('mouseleave', function () { if (!placed && active === p.img) cancel(); });
         if (p.item.link) {
@@ -11757,6 +11776,8 @@
     }
 
     function galHide(why) {
+        galEditStop(false);
+        galMenuHide();
         if (galPend) {
             const p = galPend;
             galTrace(p.href, 'hidden: ' + (why || 'pointer left'));
@@ -11868,7 +11889,7 @@
         galListAdd(GAL_SAVED_KEY, img.__hzItem.thumb);
         if (href) galListAdd(GAL_SAVEDFROM_KEY, href);
         const cell = img.parentNode;
-        if (cell && !cell.querySelector('.svd')) cell.appendChild(galSavedIcon('svd'));
+        if (cell && cfg.gallerySavedMarks && !cell.querySelector('.svd')) cell.appendChild(galSavedIcon('svd'));
         galMarkAll();
     }
 
@@ -11919,13 +11940,190 @@
         });
     }
 
-    // Where the clicked picture waits while its gallery is open: bottom-right, a fifth of the window tall, its own shape (user).
+    // Where the clicked picture waits while its gallery is open: its remembered place, else bottom-right, a fifth of the window tall; its own shape (user).
     function galCornerRect(hr) {
-        const G = GAL_GAP, asp = hr.width && hr.height ? hr.width / hr.height : 1;
-        let h = Math.round(vpH() * GAL_FLY_FRAC), w = Math.round(h * asp);
+        const asp = hr.width && hr.height ? hr.width / hr.height : 1, rec = galAnchorRec();
+        let h = Math.round(vpH() * Math.max(0.05, Math.min(0.9, +rec.hf || GAL_FLY_FRAC))), w = Math.round(h * asp);
         const maxW = Math.round(vpW() * 0.4);
         if (w > maxW) { w = maxW; h = Math.round(w / asp); }
-        return { x: vpW() - G - w, y: vpH() - G - h, w: w, h: h };
+        return { x: Math.round(posAxis(rec.x, w, vpW())), y: Math.round(posAxis(rec.y, h, vpH())), w: w, h: h };
+    }
+
+    const GAL_ANCHOR_KEY = 'hoverZoomGalleryAnchor';     // {last, sites: {host: {x, y, hf}}}: where the clicked picture waits
+    function galAnchorDefault() { return { x: { m: 'e', o: -GAL_GAP }, y: { m: 'e', o: -GAL_GAP }, hf: GAL_FLY_FRAC }; }
+
+    function galAnchorStore() {
+        let st = null;
+        try { st = JSON.parse(GM_getValue(GAL_ANCHOR_KEY, '') || 'null'); } catch (e) { /* unreadable: start again */ }
+        if (!st || typeof st !== 'object') st = {};
+        if (!st.sites || typeof st.sites !== 'object') st.sites = {};
+        return st;
+    }
+
+    // This site's place. A site first seen takes the newest saved place and keeps it, so a later save elsewhere never moves it (user).
+    function galAnchorRec() {
+        const st = galAnchorStore(), host = pageHost();
+        if (st.sites[host]) return st.sites[host];
+        st.sites[host] = st.last || galAnchorDefault();
+        try { GM_setValue(GAL_ANCHOR_KEY, JSON.stringify(st)); } catch (e) { /* this page only */ }
+        return st.sites[host];
+    }
+
+    // A saved place: this site's, and the one new sites start from.
+    function galAnchorSave(rec) {
+        const st = galAnchorStore();
+        st.sites[pageHost()] = rec;
+        st.last = rec;
+        try { GM_setValue(GAL_ANCHOR_KEY, JSON.stringify(st)); } catch (e) { /* this page only */ }
+        dbg('gallery picture place saved', { host: pageHost(), rec: JSON.stringify(rec) });
+    }
+
+    // A box's place per axis, as the preview remembers its own: flush with an edge or the centre anchors there, else the nearest third.
+    function galAnchorAx(lo, len, V) {
+        if (len >= V - 1) return { m: 'c', o: 0 };
+        const m = Math.abs(lo) < 0.5 ? 's' : Math.abs(lo + len - V) < 0.5 ? 'e' : Math.abs(lo + len / 2 - V / 2) < 0.5 ? 'c' : usDock.zone(null, lo, len, V);
+        return { m: m, o: Math.round((posPt(lo, len, m) - posPt(0, V, m)) * 100) / 100 };
+    }
+
+    let galEdit = null;     // moving / resizing the corner picture: {start rect, drag}
+
+    // Move-and-resize mode on the corner picture: drag it, drag a corner, ✓ keeps, ✕ or Esc puts it back.
+    function galEditStart() {
+        const f = galFly;
+        if (!f) return;
+        galMenuHide();
+        const el = f.el;
+        galEdit = { el: el, was: { l: parseFloat(el.style.left), t: parseFloat(el.style.top), w: parseFloat(el.style.width), h: parseFloat(el.style.height) } };
+        el.classList.add('edit');
+        if (galCur) galCur.el.classList.add('faded');
+        hideTip();
+    }
+
+    function galEditStop(keep) {
+        const ed = galEdit;
+        if (!ed) return;
+        galEdit = null;
+        const el = ed.el;
+        el.classList.remove('edit');
+        if (galCur) galCur.el.classList.remove('faded');
+        let r = { x: parseFloat(el.style.left), y: parseFloat(el.style.top), w: parseFloat(el.style.width), h: parseFloat(el.style.height) };
+        if (!keep) {
+            r = { x: ed.was.l, y: ed.was.t, w: ed.was.w, h: ed.was.h };
+            galFlyPut(el, r.x, r.y, r.w, r.h);
+            return;
+        }
+        galAnchorSave({ x: galAnchorAx(r.x, r.w, vpW()), y: galAnchorAx(r.y, r.h, vpH()), hf: Math.round(r.h / vpH() * 1000) / 1000 });
+        galHole = r;
+        if (galCur) galPageWork(galCur, galLayout(galCur, galHole));
+        toast('Saved for this site, and as the place new sites start with', 3000);
+    }
+
+    function galFlyPut(el, l, t, w, h) {
+        el.style.left = Math.round(l) + 'px'; el.style.top = Math.round(t) + 'px';
+        el.style.width = Math.round(w) + 'px'; el.style.height = Math.round(h) + 'px';
+    }
+
+    // A press in move-and-resize mode: on a corner handle resizes (its own shape kept), elsewhere moves; both snap like the preview.
+    function galEditDown(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.button !== 0) return;
+        const el = galEdit.el, t0 = e.composedPath()[0], corner = t0 && t0.__hzCorner;
+        const st = { x: e.clientX, y: e.clientY, l: parseFloat(el.style.left), t: parseFloat(el.style.top), w: parseFloat(el.style.width), h: parseFloat(el.style.height) };
+        const asp = st.w / st.h, W = vpW(), H = vpH();
+        const move = function (ev) {
+            const dx = ev.clientX - st.x, dy = ev.clientY - st.y;
+            let l = st.l, t = st.t, w = st.w, h = st.h;
+            if (corner) {
+                const sx = corner[1] === 'r' ? 1 : -1, sy = corner[0] === 'b' ? 1 : -1;
+                const k = Math.max((st.w + sx * dx) / st.w, (st.h + sy * dy) / st.h);
+                h = Math.max(48, Math.min(H * 0.9, st.h * k));
+                w = h * asp;
+                if (w > W - 8) { w = W - 8; h = w / asp; }
+                if (corner[1] === 'l') l = st.l + st.w - w;
+                if (corner[0] === 't') t = st.t + st.h - h;
+            } else { l = st.l + dx; t = st.t + dy; }
+            l = Math.max(0, Math.min(W - w, l));
+            t = Math.max(0, Math.min(H - h, t));
+            if (!corner) { const sn = boxSnap(l, t, w, h); l = sn.x; t = sn.y; }
+            galFlyPut(el, l, t, w, h);
+        };
+        const up = function () {
+            window.removeEventListener('mousemove', move, true);
+            window.removeEventListener('mouseup', up, true);
+        };
+        window.addEventListener('mousemove', move, true);
+        window.addEventListener('mouseup', up, true);
+    }
+
+    let galMenuEl = null;
+
+    // Our menu on the corner picture: its place, and the gallery settings.
+    function galMenuShow(x, y) {
+        const root = galLayer();
+        if (!galMenuEl) {
+            galMenuEl = document.createElement('div');
+            galMenuEl.className = 'menu';
+            root.appendChild(galMenuEl);
+        }
+        const m = galMenuEl;
+        while (m.firstChild) m.firstChild.remove();
+        const item = function (text, on, act) {
+            const it = document.createElement('div');
+            it.className = 'it';
+            const ck = document.createElement('span');
+            ck.className = 'ck';
+            ck.textContent = on === true ? '✓' : '';
+            const tx = document.createElement('span');
+            tx.textContent = text;
+            it.appendChild(ck);
+            it.appendChild(tx);
+            it.addEventListener('mousedown', function (e) { e.preventDefault(); e.stopPropagation(); if (e.button === 0) act(); });
+            m.appendChild(it);
+        };
+        const sep = function () { const d = document.createElement('div'); d.className = 'sep'; m.appendChild(d); };
+        const flip = function (key) {
+            return function () {
+                cfg[key] = !cfg[key];
+                saveSettings();
+                if (key === 'gallerySavedMarks' && galCur) galCur.cells.forEach(function (c) {
+                    const d = c.querySelector('.svd');
+                    if (d && !cfg.gallerySavedMarks) d.remove();
+                });
+                galMarkSoon();
+                galChipsSync();
+                galMenuShow(x, y);
+            };
+        };
+        item('Move or resize this picture…', null, galEditStart);
+        item('Put it back in the bottom-right corner', null, function () {
+            galMenuHide();
+            const st = galAnchorStore();
+            st.sites[pageHost()] = galAnchorDefault();
+            delete st.last;             // new sites start from the corner again; other sites keep theirs
+            try { GM_setValue(GAL_ANCHOR_KEY, JSON.stringify(st)); } catch (e) { /* this page only */ }
+            if (!galFly) return;
+            const el = galFly.el, r = galCornerRect({ width: parseFloat(el.style.width), height: parseFloat(el.style.height) });
+            galFlyPut(el, r.x, r.y, r.w, r.h);
+            galHole = r;
+            if (galCur) galPageWork(galCur, galLayout(galCur, galHole));
+        });
+        sep();
+        item('Show the ▦ chip on every gallery', !!cfg.galleryChips, flip('galleryChips'));
+        item('Tick results whose gallery was seen', !!cfg.galleryTicks, flip('galleryTicks'));
+        item('Mark results something was saved from', !!cfg.gallerySavedMarks, flip('gallerySavedMarks'));
+        item('Middle-click opens a gallery', !!cfg.galleryMiddle, flip('galleryMiddle'));
+        sep();
+        item('Close the gallery', null, function () { galMenuHide(); galHide('menu'); });
+        m.hidden = false;
+        const b = m.getBoundingClientRect();
+        m.style.left = Math.round(Math.max(4, Math.min(x, vpW() - 4 - b.width))) + 'px';
+        m.style.top = Math.round(Math.max(4, Math.min(y, vpH() - 4 - b.height))) + 'px';
+        hideTip();
+    }
+
+    function galMenuHide() {
+        if (galMenuEl) galMenuEl.hidden = true;
     }
 
     // From the card to the corner; a press on it closes the gallery.
@@ -11939,13 +12137,37 @@
         el.style.left = H.x + 'px'; el.style.top = H.y + 'px';
         el.style.width = H.w + 'px'; el.style.height = H.h + 'px';
         el.style.transform = galFlyFrom(hr, H);
+        ['tl', 'tr', 'bl', 'br'].forEach(function (c) { const hd = document.createElement('span'); hd.className = 'hd ' + c; hd.__hzCorner = c; el.appendChild(hd); });
+        const bt = document.createElement('div');
+        bt.className = 'bt';
+        [['ok', ICON_TICK, 'Keep this size and place (this site, and the default for new sites)', true], ['no', ICON_CLOSE, 'Cancel', false]].forEach(function (b) {
+            const x = document.createElement('span');
+            x.className = b[0];
+            x.appendChild(mkIcon(b[1]));
+            setTip(x, b[2]);
+            x.addEventListener('mousedown', function (e) {
+                if (e.button !== 0) return;
+                e.preventDefault();
+                e.stopPropagation();
+                galEditStop(b[3]);
+            });
+            bt.appendChild(x);
+        });
+        el.appendChild(bt);
         el.addEventListener('mousedown', function (e) {
-            if (e.button !== 0) return;
+            if (galEdit) { galEditDown(e); return; }
+            if (e.button !== 0 && e.button !== 1) return;
+            e.preventDefault();         // middle too: no autoscroll, and galMidEat eats its click
+            e.stopPropagation();
+            if (e.button === 1) galMidAt = Date.now();
+            galHide(e.button === 1 ? 'middle' : 'hole');
+        });
+        el.addEventListener('contextmenu', function (e) {
             e.preventDefault();
             e.stopPropagation();
-            galHide('hole');
+            if (!galEdit) galMenuShow(e.clientX, e.clientY);
         });
-        setTip(el, 'Close this gallery');
+        setTip(el, 'Close this gallery · right-click for options');
         root.appendChild(el);
         void el.offsetWidth;
         el.classList.add('on');
@@ -12527,12 +12749,18 @@
                 galMarkPlace(img);
                 return;
             }
-            const saved = from.has(h) ? galMarkSaved(img, h) : null;
+            const atp = img.closest('picture') || img;
+            const saved = from.has(h) && cfg.gallerySavedMarks ? galMarkSaved(img, h) : null;
+            if (!saved) { const x = galMarkFind(atp, GAL_SAVED_MARK); if (x) x.remove(); }
             let m = null;
-            if (went.has(h)) m = galMarkImg(img, '2', h);
-            else if (seen.has(h)) m = galMarkImg(img, '1', h);
+            if (cfg.galleryTicks) {
+                if (went.has(h)) m = galMarkImg(img, '2', h);
+                else if (seen.has(h)) m = galMarkImg(img, '1', h);
+            }
+            if (!m) { const x = galMarkFind(atp, GAL_MARK); if (x) x.remove(); }
+            if (!cfg.galleryTicks && (went.has(h) || seen.has(h))) { galMarkPlace(img); return; }
             const chip = galMarkFind(img.closest('picture') || img, GAL_DOOR_MARK);
-            if (saved || m || chip) galMarkPlace(img);
+            galMarkPlace(img);
             if (!went.has(h) && !seen.has(h)) return;
             if (!m) {
                 st.tooSmall++;
@@ -12640,6 +12868,7 @@
             galMidAt = 0;
             galLeftAt = 0;
             if (e.button === 0) galInputAt = performance.now();      // a scrollbar drag; the middle press itself is not
+            if (galMenuEl && !galMenuEl.hidden && e.composedPath().indexOf(galMenuEl) < 0) galMenuHide();
             if (e.composedPath().some(function (n) { return n.nodeType === 1 && n.hasAttribute(GAL_PILL); })) return;   // our marks act on their own
             const plain = e.button === 1 && cfg.galleryMiddle && !e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey;
             if (plain && !CAPTCHA_HERE && siteEnabled()) {
@@ -12668,7 +12897,8 @@
         }, true);
         window.addEventListener('keydown', function (e) {
             if (e.key !== 'Control') galInputAt = performance.now();
-            if (e.key === 'Escape' && galCur && !(view && box && box.classList.contains('on'))) galHide('esc');   // a preview up: Esc closes it first
+            if (e.key === 'Escape' && (galEdit || (galMenuEl && !galMenuEl.hidden))) { e.stopImmediatePropagation(); if (galEdit) galEditStop(false); else galMenuHide(); }
+            else if (e.key === 'Escape' && galCur && !(view && box && box.classList.contains('on'))) galHide('esc');   // a preview up: Esc closes it first
             if ((e.key === 'PageDown' || e.key === 'PageUp') && galCur && galCur.pages && galCur.pages.length > 1 && !typingIn(e)) {
                 e.preventDefault();
                 e.stopImmediatePropagation();
@@ -14053,6 +14283,10 @@
             'Off: middle-click opens the link in a new tab as usual, and clicking the ▦ chip on a result opens its gallery.');
         check('galleryChips', 'Show the ▦ chip on every gallery',
             'Off: the chip shows only on the thumbnail under the pointer.').el.addEventListener('change', galMarkSoon);
+        check('galleryTicks', 'Tick results whose gallery was seen',
+            'One green tick for a gallery you looked at, two for a page you opened.').el.addEventListener('change', galMarkSoon);
+        check('gallerySavedMarks', 'Mark results something was saved from',
+            'A blue disc on the result, and on each saved picture in its gallery.').el.addEventListener('change', galMarkSoon);
         const foot = document.createElement('div');
         foot.className = 'foot';
 

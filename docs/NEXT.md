@@ -40,6 +40,9 @@ is still undecided.
   corner (1/5 window tall, full-size original) and back on close; blue border again, no tab; chip,
   tick, disc in one dark pill drawn in a shadow root (Dark Reader turned the inline one light);
   press on a gallery cell pins its preview like on a page (`composedPath`).
+- **v0.294.0**: middle press on the corner picture closes again; right-click menu on it; move /
+  resize mode remembered per site (`GALLERY.md`); ticks and saved discs can be switched off.
+  Checked in Chrome by synthetic events; the user's stored place was reset after the test.
   Not changed: nsfw.xxx post pages refuse the preview because the page already draws the picture
   as tall as the window (`bigEnough`) — offered to the user, no answer yet.
 
