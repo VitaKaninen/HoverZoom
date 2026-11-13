@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.298.0
+// @version     0.299.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -4427,7 +4427,7 @@
         CAP_TARGET.addEventListener('keydown', onPinKey, true);
         // The wheel becomes the window's only now — see enableWheelZoom.
         enableWheelZoom();
-        if (!tour) tourStart();     // a tour begun from the widget brings its own
+        if (!tour && !galOwns(active)) tourStart();     // a tour begun from the widget brings its own; a gallery picture steps through its gallery (galStep)
         reflow();       // the controls appear with `placed`, and minFrameW() grows with them
         layout();
         twSync();
@@ -8763,7 +8763,7 @@
     const TW_HELP = '◀ ▶  previous / next; hold to repeat\n' +
         '⇅  wheel near it flips; click: wheel flips anywhere\n' +
         'Drag to move; Ctrl: no snapping';
-    let twShownOn = null;       // the URL the widget was last shown on: it stays there at any count (debugging)
+    let twGalOpen = false;      // a gallery is open: its own strip steps it, so the widget goes
     let twWheelArmed = null;    // the URL the wheel button was clicked on; the wheel then steps anywhere
     let twWheelIn = false;      // the pointer is within wheelRange of the button
     let twWheelAcc = 0;         // wheel travel not yet stepped on, px
@@ -8914,7 +8914,7 @@
     }
 
     function twWanted() {
-        return !!cfg.tourButtons && isTopFrame && siteEnabled() && !CAPTCHA_HERE && (!!tour || (twPics >= 2 && twTotal >= 2) || twShownOn === location.href);
+        return !!cfg.tourButtons && isTopFrame && siteEnabled() && !CAPTCHA_HERE && !twGalOpen && (!!tour || (twPics >= 2 && twTotal >= 2));
     }
 
     function twRefresh() {
@@ -8931,7 +8931,6 @@
         if (!tour && twTotal !== was && debugOn()) dbg('widget count ' + twTotal, twReport());
         if (twWheelArmed && twWheelArmed !== location.href) twWheelSet(false);
         const on = twWanted();
-        if (on) twShownOn = location.href;
         if (on) twTheme();
         if (on) setTimeout(twWarmFirst, 0);     // never during boot: it reads `let`s declared further down
         const shown = tw.host.style.display !== 'none';
@@ -10780,8 +10779,11 @@
     const GAL_SETTLE_MS = 700;          // the frame counts once no picture has arrived for this long
     const GAL_QUIET_CAP_MS = 4000;      // from DOMContentLoaded: the frame reports by then whatever it has
     const GAL_MIN_H = 120;              // rows never shorter: a bigger gallery is laid out as pages
-    const GAL_PG_TOP = 30;              // px kept above a paged gallery's rows for the page line
-    const GAL_FLIP_MS = 250;            // at most one page per this long on the wheel
+    const GAL_FLIP_MS = 200;            // at most one picture per this long on the wheel
+    const GAL_STRIP_H = 60;             // the page and picture rows under the clicked picture
+    const GAL_STRIP_W = 190;            // their least width; wider under a wider picture
+    const GAL_STRIP_GAP = 6;            // between the picture and the strip
+    let galResizeAt = 0, galRefitTimer = 0;
     const GAL_APPEND_MS = 300;          // thumbnails that load late join the set in batches this far apart
     const GAL_GROW_TICK = 400;          // the reading frame scrolls a screen this often
     const GAL_GROW_IDLE_MS = 4000;      // at its bottom with nothing new this long, the page is read
@@ -11287,10 +11289,14 @@
             'padding:6px 12px;border-radius:8px;background:#1e1e2e;border:1px solid #f9e2af;color:#f9e2af;font:13px/1.3 system-ui,sans-serif;' +
             'pointer-events:none;box-shadow:0 4px 14px rgba(0,0,0,.6)}' +
             '.svd{position:absolute;left:4px;top:4px;width:22px;height:22px;pointer-events:none}' +
-            '.pg[hidden]{display:none}' +
-            '.pg{position:fixed;left:50%;top:' + (GAL_GAP - 4) + 'px;transform:translateX(-50%);max-width:calc(100vw - 32px);box-sizing:border-box;' +
-            'padding:3px 12px;border-radius:8px;background:#1e1e2e;border:1px solid #45475a;color:#cdd6f4;font:12px/1.4 system-ui,sans-serif;' +
-            'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none;box-shadow:0 4px 14px rgba(0,0,0,.6)}' +
+            '.strip[hidden]{display:none}' +
+            '.strip{position:fixed;z-index:4;display:flex;flex-direction:column;justify-content:space-between;padding:4px;box-sizing:border-box;' +
+            'height:' + GAL_STRIP_H + 'px;background:#1e1e2e;border:1px solid #45475a;border-radius:8px;color:#cdd6f4;' +
+            'font:12px/1 system-ui,sans-serif;pointer-events:auto;box-shadow:0 4px 14px rgba(0,0,0,.6);user-select:none}' +
+            '.strip .r{display:flex;align-items:center;gap:6px;height:24px}' +
+            '.strip .b{flex:none;display:flex;align-items:center;justify-content:center;width:28px;height:24px;border-radius:5px;background:#313244;cursor:pointer;font-size:11px}' +
+            '.strip .b:hover{background:#45475a}.strip .b.faint{opacity:.35;cursor:default}.strip .b.faint:hover{background:#313244}' +
+            '.strip .t{flex:1;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}' +
             '.cell.go{cursor:pointer}' +
             'img{display:block;width:100%;height:100%;object-fit:cover;border-radius:6px;background:#1e1e2e;opacity:0;transition:opacity ' + GAL_FADE_MS + 'ms ease;' +
             'box-shadow:0 8px 22px rgba(0,0,0,.55),0 2px 5px rgba(0,0,0,.4)}' +
@@ -11346,7 +11352,7 @@
     // Rows of one height spread over the viewport, split around the hole: the largest height that fits every shape,
     // or, when that is under GAL_MIN_H, pages of GAL_MIN_H rows. {out: slots by index for `page`, pages: [[from, to]], page}.
     function galRows(asp, hole, page) {
-        const G = GAL_GAP, W = vpW(), H = vpH(), bars = [hole];
+        const G = GAL_GAP, W = vpW(), H = vpH(), bars = [].concat(hole);
         const free = function (y, h) {
             let segs = [[G, W - G]];
             bars.forEach(function (b) {
@@ -11398,7 +11404,7 @@
             }
             return { out: best.out, pages: [[0, asp.length]], page: 0 };
         }
-        const top = G + GAL_PG_TOP, pages = [];
+        const top = G, pages = [];
         for (let s = 0; s < asp.length;) {
             const e = Math.max(place(minH, s, top).next, s + 1);
             pages.push([s, e]);
@@ -11436,7 +11442,7 @@
 
     // Lay the set out around one hole; returns the slots.
     function galLayout(set, hole) {
-        const R = galRows(set.asp, hole, set.page || 0), L = R.out;
+        const R = galRows(set.asp, [hole, galStripRect(hole)], set.page || 0), L = R.out;
         set.pages = R.pages;
         set.page = R.page;
         set.open = hole;
@@ -11449,24 +11455,135 @@
             cell.style.height = r.h + 'px';
             cell.style.transform = 'translate(' + r.x + 'px,' + r.y + 'px)';
         });
+        set.rows = galRowLines(L);
         galPageNote(set);
         return L;
     }
 
-    // The page line, top centre: page, count, and whether more are being read.
+    // Where the rows on screen start and end, and the middle of each gap between them: what a resize of the clicked picture snaps to.
+    function galRowLines(L) {
+        const rows = new Map();
+        L.forEach(function (r) { if (r) rows.set(Math.round(r.y), Math.round(r.y + r.h)); });
+        const tops = Array.from(rows.keys()).sort(function (a, b) { return a - b; }), out = [];
+        tops.forEach(function (t, i) {
+            out.push(t, rows.get(t));
+            if (i + 1 < tops.length) out.push(Math.round((rows.get(t) + tops[i + 1]) / 2));
+        });
+        return out;
+    }
+
+    // The strip's box for a clicked picture at `h`: under it, else over it; at least GAL_STRIP_W wide, centred on it.
+    function galStripRect(h) {
+        const W = vpW(), H = vpH(), w = Math.min(W - 2 * GAL_GAP, Math.max(GAL_STRIP_W, h.w));
+        const x = Math.max(GAL_GAP, Math.min(W - GAL_GAP - w, h.x + h.w / 2 - w / 2));
+        const below = h.y + h.h + GAL_STRIP_GAP + GAL_STRIP_H <= H - 4;
+        return { x: x, y: below ? h.y + h.h + GAL_STRIP_GAP : Math.max(4, h.y - GAL_STRIP_GAP - GAL_STRIP_H), w: w, h: GAL_STRIP_H };
+    }
+
+    // The strip under the clicked picture: ◀ Page n / N ▶, then ◀ picture n / N ▶.
     function galPageNote(set) {
         if (!set) return;
-        const many = set.pages && set.pages.length > 1, reading = galGrowing === set.href;
-        if (!set.pg) {
-            set.pg = document.createElement('div');
-            set.pg.className = 'pg';
-            set.el.appendChild(set.pg);
-        }
-        set.pg.hidden = false;
-        const n = set.cells.length;
-        const total = set.pages ? set.pages.length : 1;
-        set.pg.textContent = 'Page ' + ((set.page || 0) + 1) + ' / ' + total + (reading ? '+' : '') + ' · ' +
-            n + ' picture' + (n === 1 ? '' : 's') + (reading ? ', finding more…' : '') + (many || reading ? ' · mouse wheel turns pages' : '');
+        if (!set.strip) galStripBuild(set);
+        const s = set.strip, reading = galGrowing === set.href, n = set.cells.length;
+        const total = set.pages ? set.pages.length : 1, page = set.page || 0, at = set.at >= 0 && set.at < n ? set.at : -1;
+        const r = galStripRect(set.open || galHole);
+        s.el.style.left = Math.round(r.x) + 'px'; s.el.style.top = Math.round(r.y) + 'px'; s.el.style.width = Math.round(r.w) + 'px';
+        s.el.hidden = !!galEdit;
+        s.pgT.textContent = 'Page ' + (page + 1) + ' / ' + total + (reading ? '+' : '');
+        s.picT.textContent = (at >= 0 ? at + 1 : '–') + ' / ' + n + (reading ? '+' : '');
+        setTip(s.pgT, reading ? 'Finding more pictures on the gallery\'s page…' : total + ' page' + (total === 1 ? '' : 's') + ' · PageUp / PageDown');
+        setTip(s.picT, n + ' picture' + (n === 1 ? '' : 's') + (reading ? ', finding more' : '') + ' · mouse wheel or ← → steps through them');
+        s.pgP.classList.toggle('faint', page <= 0);
+        s.pgN.classList.toggle('faint', page >= total - 1);
+        s.picP.classList.toggle('faint', !n);
+        s.picN.classList.toggle('faint', !n);
+    }
+
+    function galStripBuild(set) {
+        const el = document.createElement('div');
+        el.className = 'strip';
+        const s = { el: el };
+        const row = function (pk, tk, nk, prevTip, nextTip, act) {
+            const r = document.createElement('div');
+            r.className = 'r';
+            const btn = function (text, tip, dir) {
+                const b = document.createElement('span');
+                b.className = 'b';
+                b.textContent = text;
+                setTip(b, tip);
+                b.addEventListener('mousedown', function (e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (e.button === 0 && !b.classList.contains('faint')) act(dir);
+                });
+                return b;
+            };
+            s[pk] = btn('◀', prevTip, -1);
+            s[tk] = document.createElement('span');
+            s[tk].className = 't';
+            s[nk] = btn('▶', nextTip, 1);
+            r.appendChild(s[pk]); r.appendChild(s[tk]); r.appendChild(s[nk]);
+            el.appendChild(r);
+        };
+        row('pgP', 'pgT', 'pgN', 'Previous page · PageUp', 'Next page · PageDown', galFlip);
+        row('picP', 'picT', 'picN', 'Previous picture · ← or wheel up', 'Next picture · → or wheel down', galStep);
+        ['mousedown', 'mouseup', 'click', 'auxclick', 'dblclick', 'contextmenu'].forEach(function (t) {
+            el.addEventListener(t, function (e) { e.preventDefault(); e.stopPropagation(); });
+        });
+        set.strip = s;
+        set.el.appendChild(el);
+    }
+
+    // The page holding picture k.
+    function galPageOf(set, k) {
+        const i = (set.pages || []).findIndex(function (p) { return k >= p[0] && k < p[1]; });
+        return i < 0 ? set.page || 0 : i;
+    }
+
+    // The gallery picture on screen in the preview, else -1.
+    function galShownAt(set) {
+        if (!active || !galOwns(active)) return -1;
+        return set.pics.findIndex(function (p) { return p.img === active; });
+    }
+
+    let galStepTok = null;
+
+    // One picture on (+1) or back (-1), its page following; with none in the preview it starts from the last one seen on this page, else the page's first (last going back).
+    function galStep(dir) {
+        const set = galCur;
+        if (!set || !set.pics.length) return false;
+        const n = set.pics.length, p = (set.pages && set.pages[set.page]) || [0, n];
+        let k = galShownAt(set);
+        if (k < 0 && set.at >= p[0] && set.at < p[1]) k = set.at;
+        k = k < 0 ? (dir > 0 ? p[0] : p[1] - 1) : (k + dir + n) % n;
+        set.at = k;
+        const pg = galPageOf(set, k);
+        if (pg !== set.page) {
+            if (galOwns(active) && !placed) cancel();
+            set.page = pg;
+            galPageWork(set, galLayout(set, set.open));
+        } else galPageNote(set);
+        galPin(set, set.pics[k].img);
+        return true;
+    }
+
+    // A gallery picture's preview, pinned; the one up now stays until the new one is found, so a step never blinks.
+    function galPin(set, img) {
+        if (galStepTok) galStepTok.cancelled = true;
+        const tok = galStepTok = { cancelled: false, fresh: true };
+        if (!placed) { cancel(); showSpinner(); }
+        galResolve(img, tok).then(function (hit) {
+            if (galStepTok !== tok || galCur !== set) return;
+            hideSpinner();
+            if (!hit) return;
+            if (placed) unplace(); else cancel();
+            active = img;
+            activeShown = img.__hzItem.thumb;
+            hoverAt = Date.now();
+            token = tok;
+            showViewer(hit, pointer);
+            place();
+        });
     }
 
     // The cells of the page on screen, as their pics.
@@ -11501,20 +11618,21 @@
 
     let galFlipAt = 0, galWheelSum = 0, galWheelAt = 0;
 
-    // The wheel turns an open gallery's pages and never scrolls the page; over a pinned preview it stays the preview's.
+    // The wheel steps an open gallery's pictures, over the preview too, and never scrolls the page; Ctrl + wheel over a pinned preview zooms it.
     function galWheel(e) {
         const set = galCur;
         if (!set) return;
-        if (placed && pointInPreview(e.clientX, e.clientY)) return;
+        if (e.ctrlKey) return;      // the preview's zoom over a pinned one (onPinWheel), else the browser's own zoom
+
+        if (panelOwns(e)) return;
         e.preventDefault();
         e.stopImmediatePropagation();
-        if (!set.pages || set.pages.length < 2) return;
         const now = performance.now();
         if (now - galWheelAt > 300) galWheelSum = 0;
         galWheelAt = now;
         galWheelSum += e.deltaMode ? e.deltaY * 40 : e.deltaY;
         if (Math.abs(galWheelSum) < 60 || now - galFlipAt < GAL_FLIP_MS) return;
-        galFlip(galWheelSum > 0 ? 1 : -1);
+        galStep(galWheelSum > 0 ? 1 : -1);
         galFlipAt = now;
         galWheelSum = 0;
     }
@@ -11718,6 +11836,7 @@
         set.el.classList.add('on');
         galBlur.classList.add('on');
         galCur = set;
+        if (!twGalOpen) { twGalOpen = true; twRefresh(); }
         setTimeout(function () { if (galCur === set) galVeil(false); }, GAL_FADE_MS);
         galTrace(href, 'shown: ' + pics.length + ' thumbnails');
         galPendClear();
@@ -11880,6 +11999,8 @@
         galVeil(false);
         galFlyBack();
         galChipsSync();
+        if (galStepTok) { galStepTok.cancelled = true; galStepTok = null; }
+        if (twGalOpen) { twGalOpen = false; twRefresh(); }
     }
 
     function galOwns(el) {
@@ -11918,7 +12039,10 @@
             if (myToken.cancelled || active !== img) return;
             hideSpinner();
             dbg('gallery preview found', { ms: Math.round(performance.now() - t1), remembered: known, size: hit ? hit.w + 'x' + hit.h : null });
-            if (hit) showViewer(hit, pointer);
+            if (!hit) return;
+            showViewer(hit, pointer);
+            const set = galCur, i = set ? set.pics.findIndex(function (p) { return p.img === img; }) : -1;
+            if (i >= 0) { set.at = i; galPageNote(set); }      // the picture row counts from what was looked at
         }, cfg.hoverDelay);
     }
 
@@ -12083,7 +12207,7 @@
         const el = f.el;
         galEdit = { el: el, was: { l: parseFloat(el.style.left), t: parseFloat(el.style.top), w: parseFloat(el.style.width), h: parseFloat(el.style.height) } };
         el.classList.add('edit');
-        if (galCur) galCur.el.classList.add('faded');
+        if (galCur) { galCur.el.classList.add('faded'); galPageNote(galCur); }
         hideTip();
     }
 
@@ -12098,12 +12222,51 @@
         if (!keep) {
             r = { x: ed.was.l, y: ed.was.t, w: ed.was.w, h: ed.was.h };
             galFlyPut(el, r.x, r.y, r.w, r.h);
+            if (galCur) galPageNote(galCur);
             return;
         }
         galAnchorSave({ x: galAnchorAx(r.x, r.w, vpW()), y: galAnchorAx(r.y, r.h, vpH()), hf: Math.round(r.h / vpH() * 1000) / 1000 });
         galHole = r;
         if (galCur) galPageWork(galCur, galLayout(galCur, galHole));
         toast('Saved for this site, and as the place new sites start with', 3000);
+    }
+
+    // The browser window resized: the clicked picture goes back to its remembered place for the new size, and the gallery is laid out again on the page holding the same picture.
+    function galRefit() {
+        galResizeAt = performance.now();
+        if (galRefitTimer) return;
+        galRefitTimer = setTimeout(function () {
+            galRefitTimer = 0;
+            galResizeAt = performance.now();
+            galEditStop(false);
+            galMenuHide();
+            if (galFly) {
+                const el = galFly.el, r = galCornerRect({ width: parseFloat(el.style.width), height: parseFloat(el.style.height) });
+                galFlyPut(el, r.x, r.y, r.w, r.h);
+                galHole = r;
+            } else if (galHole) galHole = galCornerRect({ width: galHole.w, height: galHole.h });
+            if (galVeilEl && galVeilEl.classList.contains('on')) galVeilEl.style.clipPath = galBlur.style.clipPath = galClip(galHole);
+            const set = galCur;
+            if (!set) return;
+            const p = set.pages && set.pages[set.page], keep = set.at >= 0 ? set.at : p ? p[0] : 0;
+            let L = galLayout(set, galHole);
+            const pg = galPageOf(set, keep);
+            if (pg !== set.page) { set.page = pg; L = galLayout(set, galHole); }
+            galPageWork(set, L);
+        });
+    }
+
+    // A corner drag's height, snapped: the moving edge on a row's top or bottom, a gap's middle, or the window's centre line (either axis); the nearest to the free height wins.
+    function galSnapH(st, corner, h0, lines, W, H) {
+        const asp = st.w / st.h, cands = [];
+        lines.concat([H / 2]).forEach(function (y) { cands.push(corner[0] === 'b' ? y - st.t : st.t + st.h - y); });
+        cands.push((corner[1] === 'r' ? W / 2 - st.l : st.l + st.w - W / 2) / asp);
+        let best = h0, d = Infinity;
+        cands.forEach(function (h) {
+            if (!(h >= 48 && h <= H * 0.9 && h * asp <= W - 8)) return;
+            if (Math.abs(h - h0) < d) { d = Math.abs(h - h0); best = h; }
+        });
+        return best;
     }
 
     function galFlyPut(el, l, t, w, h) {
@@ -12126,6 +12289,7 @@
                 const sx = corner[1] === 'r' ? 1 : -1, sy = corner[0] === 'b' ? 1 : -1;
                 const k = Math.max((st.w + sx * dx) / st.w, (st.h + sy * dy) / st.h);
                 h = Math.max(48, Math.min(H * 0.9, st.h * k));
+                if (!ev.altKey && galCur && galCur.rows) h = galSnapH(st, corner, h, galCur.rows, W, H);
                 w = h * asp;
                 if (w > W - 8) { w = W - 8; h = w / asp; }
                 if (corner[1] === 'l') l = st.l + st.w - w;
@@ -12133,7 +12297,7 @@
             } else { l = st.l + dx; t = st.t + dy; }
             l = Math.max(0, Math.min(W - w, l));
             t = Math.max(0, Math.min(H - h, t));
-            if (!corner) { const sn = boxSnap(l, t, w, h); l = sn.x; t = sn.y; }
+            if (!corner && !ev.altKey) { const sn = boxSnap(l, t, w, h); l = sn.x; t = sn.y; }
             galFlyPut(el, l, t, w, h);
         };
         const up = function () {
@@ -12225,7 +12389,13 @@
         el.style.left = H.x + 'px'; el.style.top = H.y + 'px';
         el.style.width = H.w + 'px'; el.style.height = H.h + 'px';
         el.style.transform = galFlyFrom(hr, H);
-        ['tl', 'tr', 'bl', 'br'].forEach(function (c) { const hd = document.createElement('span'); hd.className = 'hd ' + c; hd.__hzCorner = c; el.appendChild(hd); });
+        ['tl', 'tr', 'bl', 'br'].forEach(function (c) {
+            const hd = document.createElement('span');
+            hd.className = 'hd ' + c;
+            hd.__hzCorner = c;
+            setTip(hd, 'Drag to resize — snaps to the edges of the gallery\'s rows, the middle of the gaps between them and the window\'s centre line · hold Alt to size freely');
+            el.appendChild(hd);
+        });
         const bt = document.createElement('div');
         bt.className = 'bt';
         [['ok', ICON_TICK, 'Keep this size and place (this site, and the default for new sites)', true], ['no', ICON_CLOSE, 'Cancel', false]].forEach(function (b) {
@@ -12555,7 +12725,8 @@
         if (!galMarksHere() && !galWant && !galCur) return;
         const t = e.target;
         if (t !== document && !(t && t.nodeType === 1 && t.clientHeight >= vpH() / 2)) return;
-        if (galWant || galCur) galHide(performance.now() - galInputAt < 600 ? 'scroll' : 'page scrolled by itself');
+        if ((galWant || galCur) && performance.now() - galResizeAt > 1000)      // a window resize reflows the page, and its scroll is not the user's
+            galHide(performance.now() - galInputAt < 600 ? 'scroll' : 'page scrolled by itself');
         galMarkSoon();
     }
 
@@ -13044,16 +13215,26 @@
             if (e.key !== 'Control') galInputAt = performance.now();
             if (e.key === 'Escape' && (galEdit || (galMenuEl && !galMenuEl.hidden))) { e.stopImmediatePropagation(); if (galEdit) galEditStop(false); else galMenuHide(); }
             else if (e.key === 'Escape' && galCur && !(view && box && box.classList.contains('on'))) galHide('esc');   // a preview up: Esc closes it first
-            if ((e.key === 'PageDown' || e.key === 'PageUp') && galCur && galCur.pages && galCur.pages.length > 1 && !typingIn(e)) {
+            if ((e.key === 'PageDown' || e.key === 'PageUp') && galCur && !galEdit && !typingIn(e)) {
                 e.preventDefault();
                 e.stopImmediatePropagation();
                 galFlip(e.key === 'PageDown' ? 1 : -1);
             }
+            const step = { ArrowRight: 1, ']': 1, ArrowLeft: -1, '[': -1 }[e.key];      // in a gallery the arrows always step (never pan)
+            if (step && galCur && !galEdit && !panelHost && !e.ctrlKey && !e.metaKey && !e.altKey && !typingIn(e)) {
+                e.preventDefault();
+                e.stopImmediatePropagation();
+                if (!e.repeat || performance.now() - galFlipAt >= GAL_FLIP_MS) { galFlipAt = performance.now(); galStep(step); }
+            }
+            if (e.key === 'Alt' && galEdit) e.preventDefault();       // held for a free resize: the browser's menu bar stays shut
+        }, true);
+        window.addEventListener('keyup', function (e) {
+            if (e.key === 'Alt' && galEdit) e.preventDefault();
         }, true);
         CAP_TARGET.addEventListener('wheel', galWheel, WHEEL_OPTS);
         window.addEventListener('resize', function () {
             if (galMarksHere()) galMarkSoon();
-            if (galWant || galCur) galHide('resize');
+            if (galWant || galCur) galRefit();
         });
     } else if (String(window.name || '').indexOf(GAL_NAME + ':') === 0) {
         setTimeout(galProbeReport, 0);

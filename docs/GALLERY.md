@@ -39,17 +39,26 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   Open door's chip = yellow ✕, `galChipsSync()` on every open/close. No first-uses text (user: "just
   show the icon"; GM `hoverZoomPeekHints` left unread).
 - **Pages** (`galRows(asp, hole, page)` → `{out, pages, page}`): if everything fits at
-  `GAL_MIN_H` 120 the old binary search runs from there up; else pages of `GAL_MIN_H` rows with
-  `GAL_PG_TOP` kept for the `.pg` line. Tested in `test-resolver.js` (683 at 1920×1080 → 10 pages of
-  ~73). `set.page` survives a rebuild of the same href. `galPageWork` = upgrades and `galHqAll`
-  for the page on screen only (was every cell). `galWheel` on `CAP_TARGET` capture, non-passive:
-  60 px of delta, one flip per `GAL_FLIP_MS`; skipped over a pinned preview. **It eats the wheel even
-  with one page** (user, v0.295.0): a page scroll closed the gallery, which then also stopped the
-  reading, so a first open (read at the site's pace, nsfw.xxx ~15 per 2 s) never got a second page.
-  **Closing no longer stops the reading** (user, v0.297.0): it runs to its end (`GAL_GROW_MAX_MS`) so
+  `GAL_MIN_H` 120 the old binary search runs from there up; else pages of `GAL_MIN_H` rows from the
+  top. `galRows` takes several bars (the clicked picture and its strip). Tested in `test-resolver.js`.
+  `set.page` survives a rebuild of the same href. `galPageWork` = upgrades and `galHqAll` for the page
+  on screen only (was every cell).
+- **The strip** (user, v0.299.0; replaced the top `.pg` line): `galPageNote` draws two rows under the
+  clicked picture (over it when no room, `galStripRect`, ≥ `GAL_STRIP_W`): ◀ Page n / N ▶ (`galFlip`,
+  PageUp/PageDown) and ◀ picture n / N ▶ (`galStep`); `+` while reading on. It is a bar in `galRows`
+  so no cell lands under it; hidden while moving/resizing. The dock widget hides while a gallery is
+  open (`twGalOpen`) — never two ◀ ▶ on screen.
+- **Stepping** (`galStep`): wheel anywhere (also over the preview — Ctrl + wheel over a pinned one
+  zooms it, elsewhere the browser zooms), ← → [ ] (always step in a gallery, never pan), the picture
+  row. From the preview's picture, else `set.at` (last viewed/stepped) if on the page on screen, else
+  the page's first (last going back); wraps; the page follows. `galPin` keeps the old pinned preview
+  until the next is resolved (no blink) and pins it; `place()` skips `tourStart` for a gallery
+  picture. `galWheel` on `CAP_TARGET` capture, before `onPinWheel`: 60 px of delta, one step per
+  `GAL_FLIP_MS`. **It eats the wheel always** (user, v0.295.0): a page scroll closed the gallery,
+  which then also stopped the reading.
+- **Closing no longer stops the reading** (user, v0.297.0): it runs to its end (`GAL_GROW_MAX_MS`) so
   a reopen has the later pages; a hover read-ahead or another open still replaces it (`galRender`
-  stops the busy frame) and the reopen then reads again. The `.pg` line shows from the first picture ("Page 1 / 1+ · … · mouse wheel turns
-  pages"); it used to wait for 2 pages, and with v0.291.0's preload gone that took ~20 s.
+  stops the busy frame) and the reopen then reads again.
 - **Reading on** (`galGrow`, after `galBuild` of a locked open): `galRender(href, onMore, onEnd)` names
   the frame `…:<token>:grow`; the frame's `galProbeReport` reports as before, then `readOn()`:
   every `GAL_GROW_TICK` it posts only new items, scrolls `scrollingElement` 0.9 screen and
@@ -87,7 +96,10 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   leaving the link or the window does not hide it, so the pointer can go over the thumbnails. Closes
   on a Ctrl tap (Ctrl down then up, no other key, press or wheel between: `galTap`; it does not also
   run the previews hotkey, `galPeekTapAt`), Esc (with no preview up), a press on the corner picture
-  (`.fly`), a scroll, a resize. A left press on the page where the corner is, while the picture is
+  (`.fly`), a scroll. **A browser-window resize keeps it** (user, v0.299.0: resizing to fit more
+  pictures): `galRefit` puts the picture at its remembered place for the new size and lays out again on
+  the page holding `set.at`; a scroll within 1 s of a resize is the reflow's and does not close
+  (`galResizeAt`). The Browser pane's viewport emulation sends no `resize` event — dispatch one. A left press on the page where the corner is, while the picture is
   still flying, closes too (`galLeftAt` makes `galMidEat` eat its click). A left press before the set
   is built (loading) still closes it and goes through.
 - **Presses between pictures reach nothing** (user, v0.292.0: a misclick must not open another
@@ -119,8 +131,13 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   Closed by any press outside it or Esc.
 - **Move or resize** (`galEditStart`/`galEditDown`/`galEditStop`, user v0.294.0): the set fades
   (`.faded`), the picture gets a dashed outline, four corner handles (resize, own shape kept,
-  48 px … 90 % of the window tall) and ✓ / ✕ in its middle. A drag snaps with the preview's
-  `boxSnap`; Esc or ✕ restores. ✓ saves and lays the set out around the new place.
+  48 px … 90 % of the window tall) and ✓ / ✕ in its middle. A move snaps with the preview's
+  `boxSnap`. **A corner drag always snaps** (user, v0.299.0, `galSnapH`): the moving edge to a row's
+  top or bottom or a gap's middle (`set.rows` from `galRowLines`), or the window's centre line on
+  either axis; the nearest to the free height wins. **Alt = free**, move and resize (Alt keydown/keyup
+  `preventDefault` while editing, so the menu bar stays shut — unverified in LibreWolf). Lines come
+  from the layout on screen: on a one-page gallery the rows' height changes after ✓, so the edges
+  stop lining up; paged rows (`GAL_MIN_H`) stay put. Esc or ✕ restores. ✓ saves and lays the set out.
 - **Its memory** (GM `hoverZoomGalleryAnchor` = `{last, sites: {host: {x, y, hf}}}`; x/y are the
   preview's per-axis `{m: s|c|e, o}` via `galAnchorAx`, applied with `posAxis`; hf = height ÷ window
   height). A save writes this site and `last`. **A site's first open copies `last` (or the corner
@@ -137,7 +154,7 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   width spread evenly between them; binary search for the largest height that places every
   picture (none fits even at 8 px → the unplaced cells are hidden). Rows are one height because a
   segment beside the hole cannot be justified independently of the rows above and below.
-- Resize hides the set (the hole's rect is stale). Upgrade check uses each picture's drawn width.
+- Upgrade check uses each picture's drawn width.
 - **Read-ahead**: hovering a door, after `cfg.hoverDelay`, reads its gallery (`galLoad`) and warms its
   thumbnails (`galWarm`). `GAL_CACHE` 300.
 - **Preload** (`galPreNext`, user v0.297.0, `cfg.galleryPreload` on): the first page (`galLoad` +

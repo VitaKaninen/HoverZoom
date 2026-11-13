@@ -1270,6 +1270,19 @@ eq('template: all empty', N.fillNameTemplate('[site] - ([page_title])', { now: N
         return r.x + r.w <= hole.x || r.x >= hole.x + hole.w || r.y + r.h <= hole.y || r.y >= hole.y + hole.h; }), true);
     console.log('  (683 pictures: ' + big.pages.length + ' pages of about ' + (big.pages[0][1] - big.pages[0][0]) + ')');
 }
+// ---- resizing the clicked picture: snaps to row edges, gap middles and the window's centre lines; Alt (not here) is free.
+{
+    const cut = function (from, to) { const a = src.indexOf(from), b = src.indexOf(to, a); return src.slice(a, b); };
+    const S = new Function(cut('    function galRowLines(', '    // The strip\'s box') + cut('    function galSnapH(', '    function galFlyPut(') +
+        NL + 'return {galRowLines, galSnapH};')();
+    const L = [{ x: 0, y: 12, w: 160, h: 120 }, { x: 170, y: 12, w: 160, h: 120 }, { x: 0, y: 150, w: 160, h: 120 }, null];
+    eq('snap: row lines are tops, bottoms and the gap middle', S.galRowLines(L), [12, 132, 141, 150, 270]);
+    const st = { l: 1700, t: 800, w: 200, h: 200 };     // bottom-right corner, dragging its top-left handle
+    eq('snap: the top edge lands on the nearest row line', S.galSnapH(st, 'tl', 155, [12, 132, 141, 150, 270, 852], 1920, 1080), 148);
+    eq('snap: the centre line counts', S.galSnapH(st, 'tl', 470, [12, 132, 141, 150, 270], 1920, 1080), 460);
+    eq('snap: the vertical centre line counts too', S.galSnapH(st, 'tl', 930, [], 1920, 1080), 940);
+    eq('snap: a line past the size limits is never taken', S.galSnapH(st, 'tl', 980, [12], 1920, 1080), 940);
+}
 // ---- mark corners: clear of the page's badges, beside each other when one corner is left (nsfw.xxx card, measured).
 {
     const a = src.indexOf('    const GAL_TICK_ORDER'), b = src.indexOf('    // The page\'s own elements over the picture');

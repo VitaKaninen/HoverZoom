@@ -45,19 +45,25 @@ is still undecided.
   Checked in Chrome by synthetic events; the user's stored place was reset after the test.
   Not changed: nsfw.xxx post pages refuse the preview because the page already draws the picture
   as tall as the window (`bigEnough`) — offered to the user, no answer yet.
+- **v0.295.0–v0.298.0**: the gallery eats the wheel with one page; dark from the flight; the first
+  page of every gallery on screen read ahead (setting, on); reading stops at the site's appended feed.
+- **v0.299.0** (user's design, 2026-11-13; this is B-rest and C, settled): the dock widget's `– / 0`
+  stickiness removed (it hides under 2 pictures); the widget hides while a gallery is open; a
+  two-row strip under the clicked picture (◀ Page ▶, ◀ picture ▶) replaces the top line; wheel /
+  ← → step pictures in a pinned preview, the page follows; corner resize snaps to row edges, gap
+  middles and the window's centre lines (Alt free); a browser-window resize keeps the gallery and
+  lays it out again. Checked in the Browser pane by synthetic events on `door-big.html` (240).
 
 ## Not verified
 
-Not tried in LibreWolf + Tampermonkey.
+Not tried in LibreWolf + Tampermonkey (incl. v0.299.0: does Alt held during a resize still open the menu bar?).
 The pane sends no scroll events, so the reading frame dispatches its own; pages that load via
-IntersectionObserver are untested. ~100-picture galleries now take 2 pages (row floor 120) — the
-user may want `GAL_MIN_H` lower.
+IntersectionObserver are untested. ~100-picture galleries now take 2 pages (row floor 120) — asked
+whether `GAL_MIN_H` should go lower, unanswered. On a one-page gallery the snapped corner picture
+stops lining up after ✓ (rows grow to fill) — not raised with the user yet.
 
 ## Remaining proposal (recommendations, each waits on the user's yes)
 
-B (rest). The slideshow widget inside an open gallery, counting that gallery's pictures.
-C. User's idea: widget ◀ ▶ flip gallery pages showing "page n / N". Recommended instead: ◀ ▶ always
-   mean next picture; the gallery follows a slideshow to the page holding it. Undecided.
 D. One slideshow scope whatever the start (old reason: a forum post's pictures without the replies;
    `S25`, `E60`); one remembered window position instead of two (`E64`); a slideshow keeps the
    window where it is; same frame rules pinned or touring (`E21` vs `growBox`).
@@ -67,10 +73,7 @@ F. Newcomer: first-use hint line in the bar, a `?` gesture sheet, tooltips on se
 
 ## Last exchange
 
-2026-11-13 session: user asked for the nsfw.xxx gallery changes in v0.292.0–v0.293.0 (above), the
-last being: clicked picture flies to the bottom-right corner and back, chip/tick/disc in one dark
-pill, press-to-pin the same inside the gallery. All built, checked in Chrome by synthetic events
-only (the flight animation itself unseen; LibreWolf untested). One question asked, **unanswered**:
-should nsfw.xxx post pages preview a picture the page already draws as tall as the window
-(`bigEnough` refuses it today)? Leftover: an empty stray file `C:\Users\VITAKA~1\AppData\Local\Temp\s1.py`
-(a safety check blocked deleting it; the user was asked to remove it).
+2026-11-13: user designed the gallery strip + snapping resize + resize-keeps-open; built as v0.299.0.
+Still unanswered: nsfw.xxx post pages previewing a picture drawn window-tall (`bigEnough`);
+`GAL_MIN_H`. Flagged to the user: Alt frees the corner picture, but the dock widget uses Ctrl for
+"no snapping" — one key for both is a consistency question for them.
