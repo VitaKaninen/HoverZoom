@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.307.0
+// @version     0.308.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -11092,13 +11092,14 @@
                 else end(why);
             };
             let held = false;
-            // Reading on waits (on) or goes on (off); a wait does not count towards its time limit.
-            const hold = function (on) {
-                if (!done || gone || on === held) return;
-                held = on;
+            // Reading on waits (on) or goes on (off); an open gallery's wait does not count towards its time limit, a closed one's does.
+            const hold = function (on, closed) {
+                if (!done || gone) return;
                 clearTimeout(t);
-                if (!on) t = setTimeout(function () { end('timed out'); }, GAL_GROW_MAX_MS + GAL_REPORT_MS);
-                galTrace(href, 'reading on: ' + (on ? 'waits, the next page is full' : 'goes on'));
+                if (!on || closed) t = setTimeout(function () { end('timed out'); }, GAL_GROW_MAX_MS + GAL_REPORT_MS);
+                if (on === held) return;
+                held = on;
+                galTrace(href, 'reading on: ' + (on ? 'waits' + (closed ? ', the gallery closed' : ', the next page is full') : 'goes on'));
                 try { f.contentWindow.postMessage({ hzGalleryHold: token, hold: on }, new URL(href).origin); } catch (e) { /* frame gone */ }
             };
             const stop = function () { if (done) end('cancelled'); else fin('cancel', 'replaced by a newer hover'); };
@@ -12355,7 +12356,7 @@
         galPeek = false;
         if (galOwns(active)) cancel();
         if (galCur) { galDrop(galCur); galCur = null; }
-        if (galGrowEnd) galGrowEnd('closed');
+        if (galGrowHold) galGrowHold(true, true);
         if (galBlur) galBlur.classList.remove('on');
         galVeil(false);
         galFlyBack();

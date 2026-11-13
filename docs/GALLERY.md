@@ -51,7 +51,8 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
 - **The strip** (user, v0.299.0–v0.303.0; replaced the top `.pg` line): one element for every
   gallery (`galSt`, built once by `galStripBuild`, filled by `galStripText`): ◀ Page n / N ▶
   (`galFlip`, PageUp/PageDown; the `.pg` row, 16 px, user: "rarely used") and ◀ picture n / N ▶
-  (`galStep`, 24 px); `+` while reading on. **The page row shows only with 2+ pages**
+  (`galStep`, 24 px; row class `.pn` — `.pic` is the picture box's, and `.fly .pic{flex:1}`
+  stretched the row); rows `justify-content:space-evenly` (user: equal gaps); `+` while reading on. **The page row shows only with 2+ pages**
   (`galStripOne`, `galStripRows`; strip `GAL_STRIP_H1` 34 vs `GAL_STRIP_H` 54). Each open starts
   with one row; the first time a set has 2+ pages it switches for good (`set.two`, so a relayout
   that fits one page again cannot flip it back and forth). An attached strip keeps the unit's
@@ -90,17 +91,30 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   picture?" (`.bt.ask`, `galJoin`): ✓ → `in`, ✕ → stays `dock`; both save. A new press on the
   picture or strip answers ✕. Ctrl drops the snapping, docking included. Joining is the only way
   back in (user removed "Reset position", v0.303.0).
-- **Stepping** (`galStep`): wheel anywhere (also over the preview — Ctrl + wheel over a pinned one
-  zooms it, elsewhere the browser zooms), ← → [ ] (always step in a gallery, never pan), the picture
-  row. From the preview's picture, else `set.at` (last viewed/stepped) if on the page on screen, else
-  the page's first (last going back); wraps; the page follows. `galPin` keeps the old pinned preview
+- **Stepping** (`galStep`): wheel anywhere but over a pinned preview (there it zooms, `onPinWheel`,
+  and a drag pans; user v0.307.0), Ctrl + wheel is the browser's, ← → [ ] (always step in a gallery,
+  never pan), the picture row. **Start** (user v0.307.0): a *pinned* preview's picture, else
+  `set.at` if on the page on screen, else the page's first, shown (either direction). `set.at` is
+  set only by a step or a pin (`place()` writes it for a gallery picture), **never by a hover**:
+  reaching the strip crosses cells, and a hover-set start made the first ▶ land mid-page. Wraps;
+  the page follows. `galPin` keeps the old pinned preview
   until the next is resolved (no blink) and pins it; `place()` skips `tourStart` for a gallery
   picture. `galWheel` on `CAP_TARGET` capture, before `onPinWheel`: 60 px of delta, one step per
   `GAL_FLIP_MS`. **It eats the wheel always** (user, v0.295.0): a page scroll closed the gallery,
   which then also stopped the reading.
-- **Closing no longer stops the reading** (user, v0.297.0): it runs to its end (`GAL_GROW_MAX_MS`) so
-  a reopen has the later pages; a hover read-ahead or another open still replaces it (`galRender`
-  stops the busy frame) and the reopen then reads again.
+- **Closing no longer stops the reading** (user, v0.297.0), so a reopen has the later pages, but it
+  makes it wait (`galGrowHold(true, true)`), and a closed wait counts toward `GAL_GROW_MAX_MS`; a
+  hover read-ahead or another open still replaces it (`galRender` stops the busy frame).
+- **One page ahead** (user v0.307.0: "don't download all that stuff if they are not going to
+  use it"): `galGrowPace` (end of every `galLayout`) holds the reading frame once
+  `cells ≥ (page + 2) × first page's size`, i.e. the page after the one on screen is full, and lets
+  it go when a flip or step moves on. Parent `hold` posts `{hzGalleryHold: token, hold}` into the
+  frame; the frame's `readOn` tick idles while held (no scroll, no idle count, `t0` pushed on).
+  Every cell's thumbnail is fetched when its item arrives, so pausing the frame is what limits
+  the downloads. Verified in Chrome on nsfw.xxx (frame held 8 s: no items; released: resumed).
+  No total is known ahead: the strip says `N+` while reading. nsfw.xxx's profile tabs (All /
+  Images / Videos) count only some posts (alternativealt1: All 3, but hundreds of posts labelled
+  with their name follow in the same grid) — not usable as a total.
 - **Reading on** (`galGrow`, after `galBuild` of a locked open): `galRender(href, onMore, onEnd)` names
   the frame `…:<token>:grow`; the frame's `galProbeReport` reports as before, then `readOn()`:
   every `GAL_GROW_TICK` it posts only new items, scrolls `scrollingElement` 0.9 screen and
@@ -126,10 +140,9 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   picture, then 16 feed cards linking `/post/#`): when its shapes split into own and other
   galleries, only the own ones count; when none judge own, all do, as before (a page whose own
   thumbnails link to sibling pages of its own shape keeps working).
-  nsfw.xxx `/user/alternativealt1` (card count 3, 500+ read; user reported as endless) is **not** a
-  feed: the 3 is the creator's *picture* count, and the page lists their hundreds of video posts
-  (`div.post.video`, all labelled with their name). Whether galleries should leave video posts out
-  was put to the user (2026-11-13).
+  nsfw.xxx `/user/alternativealt1` (card count 3, 500+ read) is **not** a feed: hovering its posts
+  says they are the creator's, and the user keeps them, videos included (2026-11-13); the volume is
+  handled by reading one page ahead (above).
   Not used (tried in v0.298.0's draft): `galLeafAt` on the shape's links — a video post's page has
   no bigger *picture*, so it called the gallery's own video posts "more thumbnails" and cut a
   37-post gallery at 15. Every verdict and the end reason go into the open's trace as `frame: …`

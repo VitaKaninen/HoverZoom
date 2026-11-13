@@ -63,10 +63,16 @@ is still undecided.
   pages; text squeezes; detached strip text-wide; rows touching the picture stay whole; first-list
   feed judged (Chrome-verified on a post page); ⌕ chip previews a picture shown full size
   (`bigChip`). All but the feed checked in the pane by synthetic events.
+- **v0.307.0–v0.308.0** (user, 2026-11-13): slideshow start = pinned preview or page's first, never
+  a hover; wheel over a pinned preview zooms; strip row gaps equal (`.pn` class collision); reading
+  on waits one page ahead (frame hold verified in Chrome; parent pacing not run on a live gallery).
+  Snapped-picture gap (user's screenshots) NOT reproduced: 870-case node sweep and pane drags to
+  gap middles / row bottoms all leave the row above whole — suspect a dark or unloaded cell; asked
+  the user to hover the empty spot.
 
 ## Not verified
 
-Not tried in LibreWolf + Tampermonkey (incl. v0.300.0–v0.306.0).
+Not tried in LibreWolf + Tampermonkey (incl. v0.300.0–v0.308.0).
 The pane sends no scroll events, so the reading frame dispatches its own; pages that load via
 IntersectionObserver are untested. Row floor is a setting since v0.301.0 (user: 120 is a good start). On a one-page gallery the snapped corner picture
 stops lining up after ✓ (rows grow to fill) — told the user in v0.299.0's report, no answer. A row-line
@@ -84,6 +90,5 @@ F. Newcomer: first-use hint line in the bar, a `?` gesture sheet, tooltips on se
 ## Last exchange
 
 2026-11-13: gallery strip and snapping (v0.299.0–v0.300.0), row floor (v0.301.0), then the user's
-seven-point round (v0.302.0–v0.306.0, see above). Asked, unanswered: nsfw.xxx /user/alternativealt1
-reads 500+ pictures because the creator has hundreds of *video* posts (card's 3 = pictures only) —
-should galleries leave video posts out?
+seven-point round (v0.302.0–v0.306.0), then v0.307.0–v0.308.0 (see above; user keeps video posts).
+Asked: does the empty spot above a snapped picture show a preview when hovered?
