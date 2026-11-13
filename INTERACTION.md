@@ -544,14 +544,14 @@ in a blue ring. Detail: [`docs/GALLERY.md`](docs/GALLERY.md).
 
 | ID | What | Behaviour |
 |---|---|---|
-| `G1` | Peek | A click on the ▦ chip of a **gallery door** (`P17`; not a door to more results) opens its gallery on any site, no mode needed; middle-click does too when Settings → Galleries → *Middle-click opens a gallery* is on (off by default). Hovering the door shows the chip on its corner (spelled out the first 3 times per site) and reads its gallery ahead |
+| `G1` | Peek | A click on the ▦ chip of a **gallery door** (`P17`; not a door to more results) opens its gallery on any site, no mode needed; middle-click does too when Settings → Galleries → *Middle-click opens a gallery* is on (off by default). The chip sits top-left on every gallery door (Settings → Galleries → *Show the ▦ chip on every gallery*; off: only under the pointer); hovering a door reads its gallery ahead |
 | `G2` | Gallery mode | **Retired v0.291.0.** Was a per-site switch with previews off; `G1` does its job |
 | `G3` | Open | Locked on the result it was opened from; the page under it takes no hovers |
-| `G4` | Closes on | Middle-click on the same result, when middle-click opens galleries (another result switches), Esc (after any preview), a left press on the page, a Ctrl tap, a resize, a page scroll |
-| `G5` | Cells | Hover = the ordinary hover preview of the cell's original (`S05`); a press pins it (`S10`); middle-click on the preview saves |
+| `G4` | Closes on | The door's chip (now a yellow ✕), a press on the original picture or the yellow **Close** tab on its pulsing ring, middle-click on the same result when middle-click opens galleries (another result switches), Esc (after any preview), a Ctrl tap, a resize, a page scroll. A press between pictures does nothing |
+| `G5` | Cells | Hover = the ordinary hover preview of the cell's original, from the picture's own page (`S05`); a press pins it (`S10`); middle-click on the preview saves; with no preview up, a click opens the page the picture links to |
 | `G6` | Pages | Rows never under 120 px; more pictures than fit become pages. Wheel (not over a pinned preview) or PageUp/PageDown turns them; top line "Page n / N · count". One page: the wheel scrolls the page, which closes it (`G4`) |
 | `G7` | Reading on | While open, a hidden frame scrolls the linked page a screen every 0.4 s and adds pictures it mounts late; the line says "N+ … finding more…" until 4 s at its bottom with nothing new (cap 3 min). Closing stops it |
-| `G8` | Marks | Seen (one tick), visited (two), saved (blue disc) on results, on sites with learned doors; a click on a mark clears it |
+| `G8` | Marks | Seen (one tick), visited (two), saved (blue disc) on results, on sites with learned doors; with the chip: chip, tick to its right, disc below; a click on a mark clears it |
 
 ---
 

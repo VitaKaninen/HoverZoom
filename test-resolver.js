@@ -1287,6 +1287,14 @@ eq('template: all empty', N.fillNameTemplate('[site] - ([page_title])', { now: N
     eq('marks: a chip wider than the card stays top-left', [wide.left, wide.top], [6, 6]);
     const chip = M.galCorners(ir, [badge, info], [{ w: 30, h: 22, order: M.GAL_HINT_ORDER }], 6, two)[0];
     eq('marks: the chip sits beside the disc and tick', [chip.left, chip.top], [72, 179]);
+    const door = M.galCorners(ir, [badge, info], [{ w: 22, h: 22, order: M.GAL_HINT_ORDER },
+        { w: 24, h: 24, order: M.GAL_TICK_ORDER, rel: { i: 0, side: 'right' } }, { w: 22, h: 22, order: M.GAL_SAVED_ORDER, rel: { i: 0, side: 'below' } }]);
+    eq('marks: a door\'s chip takes top-left', [door[0].left, door[0].top], [16, 179]);
+    eq('marks: the tick sits right of the chip', [door[1].left, door[1].top], [42, 179]);
+    eq('marks: the saved disc sits below the chip', [door[2].left, door[2].top], [16, 205]);
+    const low = M.galCorners(R(0, 0, 100, 40), [], [{ w: 22, h: 22, order: M.GAL_HINT_ORDER },
+        { w: 22, h: 22, order: M.GAL_SAVED_ORDER, rel: { i: 0, side: 'below' } }]);
+    eq('marks: no room below the chip, the disc takes a free corner', [low[1].left, low[1].top], [74, 14]);
 }
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

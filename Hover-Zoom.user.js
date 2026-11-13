@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.291.0
+// @version     0.292.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -249,6 +249,7 @@
         hotkeyToggle: false,        // 'hover': a lone tap turns previews off in this tab until the next
         hoverDelay: 120,            // ms before resolving
         galleryMiddle: false,       // a middle-click on a result opens its gallery (else the ▦ chip's click does)
+        galleryChips: true,         // the ▦ chip on every gallery thumbnail; off: only on the one under the pointer
         hoverPreload: true,         // load the page's pictures ahead of the user, as far as they show interest
         minDisplayed: 16,           // ignore images displayed smaller than this, whatever they are
         smallBelow: 48,             // px: smaller pictures preview only as an avatar or an emoji
@@ -1888,8 +1889,33 @@
         return u;
     }
 
-    function linkedMedia(el) {
-        const u = linkTarget(el);
+    // A linkless picture's card link: the one page link of its smallest ancestor holding no other picture like it (nsfw.xxx's post button). See RESOLVER.md "Card link".
+    function cardLink(el) {
+        const l = cardLinks(el);
+        return l.length === 1 ? new URL(l[0]) : null;
+    }
+
+    // Every page link (up to 4) of a linkless picture's smallest card that has any.
+    function cardLinks(el) {
+        if (!el || !el.parentElement) return [];
+        const at = baseOf(el), doc = el.ownerDocument;
+        const like = function (n) { return n !== el && n.className === el.className; };
+        for (let e = el.parentElement, i = 0; e && i < 4 && e !== doc.body; e = e.parentElement, i++) {
+            if (Array.prototype.some.call(e.getElementsByTagName(el.tagName), like)) return [];
+            const hrefs = new Set();
+            e.querySelectorAll('a[href]').forEach(function (a) {
+                let u;
+                try { u = new URL(a.getAttribute('href'), at); } catch (x) { return; }
+                u.hash = '';
+                if (/^https?:$/.test(u.protocol) && u.origin === location.origin && u.href !== at.split('#')[0] &&
+                    !looksLikeImage(u.href) && !isVideoUrl(u.href)) hrefs.add(u.href);
+            });
+            if (hrefs.size) return Array.from(hrefs).slice(0, 4);
+        }
+        return [];
+    }
+
+    function linkedMedia(u) {
         if (!u) return Promise.resolve(null);
         if (pageCache.has(u.href)) return pageCache.get(u.href);
         const p = fetchPageMedia(u);
@@ -1938,12 +1964,13 @@
         }
 
         // Learned per area: a linked page that never holds the original is skipped, bar a recheck. See E15.
-        const lt = !skipLinkedPage(el) && el.ownerDocument === document ? linkTarget(el) : null;
+        const ownLink = !skipLinkedPage(el) && el.ownerDocument === document ? linkTarget(el) : null;
+        const lt = ownLink || (!skipLinkedPage(el) && el.ownerDocument === document && !closestAcross(el, 'a[href]') ? cardLink(el) : null);
         const lchain = lt ? domChain(el) : '', lpath = pagePath();
         let lfetched = false;
         const lskip = lt && !token.recheck && areaRule('linkAreas', lchain, lpath) && Math.random() >= LINK_RECHECK;
         if (lskip) dbg('linked page skipped — pages linked from here have never held the original', { link: lt.href });
-        const linked = skipLinkedPage(el) || lskip ? Promise.resolve(null) : linkedMedia(el).then(async function (page) {
+        const linked = !lt || lskip ? Promise.resolve(null) : linkedMedia(lt).then(async function (page) {
             if (!page || token.cancelled) return null;
             lfetched = true;
             const tries = [];
@@ -2036,7 +2063,7 @@
             if (trusted) areaApply('linkAreas', areaDrop, lchain, lpath);
             else areaApply('linkAreas', areaLearn, lchain, lpath, lt.href);
         }
-        if (lt && full && token.door && !token.cancelled) doorLearn(doorVerdict({
+        if (ownLink && full && token.door && !token.cancelled) doorLearn(doorVerdict({
             linked: lfetched ? 'fetched' : lskip ? 'skipped' : null, trusted: trusted,
             displayed: displayed, failed: lfailed }), lchain, lpath, lt.href);
         if (trusted) {
@@ -5491,8 +5518,11 @@
     function toast(text, ms) {
         hideTip();
         const t = tipBox();
-        t.textContent = text;
+        t.__text.textContent = text;    // the host has a shadow root: its own text would never draw
+        t.style.cssText = 'all:initial;display:block;position:fixed;left:0;top:0;width:max-content;max-width:320px;margin:0;padding:0;border:0;' +
+            'background:none;overflow:visible;z-index:2147483647;pointer-events:none';
         document.documentElement.appendChild(t);
+        try { t.showPopover(); } catch (e) { /* no popover API */ }
         const b = t.getBoundingClientRect();
         t.style.left = Math.max(4, Math.min(vpW() - 4 - b.width, pointer.x + 14)) + 'px';
         t.style.top = Math.max(4, Math.min(vpH() - 4 - b.height, pointer.y + 18)) + 'px';
@@ -5507,7 +5537,11 @@
         if (!view || !box || !box.classList.contains('on')) return false;
         if (pointInPreview(e.clientX, e.clientY)) return true;
         if (!active || activeSmall) return false;
-        return e.target === active || (active.contains && active.contains(e.target));
+        if (e.target === active || (active.contains && active.contains(e.target))) return true;
+        // The site's card over the picture (nsfw.xxx's div.post): a press inside the picture still pins.
+        const t = e.target;
+        if (!t || t.nodeType !== 1 || ours(t) || !active.getBoundingClientRect || !holds(active.getBoundingClientRect(), e.clientX, e.clientY)) return false;
+        return t.contains(active) || coveredMedia(t, e.clientX, e.clientY) === active;
     }
 
     function pointInPreview(x, y) {
@@ -5761,7 +5795,7 @@
         if (!verdict) return;
         const c = verdict === 'leaf' ? areaApply('doorAreas', areaDrop, chain, path)
             : areaApply('doorAreas', areaLearn, chain, path, id);
-        if (c && c !== 'sampled' && c !== 'used' && c !== 'confirmed') setTimeout(twRecount, 0);
+        if (c && c !== 'sampled' && c !== 'used' && c !== 'confirmed') { setTimeout(twRecount, 0); if (isTopFrame) setTimeout(galMarkSoon, 0); }
     }
 
     let doorCheckEl = null;
@@ -10748,9 +10782,8 @@
     const GAL_GROW_TICK = 400;          // the reading frame scrolls a screen this often
     const GAL_GROW_IDLE_MS = 4000;      // at its bottom with nothing new this long, the page is read
     const GAL_GROW_MAX_MS = 180000;     // longest a gallery's page is read on
-    const GAL_HINT_TIMES = 3;           // door hovers per site that spell the gesture out
-    const GAL_HINT_KEY = 'hoverZoomPeekHints';
-    let galPeek = false, galPeekTapAt = 0, galGrowing = null, galGrowEnd = null, galHintEl = null, galHintFor = null;
+    const GAL_DOOR_MARK = 'data-hz-door';      // the ▦ chip, in the card like the marks
+    let galPeek = false, galPeekTapAt = 0, galGrowing = null, galGrowEnd = null, galChipHot = null, galLeftAt = 0;
     const galGrown = new Set(), galLists = new Map();
     const galCache = new Map();         // href -> Promise of [{thumb, ss, cands, base}] | null | 'cancel'
     let galFrameStop = null;
@@ -10768,7 +10801,7 @@
     let galOn = false, galTap = false, galMidAt = 0;      // a peek is up and locked; Ctrl down with nothing else yet
     const GAL_PEND_MS = 3000;           // the pressed result lights up only if its gallery is not on screen by then
     const GAL_DIAG_MS = 10000;          // an open that shows nothing this long after the press gets the diagnostics popup
-    const GAL_USER_HIDE = ['press', 'esc', 'middle', 'ctrl', 'resize', 'scroll'];
+    const GAL_USER_HIDE = ['press', 'esc', 'middle', 'ctrl', 'resize', 'scroll', 'chip', 'hole'];
     const galTraces = new Map();        // href -> [[ms, what]], sanitised, the last 60 links
     let galPend = null, galInputAt = 0; // the open waiting for its gallery; the user's last wheel/key/press
 
@@ -10916,7 +10949,33 @@
             cands = collectCandidates(el).map(function (c) { return c.url; })
                 .filter(function (u) { return u !== thumb && !isVideoUrl(u); }).slice(0, GAL_TRIES * 2);
         } catch (e) { /* no candidates is fine: the thumbnail stays */ }
-        return { thumb: thumb, ss: ss.filter(Boolean), cands: cands, base: base };
+        const links = galItemLinks(el, base);
+        return { thumb: thumb, ss: ss.filter(Boolean), cands: cands, base: base, links: links, link: links.length === 1 ? links[0] : '' };
+    }
+
+    // The pages a gallery picture may open on its own page: its link, else its card's links.
+    function galItemLinks(el, base) {
+        const a = el.closest && el.closest('a[href]');
+        if (!a) return cardLinks(el);
+        let u;
+        try { u = new URL(a.getAttribute('href'), base); } catch (e) { return []; }
+        u.hash = '';
+        return /^https?:$/.test(u.protocol) && u.href !== String(base).split('#')[0] ? [u.href] : [];
+    }
+
+    // A card with several links (post, poster): the one whose first path part is the one most single-link cards use.
+    function galLinksPick(items) {
+        const seg = function (h) { try { return new URL(h).pathname.split('/')[1] || ''; } catch (e) { return ''; } };
+        const n = new Map();
+        items.forEach(function (it) { if (it.links && it.links.length === 1) n.set(seg(it.links[0]), (n.get(seg(it.links[0])) || 0) + 1); });
+        let top = null, most = 0;
+        n.forEach(function (c, k) { if (c > most) { most = c; top = k; } });
+        if (top === null) return;
+        items.forEach(function (it) {
+            if (it.link || !it.links || it.links.length < 2) return;
+            const hit = it.links.filter(function (h) { return seg(h) === top; });
+            if (hit.length === 1) it.link = hit[0];
+        });
     }
 
     // The rendered page's pictures, by the widget's own rules, from a hidden frame. null = the frame failed.
@@ -11159,22 +11218,26 @@
             'padding:6px 12px;border-radius:8px;background:#1e1e2e;border:1px solid #f9e2af;color:#f9e2af;font:13px/1.3 system-ui,sans-serif;' +
             'pointer-events:none;box-shadow:0 4px 14px rgba(0,0,0,.6)}' +
             '.svd{position:absolute;left:4px;top:4px;width:22px;height:22px;pointer-events:none}' +
-            '.pg[hidden],.hint[hidden]{display:none}' +
+            '.pg[hidden]{display:none}' +
             '.pg{position:fixed;left:50%;top:' + (GAL_GAP - 4) + 'px;transform:translateX(-50%);max-width:calc(100vw - 32px);box-sizing:border-box;' +
             'padding:3px 12px;border-radius:8px;background:#1e1e2e;border:1px solid #45475a;color:#cdd6f4;font:12px/1.4 system-ui,sans-serif;' +
             'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none;box-shadow:0 4px 14px rgba(0,0,0,.6)}' +
-            '.hint{position:fixed;display:flex;align-items:center;gap:6px;box-sizing:border-box;height:22px;padding:0 6px;border-radius:6px;' +
-            'background:rgba(30,30,46,.92);border:1px solid #45475a;color:#cdd6f4;font:12px/1 system-ui,sans-serif;white-space:nowrap;' +
-            'pointer-events:auto;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.5)}' +
-            '.hint svg{display:block;width:12px;height:12px;fill:#89b4fa}' +
+            '.cell.go{cursor:pointer}' +
             'img{display:block;width:100%;height:100%;object-fit:cover;border-radius:6px;background:#1e1e2e;opacity:0;transition:opacity ' + GAL_FADE_MS + 'ms ease;' +
             'box-shadow:0 8px 22px rgba(0,0,0,.55),0 2px 5px rgba(0,0,0,.4)}' +
             'img.ok{opacity:1}' +
             '.shade{position:absolute;inset:0;background:rgba(0,0,0,.8)}' +
+            '.set.live .shade{pointer-events:auto}' +
             '.blur{position:fixed;inset:0;backdrop-filter:blur(0) grayscale(0);transition:backdrop-filter ' + GAL_FADE_MS + 'ms ease}' +
             '.blur.on{backdrop-filter:blur(6px) grayscale(.6)}' +
-            '.ring{position:absolute;left:0;top:0;box-sizing:border-box;border:3px solid #89b4fa;border-radius:8px;' +
-            'box-shadow:0 0 14px 2px rgba(137,180,250,.55)}' +
+            '.ring{position:absolute;left:0;top:0;box-sizing:border-box;border:3px solid #f9e2af;border-radius:8px;' +
+            'box-shadow:0 0 0 2px rgba(17,17,27,.9),0 0 18px 4px rgba(249,226,175,.6);animation:hzring 1.4s ease-in-out infinite alternate}' +
+            '@keyframes hzring{to{box-shadow:0 0 0 2px rgba(17,17,27,.9),0 0 5px 1px rgba(249,226,175,.3)}}' +
+            '.tab{position:absolute;left:0;top:0;display:flex;align-items:center;gap:4px;box-sizing:border-box;height:22px;padding:0 9px;' +
+            'border-radius:6px 6px 0 0;background:#f9e2af;color:#11111b;font:600 12px/1 system-ui,sans-serif;white-space:nowrap;' +
+            'pointer-events:auto;cursor:pointer}' +
+            '.tab.under{border-radius:0 0 6px 6px}' +
+            '.tab svg{display:block;width:12px;height:12px;fill:#11111b}' +
             '.pend[hidden]{display:none}.pend{position:fixed;box-sizing:border-box;border:3px solid #89b4fa;border-radius:8px;' +
             'box-shadow:0 0 0 200vmax rgba(0,0,0,.55),0 0 16px 3px rgba(137,180,250,.7);animation:hzpend .8s ease-in-out infinite alternate}' +
             '@keyframes hzpend{to{border-color:#cdd6f4;box-shadow:0 0 0 200vmax rgba(0,0,0,.55),0 0 4px 1px rgba(137,180,250,.4)}}' +
@@ -11269,6 +11332,11 @@
         const R = 4, rs = set.ring.style;
         rs.left = (o.x - R) + 'px'; rs.top = (o.y - R) + 'px';
         rs.width = (o.w + 2 * R) + 'px'; rs.height = (o.h + 2 * R) + 'px';
+        if (!set.tab) return;
+        const under = o.y - R - 22 < 2;
+        set.tab.classList.toggle('under', under);
+        set.tab.style.left = (o.x - R) + 'px';
+        set.tab.style.top = (under ? o.y + o.h + R : o.y - R - 22) + 'px';
     }
 
     // Lay the set out around one hole; returns the slots.
@@ -11516,6 +11584,14 @@
         if (saved.has(p.item.thumb)) cell.appendChild(galSavedIcon('svd'));
         cell.addEventListener('mouseenter', function () { if (set.pv) galPv(p.img); else galNoPv(set); });
         cell.addEventListener('mouseleave', function () { if (!placed && active === p.img) cancel(); });
+        if (p.item.link) {
+            cell.classList.add('go');
+            cell.addEventListener('click', function (e) {     // as on its own page: the picture's link
+                if (e.button !== 0 || (view && box && box.classList.contains('on'))) return;
+                e.preventDefault();
+                location.assign(p.item.link);
+            });
+        }
         set.cells.push(cell);
         set.asp.push(p.asp);
         set.pics.push(p);
@@ -11532,10 +11608,20 @@
         set.el.className = 'set';
         set.shade.className = 'shade';
         set.ring.className = 'ring';
+        set.tab = document.createElement('div');
+        set.tab.className = 'tab';
+        set.tab.appendChild(mkIcon(ICON_CLOSE));
+        set.tab.appendChild(document.createTextNode('Close'));
+        set.tab.addEventListener('mousedown', function (e) { if (e.button !== 0) return; e.preventDefault(); e.stopPropagation(); galHide('hole'); });
+        ['mousedown', 'mouseup', 'click', 'auxclick', 'dblclick'].forEach(function (t) {
+            set.shade.addEventListener(t, function (e) { e.preventDefault(); e.stopPropagation(); });   // between pictures: nothing under it is reached
+        });
         set.el.appendChild(set.shade);
         set.el.appendChild(set.ring);
         const saved = galList(GAL_SAVED_KEY);
+        galLinksPick(pics.map(function (p) { return p.item; }));
         pics.forEach(function (p) { galCell(set, p, saved); });
+        set.el.appendChild(set.tab);
         set.pv = siteEnabledAt(href);       // the linked page previews: so do its thumbnails
         const L = galLayout(set, galHole);
         set.el.classList.add('live');
@@ -11597,6 +11683,7 @@
             const saved = galList(GAL_SAVED_KEY), keys = galKeys(set.pics.map(function (p) { return p.item; }));
             const before = set.pages && set.pages[set.page] ? set.pages[set.page].join('-') : '';
             let n = 0;
+            galLinksPick(set.pics.map(function (p) { return p.item; }).concat(batch.map(function (b) { return b.p.item; })));
             batch.forEach(function (b) { if (!galKeyHit(keys, b.p.item)) { galCell(set, b.p, saved); n++; } });
             if (!n) return;
             galTrace(set.href, 'appended ' + n + ' (' + set.cells.length + ' in all)');
@@ -11699,6 +11786,7 @@
         if (galGrowEnd) galGrowEnd('closed');
         if (galOwns(active)) cancel();
         if (galCur) { galDrop(galCur); galCur = null; galBlur.classList.remove('on'); }
+        galChipsSync();
     }
 
     function galOwns(el) {
@@ -11754,6 +11842,8 @@
             if (d) return item.hit;
             item.hit = null;
         }
+        const linked = await galLinkedHit(item, img, tok);
+        if (linked) return (item.hit = linked);
         for (let i = 0; i < list.length; i++) {
             if (tok.cancelled) return null;
             const d = await probe(list[i], tok.fresh);
@@ -11762,6 +11852,29 @@
         const own = img.currentSrc || img.src;
         const d = own ? await probe(own) : null;
         return d ? hitOf(own, d) : null;
+    }
+
+    // The page a gallery picture links to: what it declares (same shape) or a copy of the same name, the biggest one larger than the thumbnail.
+    async function galLinkedHit(item, img, tok) {
+        let u;
+        try { u = item.link ? new URL(item.link) : null; } catch (e) { u = null; }
+        if (!u || u.origin !== location.origin || looksLikeImage(u.href) || isVideoUrl(u.href)) return null;
+        const page = await linkedMedia(u);
+        if (!page || tok.cancelled) return null;
+        const nat = { w: img.naturalWidth || 0, h: img.naturalHeight || 0 };
+        const tries = [];
+        if (page.declared) tries.push({ url: page.declared.url, named: sameStem(page.declared.url, item.thumb) });
+        page.body.forEach(function (x) { if (x !== item.thumb && sameStem(x, item.thumb)) tries.push({ url: x, named: true }); });
+        let best = null;
+        for (const t of tries.slice(0, LINKED_TRIES)) {
+            if (tok.cancelled || blocked(t.url) || t.url === item.thumb) continue;
+            const d = await probe(t.url, tok.fresh);
+            if (!d || d.w <= nat.w || (!t.named && nat.w && !sameShape(nat, d))) continue;
+            if (best && d.w * d.h <= best.w * best.h) continue;
+            best = { url: t.url, w: d.w, h: d.h, video: !!d.video, duration: d.duration, display: d.display };
+        }
+        dbg('gallery preview: the picture\'s own page', { link: u.href, declared: page.declared && page.declared.url, hit: best && best.url });
+        return best;
     }
 
     // A picture saved from the gallery: its thumbnail and the result it came from are marked.
@@ -11812,63 +11925,100 @@
         galWant = href;
         clearTimeout(galHoverTimer);
         galPendStart(href, 'middle press');
+        galChipsSync();
         galLoad(href).then(function (list) { galShow(href, list); });
     }
 
-    // A hovered door: its pictures are read ahead, and a chip on its corner says a middle-click shows them.
+    // A hovered door: its chip shows (with galleryChips off) and its pictures are read ahead.
     function galDoorHover(el, x, y) {
-        if (!isTopFrame || galCur || galWant) return;
+        if (!isTopFrame) return;
         if (x !== undefined) { galPt.x = x; galPt.y = y; }    // mouseover lands before the mousemove that would set it
         const href = galLinkOf(el);
-        if (!href || galHintFor === el) return;
+        if (!href || galChipHot === el) return;
         galKindOf(el, href).then(function (kind) {
-            if (kind === 'results' || galHintFor === el || galCur || galWant) return;
+            if (kind === 'results' || galChipHot === el) return;
             if (!holds(el.getBoundingClientRect(), galPt.x, galPt.y)) return;
-            galHintShow(el);
+            const prev = galChipHot;
+            galChipHot = el;
+            if (prev) galChipRefresh(prev);
+            if (galChipEl(el, href)) galMarkPlaceOf(el);
+            if (galCur || galWant) return;
             clearTimeout(galHoverTimer);
             galHoverTimer = setTimeout(function () {
-                if (galHintFor !== el) return;
+                if (galChipHot !== el) return;
                 galLoad(href).then(function (list) { if (Array.isArray(list)) galWarm(list); });
             }, cfg.hoverDelay);
         });
     }
 
-    function galHintShow(el) {
-        if (galHintFor === el) return;
-        const root = galLayer();
-        if (!galHost.isConnected) document.documentElement.appendChild(galHost);
-        if (!galHintEl) {
-            galHintEl = document.createElement('div');
-            galHintEl.className = 'hint';
-            root.appendChild(galHintEl);
+    // The ▦ chip of a door's picture, made if missing; null when the picture is too small for marks.
+    function galChipEl(img, h) {
+        const at = img.closest('picture') || img, ir = galMarkRect(img, at);
+        if (ir.width < 48 || ir.height < 24) return null;
+        let m = galMarkFind(at, GAL_DOOR_MARK);
+        if (!m) {
+            m = document.createElement('span');
+            m.setAttribute(GAL_DOOR_MARK, '');
+            galChipClickable(m);
+            m.__hzAt = at;
+            galMarkHost(at).appendChild(m);
         }
-        let seen = {};
-        try { seen = JSON.parse(GM_getValue(GAL_HINT_KEY, '') || '{}') || {}; } catch (e) { /* fresh */ }
-        const host = pageHost(), n = seen[host] || 0;
-        while (galHintEl.firstChild) galHintEl.firstChild.remove();
-        const r = galMarkRect(el, el.closest('picture') || el);
-        galHintEl.appendChild(mkIcon(ICON_GALLERY));
-        if (n < GAL_HINT_TIMES) {
-            const t = document.createElement('span');
-            t.textContent = cfg.galleryMiddle ? 'Click here or middle-click to see its pictures' : 'Click to see its pictures';
-            galHintEl.appendChild(t);
-            seen[host] = n + 1;
-            try { GM_setValue(GAL_HINT_KEY, JSON.stringify(seen)); } catch (e) { /* this page only */ }
-        }
-        galHintEl.style.left = '0px';
-        galHintEl.style.top = '0px';
-        galHintEl.hidden = false;
-        const at = el.closest('picture') || el, hr = galHintEl.getBoundingClientRect();
-        const own = [GAL_MARK, GAL_SAVED_MARK].map(function (k) { const x = galMarkFind(at, k); return x && x.getBoundingClientRect(); }).filter(Boolean);
-        const spot = galCorners(r, galMarkBlockers(at, r), [{ w: hr.width, h: hr.height, order: GAL_HINT_ORDER }], 6, own)[0];
-        galHintEl.style.left = Math.max(4, spot.left) + 'px';
-        galHintEl.style.top = Math.max(4, spot.top) + 'px';
-        galHintFor = el;
+        m.__hzHref = h;
+        m.__hzImg = img;
+        galChipStyle(m);
+        return m;
     }
 
-    function galHintHide() {
-        galHintFor = null;
-        if (galHintEl) galHintEl.hidden = true;
+    function galChipOpen(h) { return !!h && (galWant === h || (!!galCur && galCur.href === h)); }
+
+    // Closed: the ▦ chip; open: a yellow ✕. Hidden (but keeping its spot) when chips show only under the pointer.
+    function galChipStyle(m) {
+        const open = galChipOpen(m.__hzHref), shown = open || cfg.galleryChips || galChipHot === m.__hzImg;
+        if (m.__hzOpen !== open || !m.firstChild) {
+            m.__hzOpen = open;
+            while (m.firstChild) m.firstChild.remove();
+            const svg = mkIcon(open ? ICON_CLOSE : ICON_GALLERY);
+            svg.style.cssText = 'display:block;width:' + (open ? 14 : 12) + 'px;height:' + (open ? 14 : 12) + 'px;fill:' + (open ? '#11111b' : '#89b4fa');
+            m.appendChild(svg);
+            setTip(m, open ? 'Close this gallery' : 'Show this gallery’s pictures');
+        }
+        const keep = 'left:' + (m.style.left || '0px') + ';top:' + (m.style.top || '0px') + ';';
+        m.style.cssText = 'all:initial;position:absolute;' + keep + 'z-index:3;display:flex;align-items:center;justify-content:center;' +
+            'box-sizing:border-box;width:22px;height:22px;border-radius:6px;cursor:pointer;transition:opacity .12s ease;' +
+            (open ? 'background:#f9e2af;border:1px solid #f9e2af;box-shadow:0 0 0 3px rgba(249,226,175,.4),0 2px 8px rgba(0,0,0,.6);'
+                : 'background:rgba(30,30,46,.92);border:1px solid #45475a;box-shadow:0 2px 8px rgba(0,0,0,.5);') +
+            'opacity:' + (shown ? 1 : 0) + ';pointer-events:' + (shown ? 'auto' : 'none');
+    }
+
+    function galChipRefresh(img) {
+        const m = galMarkFind(img.closest('picture') || img, GAL_DOOR_MARK);
+        if (m) galChipStyle(m);
+    }
+
+    function galChipsSync() {
+        document.querySelectorAll('[' + GAL_DOOR_MARK + ']').forEach(galChipStyle);
+    }
+
+    // A press on the chip opens its door's gallery, or closes it when open; the page never sees it.
+    function galChipClickable(m) {
+        ['mousedown', 'mouseup', 'click', 'auxclick', 'dblclick'].forEach(function (t) {
+            m.addEventListener(t, function (e) {
+                if (t === 'mousedown') document.documentElement.setAttribute('data-userscript-click-claim', String(Date.now()));
+                e.preventDefault();
+                e.stopImmediatePropagation();
+                hideTip();
+                if (t !== 'mousedown' || e.button !== 0 || !m.__hzHref || !m.__hzImg) return;
+                if (galChipOpen(m.__hzHref)) { galHide('chip'); return; }
+                galPeek = true;
+                galMiddle(m.__hzImg, m.__hzHref);
+            }, true);
+        });
+    }
+
+    // Every mark of one picture laid out again.
+    function galMarkPlaceOf(img) {
+        const at = img.closest('picture') || img;
+        galMarkPlace(img, galMarkFind(at, GAL_SAVED_MARK), galMarkFind(at, GAL_MARK), galMarkFind(at, GAL_DOOR_MARK));
     }
 
     // ---- open diagnostics
@@ -11994,7 +12144,8 @@
 
     // The rest of that press: no new tab.
     function galMidEat(e) {
-        if (e.button !== 1 || !galMidAt || Date.now() - galMidAt > 1000) return;
+        const at = e.button === 1 ? galMidAt : e.button === 0 ? galLeftAt : 0;
+        if (!at || Date.now() - at > 1000) return;
         e.preventDefault();
         e.stopImmediatePropagation();
     }
@@ -12012,16 +12163,22 @@
         if (galOn || galWant || galCur) { galPeekTapAt = Date.now(); galHide('ctrl'); }
     }
 
-    // Tracks the pointer; the chip goes once it leaves its door.
+    // Tracks the pointer; a hover-only chip goes once it leaves its door.
     function galMove(e) {
         galPt.x = e.clientX;
         galPt.y = e.clientY;
-        if (galHintFor && !holds(galHintFor.getBoundingClientRect(), galPt.x, galPt.y)) galHintHide();
+        if (galChipHot && !holds(galChipHot.getBoundingClientRect(), galPt.x, galPt.y)) galChipCool();
+    }
+
+    function galChipCool() {
+        const el = galChipHot;
+        galChipHot = null;
+        if (el) galChipRefresh(el);
     }
 
     // A page scroll hides the set; nothing shows again until the pointer itself moves.
     function galScroll(e) {
-        galHintHide();
+        galChipCool();
         if (!galMarksHere() && !galWant && !galCur) return;
         const t = e.target;
         if (t !== document && !(t && t.nodeType === 1 && t.clientHeight >= vpH() / 2)) return;
@@ -12058,14 +12215,14 @@
     function galMarkClear(m, e) {
         e.preventDefault();
         e.stopImmediatePropagation();
+        hideTip();
         const h = m.__hzHref;
         if (!h || e.type !== 'click') return;
         galListDel(GAL_SEEN_KEY, h);
         galListDel(GAL_VISITED_KEY, h);
         galListDel(GAL_SAVEDFROM_KEY, h);
         document.querySelectorAll('[' + GAL_MARK + '],[' + GAL_SAVED_MARK + ']').forEach(function (x) { if (x.__hzHref === h) x.remove(); });
-        hideTip();
-        toast('Marked as not seen', 3000);
+        galMarkSoon();
         dbg('gallery mark cleared', { href: h });
     }
 
@@ -12085,24 +12242,28 @@
         return Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left)) * Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
     }
 
-    // Spots for marks {w, h, order} in box ir: each takes its first corner clear of the blockers and earlier marks (prior: ones already drawn), else beside one, else the least covered.
+    // Spots for marks {w, h, order, rel?} in box ir: each takes its first spot clear of the blockers and earlier marks (prior: ones already drawn) —
+    // rel {i, side: 'right'|'below'} beside mark i first, then its corners, then beside any — else the least covered.
     function galCorners(ir, blockers, marks, pad, prior) {
-        const p = pad === undefined ? 4 : pad, taken = (prior || []).slice();
-        return marks.map(function (k) {
+        const p = pad === undefined ? 4 : pad, taken = (prior || []).slice(), out = [];
+        marks.forEach(function (k) {
             const at = function (left, top) { return { left: left, top: top, right: left + k.w, bottom: top + k.h }; };
-            const cands = k.order.map(function (c) {
-                return at(c[0] === 'r' ? ir.right - p - k.w : ir.left + p, c[1] === 't' ? ir.top + p : ir.bottom - p - k.h);
+            const cands = [], r = k.rel && out[k.rel.i];
+            if (r) cands.push(k.rel.side === 'below' ? at(r.left, r.bottom + p) : at(r.right + p, r.top));
+            k.order.forEach(function (c) {
+                cands.push(at(c[0] === 'r' ? ir.right - p - k.w : ir.left + p, c[1] === 't' ? ir.top + p : ir.bottom - p - k.h));
             });
             taken.forEach(function (t) { cands.push(at(t.right + p, t.top), at(t.left - p - k.w, t.top)); });
             let best = cands[0], cov = Infinity;
             cands.forEach(function (c) {
-                if (c.left < ir.left || c.right > ir.right) return;
+                if (c.left < ir.left || c.right > ir.right || c.top < ir.top || c.bottom > ir.bottom) return;
                 const v = blockers.concat(taken).reduce(function (s, b) { return s + galOverlap(c, b); }, 0);
                 if (v < cov) { cov = v; best = c; }
             });
             taken.push(best);
-            return best;
+            out.push(best);
         });
+        return out;
     }
 
     // The page's own elements over the picture's box (a count badge, a name bar): read from the card's tree, so it holds off screen too.
@@ -12115,7 +12276,7 @@
             if (pr.width * pr.height > area * 2) break;
             scope = scope.parentElement;
         }
-        const mine = '[' + GAL_MARK + '],[' + GAL_SAVED_MARK + ']';
+        const mine = '[' + GAL_MARK + '],[' + GAL_SAVED_MARK + '],[' + GAL_DOOR_MARK + ']';
         scope.querySelectorAll('*').forEach(function (n) {
             if (n === at || n.contains(at) || at.contains(n) || n.closest(mine)) return;
             const r = n.getBoundingClientRect();
@@ -12127,17 +12288,27 @@
         return out;
     }
 
-    // Our saved disc and tick on one picture, laid out together clear of the page's badges.
-    function galMarkPlace(img, saved, tick) {
+    // The marks' specs for galCorners: with a chip, it goes top-left first, the tick to its right, the disc below it (user).
+    function galMarkSpecs(chip, tick, saved, tickW) {
+        const out = [];
+        if (chip) out.push({ w: 22, h: 22, order: GAL_HINT_ORDER, m: chip });
+        const c = chip ? 0 : -1;
+        if (!chip && saved) out.push({ w: 22, h: 22, order: GAL_SAVED_ORDER, m: saved });
+        if (tick) out.push({ w: tickW, h: 24, order: GAL_TICK_ORDER, rel: chip ? { i: c, side: 'right' } : null, m: tick });
+        if (chip && saved) out.push({ w: 22, h: 22, order: GAL_SAVED_ORDER, rel: { i: c, side: 'below' }, m: saved });
+        return out;
+    }
+
+    // Our chip, tick and saved disc on one picture, laid out together clear of the page's badges.
+    function galMarkPlace(img, saved, tick, chip) {
         const at = img.closest('picture') || img, ir = galMarkRect(img, at);
-        const marks = [saved, tick].filter(Boolean);
-        const spots = galCorners(ir, galMarkBlockers(at, ir), marks.map(function (m) {
-            return m === saved ? { w: 22, h: 22, order: GAL_SAVED_ORDER } : { w: m.getAttribute(GAL_MARK) === '2' ? 34 : 24, h: 24, order: GAL_TICK_ORDER };
-        }));
-        marks.forEach(function (m, i) {
-            const o = m.getBoundingClientRect();
-            m.style.left = (spots[i].left - o.left) + 'px';
-            m.style.top = (spots[i].top - o.top) + 'px';
+        const specs = galMarkSpecs(chip, tick, saved, tick && tick.getAttribute(GAL_MARK) === '2' ? 34 : 24);
+        if (!specs.length) return;
+        const spots = galCorners(ir, galMarkBlockers(at, ir), specs);
+        specs.forEach(function (k, i) {
+            const m = k.m, o = m.getBoundingClientRect();
+            m.style.left = ((parseFloat(m.style.left) || 0) + spots[i].left - o.left) + 'px';
+            m.style.top = ((parseFloat(m.style.top) || 0) + spots[i].top - o.top) + 'px';
         });
     }
 
@@ -12235,6 +12406,7 @@
     function galMarkAll() {
         if (!isTopFrame || !galMarksHere()) return;
         const seen = galList(GAL_SEEN_KEY), went = galList(GAL_VISITED_KEY), from = galList(GAL_SAVEDFROM_KEY);
+        galChipsAll();
         if (!seen.size && !went.size && !from.size) { galMarkLog({ stored: 'none' }); return; }
         const dbgOn = debugOn(), st = { seenStored: seen.size, visitedStored: went.size, pictures: 0, linked: 0, ticks: 0, tooSmall: 0, hidden: [] };
         const links = new Set(), biggest = new Map(), area = function (img) { const r = galMarkRect(img, img.closest('picture') || img); return r.width * r.height; };
@@ -12258,7 +12430,8 @@
             let m = null;
             if (went.has(h)) m = galMarkImg(img, '2', h);
             else if (seen.has(h)) m = galMarkImg(img, '1', h);
-            if (saved || m) galMarkPlace(img, saved, m);
+            const chip = galMarkFind(img.closest('picture') || img, GAL_DOOR_MARK);
+            if (saved || m) galMarkPlace(img, saved, m, chip);
             if (!went.has(h) && !seen.has(h)) return;
             if (!m) {
                 st.tooSmall++;
@@ -12284,6 +12457,21 @@
             }).slice(0, 3);
         }
         galMarkLog(st);
+    }
+
+    // A chip on every door's picture whose area leads to galleries; hidden (spot kept) when galleryChips is off. An area's kind is read once, then this runs again.
+    function galChipsAll() {
+        document.querySelectorAll('a[href] img').forEach(function (img) {
+            const h = galLinkOf(img), at = img.closest('picture') || img;
+            const old = galMarkFind(at, GAL_DOOR_MARK);
+            if (!h || !doorReason(img)) { if (old) old.remove(); return; }
+            const key = domChain(img);
+            if (!galKindDone.has(key)) { galKindOf(img, h).then(galMarkSoon); return; }
+            if (galKindDone.get(key) === 'results') { if (old) old.remove(); return; }
+            const chip = galChipEl(img, h);
+            if (!chip) return;
+            galMarkPlace(img, galMarkFind(at, GAL_SAVED_MARK), galMarkFind(at, GAL_MARK), chip);
+        });
     }
 
     // Debug only: why a drawn tick cannot be seen — zero size, clipped by an ancestor, or something drawn over it.
@@ -12349,16 +12537,10 @@
         document.addEventListener('mousedown', function (e) {
             galTap = false;
             galMidAt = 0;
+            galLeftAt = 0;
             if (e.button === 0) galInputAt = performance.now();      // a scrollbar drag; the middle press itself is not
-            const chip = galHintEl && !galHintEl.hidden && galHintEl.contains(e.composedPath()[0]) ? galHintFor : null;
-            galHintHide();
-            if (chip && e.button === 0) {       // the ▦ chip: its door's gallery, as a peek
-                e.preventDefault();
-                e.stopImmediatePropagation();
-                const href = galLinkOf(chip);
-                if (href) { galPeek = true; galMiddle(chip, href); }
-                return;
-            }
+            const t0 = e.composedPath()[0];
+            if (t0 && t0.nodeType === 1 && t0.closest('[' + GAL_DOOR_MARK + '],[' + GAL_MARK + '],[' + GAL_SAVED_MARK + ']')) return;   // they act on their own
             const plain = e.button === 1 && cfg.galleryMiddle && !e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey;
             if (plain && !CAPTCHA_HERE && siteEnabled()) {
                 if (e.target === galHost && galCur) { e.preventDefault(); return; }
@@ -12373,6 +12555,14 @@
                 }
             }
             if (e.button !== 0 || (!galWant && !galCur)) return;     // middle and right presses (a tab, the menu) leave it up
+            const H = galHole;
+            if (H && e.target !== galHost && !pointInPreview(e.clientX, e.clientY) && e.clientX >= H.x && e.clientX <= H.x + H.w && e.clientY >= H.y && e.clientY <= H.y + H.h) {
+                e.preventDefault();         // the original card: closes, and its link is not followed
+                e.stopImmediatePropagation();
+                galLeftAt = Date.now();
+                galHide('hole');
+                return;
+            }
             if (e.target === galHost || ours(e.target) || pointInPreview(e.clientX, e.clientY)) return;   // the gallery or the preview
             galHide('press');
         }, true);
@@ -13761,6 +13951,8 @@
         section('Galleries');
         check('galleryMiddle', 'Middle-click opens a gallery',
             'Off: middle-click opens the link in a new tab as usual, and clicking the ▦ chip on a result opens its gallery.');
+        check('galleryChips', 'Show the ▦ chip on every gallery',
+            'Off: the chip shows only on the thumbnail under the pointer.').el.addEventListener('change', galMarkSoon);
         const foot = document.createElement('div');
         foot.className = 'foot';
 

@@ -31,6 +31,13 @@ is still undecided.
 - **v0.290.0** — marks and chip read the card's own badges (`galMarkBlockers`, not hit-tested), so
   they land clear of nsfw.xxx's count badge from the start; a saved card shows disc and tick side by side.
 - **v0.291.0** — gallery mode retired (`GALLERY.md` top). Peek on doors is the only way in.
+- **v0.292.0** (nsfw.xxx, checked in Chrome by synthetic events): chip is a mark in the card (keeps
+  the site's hover zoom), on every door by default, ✕ while open; ring yellow + pulsing + Close tab;
+  the original card closes; presses between pictures are swallowed; cell click opens its post;
+  cell previews and linkless pictures use the card's post link (`og:image` original); press-to-pin
+  works through a site card over the picture; `toast()` showed the old tip text (fixed).
+  Not changed: nsfw.xxx post pages refuse the preview because the page already draws the picture
+  as tall as the window (`bigEnough`) — offered to the user, no answer yet.
 
 ## Not verified
 

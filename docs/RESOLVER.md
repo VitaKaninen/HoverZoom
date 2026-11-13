@@ -236,6 +236,16 @@ forms a rule. Speculative resolves (the widget's preload) count too: their fetch
 page can learn before any hover. Only elements of this document learn (`ownerDocument`), never the
 slideshow's harvest from other pages. `test-pages/linked.html`.
 
+### Card link · v0.292.0
+
+A picture with no link of its own (nsfw.xxx profiles: the card is a `div.post`, the post link is a
+small round button beside the picture) follows its **card link**: `cardLinks(el)` climbs ≤ 4
+ancestors, stops at one holding another `<img>` of the same class (the next card), and returns the
+page links of the first that has any; `cardLink` uses it only when there is exactly one. `resolve()`
+fetches it like an own link, but **door learning stays on own links only** (`ownLink`): a card's
+comments or poster link would otherwise teach a door and stop previews. The gallery picks among
+several by path shape (`galLinksPick`, GALLERY.md).
+
 ### A matching filename outranks the shape test · v0.58.0
 
 `angryduck.cc` is a grid of clips where **some posts previewed and some did not, with byte-identical

@@ -14,9 +14,8 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
 
 ## Peek, pages, reading on (v0.282.0; INTERACTION.md `G1`, `G6`, `G7`)
 
-- **Peek**: the document mousedown handler: a left press on the `.hint` chip (`composedPath()[0]`,
-  read before `galHintHide()`) peeks at `galHintFor`; where `siteEnabled()`,
-  a plain middle press on `doorAt()` does too, but only with `cfg.galleryMiddle` (default off, user
+- **Peek**: a left press on a door's chip (`galChipClickable`, capture on the chip) peeks, or closes
+  the open one; where `siteEnabled()`, a plain middle press on `doorAt()` does too, but only with `cfg.galleryMiddle` (default off, user
   2026-11-12). Both set
   `galPeek` and call `galMiddle()`. A door whose `galKindOf()` is `results` gets neither. While `galPeek`, a Ctrl tap closes it (and `galPeekTapAt` keeps the previews hotkey from also
   toggling), `galScroll` runs. `onOver` returns while `galCur || (galOn && galWant)`: with previews
@@ -24,11 +23,18 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
 - **Door hover** (`doorHover(el, x, y)` → `galDoorHover`): the event's x, y go into `galPt` first —
   mouseover lands before the mousemove that sets it, and a cached `galKindOf()` would test a stale
   point and skip the chip. `galKindOf()` settles once per area per page, unknown included (nsfw.xxx
-  profiles are script-built: always unknown, ~1 s per read). `galHintShow` chip (`.hint`, clickable,
-  placed by `galCorners` on `galMarkRect()` of the door (the visible card, not a hover-scaled picture),
-  top-left first, beside our marks, clear of the page's badges,
-  text for the first `GAL_HINT_TIMES` 3 per site, count in GM `hoverZoomPeekHints`), hidden by
-  `galMove` off the door, any press, any scroll; `galLoad` after `cfg.hoverDelay` reads ahead.
+  profiles are script-built: always unknown, ~1 s per read). `galLoad` after `cfg.hoverDelay` reads ahead.
+- **The chip is a mark** (user, v0.292.0): `[data-hz-door]` in the card's link like the tick and disc
+  (`galChipEl`), so hovering it keeps the site's own `:hover` (nsfw.xxx zooms the card 1.1×; a chip
+  in our fixed layer took the hover away). `galChipsAll` (from `galMarkAll`) puts one on every
+  picture `doorReason()` matches once its area's `galKindOf()` is settled and not `results`.
+  `cfg.galleryChips` (default on): every chip shows; off: each stays invisible with
+  `pointer-events:none`, **still placed**, so marks never move when it appears; `galChipHot` (the
+  hovered door, cleared by `galMove`/`galScroll`) shows it. Open door's chip = yellow ✕ ("Close this
+  gallery"), `galChipsSync()` on every open/close. No first-uses text (user: "just show the icon";
+  GM `hoverZoomPeekHints` left unread).
+- **Layout with a chip** (user): chip top-left first, tick right of it, saved disc below it
+  (`galMarkSpecs` → `galCorners` `rel`), each still moving off the page's badges.
 - **Pages** (`galRows(asp, hole, page)` → `{out, pages, page}`): if everything fits at
   `GAL_MIN_H` 120 the old binary search runs from there up; else pages of `GAL_MIN_H` rows with
   `GAL_PG_TOP` kept for the `.pg` line. Tested in `test-resolver.js` (683 at 1920×1080 → 10 pages of
@@ -56,12 +62,23 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
 - **Locked on its door** (`galOn`): no hover delay, the hole and gallery never change while open, and
   leaving the link or the window does not hide it, so the pointer can go over the thumbnails. Closes
   on a Ctrl tap (Ctrl down then up, no other key, press or wheel between: `galTap`; it does not also
-  run the previews hotkey, `galPeekTapAt`), Esc (with no preview up), a left press on the page (not on
-  the gallery or a preview; middle and right presses leave it up), a scroll, a resize.
+  run the previews hotkey, `galPeekTapAt`), Esc (with no preview up), the door's ✕ chip, a left press
+  on the original card (the hole; `galLeftAt` makes `galMidEat` swallow its click, so its link is not
+  followed) or the yellow **Close** tab on the ring, a scroll, a resize. A left press before the set is
+  built (loading) still closes it and goes through.
+- **Presses between pictures reach nothing** (user, v0.292.0: a misclick must not open another
+  page): `.set.live .shade` takes pointer events (its clip-path cuts the hole out of hit-testing too)
+  and stops every press and click. Only cells, the preview, the hole and the tab act.
+- **Clicking a cell opens its own page** (user): `item.link` = the picture's link on the gallery's
+  page, else its card's (`cardLinks`); several (post + poster) → `galLinksPick` keeps the one whose
+  first path part most single-link cards use. Ignored while a preview is up (that press pins it).
 - **Middle press** (`galMiddle`, with `galleryMiddle`): on the open door it closes it; on another it
   switches. `preventDefault` on the press (no autoscroll), and `galMidEat` swallows that press's
   mouseup/auxclick/click (no new tab; `galMidAt`, reset by every press). Any modifier goes to the
   browser. A middle press on the preview is still `midSave` (window capture, runs first).
+- **Where to click to end, at a glance** (user): the ring is yellow `#f9e2af`, pulsing (`hzring`
+  1.4 s), with a yellow **✕ Close** tab on its top edge (under it when no room) — the only yellow
+  in the set, so it is found without reading.
 - **The hole is the door's picture** (`galHole`, clipped card box). The moving slot that followed the
   pointer was v0.240.0, commit de9996a ("take it back to here" means that).
 - `galShow` loads every thumbnail first (`galImg`, up to `GAL_WAIT_MS` 2.5 s; late or failed ones are
@@ -75,6 +92,9 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
 - Resize hides the set (the hole's rect is stale). Upgrade check uses each picture's drawn width.
 - **Read-ahead**: hovering a door, after `cfg.hoverDelay`, reads its gallery (`galLoad`) and warms its
   thumbnails (`galWarm`). `GAL_CACHE` 300. No whole-page preload since v0.291.0.
+- **A cell's preview asks the picture's own page first** (`galLinkedHit`, v0.292.0): its `og:image`
+  (same shape as the thumbnail unless the names match) or a same-named copy, the biggest wider than
+  the thumbnail. nsfw.xxx profile cells: 300×533 thumbnail → the post's 960×1704.
 - **Originals on open** (user, v0.263.0 — hovering each cell then waiting for its fetch was the
   complaint): when a set is built and its thumbnails preview (`set.pv`), `galHqAll` runs `galResolve`
   on every cell, `GAL_HQ_PAR` 4 at a time, in cell order. Same probe as the hover, so `probeCache`
@@ -159,8 +179,10 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   the picture:** nsfw.xxx's card container is a z-index 1 layer under the link's z-index 2 gradient
   `::before`, so a mark inside it was dimmed and unclickable at any z-index. z-index 3.
   **A click on a tick or saved disc clears the link** from seen, visited and saved-from (`galMarkClear`,
-  capture on the mark, claims the click per `../CLICK_COLLISIONS.md`, toast). Saved-disc clearing is
-  untested live.
+  capture on the mark, claims the click per `../CLICK_COLLISIONS.md`, no toast — user: the tip must
+  just go). Saved-disc clearing is untested live.
+  `toast()` writes into the tip's shadow text (`tipEl.__text`): writing the host's own `textContent`
+  never drew, so the old tip text showed again under the pointer (fixed v0.292.0).
 - **Visited = double tick** (user): two of the same ticks, 10 px apart in a 34 × 24 box, both fully
   outlined. Stored in `hoverZoomGalleryVisited` (same list rules, `galList`/`galListAdd`). **Only the
   browser loading the page counts** (user, v0.252.0): at boot, every top-frame page on a
@@ -173,7 +195,7 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   listeners get nothing) — dispatch `new Event('scroll')` on `document` by hand.
 - Backdrop (user, v0.247.0 — so the page's picture can't be taken for a thumbnail): `.shade`
   darkens the page `rgba(0,0,0,.8)` with the hole cut out (`clip-path: polygon(evenodd, viewport,
-  hole)`, `galShade`); the hole is left undimmed with a 3 px `#89b4fa` glowing `.ring` 4 px outside it.
+  hole)`, `galShade`); the hole is left undimmed with a 3 px glowing `.ring` 4 px outside it.
   Both live inside the set and fade with it. The page is also blurred and greyed (`blur(6px)
   grayscale(.6)`) by one shared `galBlur` with the same clip, **outside** the sets: an ancestor
   with opacity < 1 is a backdrop root, so inside the fading set the blur would show nothing
@@ -272,8 +294,7 @@ with `logBusy` — the host is already stored in `doorAreas`, so the log privacy
 
 `test-pages/door-search.html`: hover d1–d3 to learn the door area, then the chip on d4 opens
 `gallery-mixed.html`. Synthetic `mouseover`/`mousemove` with `clientX/Y` learns; a synthetic
-`mousedown` on the chip (inside the gallery layer's shadow root, `composed: true`) opens; the
-preview caption also has a `.hint` — pick the one holding an `<svg>`. `gallery-search.html` and
+`mousedown` on the chip (`[data-hz-door]`, in the card's link) opens. `gallery-search.html` and
 `gallery-masonry.html` still seed `gallerySites` (ignored now); their linked pages:
 "built by script" → 25 through the frame in ~1.5 s, logo left out; A → (frame times out: A has no
 script) all 40 grid pictures from the HTML, none of the 6 related; B → 10; the last → nothing. Synthetic
