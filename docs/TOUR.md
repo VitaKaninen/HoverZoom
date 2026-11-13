@@ -32,9 +32,8 @@ fight that. They are deleted. Do not put nav controls back on the frame.
   scrolling (no MutationObserver: design invariant). With `debug` on, a changed count logs
   `twReport()`: every drawn picture and the gate that dropped it, URLs replaced by `U1…` labels
   (the user diagnoses private sites with it — keep it URL-free). Faint (`tourFade`, at `tourFadeTo` %) until the
-  pointer is within `TW_NEAR`; a `mouseover` on the host covers a pointer resting where it appears.
-- **▶ with nothing open starts at the FIRST picture, ◀ at the LAST** (user's call: no guessing a
-  start) — `tourFromStart(dir)`. **→ / ← do the same** (`tourKeyStart`, default on):
+  pointer is within `TW_NEAR`; under a window that covers it the widget sits at `TW_COVER_OPACITY` (0.25, `twOpacity`, not a setting) unless the pointer is near; a `mouseover` on the host covers a pointer resting where it appears.
+- **The idle widget always shows the start number** `twStartAt` (`twStartOf`: the first picture at or below the top of the screen; `1 / N` on arrival, `21 / 50` after Page ▶ past 20). The wheel button and the wheel over the widget open at that number; ▶ at number+1, ◀ at number−1 (wrapping) — `tourFromStart(dir, same)` (v0.316.0, user). `twWarmFirst` only warms entry 0, so a start elsewhere resolves cold. **→ / ← do the same as ▶ / ◀** (`tourKeyStart`, default on):
   window bubble phase, so a page that preventDefaults or stops → keeps it; not while focus is in a
   form control, media, or a slider/tab/menu role. Starting from a chosen picture = hover or pin it.
 - **The first picture is resolved on landing** (`twWarmFirst`, from `twRefresh` whenever the widget

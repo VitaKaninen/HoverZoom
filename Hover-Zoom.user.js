@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.315.0
+// @version      0.316.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -3984,6 +3984,7 @@
         box.classList.toggle('pan', placed && pannable());
         if (spinDocked) moveSpinner();      // the dock rides with the frame
         placePop();
+        twOpacity();
     }
 
     function clampScale(s) {
@@ -4244,6 +4245,7 @@
         box.style.transition = '';
         box.style.opacity = '';
         box.classList.add('on');
+        twOpacity();
         showBar();
     }
 
@@ -4393,6 +4395,7 @@
         volDrag = false;
         closeVol();
         box.classList.remove('on', 'hot', 'pan', 'drag', 'full');
+        twOpacity();
         syncSavedMark();
         box.style.cursor = '';      // onMove writes this inline over the bands; see hitRegion
         if (gripEl) { gripEl.classList.remove('hot'); gripEl.style.cursor = ''; }
@@ -8842,7 +8845,8 @@
 
     let tw = null;              // { host, box, prev, count, next, dock, rect, near }
     let twPics = 0;             // pictures on the page by the cheap count, capped at 2
-    let twTotal = -1;           // the real count: at load, when scrolling stops, and when the pointer nears the widget
+    let twStartAt = 0;          // the index the idle widget shows and the wheel / ⇅ open at: the first picture on screen
+    let twTotal = -1;          // the real count: at load, when scrolling stops, and when the pointer nears the widget
     let twStarting = null;      // the token of a tour being opened from the widget
     let twRecountTimer = 0;
     let twLoadTimer = 0;
@@ -9030,7 +9034,7 @@
         }
         twPics = twCount();
         const was = twTotal;
-        if (!tour) twTotal = twPics >= 2 ? widgetEntries().length : 0;
+        if (!tour) { const l = twPics >= 2 ? widgetEntries() : []; twTotal = l.length; twStartAt = twStartOf(l); }
         if (!tour && twTotal !== was && debugOn()) dbg('widget count ' + twTotal, twReport());
         const on = twWanted();
         if (on) twTheme();
@@ -9122,7 +9126,7 @@
         twTrackTimer = 0;
         if (!tw || twStarting) return;
         if (tour) { if (tourIsWidget()) { tourSync(); twSync(); } return; }
-        if (twPics >= 2) { twTotal = widgetEntries().length; twSync(); }
+        if (twPics >= 2) { const l = widgetEntries(); twTotal = l.length; twStartAt = twStartOf(l); twSync(); }
     }
 
     // The page as PageDown counts it: screens of height, and which one the top of the view is on.
@@ -9158,7 +9162,7 @@
     function twSync() {
         if (!tw) return;
         const on = !!tour && (tour.on || (placed && tour.index >= 0));      // a pinned picture counts too
-        const at = on ? tour.index : -1, n = on ? tour.total : twTotal;
+        const at = on ? tour.index : twTotal > 0 ? twStartAt : -1, n = on ? tour.total : twTotal;
         tw.num.nodeValue = (at >= 0 ? at + 1 : '–') + ' / ' + (n >= 0 ? n : '–');
         const dupes = tour ? tourDupes : widgetDupes;
         tw.dup.textContent = dupes ? '(' + dupes + ')' : '';
@@ -9174,9 +9178,27 @@
         const pages = twPages();
         tw.pageRow.classList.toggle('on', pages.n >= 2);
         tw.pgNum.textContent = 'Page ' + pages.at + ' / ' + pages.n;
-        const fade = Math.max(0, Math.min(100, +cfg.tourFadeTo || 0)) / 100;
-        tw.box.style.opacity = cfg.tourFade && !tw.near ? String(fade) : '1';
+        twOpacity();
         if (tw.host.style.display !== 'none') tw.dock.sizeChanged();     // the counter's width
+    }
+
+    // Faded under a window that covers it (full again when the pointer is near), else by the idle-fade setting.
+    const TW_COVER_OPACITY = 0.25;
+    function twOpacity() {
+        if (!tw) return;
+        const r = tw.rect;
+        const under = !!(r && view && box && box.classList.contains('on') && tw.host.style.display !== 'none' &&
+            !(r.x >= view.left + outerW() || r.x + r.w <= view.left || r.y >= view.top + outerH() || r.y + r.h <= view.top));
+        const fade = Math.max(0, Math.min(100, +cfg.tourFadeTo || 0)) / 100;
+        tw.box.style.opacity = tw.near ? '1' : under ? String(Math.min(TW_COVER_OPACITY, cfg.tourFade ? fade : 1)) : cfg.tourFade ? String(fade) : '1';
+    }
+
+    // The first picture at or below the top of the screen: where a start from the widget begins.
+    function twStartOf(list) {
+        if (!list.length) return 0;
+        const top = (window.scrollY || 0) - 1;
+        for (let i = 0; i < list.length; i++) if (list[i].y >= top) return i;
+        return list.length - 1;
     }
 
     // The pointer near the widget lights it up.
@@ -9244,7 +9266,7 @@
             twSync();
             return;
         }
-        tourFromStart(1);
+        tourFromStart(1, true);
     }
 
     // Window capture, bound at boot so it runs before onPinWheel: a wheel within wheelRange of the
@@ -9295,7 +9317,7 @@
             tourNav(dir, false, true);
         } else if (!twStarting) {
             twWheelHush = { t0: now, last: now };
-            tourFromStart(1);       // either way, the wheel starts at the first picture
+            tourFromStart(1, true);     // the wheel opens at the widget's number
         }
     }
 
@@ -9729,8 +9751,8 @@
         }, function () { if (twWarm === w) w.res = null; });
     }
 
-    // ▶ (◀) with nothing pinned: the first (last) picture of the area the page's pictures are in, opened and pinned.
-    async function tourFromStart(dir) {
+    // With nothing pinned: opens at the widget's number (`same`: the wheel and ⇅), or one past / before it (▶ ◀).
+    async function tourFromStart(dir, same) {
         dir = dir < 0 ? -1 : 1;
         if (placed || twStarting || !siteEnabled() || CAPTCHA_HERE) return;
         cancel();
@@ -9739,7 +9761,9 @@
             scope: null, mainOnly: true, postOnly: true, level: -1, floor: floor, had: new Set(tourPics(floor)) };
         const list = tourEntries();
         if (!list.length) { tourEnd(); return; }
-        let at = dir > 0 ? 0 : list.length - 1;
+        let at = twStartOf(list) + (same ? 0 : dir);
+        if (at >= list.length) at = 0;
+        if (at < 0) at = list.length - 1;
         const myToken = twStarting = token = { cancelled: false, fresh: true };
         showSpinner();
         let res = null, el = null, displayed = null, fromPage = false;

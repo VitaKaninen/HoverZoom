@@ -96,6 +96,8 @@ is still undecided.
 
 - **v0.315.0** (user's design, 2026-11-13): the window may fill the whole viewport (no widget floor, no link-bar strip unless `keepClearStatus`); `clearWidget` nudges it off the widget (`keepClearWidget` shrinks instead); `position` default `auto` (centre, else under the pointer; `last` retired → `remember`); flips go back to the centre unless dragged, drops held per tab in `sessionStorage`; `tour.hold` gone. Pane-checked: fills, no overlap at 1500×800. Nudge fallbacks, shrink option, tab memory not exercised; Tampermonkey not tried. Gallery's corner picture unchanged.
 
+- **v0.316.0** (user, 2026-11-13): the idle widget shows the start number (first picture at/below the screen top, `twStartOf`); wheel/⇅ open at it, ▶ at +1, ◀ at −1; the widget fades to 0.25 under a covering window (`twOpacity`). Pane-checked by synthetic events (scroll → 4 / 25; wheel opened at 4; fade 0.25 covered, 1 after close). ▶/◀ buttons and Page ▶ at the end of a page not exercised.
+
 ## Not verified
 
 Not tried in LibreWolf + Tampermonkey (incl. v0.300.0–v0.309.0).
