@@ -192,7 +192,8 @@ so the user can judge whether that gallery is worth opening. Look only: the floa
   (`galMarkCorner`: top-right, bottom-right, bottom-left, top-left; the saved disc's top-left is skipped),
   re-derived when any `<img>` loads (masonry relayouts move cards). `galMarkRect` clips the picture by
   every overflow-hiding ancestor up to the link: nsfw.xxx scales `.user--content` 1.1× on `:hover`,
-  so the raw rect put the tick ~22 px past the card's edge, clipped off. `galMarkCorner` reads
+  so the raw rect put the tick ~22 px past the card's edge, clipped off. `galHoleRect()` (the gallery's hole and
+  ring) and the chip use the same clipped box. `galMarkCorner` reads
   `elementsFromPoint` past our own layers: the opening gallery's cells covered every corner, so the
   first gallery's tick fell back to top-right, over the site's badge. **Marks go in the link, not beside
   the picture:** nsfw.xxx's card container is a z-index 1 layer under the link's z-index 2 gradient
