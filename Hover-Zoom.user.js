@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.275.0
+// @version     0.276.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -653,6 +653,10 @@
     document.addEventListener('hover-zoom:debug', function (e) {
         pageDebug = !!e.detail;
         try { console.log('[HoverZoom ' + version() + '] debug ' + (pageDebug ? 'on' : 'off') + ' for this page'); } catch (x) { /* no console */ }
+    });
+    // `document.dispatchEvent(new CustomEvent('hover-zoom:gallery-state'))`: gallery mode's state and every load trace, as one console line.
+    document.addEventListener('hover-zoom:gallery-state', function () {
+        try { console.log('[HoverZoom ' + version() + '] gallery state\n' + galStateText()); } catch (x) { /* no console */ }
     });
 
     function debugOn() { return pageDebug || !!cfg.debug; }
@@ -11677,6 +11681,18 @@
             lines.push('trace, ms from the press (negative = before it):');
             (galTraces.get(p.href) || []).forEach(function (r) { lines.push('  ' + Math.round(r[0] - p.t0) + '  ' + r[1]); });
         }
+        return lines.join('\n');
+    }
+
+    // Gallery mode's switches and the recent load traces (ms from each load's first step), URLs reduced to shape.
+    function galStateText() {
+        const lines = ['top frame ' + isTopFrame + ', host ' + pageHost() + ', listed ' + galleryListed() + ', on ' + galleryActive() +
+            ', here ' + galleryHere() + ', open ' + !!galCur + ', locked ' + !!galOn + ', preload ' + (galPreStop ? 'halted' : 'running')];
+        galTraces.forEach(function (l, href) {
+            const t0 = l.length ? l[0][0] : 0;
+            lines.push('link ' + galSane(href) + ' (cached ' + galCache.has(href) + ')');
+            l.forEach(function (r) { lines.push('  ' + Math.round(r[0] - t0) + '  ' + r[1]); });
+        });
         return lines.join('\n');
     }
 
