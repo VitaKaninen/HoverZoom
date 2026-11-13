@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.283.0
+// @version     0.284.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -1890,7 +1890,20 @@
                 } catch (e) { /* none */ }
             }
         }
-        return { declared: og, body: pageBodyMedia(doc, pageUrl) };
+        const grid = gridMedia(doc, pageUrl.href);
+        return { declared: og, body: pageBodyMedia(doc, pageUrl).filter(function (u) { return !grid.has(u); }) };
+    }
+
+    // The URLs of a fetched page's grid cells (thumbnail and link): a copy there is one of many, not the page's picture. See P17.
+    function gridMedia(doc, href) {
+        const out = new Set(), cells = galGroup(doc, href, true);
+        if (cells.length < GAL_HTML_ENOUGH) return out;
+        cells.forEach(function (x) {
+            out.add(x.thumb);
+            const a = x.el.closest('a[href]');
+            try { if (a) out.add(new URL(a.getAttribute('href'), href).href); } catch (e) { /* no link */ }
+        });
+        return out;
     }
 
     async function fetchPageMedia(pageUrl) {
@@ -6125,6 +6138,16 @@
         if (h && (h.w > r.displayed.w * DOOR_BIGGER || h.h > r.displayed.h * DOOR_BIGGER)) return 'leaf';
         if (!h && r.failed) return null;
         return 'door';
+    }
+
+    // What a door's linked page is, from its own pictures: 'gallery' (they are leaves), 'results' (they are doors), or null. See P17.
+    function doorKindVerdict(k) {
+        if (!k.pics) return null;
+        if (k.linked * 2 < k.pics) return 'gallery';
+        if (k.images * 2 >= k.linked) return 'gallery';
+        if (k.leaves > 0) return 'gallery';
+        if (k.checked >= 2) return 'results';
+        return null;
     }
 
     // The entry for a host: its own, else the most specific user entry covering it.
@@ -10939,6 +10962,11 @@
 
     // The gallery: the largest group of pictures on the page that share one ancestor chain.
     function galPick(doc, href) {
+        return galGroup(doc, href).slice(0, GAL_MAX).map(function (x) { return galItem(x.el, x.thumb, href); });
+    }
+
+    // The fetched page's biggest group of like-placed pictures, as [{el, thumb}].
+    function galGroup(doc, href, quiet) {
         const groups = new Map();
         doc.querySelectorAll('img').forEach(function (n) {
             n.__hzBase = href;
@@ -10955,9 +10983,71 @@
         });
         let best = [];
         groups.forEach(function (g) { if (g.length > best.length) best = g; });
-        dbg('gallery picked from the HTML', { href: href, groups: groups.size, pictures: best.length,
+        if (!quiet) dbg('gallery picked from the HTML', { href: href, groups: groups.size, pictures: best.length,
             chain: best.length ? domChain(best[0].el) : '' });
-        return best.slice(0, GAL_MAX).map(function (x) { return galItem(x.el, x.thumb, href); });
+        return best;
+    }
+
+    const galKinds = new Map();     // door chain -> Promise<'gallery'|'results'|null>, this page only
+    const galKindDone = new Map();  // door chain -> its settled kind
+
+    // Whether a door leads to a gallery or to more results, read once per area on this page.
+    function galKindOf(el, href) {
+        const key = domChain(el);
+        if (galKinds.has(key)) return galKinds.get(key);
+        const p = galKindRead(href).then(function (k) {
+            if (k) galKindDone.set(key, k); else galKinds.delete(key);
+            return k;
+        });
+        galKinds.set(key, p);
+        return p;
+    }
+
+    async function galKindRead(href) {
+        const doc = await fetchDoc(href);
+        if (!doc) return null;
+        const pics = galGroup(doc, href), pages = [];
+        const k = { pics: pics.length, linked: 0, images: 0, checked: 0, leaves: 0 };
+        pics.forEach(function (x) {
+            const a = x.el.closest('a[href]');
+            let u;
+            try { u = a && new URL(a.getAttribute('href'), href); } catch (e) { u = null; }
+            if (!u || !/^https?:$/.test(u.protocol)) return;
+            u.hash = '';
+            if (u.href === href.split('#')[0]) return;
+            k.linked++;
+            if (looksLikeImage(u.href)) k.images++;
+            else if (u.origin === location.origin) pages.push({ u: u, thumb: x.thumb });
+        });
+        if (!doorKindVerdict(k)) {
+            for (const c of pages.slice(0, 2)) {
+                const leaf = await galLeafAt(c.u, c.thumb);
+                if (leaf === null) continue;
+                k.checked++;
+                if (leaf) { k.leaves++; break; }
+            }
+        }
+        const v = doorKindVerdict(k);
+        dbg('door leads to: ' + (v || 'unknown'), { href: href, pictures: k.pics, linked: k.linked,
+            toImages: k.images, pagesChecked: k.checked, leaves: k.leaves });
+        return v;
+    }
+
+    // Does this page hold a bigger copy of thumb? null = it could not be read.
+    async function galLeafAt(u, thumb) {
+        let p = pageCache.get(u.href);
+        if (!p) { p = fetchPageMedia(u); pageCache.set(u.href, p); }
+        const page = await p;
+        if (!page) return null;
+        const same = (page.declared ? [page.declared.url] : []).concat(page.body || [])
+            .filter(function (x) { return x !== thumb && sameStem(x, thumb); });
+        if (!same.length) return false;
+        const own = await probe(thumb, false);
+        for (const x of same.slice(0, 3)) {
+            const d = await probe(x, false);
+            if (d && (!own || d.w * d.h > own.w * own.h)) return true;
+        }
+        return false;
     }
 
     // One picture as plain data, so it can cross from the hidden frame: thumbnail, srcsets, resolver candidates.
@@ -11903,13 +11993,17 @@
     function galDoorHover(el) {
         if (!isTopFrame || galCur || galWant) return;
         const href = galLinkOf(el);
-        if (!href) return;
-        galHintShow(el);
-        clearTimeout(galHoverTimer);
-        galHoverTimer = setTimeout(function () {
-            if (galHintFor !== el) return;
-            galLoad(href).then(function (list) { if (Array.isArray(list)) galWarm(list); });
-        }, cfg.hoverDelay);
+        if (!href || galHintFor === el) return;
+        galKindOf(el, href).then(function (kind) {
+            if (kind === 'results' || galHintFor === el || galCur || galWant) return;
+            if (!holds(el.getBoundingClientRect(), galPt.x, galPt.y)) return;
+            galHintShow(el);
+            clearTimeout(galHoverTimer);
+            galHoverTimer = setTimeout(function () {
+                if (galHintFor !== el) return;
+                galLoad(href).then(function (list) { if (Array.isArray(list)) galWarm(list); });
+            }, cfg.hoverDelay);
+        });
     }
 
     function galHintShow(el) {
@@ -12509,7 +12603,7 @@
             } else if (plain && !CAPTCHA_HERE && siteEnabled()) {
                 if (e.target === galHost && galCur) { e.preventDefault(); return; }
                 const door = doorAt(e.target, e.clientX, e.clientY), href = door && galLinkOf(door);
-                if (href) {     // a door, anywhere: peek at its pictures. See P17.
+                if (href && galKindDone.get(domChain(door)) !== 'results') {     // a door to a gallery, anywhere: peek at its pictures. See P17.
                     e.preventDefault();
                     e.stopImmediatePropagation();
                     galMidAt = Date.now();

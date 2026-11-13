@@ -876,7 +876,7 @@ const vdStart = src.indexOf('    const VDELAY_SAMPLES');
 const vdEnd = src.indexOf('    // The entry for a host');
 if (vdStart < 0 || vdEnd < 0) { console.error('vdLearn markers not found'); process.exit(1); }
 const vd = new Function(src.slice(vdStart, vdEnd) +
-    NL + 'return {vdLearn, vdRound, vdRuleFor, chainPrefix, pathPrefix, chainMatches, pathMatches, sharedHead, vdWaitOf, vdForget, vdWorked, areaLearn, areaTouch, areaAge, areaDrop, doorVerdict, VDELAY_SAMPLES, VDELAY_FORGET};')();
+    NL + 'return {vdLearn, vdRound, vdRuleFor, chainPrefix, pathPrefix, chainMatches, pathMatches, sharedHead, vdWaitOf, vdForget, vdWorked, areaLearn, areaTouch, areaAge, areaDrop, doorVerdict, doorKindVerdict, VDELAY_SAMPLES, VDELAY_FORGET};')();
 
 eq('vdRound rounds up to 50 ms', vd.vdRound(1001), 1050);
 eq('vdRound never goes under one step', vd.vdRound(10), 250);
@@ -1013,6 +1013,13 @@ eq('no verdict: no linked copy because one failed to load', DV({ failed: true, b
 eq('no verdict: no linked page', DV({ linked: null }), null);
 eq('no verdict: nothing found because something failed', DV({ failed: true }), null);
 eq('door from a learned skip of the linked page', DV({ linked: 'skipped' }), 'door');
+const DK = function (o) { return vd.doorKindVerdict(Object.assign({ pics: 24, linked: 24, images: 0, checked: 0, leaves: 0 }, o)); };
+eq('gallery: its pictures link to image files', DK({ images: 24 }), 'gallery');
+eq('gallery: its pictures are not linked', DK({ linked: 3 }), 'gallery');
+eq('undecided: its pictures link to pages not yet checked', DK({}), null);
+eq('gallery: a checked page holds a bigger copy', DK({ checked: 1, leaves: 1 }), 'gallery');
+eq('results: two checked pages hold no bigger copy', DK({ checked: 2 }), 'results');
+eq('undecided: no pictures on the linked page', DK({ pics: 0, linked: 0 }), null);
 const DR1 = 'img>a.card>div.item-#>div.grid', DR2 = 'img>a.card>div.item-#.hot>div.grid', DR3 = 'img>a.card.new>div.item-#>div.grid';
 let door = vd.areaLearn(null, DR1, '/search', 7, 'https://x.com/g/1');
 door = vd.areaLearn(door.entry, DR1, '/search', 7, 'https://x.com/g/1');

@@ -19,7 +19,10 @@ is still undecided.
   originals preload for the page on screen only.
 - **v0.283.0** — door verdict counts only the linked page's own copy (`trusted`); the thumbnail's own
   file / URL-rule upgrade no longer makes a leaf. Found on sexygirlspics.com (no door ever learned:
-  no ▦ chip, gallery links kept previewing). User tests it there next.
+  no ▦ chip, gallery links kept previewing).
+- **v0.284.0** — a linked page's grid cells are not a "bigger copy" (`gridMedia()`); doors split into
+  gallery / results (`galKindOf()`, `GATES.md` P17): results doors get no chip and no peek. Checked
+  against sexygirlspics' real pages by hand-run fetch snippet only; user tests it in Tampermonkey.
 - INTERACTION.md was out of date (no gallery IDs at all); the `G` section now covers it.
 
 ## Not verified
@@ -46,4 +49,4 @@ F. Newcomer: first-use hint line in the bar, a `?` gesture sheet, tooltips on se
 
 User tested B on sexygirlspics.com: expected the gallery widget and menu item gone (that is "Retire
 gallery mode" above — never built, still waits on a yes), and saw no chip. v0.283.0 fixes the chip
-cause; no question is outstanding.
+cause; the user then saw home-page tiles (→ result lists) get the chip — v0.284.0. No question is outstanding.

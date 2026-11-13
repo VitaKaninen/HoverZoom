@@ -925,7 +925,16 @@ so a rule cannot form under a running slideshow): no linked page → none; the l
 the linked page's candidates failed → none; else door → `areaLearn` (id = link). **Only `trusted`
 counts (v0.283.0):** the thumbnail's own file or a URL-rule upgrade being bigger says nothing about
 where the link goes — sexygirlspics.com draws 683–920 px `/460/` files at 298 px, so counting `best`
-made every gallery link a leaf and no door ever formed. The linked page "skipped" by a
+made every gallery link a leaf and no door ever formed.
+**A grid cell is not a copy (v0.284.0):** `pageMediaFrom()` drops from `body` every URL of the linked
+page's main grid (`gridMedia()`: `galGroup()` ≥ `GAL_HTML_ENOUGH` cells, each cell's thumb and link) —
+sexygirlspics' gallery holds the listing's cover as one cell linking its `/1280/` file, which made
+every listing thumbnail a leaf. A viewer's main picture sits outside its related strip, so leaves stay.
+**Gallery door vs results door (v0.284.0):** `galKindOf()` reads the door's linked page once per
+area per page load; `doorKindVerdict()` (pure, tested): cells mostly unlinked or linking image files
+→ gallery; else 2 of the cells' pages are checked with the leaf test (`galLeafAt()`) — any bigger copy
+→ gallery, none → results, unread → null (behaves as gallery). Results doors get no ▦ chip, no
+preload, and middle-click is left to the browser. The linked page "skipped" by a
 `linkAreas` rule counts as fetched-with-nothing (that rule caches the same fetch; its own 10 % recheck
 keeps it honest). Gate `doorReason()` in `refusal()` (`doorGate:`), so doors leave the slideshow and
 the widget count too. Refused hover → `doorHover()`: `areaTouch`, and on `LINK_RECHECK` a silent
