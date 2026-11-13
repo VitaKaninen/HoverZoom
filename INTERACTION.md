@@ -3,7 +3,7 @@
 What the preview **window** does, as a state machine. Menus, buttons, the status bar contents and
 the loading ring are out of scope except where they change what the window itself accepts.
 
-Describes `Hover-Zoom.user.js` **v0.317.0**.
+Describes `Hover-Zoom.user.js` **v0.318.0**.
 
 **Two words the user uses:** *the widget* is the floating ◀ `n / N` ▶ box; *the slideshow* is the pinned
 preview stepping through a queue of the page's pictures. The code and `docs/` say `tour` for the slideshow.
@@ -397,12 +397,10 @@ the current picture on screen (`T35`).
   every rule here — spot, size reset, page picture at once, ends, hold, wheel, keys — is the same code.
   "Page" is the gallery's page there (`galPageStep`), a screen of scrolling elsewhere (`twPage`).
 - **The widget** (`E63`) is a page row `◀ Page n / N ▶` (scrolls like Page Down; with a window open
-  it also jumps to the first picture on that screen; in a gallery, the gallery's pages) above `◀ n / N ▶`
+  it also jumps to the first picture on that screen) above `◀ n / N ▶`
   and the ⇅ button, in a box of its own, placed by the shared dock that Forum Stumbler and RNFP also
-  use. **One widget for pages and galleries**: in a gallery it counts the gallery (`+` while still
-  reading), and the clicked picture sits beside it. Faint until the pointer is within 60 px (setting
-  `tourFade`); shown on pages with two pictures at the slideshow's floor, while a slideshow runs, or
-  while a gallery is open. A pinned picture shows its own number. Click either number to type where
+  use. Hidden while a gallery is open: the gallery's strip is its widget (`G6`). Faint until the pointer is within 60 px (setting
+  `tourFade`); shown on pages with two pictures at the slideshow's floor, or while a slideshow runs. A pinned picture shows its own number. Click either number to type where
   to go (`twAsk`): past what is loaded it goes to the last loaded and asks for more, so the next try
   reaches further. Right-click: a menu of where the preview opens, the widget's options and the
   gallery options (`galMenuShow`). After the count: a yellow `(N)` for skipped duplicates, then an
@@ -550,11 +548,11 @@ in a blue ring. Detail: [`docs/GALLERY.md`](docs/GALLERY.md).
 | `G1` | Peek | A click on the ▦ chip of a **gallery door** (`P17`; not a door to more results) opens its gallery on any site, no mode needed; middle-click does too when Settings → Galleries → *Middle-click opens a gallery* is on (off by default). The chip sits top-left on every gallery door (Settings → Galleries → *Show the ▦ chip on every gallery*; off: only under the pointer); hovering a door reads its gallery ahead |
 | `G2` | Gallery mode | **Retired v0.291.0.** Was a per-site switch with previews off; `G1` does its job |
 | `G3` | Open | Locked on the result it was opened from; the page under it takes no hovers |
-| `G4` | Closes on | The door's chip (now a yellow ✕), a left or middle press on the clicked picture — it flies beside the widget on open (its remembered place, moved off the widget; a fifth of the window tall, full size, blue border) and back to its card on close — middle-click on the same result when middle-click opens galleries (another result switches), Esc (after any preview), a Ctrl tap, a page scroll. A browser-window resize does **not** close it: the picture goes to its place for the new size and the rows are laid out again (same picture's page). A press between pictures does nothing. A page scroll cannot happen: the wheel turns the gallery's page |
+| `G4` | Closes on | The door's chip (now a yellow ✕), a left or middle press on the clicked picture — it flies to the bottom-right corner on open (its remembered place; a fifth of the window tall, full size, blue border) and back to its card on close — middle-click on the same result when middle-click opens galleries (another result switches), Esc (after any preview), a Ctrl tap, a page scroll. A browser-window resize does **not** close it: the picture goes to its place for the new size and the rows are laid out again (same picture's page). A press between pictures does nothing. A page scroll cannot happen: the wheel turns the gallery's page |
 | `G5` | Cells | Hover = the ordinary hover preview of the cell's original, from the picture's own page (`S05`); a press on the cell or the preview pins it and starts the slideshow on the gallery (`S10`, `S25`, `E30`, as on a page); middle-click on the preview saves; with no preview up, a click opens the page the picture links to |
-| `G6` | Pages and the widget | Rows never under 120 px (`galleryRowMin`); more pictures than fit become pages. **The page widget is the gallery's widget** (v0.317.0; the separate strip with its in/dock/out places and join prompt is gone): `Page n / N` and `n / N` count the gallery, `+` while reading on. Stepping is the slideshow's (`S25`, `T30`); ↑ ↓ PageUp PageDown and the page row turn pages; the wheel over the widget steps, over a preview zooms, elsewhere turns the page (closing a pinned preview). The rows keep clear of the widget and the picture |
+| `G6` | Pages and the strip | Rows never under 120 px (`galleryRowMin`); more pictures than fit become pages. A strip inside the clicked picture's frame, below it (default) or above; dragged off by its background it docks to the picture's top or bottom or sits anywhere, as wide as its text: ◀ Page n / N ▶ (only with 2+ pages) and ◀ picture n / N ▶ (`+` while still reading). Stepping is the slideshow's (`S25`, `T30`): the picture row, ← → [ ]; ↑ ↓ PageUp PageDown turn pages; the wheel over a preview zooms (a hover one is pinned first), elsewhere turns the page and closes a pinned preview; it never scrolls the page behind. The dock widget hides while a gallery is open |
 | `G7` | Reading on | While open, a hidden frame scrolls the linked page a screen every 0.4 s and lists every picture it mounts without loading it; the set loads thumbnails only through the pages ahead of the furthest one reached (more ahead the further the user goes). The strip shows the full count, "N+" until 4 s at the bottom with nothing new (cap 3 min). Closing does not stop it; it closes a pinned gallery preview |
-| `G9` | Picture menu, moving | Drag the clicked picture to move it, a corner to resize it (edges snap to the window's edges and centre lines, the gallery's margin, the rows' tops and bottoms and the gaps' middles; Ctrl = free; the drop is remembered per site, the start for sites not seen yet, and an edge on a line follows that line when the window resizes). Dragging the widget moves the picture off it again (`galWidgetMoved`). Right-click on it or the widget: the one menu (`galMenuShow`) |
+| `G9` | Picture menu, moving | Drag the clicked picture to move it, a corner to resize it (edges snap to the window's edges and centre lines, the gallery's margin, the rows' tops and bottoms and the gaps' middles; Ctrl = free; the drop is remembered per site, the start for sites not seen yet, and an edge on a line follows that line when the window resizes). Dropping the strip against the picture's top or bottom docks it and asks to join them. Right-click on the picture, the strip or the page widget: the one menu (`galMenuShow`) |
 | `G8` | Marks | Seen (one tick), visited (two), saved (blue disc) on results, on sites with learned doors; chip, tick and disc side by side on one dark pill; a click on a mark clears it |
 
 ---

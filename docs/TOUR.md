@@ -25,7 +25,7 @@ fight that. They are deleted. Do not put nav controls back on the frame.
 - **Visibility is `style.display`, not `[hidden]`**: the host's inline `all:initial` out-ranks the UA
   `[hidden]` rule. `twRefresh` sets both, and `dock.show()` tells the other scripts.
 - **Shown** on pages with two drawn pictures at `idleFloor()` (`twCount`, stops at 2), or while a
-  tour runs, or while a gallery is open (it then counts the gallery, `GALLERY.md`). Hidden again when the
+  tour runs, and never while a gallery is open (`twGalOpen`, `GALLERY.md` strip). Hidden again when the
   count drops under 2 (the v0.155.0 debugging stickiness, `twShownOn`, was removed in v0.299.0 at the user's word). The `– / N` total (`tourPics`) is taken with every recount — load, scroll stopping, SPA
   navigation, any `<img>` `load` (document capture; a lazy picture landing after page load, v0.150.0)
   — and again when the pointer comes near, which catches a page that changed without
@@ -33,7 +33,7 @@ fight that. They are deleted. Do not put nav controls back on the frame.
   `twReport()`: every drawn picture and the gate that dropped it, URLs replaced by `U1…` labels
   (the user diagnoses private sites with it — keep it URL-free). Faint (`tourFade`, at `TW_FADE_TO` 35 %) until the
   pointer is within `TW_NEAR`; under a window that covers it the widget sits at `TW_COVER_OPACITY` (0.25, `twOpacity`, not a setting) unless the pointer is near; a `mouseover` on the host covers a pointer resting where it appears.
-- **The idle widget always shows the start number** (in a gallery `galStartAt`) `twStartAt` (`twStartOf`: the first picture at or below the top of the screen; `1 / N` on arrival, `21 / 50` after Page ▶ past 20). The wheel button and the wheel over the widget open at that number; ▶ at number+1, ◀ at number−1 (wrapping) — `tourFromStart(dir, same)` (v0.316.0, user). `twWarmFirst` only warms entry 0, so a start elsewhere resolves cold. **→ / ← do the same as ▶ / ◀** (`tourKeyStart`, default on):
+- **The idle widget always shows the start number** `twStartAt` (`twStartOf`: the first picture at or below the top of the screen; `1 / N` on arrival, `21 / 50` after Page ▶ past 20). The wheel button and the wheel over the widget open at that number; ▶ at number+1, ◀ at number−1 (wrapping) — `tourFromStart(dir, same)` (v0.316.0, user). `twWarmFirst` only warms entry 0, so a start elsewhere resolves cold. **→ / ← do the same as ▶ / ◀** (`tourKeyStart`, default on):
   window bubble phase, so a page that preventDefaults or stops → keeps it; not while focus is in a
   form control, media, or a slider/tab/menu role. Starting from a chosen picture = hover or pin it.
 - **The first picture is resolved on landing** (`twWarmFirst`, from `twRefresh` whenever the widget

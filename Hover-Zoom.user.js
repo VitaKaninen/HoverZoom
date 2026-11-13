@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.317.0
+// @version      0.318.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -8855,7 +8855,7 @@
         'Wheel over the widget flips; ⇅ starts or stops the slideshow\n' +
         'Click a number to type where to go\n' +
         'Drag to move; Ctrl: no snapping · right-click for options';
-    let twGalOpen = false;      // a gallery is open: the widget counts its pictures and pages
+    let twGalOpen = false;      // a gallery is open: its own strip steps it, so the widget goes
     const TW_WHEEL_PAD = 4;     // px round the widget that still count as over it
     let twWheelAcc = 0;         // wheel travel not yet stepped on, px
     let twWheelLast = 0;        // the last wheel event we took
@@ -9005,7 +9005,6 @@
                 host.style.right = 'auto';
                 host.style.bottom = 'auto';
                 setTimeout(twNearAgain, 0);
-                if (galCur || galFly) galWidgetMoved();
             },
             onDrag: function (on) { if (on) { hideTip(); cancel(); } } });
         if (typeof GM_addValueChangeListener === 'function') {
@@ -9028,7 +9027,7 @@
     }
 
     function twWanted() {
-        return !!cfg.tourButtons && isTopFrame && siteEnabled() && !CAPTCHA_HERE && (!!galCur || !!tour || (twPics >= 2 && twTotal >= 2));
+        return !!cfg.tourButtons && isTopFrame && siteEnabled() && !CAPTCHA_HERE && !twGalOpen && (!!tour || (twPics >= 2 && twTotal >= 2));
     }
 
     function twRefresh() {
@@ -9169,24 +9168,12 @@
     // Counter and buttons: the slideshow's position (`–` when its picture is not in the list), else the page's total.
     function twSync() {
         if (!tw) return;
-        const g = galCur;
-        let at, n, plus = '', pages;
-        if (g) {            // an open gallery: its pictures (all it has read, loaded or not) and its pages
-            const base = galLists.get(g.href), more = Math.max(0, (base ? base.length : 0) - g.cells.length);
-            n = g.cells.length + more;
-            at = !n ? -1 : tour && tour.gal === g && tour.index >= 0 ? tour.index : galStartAt(g);
-            plus = galGrowing === g.href ? '+' : '';
-            pages = { at: (g.page || 0) + 1, n: (g.pages ? g.pages.length : 1) + (more > 0 ? Math.ceil(more / galPer(g)) : 0) };
-        } else {
-            const on = !!tour && (tour.on || (placed && tour.index >= 0));      // a pinned picture counts too
-            at = on ? tour.index : twTotal > 0 ? twStartAt : -1;
-            n = on ? tour.total : twTotal;
-            pages = twPages();
-        }
-        tw.num.nodeValue = (at >= 0 ? at + 1 : '–') + ' / ' + (n >= 0 ? n : '–') + plus;
-        const dupes = g ? 0 : tour ? tourDupes : widgetDupes;
+        const on = !!tour && (tour.on || (placed && tour.index >= 0));      // a pinned picture counts too
+        const at = on ? tour.index : twTotal > 0 ? twStartAt : -1, n = on ? tour.total : twTotal;
+        tw.num.nodeValue = (at >= 0 ? at + 1 : '–') + ' / ' + (n >= 0 ? n : '–');
+        const dupes = tour ? tourDupes : widgetDupes;
         tw.dup.textContent = dupes ? '(' + dupes + ')' : '';
-        const dl = g ? null : deadLinkSite();
+        const dl = deadLinkSite();
         tw.dead.textContent = dl ? '⚠' : '';
         tw.count.__tip = (dl ? '⚠ Links to the full-size picture failed for ' + dl.dead + ' of ' + dl.of +
                 ' pictures on this site' + (brokenRules().length ? ' — the settings panel names the rule' : '') + '\n' : '') +
@@ -9195,8 +9182,9 @@
         tw.next.classList.toggle('faint', !n);
         tw.wheel.classList.toggle('faint', !n);
         tw.wheel.classList.toggle('armed', !!(tour && tour.on && placed));
+        const pages = twPages();
         tw.pageRow.classList.toggle('on', pages.n >= 2);
-        tw.pgNum.textContent = 'Page ' + pages.at + ' / ' + pages.n + plus;
+        tw.pgNum.textContent = 'Page ' + pages.at + ' / ' + pages.n;
         twOpacity();
         if (tw.host.style.display !== 'none') tw.dock.sizeChanged();     // the counter's width
     }
@@ -10954,8 +10942,14 @@
     const GAL_QUIET_CAP_MS = 4000;      // from DOMContentLoaded: the frame reports by then whatever it has
     const GAL_MIN_H = 120;              // rows never shorter: a bigger gallery is laid out as pages (cfg.galleryRowMin)
     const GAL_FLIP_MS = 200;            // at most one picture per this long on the wheel
+    const GAL_STRIP_H = 54;             // the page and picture rows under the clicked picture
+    const GAL_STRIP_H1 = 34;            // the picture row alone: a one-page gallery
+    const GAL_UNIT_MIN_W = 120;         // a picture holding the strip: never narrower, or its numbers cannot fit
     const GAL_HD = 7;                   // a resize corner: the frame's 3 px border plus 2 px inside and out
+    const GAL_STRIP_W = 190;            // their least width; wider under a wider picture
+    const GAL_STRIP_GAP = 6;            // between the picture and the strip
     let galResizeAt = 0, galRefitTimer = 0;
+    let galSt = null, galStripM = { m: 'in', side: 'b' };   // the strip, and where it is: in the picture's frame, docked to it, or out on its own
     const GAL_APPEND_MS = 300;          // thumbnails that load late join the set in batches this far apart
     const GAL_GROW_TICK = 400;          // the reading frame scrolls a screen this often
     const GAL_GROW_IDLE_MS = 4000;      // at its bottom with nothing new this long, the page is read
@@ -10968,7 +10962,7 @@
     const galGrown = new Set(), galLists = new Map();
     const galCache = new Map();         // href -> Promise of [{thumb, ss, cands, base}] | null | 'cancel'
     let galFrameStop = null;
-    let galHoverTimer = 0, galPt = { x: 0, y: 0 }, galMovedAt = 0, galLaidAt = 0, galStill = null;
+    let galHoverTimer = 0, galPt = { x: 0, y: 0 }, galMovedAt = 0, galLaidAt = 0, galStill = null, galStripOne = true;
     const GAL_SEEN_KEY = 'hoverZoomGallerySeen';   // linked pages whose gallery was shown, oldest first
     const GAL_SEEN_MAX = 10000;
     const GAL_SEEN_MS = 1000;           // a gallery counts as seen once it has been on screen this long
@@ -11508,6 +11502,21 @@
             'padding:6px 12px;border-radius:8px;background:#1e1e2e;border:1px solid #f9e2af;color:#f9e2af;font:13px/1.3 system-ui,sans-serif;' +
             'pointer-events:none;box-shadow:0 4px 14px rgba(0,0,0,.6)}' +
             '.svd{position:absolute;left:4px;top:4px;width:22px;height:22px;pointer-events:none}' +
+            '.strip[hidden]{display:none}' +
+            '.strip{position:fixed;z-index:4;display:flex;flex-direction:column;justify-content:space-evenly;padding:0 4px;box-sizing:border-box;cursor:move;' +
+            'background:#1e1e2e;border:1px solid #45475a;border-radius:8px;color:#cdd6f4;' +
+            'font:12px/1 system-ui,sans-serif;pointer-events:auto;box-shadow:0 4px 14px rgba(0,0,0,.6);user-select:none}' +
+            '.strip .r{display:flex;align-items:center;gap:4px;height:24px}' +
+            '.strip .r.pg{height:16px}.strip .r.pg .b{height:16px;font-size:8px}.strip .r.pg .t{font-size:11px}.strip.one .r.pg{display:none}' +
+            '.strip.out{width:max-content}.strip.out .t{padding:0 6px}' +
+            '.strip .b{flex:none;display:flex;align-items:center;justify-content:center;width:20px;height:24px;border-radius:5px;background:#313244;cursor:pointer;font-size:11px}' +
+            '.strip .b:hover{background:#45475a}.strip .b.faint{opacity:.35;cursor:default}.strip .b.faint:hover{background:#313244}' +
+            '.strip .t{flex:1;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}' +
+            '.strip.own{border:3px solid #89b4fa;box-shadow:0 0 14px 2px rgba(137,180,250,.55),0 8px 22px rgba(0,0,0,.6)}' +
+            '.strip.edit:not(.in){outline:2px dashed #f9e2af;outline-offset:3px}' +
+            '.fly .strip{position:relative;z-index:auto;flex:none;width:auto;border:0;border-radius:0;box-shadow:none}' +
+            '.fly.edit.joined{outline:none}' +
+            '.fly.edit.joined .pic,.fly.edit.joined .strip{outline:2px dashed #f9e2af;outline-offset:-3px}' +
             '.cell.go{cursor:pointer}' +
             'img{display:block;width:100%;height:100%;object-fit:cover;border-radius:6px;background:#1e1e2e;opacity:0;transition:opacity ' + GAL_FADE_MS + 'ms ease;' +
             'box-shadow:0 8px 22px rgba(0,0,0,.55),0 2px 5px rgba(0,0,0,.4)}' +
@@ -11526,6 +11535,12 @@
             '.fly img{width:100%;height:100%;object-fit:cover;border-radius:0;box-shadow:none;opacity:1}' +
             '.fly.edit{outline:2px dashed #f9e2af;outline-offset:3px}' +
             '.hd{position:fixed;z-index:6;width:' + GAL_HD + 'px;height:' + GAL_HD + 'px;pointer-events:auto}.hd.tl,.hd.br{cursor:nwse-resize}.hd.tr,.hd.bl{cursor:nesw-resize}' +
+            '.fly .bt{display:none;gap:8px;position:absolute;left:50%;top:50%;transform:translate(-50%,-50%)}' +
+            '.fly .bt.ask{display:none;flex-wrap:wrap;justify-content:center;width:max-content;max-width:90%}.fly.asking .bt{display:none}.fly.asking .bt.ask{display:flex}' +
+            '.fly .bt.ask b{flex-basis:100%;padding:4px 8px;border-radius:6px;background:#1e1e2e;color:#cdd6f4;font:12px/1.3 system-ui,sans-serif;text-align:center}' +
+            '.fly .bt span{display:flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:16px;' +
+            'background:#1e1e2e;border:1px solid #45475a;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.6)}' +
+            '.fly .bt svg{width:18px;height:18px;fill:#a6e3a1}.fly .bt .no svg{fill:#f38ba8}' +
             '.menu[hidden]{display:none}' +
             '.menu{position:fixed;z-index:5;min-width:240px;padding:4px;box-sizing:border-box;background:#1e1e2e;border:1px solid #45475a;border-radius:8px;' +
             'box-shadow:0 8px 28px rgba(0,0,0,.6);color:#cdd6f4;font:13px/1.3 system-ui,sans-serif;pointer-events:auto}' +
@@ -11707,10 +11722,10 @@
         return galGrowing !== set.href && (!base || set.fed >= base.length) && !set.inflight;
     }
 
-    // What the rows keep clear of: the clicked picture, and the widget.
+    // What the rows keep clear of: the clicked picture with its attached strip, and a strip of its own.
     function galBars(hole) {
-        const w = twShownRect();
-        return w ? [hole, w] : [hole];
+        if (!galFly) return [hole, galStripRect(hole)];
+        return galStripM.m === 'out' && galStripM.r ? [hole, galStripM.r] : [hole];
     }
 
     // Where the rows on screen start and end, and the middle of each gap between them: what a resize of the clicked picture snaps to.
@@ -11779,7 +11794,7 @@
             let ph, both = true;
             if (t !== null && b !== null && b - t - sh >= 48) ph = b - t - sh;
             else if (l !== null && r !== null && r - l >= 48) ph = (r - l) / asp;
-            else { ph = H * Math.max(0.05, Math.min(0.9, +rec.hf || GAL_FLY_FRAC)); both = false; }
+            else { ph = H * Math.max(0.05, Math.min(0.9, +rec.hf || GAL_FLY_FRAC)) + (sh ? GAL_STRIP_H - sh : 0); both = false; }
             w = ph * asp;
             const maxW = both ? W - 8 : W * 0.4;
             if (w > maxW) { w = maxW; ph = w / asp; }
@@ -11810,14 +11825,76 @@
         return { x: one(l, w, galLines(W), W), y: one(t, h, galLines(H, rows), H) };
     }
 
-
-    // The clicked picture's resize corners follow it.
-    function galStripPlace() {
-        galHdPlace();
+    // The strip's box when there is no clicked picture to hold it: under the hole, else over it.
+    function galStripRect(h) {
+        const W = vpW(), H = vpH(), w = Math.min(W - 2 * GAL_GAP, Math.max(GAL_STRIP_W, h.w));
+        const x = Math.max(GAL_GAP, Math.min(W - GAL_GAP - w, h.x + h.w / 2 - w / 2));
+        const sh = galStripH(), below = h.y + h.h + GAL_STRIP_GAP + sh <= H - 4;
+        return { x: x, y: below ? h.y + h.h + GAL_STRIP_GAP : Math.max(4, h.y - GAL_STRIP_GAP - sh), w: w, h: sh };
     }
 
+    // The strip: inside the clicked picture's frame ('in'), against its top or bottom with a frame of its own ('dock'), or anywhere ('out').
+    function galStripPlace() {
+        galHdPlace();
+        const s = galSt;
+        if (!s) return;
+        const f = galFly, m = galStripM;
+        s.el.hidden = !galOn;
+        s.el.classList.toggle('edit', !!galEdit);
+        s.el.classList.toggle('one', galStripOne);
+        s.el.style.height = galStripH() + 'px';
+        const inside = !!f && m.m === 'in';
+        s.el.classList.toggle('in', inside);
+        s.el.classList.toggle('own', !!f && !inside);
+        if (f) f.el.classList.toggle('joined', inside);
+        if (inside) {
+            if (m.side === 't') { if (f.el.firstChild !== s.el) f.el.insertBefore(s.el, f.el.firstChild); }
+            else if (f.pic0.nextSibling !== s.el) f.el.insertBefore(s.el, f.pic0.nextSibling);
+            s.el.classList.remove('out');
+            s.el.style.left = s.el.style.top = s.el.style.width = '';
+            galStripFit();
+            return;
+        }
+        if (s.el.parentNode !== galTop) galTopRoot().appendChild(s.el);
+        const r = !f ? galStripRect(galHole || { x: 0, y: 0, w: 0, h: 0 }) : m.m === 'dock' ? galDockRect(galFlyRect(), m.side) : m.r;
+        const free = !!f && m.m === 'out' && !(r && r.d);
+        s.el.classList.toggle('out', free);
+        s.el.style.width = free || !r ? '' : Math.round(r.w) + 'px';
+        galStripFit();
+        if (!r) return;
+        if (free) {         // as wide as its text; the side nearer the window's edge stays put
+            const w = s.el.offsetWidth;
+            if (r.w && r.x + r.w / 2 > vpW() / 2) r.x += r.w - w;
+            r.x = Math.max(0, Math.min(vpW() - w, r.x));
+            r.w = w;
+            r.h = s.el.offsetHeight;
+        }
+        s.el.style.left = Math.round(r.x) + 'px'; s.el.style.top = Math.round(r.y) + 'px';
+    }
 
+    function galStripFit() {
+        if (galCur) galStripText(galCur);
+    }
 
+    // The strip's height: the page row shows only once there is more than one page.
+    function galStripH() {
+        return galStripOne ? GAL_STRIP_H1 : GAL_STRIP_H;
+    }
+
+    // A second page appeared: the page row joins the strip for good, and an attached strip keeps the unit's height, so the picture narrows.
+    function galStripRows(set) {
+        const one = !set.two && (set.pages ? set.pages.length : 1) <= 1;
+        if (!one) set.two = true;
+        if (one === galStripOne || galEdit) return;
+        const u0 = galAttH() ? galUnitRect() : null;
+        galStripOne = one;
+        if (!u0) { galStripPlace(); return; }
+        const W = vpW(), ph = Math.max(48, u0.h - galStripH()), w = Math.min(W - 8, ph * galFly.asp);
+        const x = u0.x + u0.w / 2 > W / 2 ? u0.x + u0.w - w : u0.x;
+        galHole = { x: Math.max(0, Math.min(W - w, x)), y: u0.y, w: w, h: u0.h };
+        galUnitPut(galHole);
+        setTimeout(function () { if (galCur === set && !galEdit) galPageWork(set, galLayout(set, galHole)); }, 0);
+    }
 
     // The corners that resize the clicked picture: invisible, at the unit's corners.
     function galHdPlace() {
@@ -11831,33 +11908,129 @@
         });
     }
 
-
-    // The clicked picture's box: what the rows keep clear of.
-    function galUnitRect() {
-        return galFlyRect();
+    // The strip's box against the picture's top or bottom, as wide as it.
+    function galDockRect(p, side) {
+        const sh = galStripH();
+        return { x: p.x, y: side === 't' ? p.y - sh : p.y + p.h, w: p.w, h: sh };
     }
 
+    // The clicked picture's box with an attached strip (inside its frame or docked against it): what the rows keep clear of.
+    function galUnitRect() {
+        const p = galFlyRect(), sh = galStripH();
+        if (galStripM.m !== 'dock') return p;
+        return { x: p.x, y: galStripM.side === 't' ? p.y - sh : p.y, w: p.w, h: p.h + sh };
+    }
+
+    // The attached strip's height, which the picture's box includes.
+    function galAttH() {
+        return galFly && (galStripM.m === 'in' || galStripM.m === 'dock') ? galStripH() : 0;
+    }
 
     function galFlyRect() {
         const el = galFly.el;
         return { x: parseFloat(el.style.left), y: parseFloat(el.style.top), w: parseFloat(el.style.width), h: parseFloat(el.style.height) };
     }
 
+    // The clicked picture and its attached strip put in one box.
     function galUnitPut(u) {
         const f = galFly;
         if (!f) return;
-        galFlyPut(f.el, u.x, u.y, u.w, u.h);
-        galHdPlace();
+        const sh = galStripM.m === 'dock' ? galStripH() : 0;
+        galFlyPut(f.el, u.x, galStripM.side === 't' ? u.y + sh : u.y, u.w, u.h - sh);
+        galStripPlace();
     }
 
-    // The widget shows the gallery's page and picture.
+    // The strip's page and picture: ◀ Page n / N ▶, then ◀ picture n / N ▶.
     function galPageNote(set) {
-        if (set) twSync();
+        if (!set) return;
+        galStripBuild();
+        galStripPlace();
+        galStripText(set);
     }
 
+    function galStripText(set) {
+        const s = galSt;
+        if (!s || !set) return;
+        const reading = galGrowing === set.href, base = galLists.get(set.href), n = Math.max(set.cells.length, base ? base.length : 0);
+        galStripRows(set);
+        const more = n - set.cells.length, page = set.page || 0, at = set.at >= 0 && set.at < n ? set.at : -1;
+        const total = (set.pages ? set.pages.length : 1) + (more > 0 ? Math.ceil(more / galPer(set)) : 0);
+        const pg = (page + 1) + ' / ' + total + (reading ? '+' : '');
+        s.pgT.textContent = 'Page ' + pg;
+        s.picT.textContent = (at >= 0 ? at + 1 : '–') + ' / ' + n + (reading ? '+' : '');
+        galStripSqueeze(s, pg);
+        setTip(s.pgT, reading ? 'Finding more pictures on the gallery\'s page…' : total + ' page' + (total === 1 ? '' : 's') + ' · PageUp / PageDown');
+        setTip(s.picT, n + ' picture' + (n === 1 ? '' : 's') + (reading ? ', finding more' : '') + ' · mouse wheel or ← → steps through them');
+        s.pgP.classList.toggle('faint', page <= 0);
+        s.pgN.classList.toggle('faint', page >= total - 1);
+        s.picP.classList.toggle('faint', !n);
+        s.picN.classList.toggle('faint', !n);
+    }
 
+    // Numbers that do not fit: "Page" goes first, then the type shrinks.
+    function galStripSqueeze(s, pg) {
+        [s.pgT, s.picT].forEach(function (t) { t.style.fontSize = ''; });
+        if (s.el.hidden || s.el.classList.contains('out')) return;
+        const over = function (t) { return t.scrollWidth > t.clientWidth + 0.5; };
+        if (over(s.pgT)) s.pgT.textContent = pg;
+        [s.pgT, s.picT].forEach(function (t) {
+            let f = parseFloat(getComputedStyle(t).fontSize) || 12;
+            while (over(t) && f > 8) { f -= 0.5; t.style.fontSize = f + 'px'; }
+        });
+    }
 
+    // Before the gallery's pictures arrive.
+    function galStripBlank() {
+        const s = galSt;
+        if (!s) return;
+        s.pgT.textContent = 'Page … / …';
+        s.picT.textContent = '– / …';
+        ['pgP', 'pgN', 'picP', 'picN'].forEach(function (k) { s[k].classList.add('faint'); });
+    }
 
+    // One strip for every gallery, made once; dragged by its background, it comes off the picture.
+    function galStripBuild() {
+        if (galSt) return;
+        galLayer();
+        const el = document.createElement('div');
+        el.className = 'strip';
+        el.hidden = true;
+        const s = { el: el };
+        const row = function (cls, pk, tk, nk, prevTip, nextTip, act) {
+            const r = document.createElement('div');
+            r.className = 'r ' + cls;
+            const btn = function (text, tip, dir) {
+                const b = document.createElement('span');
+                b.className = 'b';
+                b.textContent = text;
+                setTip(b, tip);
+                b.addEventListener('mousedown', function (e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (e.button === 0 && !b.classList.contains('faint')) act(dir);
+                });
+                return b;
+            };
+            s[pk] = btn('◀', prevTip, -1);
+            s[tk] = document.createElement('span');
+            s[tk].className = 't';
+            s[nk] = btn('▶', nextTip, 1);
+            r.appendChild(s[pk]); r.appendChild(s[tk]); r.appendChild(s[nk]);
+            el.appendChild(r);
+        };
+        row('pg', 'pgP', 'pgT', 'pgN', 'Previous page · PageUp', 'Next page · PageDown', galFlip);
+        row('pn', 'picP', 'picT', 'picN', 'Previous picture · ← or wheel up', 'Next picture · → or wheel down', galStep);
+        ['mousedown', 'mouseup', 'click', 'auxclick', 'dblclick', 'contextmenu'].forEach(function (t) {
+            el.addEventListener(t, function (e) {
+                e.preventDefault();
+                e.stopPropagation();
+                if (t === 'mousedown' && !galEdit && e.button === 0) galStripDown(e);
+                if (t === 'contextmenu' && !galEdit && galFly) galMenuShow(e.clientX, e.clientY);
+            });
+        });
+        galSt = s;
+        galTopRoot().appendChild(el);
+    }
 
     // The page holding picture k.
     function galPageOf(set, k) {
@@ -11898,18 +12071,7 @@
         set.at = k;
         const pg = galPageOf(set, k);
         if (pg !== set.page) { set.page = pg; galPageWork(set, galLayout(set, set.open)); }
-        else twSync();
-    }
-
-    // The widget appeared or moved over a gallery: the clicked picture steps beside it and the rows keep clear of both.
-    let galWidgetTimer = 0;
-    function galWidgetMoved() {
-        clearTimeout(galWidgetTimer);
-        galWidgetTimer = setTimeout(function () {
-            if (galEdit) return;
-            if (galFly && galHole) { galHole = galBesideWidget(galUnitRect()); galUnitPut(galHole); }
-            if (galCur) galLayout(galCur, galHole);
-        }, 60);
+        else galPageNote(set);
     }
 
     // More pictures for a slideshow at the gallery's end: the next pages' thumbnails, waited for a few seconds.
@@ -12195,7 +12357,7 @@
         set.el.classList.add('on');
         galBlur.classList.add('on');
         galCur = set;
-        if (!twGalOpen) { twGalOpen = true; twRefresh(); galWidgetMoved(); }
+        if (!twGalOpen) { twGalOpen = true; twRefresh(); }
         setTimeout(function () { if (galCur === set) galVeil(false); }, GAL_FADE_MS);
         galTrace(href, 'shown: ' + pics.length + ' thumbnails');
         galPendClear();
@@ -12360,6 +12522,7 @@
         if (galBlur) galBlur.classList.remove('on');
         galVeil(false);
         galFlyBack();
+        if (galSt) galSt.el.hidden = true;
         galChipsSync();
         if (twGalOpen) { twGalOpen = false; twRefresh(); }
     }
@@ -12497,7 +12660,9 @@
         const hr = galHoleRect(pic || t);
         if (galOwns(active)) cancel();
         galOn = true;
-        galHole = galCornerRect(hr.width && hr.height ? hr.width / hr.height : 1);
+        galStripOne = true;
+        galStripM = pic ? galStripLoad(galAnchorRec(), galPagedRows(vpH())) : { m: 'in', side: 'b' };
+        galHole = galCornerRect(hr.width && hr.height ? hr.width / hr.height : 1, pic && galStripM.m !== 'out' ? galStripH() : 0);
         galWant = href;
         clearTimeout(galHoverTimer);
         galFlyBack();
@@ -12511,19 +12676,9 @@
         });
     }
 
-    // Where the clicked picture waits while its gallery is open: its remembered place, else bottom-right, a fifth of the window tall; its own shape (user). Never over the widget: beside it.
-    function galCornerRect(asp) {
-        const r = galPlace(galAnchorRec(), asp || 1, 0, vpW(), vpH(), galAnchorRows(vpH()));
-        return galBesideWidget(r);
-    }
-
-    // A box over the widget goes above it (below when there is no room), on the widget's outer side.
-    function galBesideWidget(r) {
-        const w = twShownRect(), W = vpW(), H = vpH(), G = 4;
-        if (!w || r.x >= w.x + w.w || r.x + r.w <= w.x || r.y >= w.y + w.h || r.y + r.h <= w.y) return r;
-        const x = w.x + w.w / 2 > W / 2 ? w.x + w.w - r.w : w.x;
-        const y = w.y - G - r.h >= 0 ? w.y - G - r.h : w.y + w.h + G;
-        return { x: Math.round(Math.max(0, Math.min(W - r.w, x))), y: Math.round(Math.max(0, Math.min(H - r.h, y))), w: r.w, h: r.h };
+    // Where the clicked picture waits while its gallery is open, with sh px of attached strip: its remembered place, else bottom-right, a fifth of the window tall; its own shape (user).
+    function galCornerRect(asp, sh) {
+        return galPlace(galAnchorRec(), asp || 1, sh, vpW(), vpH(), galAnchorRows(vpH()));
     }
 
     // The row lines a place is remembered against: a one-page gallery's own, else the paged grid's, which only the window's height decides.
@@ -12532,7 +12687,19 @@
         return set && set.pages && set.pages.length === 1 && set.rows && set.rows.length ? set.rows : galPagedRows(H);
     }
 
+    // The strip's remembered place: in the frame (the default), docked, or out with its own place.
+    function galStripLoad(rec, rows) {
+        const s = rec.strip || {};
+        if (s.m === 'out') return { m: 'out', side: 'b', r: galPlace(s, 1, 0, vpW(), vpH(), rows, { w: GAL_STRIP_W, h: galStripH() }) };
+        return { m: s.m === 'dock' ? 'dock' : 'in', side: s.side === 't' ? 't' : 'b' };
+    }
 
+    function galStripRec(rows) {
+        const m = galStripM;
+        if (m.m !== 'out' || !m.r) return { m: m.m === 'dock' ? 'dock' : 'in', side: m.side };
+        const r = m.r, W = vpW(), H = vpH();
+        return Object.assign({ m: 'out', x: galAnchorAx(r.x, r.w, W), y: galAnchorAx(r.y, r.h, H) }, galEdges(r, W, H, rows));
+    }
 
     const GAL_ANCHOR_KEY = 'hoverZoomGalleryAnchor';     // {last, sites: {host: {x, y, hf}}}: where the clicked picture waits
     function galAnchorDefault() { return { x: { m: 'e', o: -GAL_GAP }, y: { m: 'e', o: -GAL_GAP }, hf: GAL_FLY_FRAC }; }
@@ -12577,9 +12744,9 @@
         const f = galFly;
         if (!f) return;
         galMenuHide();
-        galEdit = { el: f.el, u: galUnitRect() };
+        galEdit = { el: f.el, u: galUnitRect(), sm: Object.assign({}, galStripM) };
         f.el.classList.add('edit');
-        galHdPlace();
+        galStripPlace();
         hideTip();
     }
 
@@ -12590,7 +12757,9 @@
         galEdit = null;
         ed.el.classList.remove('edit');
         if (!keep || !galFly) {
-            if (galFly) galUnitPut(ed.u);
+            ed.el.classList.remove('asking');
+            galStripM = ed.sm;
+            if (galFly) galUnitPut(ed.u); else galStripPlace();
             return;
         }
         galSave();
@@ -12601,9 +12770,9 @@
         if (!galFly) return;
         const u = galUnitRect(), W = vpW(), H = vpH(), rows = galAnchorRows(H);
         galAnchorSave(Object.assign({ x: galAnchorAx(u.x, u.w, W), y: galAnchorAx(u.y, u.h, H),
-            hf: Math.round(u.h / H * 1000) / 1000 }, galEdges(u, W, H, rows)));
+            hf: Math.round((u.h - (galAttH() ? GAL_STRIP_H : 0)) / H * 1000) / 1000, strip: galStripRec(rows) }, galEdges(u, W, H, rows)));
         galHole = u;
-        galHdPlace();
+        galStripPlace();
         if (galCur) galPageWork(galCur, galLayout(galCur, galHole));
     }
 
@@ -12618,9 +12787,11 @@
             galMenuHide();
             const set = galCur, H = vpH();
             if (galFly) {
-                galHole = galCornerRect(galFly.asp);
+                const sl = galStripLoad(galAnchorRec(), galAnchorRows(H));
+                if (sl.m === 'out' && galStripM.m === 'out') galStripM.r = sl.r;
+                galHole = galCornerRect(galFly.asp, galAttH());
                 galUnitPut(galHole);
-            } else if (galHole) galHole = galCornerRect(galHole.w / galHole.h);
+            } else if (galHole) galHole = galCornerRect(galHole.w / galHole.h, 0);
             if (galVeilEl && galVeilEl.classList.contains('on')) galVeilEl.style.clipPath = galBlur.style.clipPath = galClip(galHole);
             if (!set) return;
             const p = set.pages && set.pages[set.page], keep = set.at >= 0 ? set.at : p ? p[0] : 0;
@@ -12628,7 +12799,7 @@
             const pg = galPageOf(set, keep);
             if (pg !== set.page) { set.page = pg; L = galLayout(set, galHole); }
             if (galFly && set.pages.length === 1) {         // a one-page gallery's rows move with the picture: place it once more on the new ones
-                const u = galCornerRect(galFly.asp);
+                const u = galCornerRect(galFly.asp, galAttH());
                 if (u.x !== galHole.x || u.y !== galHole.y || u.w !== galHole.w || u.h !== galHole.h) { galHole = u; galUnitPut(u); L = galLayout(set, u); }
             }
             galPageWork(set, L);
@@ -12654,20 +12825,56 @@
         el.style.width = Math.round(w) + 'px'; el.style.height = Math.round(h) + 'px';
     }
 
+    // A strip box s against picture box p: which side it docks to, if close enough and overlapping.
+    function galDockFor(s, p) {
+        if (s.x + s.w <= p.x || s.x >= p.x + p.w) return null;
+        if (Math.abs(s.y + s.h - p.y) <= POS_SNAP_EDGE) return 't';
+        if (Math.abs(s.y - (p.y + p.h)) <= POS_SNAP_EDGE) return 'b';
+        return null;
+    }
 
+    // The strip docks to the picture's top or bottom, kept on screen, and asks whether to join them.
+    function galDock(side) {
+        galStripM = { m: 'dock', side: side };
+        const u = galUnitRect(), W = vpW(), H = vpH();
+        galUnitPut({ x: Math.max(0, Math.min(W - u.w, u.x)), y: Math.max(0, Math.min(H - u.h, u.y)), w: u.w, h: u.h });
+        galSave();
+        if (galFly) galFly.el.classList.add('asking');
+    }
 
+    // The question's answer: joined, the strip goes inside the picture's frame; else they stay apart.
+    function galJoin(yes) {
+        if (!galFly) return;
+        galFly.el.classList.remove('asking');
+        if (!yes || galStripM.m !== 'dock') return;
+        const u = galUnitRect();
+        galStripM = { m: 'in', side: galStripM.side };
+        galUnitPut(u);
+        galSave();
+    }
 
+    // The strip comes off the picture: the picture keeps its own box, the strip goes its own way.
+    function galDetach() {
+        const m = galStripM;
+        if (m.m === 'out') return;
+        const u = galUnitRect(), sh = galStripH(), y = m.side === 't' ? u.y + sh : u.y;
+        galStripM = { m: 'out', side: m.side, r: null };
+        galFlyPut(galFly.el, u.x, y, u.w, u.h - sh);
+        galStripPlace();
+    }
 
     // A press on the clicked picture: a click closes the gallery; dragged, it moves the picture with any attached strip, or from a corner resizes it (its own shape kept); both snap unless Ctrl is held, and the drop is saved.
     function galEditDown(e) {
         e.preventDefault();
         e.stopPropagation();
         if (e.button !== 0 || !galFly) return;
+        if (galFly.el.classList.contains('asking')) galJoin(false);
         const t0 = e.composedPath()[0], corner = t0 && t0.__hzCorner;
         let on = false;
-        const u0 = galUnitRect(), sh = 0, st = { x: e.clientX, y: e.clientY, l: u0.x, t: u0.y, w: u0.w, h: u0.h };
+        const u0 = galUnitRect(), sh = galAttH(), st = { x: e.clientX, y: e.clientY, l: u0.x, t: u0.y, w: u0.w, h: u0.h };
         const ph0 = st.h - sh, asp = st.w / ph0, W = vpW(), H = vpH(), rows = galAnchorRows(H);
         const ys = galLines(H, rows).map(function (x) { return x.v; }), xs = galLines(W).map(function (x) { return x.v; });
+        let dock = null;
         const move = function (ev) {
             if (!on) {
                 if (Math.hypot(ev.clientX - st.x, ev.clientY - st.y) < 4) return;
@@ -12677,10 +12884,11 @@
             if (!galEdit) return;       // Esc
             const dx = ev.clientX - st.x, dy = ev.clientY - st.y;
             let l = st.l, t = st.t, w = st.w, h = st.h;
+            dock = null;
             if (corner) {
                 const sx = corner[1] === 'r' ? 1 : -1, sy = corner[0] === 'b' ? 1 : -1;
                 const k = Math.max((st.w + sx * dx) / st.w, (ph0 + sy * dy) / ph0);
-                const lo = 48;
+                const lo = Math.max(48, sh ? GAL_UNIT_MIN_W / asp : 0);
                 let ph = Math.max(lo, Math.min(H * 0.9, ph0 * k));
                 if (!ev.ctrlKey) ph = Math.max(lo, galSnapH(st, corner, ph, ys, W, H, sh, xs));
                 w = ph * asp;
@@ -12691,7 +12899,12 @@
             } else { l = st.l + dx; t = st.t + dy; }
             l = Math.max(0, Math.min(W - w, l));
             t = Math.max(0, Math.min(H - h, t));
-            if (!corner && !ev.ctrlKey) { const sn = galBoxSnap(l, t, w, h, W, H, rows); l = sn.x; t = sn.y; }
+            if (!corner && !ev.ctrlKey) {
+                const m = galStripM;
+                dock = m.m === 'out' && m.r ? galDockFor(m.r, { x: l, y: t, w: w, h: h }) : null;
+                if (dock) t = dock === 't' ? m.r.y + m.r.h : m.r.y - h;
+                else { const sn = galBoxSnap(l, t, w, h, W, H, rows); l = sn.x; t = sn.y; }
+            }
             galUnitPut({ x: l, y: t, w: w, h: h });
         };
         const up = function () {
@@ -12700,15 +12913,48 @@
             if (!on) { if (!corner) galHide('hole'); return; }
             if (!galEdit) return;
             galEditStop(true);
+            if (dock) galDock(dock);
         };
         window.addEventListener('mousemove', move, true);
         window.addEventListener('mouseup', up, true);
     }
 
+    // A press on the strip's background: dragged, it comes off the picture and moves on its own (snapping unless Ctrl is held); dropped against the picture's top or bottom it docks there.
+    function galStripDown(e) {
+        if (!galFly) return;
+        if (galFly.el.classList.contains('asking')) galJoin(false);
+        const b = galSt.el.getBoundingClientRect(), W = vpW(), H = vpH(), rows = galAnchorRows(H);
+        const st = { x: e.clientX, y: e.clientY, fx: (e.clientX - b.left) / (b.width || 1), oy: e.clientY - b.top };
+        let on = false, dock = null;
+        const move = function (ev) {
+            if (!on) {
+                if (Math.hypot(ev.clientX - st.x, ev.clientY - st.y) < 4) return;
+                on = true;
+                galEditStart();
+                galDetach();
+            }
+            if (!galEdit) return;       // Esc
+            const p = galFlyRect(), sw = galSt.el.offsetWidth, h = galStripH();
+            let l = Math.max(0, Math.min(W - sw, ev.clientX - st.fx * sw)), t = Math.max(0, Math.min(H - h, ev.clientY - st.oy));
+            dock = ev.ctrlKey ? null : galDockFor({ x: l, y: t, w: sw, h: h }, p);
+            if (!dock && !ev.ctrlKey) { const sn = galBoxSnap(l, t, sw, h, W, H, rows); l = sn.x; t = sn.y; }
+            galStripM.r = dock ? Object.assign(galDockRect(p, dock), { d: 1 }) : { x: l, y: t, w: 0, h: h };
+            galStripPlace();
+        };
+        const up = function () {
+            window.removeEventListener('mousemove', move, true);
+            window.removeEventListener('mouseup', up, true);
+            if (!on || !galEdit) return;
+            galEditStop(true);
+            if (dock) galDock(dock);
+        };
+        window.addEventListener('mousemove', move, true);
+        window.addEventListener('mouseup', up, true);
+    }
 
     let galMenuEl = null;
 
-    // Our menu, on the widget and on a gallery's clicked picture: where the preview opens and what the widget does, then the gallery settings.
+    // Our menu on the corner picture: its place, and the gallery settings.
     function galMenuShow(x, y) {
         const root = galTopRoot();
         if (!galMenuEl) {
@@ -12797,7 +13043,9 @@
     function galFlyOut(pic, hr, href) {
         const root = galTopRoot();
         if (!galHost.isConnected) document.documentElement.appendChild(galHost);
-        const H = galHole, P = H;
+        const U = galHole, m = galStripM, sh = m.m === 'dock' ? galStripH() : 0, band = m.m === 'in' ? galStripH() : 0;
+        const H = { x: U.x, y: m.side === 't' ? U.y + sh : U.y, w: U.w, h: U.h - sh };
+        const P = { x: H.x, y: m.side === 't' ? H.y + band : H.y, w: H.w, h: H.h - band };
         const el = document.createElement('div'), pw = document.createElement('div'), img = document.createElement('img');
         el.className = 'fly';
         pw.className = 'pic';
@@ -12815,6 +13063,26 @@
             hd.addEventListener('contextmenu', function (e) { e.preventDefault(); e.stopPropagation(); });
             return hd;
         });
+        const pair = function (cls, label, yes, no, act) {
+            const bt = document.createElement('div');
+            bt.className = cls;
+            if (label) { const q = document.createElement('b'); q.textContent = label; bt.appendChild(q); }
+            [['ok', ICON_TICK, yes, true], ['no', ICON_CLOSE, no, false]].forEach(function (b) {
+                const x = document.createElement('span');
+                x.className = b[0];
+                x.appendChild(mkIcon(b[1]));
+                setTip(x, b[2]);
+                x.addEventListener('mousedown', function (e) {
+                    if (e.button !== 0) return;
+                    e.preventDefault();
+                    e.stopPropagation();
+                    act(b[3]);
+                });
+                bt.appendChild(x);
+            });
+            pw.appendChild(bt);
+        };
+        pair('bt ask', 'Join the strip to the picture?', 'Join them: the strip goes inside the picture\'s frame', 'Keep them apart', galJoin);
         el.addEventListener('mousedown', function (e) {
             if (e.button !== 0 && e.button !== 1) return;
             e.preventDefault();         // middle too: no autoscroll, and galMidEat eats its click
@@ -12835,8 +13103,9 @@
         el.classList.add('on');
         el.style.transform = 'none';
         galFly = { el: el, img: img, pic: pic, href: href, asp: hr.width && hr.height ? hr.width / hr.height : 1, pic0: pw, hds: hds };
-        galHdPlace();
-        twSync();
+        galStripBuild();
+        if (!galCur || galCur.href !== href) galStripBlank();
+        galStripPlace();
     }
 
     // One file name ends with the other (a site prefixing a category to the same picture's name), 8+ characters.
@@ -12861,7 +13130,8 @@
         hideTip();
         f.hds.forEach(function (hd) { hd.remove(); });
         const el = f.el, H = galHole || { x: 0, y: 0, w: 1, h: 1 };
-        el.classList.remove('edit');
+        if (galSt) { galSt.el.hidden = true; if (galSt.el.parentNode === el) galTop.appendChild(galSt.el); }
+        el.classList.remove('joined', 'edit', 'asking');
         el.style.pointerEvents = 'none';
         const r = f.pic.isConnected ? galHoleRect(f.pic) : null;
         const onScreen = r && r.width > 0 && r.bottom > 0 && r.top < vpH() && r.right > 0 && r.left < vpW();

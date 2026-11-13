@@ -16,10 +16,17 @@ into constants". Verified only in the Browser pane on test-page.html and test-pa
 (d6, 240 pictures): widget counts, steps, ↑ ↓, wheel on/off preview, typed picture and page, menu.
 **Not verified:** a real site, LibreWolf, Tampermonkey; hand-resize reset (code only).
 
-**Open, user to judge (asked in chat, no answer yet):** whether a stray wheel off a pinned preview
-should close it (built: closes) or leave it open while the page scrolls under it. Also told the user:
-`displayScale` and `galleryRowMin` were kept on purpose; the manager menu had no debug item, so the
-panel row was renamed — the user may have meant "Draw where the slideshow stops".
+**User's answers (same day):** a wheel off a pinned preview closes it (keep as built). The gallery
+widget change was wrong: v0.318.0 brings the strip back (in the picture's frame, dock/out, join
+prompt, own memory) and hides the page widget in a gallery again; everything else of v0.317.0 stays,
+including stepping through the slideshow engine (the strip's picture row → `galStep` → `twPress`).
+
+**Next:** the user asked for a list of how the strip and the page widget differ in function (not
+shape, not its place with the clicked picture), to approve before implementing. Given in chat:
+idle number (`–` vs start number; ▶ from idle lands on picture 2 under a `–`), hold-to-repeat,
+typed numbers, ⇅, wheel over it (widget flips, strip turns the page), fade, page buttons (`galFlip`
+vs `galPageStep`: a pinned preview does not follow, no loading past the last page, ends stop vs
+wrap), dragging (dock snapping vs detach/dock/join), help tip. Await the user's picks.
 
 ---
 
