@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.295.0
+// @version     0.296.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -11235,6 +11235,8 @@
             'img.ok{opacity:1}' +
             '.shade{position:absolute;inset:0;background:rgba(0,0,0,.8)}' +
             '.set.live .shade{pointer-events:auto}' +
+            '.veil{position:fixed;inset:0;background:rgba(0,0,0,.8);opacity:0;pointer-events:none;transition:opacity ' + GAL_FADE_MS + 'ms ease}' +
+            '.veil.on{opacity:1}' +
             '.blur{position:fixed;inset:0;backdrop-filter:blur(0) grayscale(0);transition:backdrop-filter ' + GAL_FADE_MS + 'ms ease}' +
             '.blur.on{backdrop-filter:blur(6px) grayscale(.6)}' +
             '.fly{position:fixed;z-index:3;box-sizing:border-box;border:3px solid #89b4fa;border-radius:8px;overflow:hidden;background:#1e1e2e;' +
@@ -11273,6 +11275,9 @@
         galBlur = document.createElement('div');
         galBlur.className = 'blur';
         galRoot.appendChild(galBlur);
+        galVeilEl = document.createElement('div');
+        galVeilEl.className = 'veil';
+        galRoot.appendChild(galVeilEl);
         return galRoot;
     }
 
@@ -11343,11 +11348,28 @@
 
     // The shading: the page dark and blurred, except the corner where the clicked picture waits.
     function galShade(set, o) {
+        set.shade.style.clipPath = galClip(o);
+        if (galBlur) galBlur.style.clipPath = set.shade.style.clipPath;
+    }
+
+    // The whole window less one box, as a clip-path.
+    function galClip(o) {
         const W = vpW(), H = vpH();
         const box = [[o.x, o.y], [o.x + o.w, o.y], [o.x + o.w, o.y + o.h], [o.x, o.y + o.h]];
         const pts = function (a) { return a.map(function (p) { return p[0] + 'px ' + p[1] + 'px'; }).join(','); };
-        set.shade.style.clipPath = 'polygon(evenodd,' + pts([[0, 0], [W, 0], [W, H], [0, H], [0, 0]]) + ',' + pts(box.concat([box[0]])) + ')';
-        if (galBlur) galBlur.style.clipPath = set.shade.style.clipPath;
+        return 'polygon(evenodd,' + pts([[0, 0], [W, 0], [W, H], [0, H], [0, 0]]) + ',' + pts(box.concat([box[0]])) + ')';
+    }
+
+    let galVeilEl = null;
+    // The page goes dark the moment the picture flies, before any cell has loaded; the set's own shade takes over.
+    function galVeil(on) {
+        if (!on) { if (galVeilEl) galVeilEl.classList.remove('on'); return; }
+        galLayer();
+        if (!galHost.isConnected) document.documentElement.appendChild(galHost);
+        galVeilEl.style.clipPath = galBlur.style.clipPath = galClip(galHole);
+        void galVeilEl.offsetWidth;
+        galVeilEl.classList.add('on');
+        galBlur.classList.add('on');
     }
 
     // Lay the set out around one hole; returns the slots.
@@ -11635,6 +11657,7 @@
         set.el.classList.add('on');
         galBlur.classList.add('on');
         galCur = set;
+        setTimeout(function () { if (galCur === set) galVeil(false); }, GAL_FADE_MS);
         galTrace(href, 'shown: ' + pics.length + ' thumbnails');
         galPendClear();
         setTimeout(function () {
@@ -11792,7 +11815,9 @@
         galPeek = false;
         if (galGrowEnd) galGrowEnd('closed');
         if (galOwns(active)) cancel();
-        if (galCur) { galDrop(galCur); galCur = null; galBlur.classList.remove('on'); }
+        if (galCur) { galDrop(galCur); galCur = null; }
+        if (galBlur) galBlur.classList.remove('on');
+        galVeil(false);
         galFlyBack();
         galChipsSync();
     }
@@ -11934,6 +11959,7 @@
         clearTimeout(galHoverTimer);
         galFlyBack();
         if (pic) galFlyOut(pic, hr, href);
+        galVeil(true);
         galPendStart(href, 'middle press');
         galChipsSync();
         galLoad(href).then(function (list) {

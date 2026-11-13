@@ -226,7 +226,10 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   listeners get nothing) — dispatch `new Event('scroll')` on `document` by hand.
 - Backdrop (user, v0.247.0 — so the page's picture can't be taken for a thumbnail): `.shade`
   darkens the page `rgba(0,0,0,.8)` with the hole cut out (`clip-path: polygon(evenodd, viewport,
-  hole)`, `galShade`); the hole is the corner where `.fly` sits.
+  hole)`, `galShade`); the hole is the corner where `.fly` sits. **The dark starts with the flight**
+  (user, v0.296.0): `galVeil(true)` in `galMiddle` puts the same shade (`.veil`, outside any set,
+  `pointer-events:none` so a press while loading still closes and goes through) and the blur up at
+  once; `galBuild` drops it `GAL_FADE_MS` after its set fades in, `galHide` always.
   Both live inside the set and fade with it. The page is also blurred and greyed (`blur(6px)
   grayscale(.6)`) by one shared `galBlur` with the same clip, **outside** the sets: an ancestor
   with opacity < 1 is a backdrop root, so inside the fading set the blur would show nothing
