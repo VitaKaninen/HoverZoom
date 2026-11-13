@@ -122,6 +122,12 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
     `galKeys`), `set.inflight` counts thumbnails loading; a failed one frees its room.
   - Strip: pictures `/ galLists length`, pages = laid-out pages + the unloaded rest ÷ `galPer`.
     `galStep` does not wrap until `galWhole` (all read and loaded).
+  - `latePlayerArea` is off inside the frame (v0.310.0). nsfw.xxx plays its own clip on a hovered
+    video card, so hovers learn those cards as a late-player area. `tourWorthy` then refused them,
+    and the frame listed none of them. On /user/alternativealt1 it read 295 of the site's 552 posts;
+    all 257 missing were `div.post.video`. The site itself had loaded all 552 (its PostsGrid
+    `posts`). Note: Chrome's resource-timing buffer stops at 250 entries, so the API page list
+    looked like it ended at page 17.
   - The fixture `door-big.html` uses `/many/bigN.jpg` (distinct paths): `galKeys` dedupes by URL
     *path*, so 240 `mural.jpg?bigN` were one picture to the feed.
 - **Reading on** (`galGrow`, after `galBuild` of a locked open): `galRender(href, onMore, onEnd)` names
