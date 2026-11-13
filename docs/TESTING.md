@@ -323,6 +323,18 @@ it rejects outright. (Counts drift; `grep -c 'class="case"' test-page.html` is t
 (`.claude/launch.json` wraps the same command as
 `hover-zoom-test`, but `.claude/` is gitignored — a fresh clone has only the direct command.)
 
+## Live sites in Chrome — run a pushed build without Tampermonkey
+
+A live https page cannot fetch the working copy from `localhost` (Chrome's Local Network Access
+refuses it, even with CORS/PNA headers, and asks the user to let the site reach their machine —
+do not ask for that). Push, then in the page via `javascript_tool`: define `GM_getValue`/
+`GM_setValue` over a `Map` holding `hoverZoomSettings = {"debug":true}`, stub the other `GM_*`,
+`fetch` `raw.githubusercontent.com/VitaKaninen/HoverZoom/<commit sha>/Hover-Zoom.user.js` (a sha,
+not `master`: the CDN caches) and run it with `new Function(src)()`. Synthetic `mouseover` on the
+`elementFromPoint` target learns areas; real pointer input is the `computer` tool's `hover` by `ref`
+(from `find`; no screenshot needed). Hook `console.log` to collect `dbg` lines as JSON. Synthetic
+hovers passed where real ones failed twice — finish on real hovers.
+
 ## Two Browser-pane traps that fire before you act
 
 - **The Browser pane is Chromium; a Firefox-only layout fault is invisible to every check made
