@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.301.0
+// @version     0.302.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -5560,6 +5560,7 @@
         if (panelHost && (node === panelHost ||
             (panelHost.contains && panelHost.contains(node)))) return true;
         if (tw && node === tw.host) return true;
+        if (galTopHost && node === galTopHost) return true;
         return !!host && (node === host || (host.contains && host.contains(node)));
     }
 
@@ -10798,8 +10799,8 @@
     const galGrown = new Set(), galLists = new Map();
     const galCache = new Map();         // href -> Promise of [{thumb, ss, cands, base}] | null | 'cancel'
     let galFrameStop = null;
-    let galHost = null, galRoot = null, galBlur = null, galCur = null, galWant = null;
-    let galHoverTimer = 0, galPt = { x: 0, y: 0 };
+    let galHost = null, galRoot = null, galBlur = null, galCur = null, galWant = null, galTopHost = null, galTop = null;
+    let galHoverTimer = 0, galPt = { x: 0, y: 0 }, galMovedAt = 0, galLaidAt = 0, galStill = null;
     const GAL_SEEN_KEY = 'hoverZoomGallerySeen';   // linked pages whose gallery was shown, oldest first
     const GAL_SEEN_MAX = 10000;
     const GAL_SEEN_MS = 1000;           // a gallery counts as seen once it has been on screen this long
@@ -11276,6 +11277,13 @@
         return p;
     }
 
+    // The clicked picture, its strip and the menu: a layer of their own, after <body> so it stacks over the preview.
+    function galTopRoot() {
+        galLayer();
+        if (!galTopHost.isConnected) document.documentElement.appendChild(galTopHost);
+        return galTop;
+    }
+
     function galLayer() {
         if (galRoot) return galRoot;
         galHost = document.createElement('div');
@@ -11351,6 +11359,10 @@
             '.diag button{margin-left:8px;float:right;padding:4px 12px;background:#45475a;color:#cdd6f4;border:0;border-radius:4px;font:inherit;cursor:pointer}' +
             '.diag button:hover{background:#585b70}';
         galRoot.appendChild(st);
+        galTopHost = document.createElement('div');
+        galTopHost.style.cssText = 'all:initial;position:fixed;inset:0;pointer-events:none;z-index:2147483647';
+        galTop = galTopHost.attachShadow({ mode: 'open' });
+        galTop.appendChild(st.cloneNode(true));
         // Outside the fading .set: an ancestor below opacity 1 is a backdrop root, so the blur would show nothing mid-fade.
         galBlur = document.createElement('div');
         galBlur.className = 'blur';
@@ -11454,6 +11466,7 @@
 
     // Lay the set out around one hole; returns the slots.
     function galLayout(set, hole) {
+        galLaidAt = performance.now();
         const R = galRows(set.asp, galBars(hole), set.page || 0), L = R.out;
         set.pages = R.pages;
         set.page = R.page;
@@ -11601,7 +11614,7 @@
             galStripFit(galFlyRect().w);
             return;
         }
-        if (s.el.parentNode !== galRoot) galRoot.appendChild(s.el);
+        if (s.el.parentNode !== galTop) galTopRoot().appendChild(s.el);
         const r = !f ? galStripRect(galHole || { x: 0, y: 0, w: 0, h: 0 }) : m.m === 'dock' ? galDockRect(galFlyRect(), m.side) : m.r;
         if (!r) return;
         s.el.style.left = Math.round(r.x) + 'px'; s.el.style.top = Math.round(r.y) + 'px'; s.el.style.width = Math.round(r.w) + 'px';
@@ -11719,7 +11732,7 @@
             });
         });
         galSt = s;
-        galRoot.appendChild(el);
+        galTopRoot().appendChild(el);
     }
 
     // The page holding picture k.
@@ -11984,7 +11997,11 @@
         p.img.__hzItem = p.item;
         cell.appendChild(p.img);
         if (cfg.gallerySavedMarks && saved.has(p.item.thumb)) cell.appendChild(galSavedIcon('svd'));
-        cell.addEventListener('mouseenter', function () { if (set.pv) galPv(p.img); else galNoPv(set); });
+        const enter = function () { if (set.pv) galPv(p.img); else galNoPv(set); };
+        cell.addEventListener('mouseenter', function () {
+            if (galMovedAt < galLaidAt) { galStill = { set: set, cell: cell, go: enter }; return; }     // the cells moved under a still pointer: not a hover
+            enter();
+        });
         cell.addEventListener('mouseleave', function () { if (!placed && active === p.img) cancel(); });
         if (p.item.link) {
             cell.classList.add('go');
@@ -12597,7 +12614,7 @@
 
     // Our menu on the corner picture: its place, and the gallery settings.
     function galMenuShow(x, y) {
-        const root = galLayer();
+        const root = galTopRoot();
         if (!galMenuEl) {
             galMenuEl = document.createElement('div');
             galMenuEl.className = 'menu';
@@ -12665,7 +12682,7 @@
 
     // From the card to the corner; a press on it closes the gallery.
     function galFlyOut(pic, hr, href) {
-        const root = galLayer();
+        const root = galTopRoot();
         if (!galHost.isConnected) document.documentElement.appendChild(galHost);
         const U = galHole, m = galStripM, sh = m.m === 'dock' ? GAL_STRIP_H : 0, band = m.m === 'in' ? GAL_STRIP_H : 0;
         const H = { x: U.x, y: m.side === 't' ? U.y + sh : U.y, w: U.w, h: U.h - sh };
@@ -12751,7 +12768,7 @@
         galFly = null;
         hideTip();
         const el = f.el, H = galHole || { x: 0, y: 0, w: 1, h: 1 };
-        if (galSt) { galSt.el.hidden = true; if (galSt.el.parentNode === el) galRoot.appendChild(galSt.el); }
+        if (galSt) { galSt.el.hidden = true; if (galSt.el.parentNode === el) galTop.appendChild(galSt.el); }
         el.classList.remove('joined', 'edit', 'asking');
         el.style.pointerEvents = 'none';
         const r = f.pic.isConnected ? galHoleRect(f.pic) : null;
@@ -13010,8 +13027,13 @@
 
     // Tracks the pointer; a hover-only chip goes once it leaves its door.
     function galMove(e) {
+        if (e.clientX === galPt.x && e.clientY === galPt.y) return;     // the browser's own move after a layout
         galPt.x = e.clientX;
         galPt.y = e.clientY;
+        galMovedAt = performance.now();
+        const st = galStill;
+        galStill = null;
+        if (st && galCur === st.set && st.cell.isConnected && holds(st.cell.getBoundingClientRect(), galPt.x, galPt.y)) st.go();
         if (galChipHot && !holds(galChipHot.getBoundingClientRect(), galPt.x, galPt.y)) galChipCool();
     }
 
@@ -13503,7 +13525,7 @@
             }
             if (e.button !== 0 || (!galWant && !galCur)) return;     // middle and right presses (a tab, the menu) leave it up
             const H = galHole;
-            if (H && e.target !== galHost && !pointInPreview(e.clientX, e.clientY) && e.clientX >= H.x && e.clientX <= H.x + H.w && e.clientY >= H.y && e.clientY <= H.y + H.h) {
+            if (H && e.target !== galHost && e.target !== galTopHost && !pointInPreview(e.clientX, e.clientY) && e.clientX >= H.x && e.clientX <= H.x + H.w && e.clientY >= H.y && e.clientY <= H.y + H.h) {
                 e.preventDefault();         // the original card: closes, and its link is not followed
                 e.stopImmediatePropagation();
                 galLeftAt = Date.now();

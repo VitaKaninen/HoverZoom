@@ -60,6 +60,16 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   `galHole` holds, what the rows avoid and what the memory places. An `out` strip is a second bar
   in `galRows` (`galBars`). With no clicked picture (no `<img>` on the door) it sits under the hole
   (`galStripRect`). The dock widget hides while a gallery is open (`twGalOpen`) — never two ◀ ▶.
+- **Two layers** (v0.302.0): cells, veil and pending glow in `galRoot` (`galHost`, z max − 1); the
+  clicked picture, the strip and the menu in `galTop` (`galTopHost`, z max, appended to `<html>` after
+  `<body>`, which holds the preview's host). Same stylesheet cloned. Before this a pinned preview
+  covered the strip and the second ◀ ▶ press landed on the preview. `galTopHost` is in `ours()` and
+  in the document mousedown's hole test, or a press on the strip closes the gallery.
+- **A still pointer is not a hover** (v0.302.0): cells moved by a relayout (more pictures read in)
+  fire `mouseenter` under a pointer that never moved, which previewed that cell and set `set.at`, so
+  the counter jumped to 30 / 45. `galLayout` stamps `galLaidAt`, `galMove` stamps `galMovedAt` only
+  when the coordinates change (browsers send their own same-place mousemove after a layout); an
+  enter with no move since the layout is parked in `galStill` and runs on the next real move.
 - **Detach / dock / join** (user, v0.300.0), only in move-and-resize mode, where the strip's buttons
   are faded and dead and each piece has its own dashed outline (inside the frame when joined).
   Dragging the strip (`galStripDown`) detaches it (`galDetach`, the picture keeps its own box);
