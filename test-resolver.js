@@ -1250,7 +1250,7 @@ eq('template: the original name', N.fillNameTemplate('[site] - [page_title] - [o
 eq('template: all empty', N.fillNameTemplate('[site] - ([page_title])', { now: NOW }), '');
 // ---- gallery pages: rows never under GAL_MIN_H; past that the set is laid out as pages.
 {
-    const a = src.indexOf('    function galRows('), b = src.indexOf('    // The hole\'s shading');
+    const a = src.indexOf('    function galRows('), b = src.indexOf('    // The shading: the page dark');
     const rows = new Function('vpW', 'vpH', 'GAL_GAP', 'GAL_MIN_H', 'GAL_PG_TOP', src.slice(a, b) + NL + 'return galRows;')
         (function () { return 1920; }, function () { return 1080; }, 12, 120, 30);
     const hole = { x: 100, y: 100, w: 160, h: 120 }, four3 = function (n) { return Array(n).fill(4 / 3); };

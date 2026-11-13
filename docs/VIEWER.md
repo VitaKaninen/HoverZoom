@@ -908,7 +908,8 @@ time the flip with a `MutationObserver`, not a polling loop. See [`TESTING.md`](
   `pressPinsPreview()` claims a press inside the window's rectangle *or*, in any mode, on the
   element the preview came from — or, inside that element's box, on a site element covering it
   (nsfw.xxx's `div.post` is the press target over the `<img>`; without this the site's click
-  opened the post, v0.292.0). Without it such a preview cannot be kept at all: it is
+  opened the post, v0.292.0). The target is `composedPath()[0]`: a gallery cell is in our shadow
+  root, where `e.target` is only the layer's host (v0.293.0). Without it such a preview cannot be kept at all: it is
   pointer-transparent, the pointer is never over it, and leaving the picture closes it. v0.124.0
   keyed the second half on `position: 'center'`, so under `'last'` nothing could be pinned — the
   user read it as "a preview that does not open under the pointer cannot be pinned". `'center'`

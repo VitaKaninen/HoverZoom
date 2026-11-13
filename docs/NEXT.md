@@ -36,6 +36,10 @@ is still undecided.
   the original card closes; presses between pictures are swallowed; cell click opens its post;
   cell previews and linkless pictures use the card's post link (`og:image` original); press-to-pin
   works through a site card over the picture; `toast()` showed the old tip text (fixed).
+- **v0.293.0** (nsfw.xxx, Chrome, synthetic events): clicked picture flies to the bottom-right
+  corner (1/5 window tall, full-size original) and back on close; blue border again, no tab; chip,
+  tick, disc in one dark pill drawn in a shadow root (Dark Reader turned the inline one light);
+  press on a gallery cell pins its preview like on a page (`composedPath`).
   Not changed: nsfw.xxx post pages refuse the preview because the page already draws the picture
   as tall as the window (`bigEnough`) — offered to the user, no answer yet.
 

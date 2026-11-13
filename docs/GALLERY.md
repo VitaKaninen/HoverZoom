@@ -24,17 +24,20 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   mouseover lands before the mousemove that sets it, and a cached `galKindOf()` would test a stale
   point and skip the chip. `galKindOf()` settles once per area per page, unknown included (nsfw.xxx
   profiles are script-built: always unknown, ~1 s per read). `galLoad` after `cfg.hoverDelay` reads ahead.
-- **The chip is a mark** (user, v0.292.0): `[data-hz-door]` in the card's link like the tick and disc
-  (`galChipEl`), so hovering it keeps the site's own `:hover` (nsfw.xxx zooms the card 1.1×; a chip
-  in our fixed layer took the hover away). `galChipsAll` (from `galMarkAll`) puts one on every
-  picture `doorReason()` matches once its area's `galKindOf()` is settled and not `results`.
-  `cfg.galleryChips` (default on): every chip shows; off: each stays invisible with
-  `pointer-events:none`, **still placed**, so marks never move when it appears; `galChipHot` (the
-  hovered door, cleared by `galMove`/`galScroll`) shows it. Open door's chip = yellow ✕ ("Close this
-  gallery"), `galChipsSync()` on every open/close. No first-uses text (user: "just show the icon";
-  GM `hoverZoomPeekHints` left unread).
-- **Layout with a chip** (user): chip top-left first, tick right of it, saved disc below it
-  (`galMarkSpecs` → `galCorners` `rel`), each still moving off the page's badges.
+- **One pill per picture** (user, v0.293.0): chip ▦, tick, saved disc side by side, in that order,
+  on one dark background — `[data-hz-marks]` in the card's link (`galPill`; marks found through
+  `pill.__box`, `galPillMarks`), so hovering it keeps the site's own `:hover` (nsfw.xxx zooms the
+  card 1.1×; the v0.291.0 chip in our fixed layer took the hover away). The pill is placed as one box
+  by `galCorners` (`galMarkPlace(img)`): top-left first with a chip, else the tick's or disc's order.
+  **Its look is in a shadow root's stylesheet, never inline**: Dark Reader (in the user's Chrome)
+  rewrites inline colours and turned the dark pill light grey; it leaves a shadow `<style>` dark.
+  The pill swallows presses on its own padding (link not followed).
+- **The chip**: `galChipsAll` (from `galMarkAll`) puts one on every picture `doorReason()` matches
+  once its area's `galKindOf()` is settled and not `results`. `cfg.galleryChips` (default on): every
+  chip shows; off: the chip is `.off` (out of the pill) except on `galChipHot` (the hovered door,
+  cleared by `galMove`/`galScroll`) — the tick and disc then shift by one slot when it appears.
+  Open door's chip = yellow ✕, `galChipsSync()` on every open/close. No first-uses text (user: "just
+  show the icon"; GM `hoverZoomPeekHints` left unread).
 - **Pages** (`galRows(asp, hole, page)` → `{out, pages, page}`): if everything fits at
   `GAL_MIN_H` 120 the old binary search runs from there up; else pages of `GAL_MIN_H` rows with
   `GAL_PG_TOP` kept for the `.pg` line. Tested in `test-resolver.js` (683 at 1920×1080 → 10 pages of
@@ -62,10 +65,10 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
 - **Locked on its door** (`galOn`): no hover delay, the hole and gallery never change while open, and
   leaving the link or the window does not hide it, so the pointer can go over the thumbnails. Closes
   on a Ctrl tap (Ctrl down then up, no other key, press or wheel between: `galTap`; it does not also
-  run the previews hotkey, `galPeekTapAt`), Esc (with no preview up), the door's ✕ chip, a left press
-  on the original card (the hole; `galLeftAt` makes `galMidEat` swallow its click, so its link is not
-  followed) or the yellow **Close** tab on the ring, a scroll, a resize. A left press before the set is
-  built (loading) still closes it and goes through.
+  run the previews hotkey, `galPeekTapAt`), Esc (with no preview up), a press on the corner picture
+  (`.fly`), a scroll, a resize. A left press on the page where the corner is, while the picture is
+  still flying, closes too (`galLeftAt` makes `galMidEat` eat its click). A left press before the set
+  is built (loading) still closes it and goes through.
 - **Presses between pictures reach nothing** (user, v0.292.0: a misclick must not open another
   page): `.set.live .shade` takes pointer events (its clip-path cuts the hole out of hit-testing too)
   and stops every press and click. Only cells, the preview, the hole and the tab act.
@@ -76,10 +79,17 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   switches. `preventDefault` on the press (no autoscroll), and `galMidEat` swallows that press's
   mouseup/auxclick/click (no new tab; `galMidAt`, reset by every press). Any modifier goes to the
   browser. A middle press on the preview is still `midSave` (window capture, runs first).
-- **Where to click to end, at a glance** (user): the ring is yellow `#f9e2af`, pulsing (`hzring`
-  1.4 s), with a yellow **✕ Close** tab on its top edge (under it when no room) — the only yellow
-  in the set, so it is found without reading.
-- **The hole is the door's picture** (`galHole`, clipped card box). The moving slot that followed the
+- **The clicked picture flies to the corner** (user, v0.293.0: always the same place to click to end,
+  and nsfw.xxx's cards are a third of the page tall, so a hole there crowded the gallery out):
+  `galHole = galCornerRect()` — bottom-right, `GAL_FLY_FRAC` 1/5 of the window tall, the card's
+  shape, ≤ 40 % wide. `galFlyOut` copies the card's picture into `.fly` (outside the sets, blue
+  border) and animates `transform` from the card's box (`GAL_FLY_MS` 320). `galFlyBack` (every
+  `galHide`, and a switch to another door) flies it back to the card's box **as it is now**, or
+  fades it when the card is off screen. `galFlyUpgrade` swaps in the full-size original: the gallery
+  item that is this picture (same URL, `sameStem`, or `galSameFile` — one file name ends with the
+  other, nsfw.xxx prefixes `amateur-`) → `galLinkedHit`, else the card's URL-rule candidates. The yellow
+  ring and Close tab of v0.292.0 are gone (user: blue again).
+- **The hole** (`galHole`) is the corner; the old hole on the card itself was v0.291.0–v0.292.0. The moving slot that followed the
   pointer was v0.240.0, commit de9996a ("take it back to here" means that).
 - `galShow` loads every thumbnail first (`galImg`, up to `GAL_WAIT_MS` 2.5 s; late or failed ones are
   left out), so each shape is known **before** anything is placed — the user does not want pictures
@@ -195,7 +205,7 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   listeners get nothing) — dispatch `new Event('scroll')` on `document` by hand.
 - Backdrop (user, v0.247.0 — so the page's picture can't be taken for a thumbnail): `.shade`
   darkens the page `rgba(0,0,0,.8)` with the hole cut out (`clip-path: polygon(evenodd, viewport,
-  hole)`, `galShade`); the hole is left undimmed with a 3 px glowing `.ring` 4 px outside it.
+  hole)`, `galShade`); the hole is the corner where `.fly` sits.
   Both live inside the set and fade with it. The page is also blurred and greyed (`blur(6px)
   grayscale(.6)`) by one shared `galBlur` with the same clip, **outside** the sets: an ancestor
   with opacity < 1 is a backdrop root, so inside the fading set the blur would show nothing
