@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.314.0
+// @version      0.315.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -292,8 +292,10 @@
 
         // how to display
         zoomLimit: 4,               // ceiling on the opening scale; the window still fits it
-        position: 'last',           // 'cursor' | 'under' | 'last' (where a pinned one was last dropped; the centre until then)
-        posPerSite: true,           // remembered positions (slideshow, 'last') are kept per site
+        position: 'auto',           // 'auto' (centred, under the pointer when the centre misses it) | 'cursor' | 'under' | 'remember' (the last drop, kept for good)
+        posPerSite: true,           // the 'remember' position is kept per site
+        keepClearWidget: false,     // never let the preview go under the widget (it is nudged aside when there is room either way)
+        keepClearStatus: false,     // never let the preview reach the strip where the browser shows a link's address
         fadeMs: 200,
         borderWidth: 1,
         borderColor: '#45475a',
@@ -350,7 +352,7 @@
             o.skipFurniture = !!o.skipPageBackgrounds;
         }
         // "Centred in the window" is "Where I last put it", whose default is the centre.
-        if (o.position === 'center') o.position = 'last';
+        if (o.position === 'center' || o.position === 'last') o.position = 'auto';
         // "Preview images that are already full size" is a minRatio below 1 now.
         if (o.showEvenIfNotLarger && !(o.minRatio < 1)) o.minRatio = 0.9;
         // Two checkboxes became two three-way modes. `barFade` answered "may they fade" for the
@@ -2643,7 +2645,7 @@
     // viewport, and our status bar is the first thing it covers.
     const STATUS_TIP_H = 20;
 
-    function bottomGap() { return Math.max(EDGE_GAP + STATUS_TIP_H, widgetFloor()); }
+    function bottomGap() { return EDGE_GAP + (cfg.keepClearStatus ? STATUS_TIP_H : 0); }
 
     const TW_FLOOR_BAND = 16;   // px: a widget whose bottom is this close to the window's is docked at the bottom
 
@@ -2656,21 +2658,43 @@
         return Math.max(0, vh - r.y + EDGE_GAP);
     }
 
-    // A status bar landing on the widget moves the window up or down, whichever is less.
+    // A window that would cover the widget is nudged sideways or up/down, whichever moves it least and
+    // stays on screen; with no room either way it stays under, unless keepClearWidget shrinks it.
     function clearWidget() {
-        const r = twShownRect(), vh = vpH();
-        if (!r || !vh || drag || !barShown() || fullActive()) return;
-        const ow = outerW(), oh = outerH(), barH = BAR_MIN_H + insetY();
-        const barTop = view.top + oh - barH;
-        if (r.x >= view.left + ow || r.x + r.w <= view.left || r.y >= view.top + oh || r.y + r.h <= barTop) return;
-        const up = r.y - EDGE_GAP - oh, down = r.y + r.h + EDGE_GAP - (oh - barH);
-        const fits = function (t) { return t >= EDGE_GAP && t + oh <= vh - bottomGap(); };     // never into the bottom strip
-        const best = [up, down].filter(fits).sort(function (a, b) {
-            return Math.abs(a - view.top) - Math.abs(b - view.top);
-        })[0];
-        if (best != null) { view.top = best; return; }
-        // Neither fits: shrink from the bottom until the window ends above the widget.
-        const capH = Math.max(MIN_FRAME, r.y - EDGE_GAP * 2 - insetY() * 2 - barDock());
+        const r = twShownRect(), vw = vpW(), vh = vpH();
+        if (!r || !vw || !vh || drag || fullActive() || !view) return;
+        const ow = outerW(), oh = outerH();
+        const G = EDGE_GAP;
+        if (r.x >= view.left + ow || r.x + r.w <= view.left || r.y >= view.top + oh || r.y + r.h <= view.top) return;
+        const opts = [];
+        if (view.autoX !== false) {
+            opts.push({ ax: 'left', d: (r.x - G - ow) - view.left});
+            opts.push({ ax: 'left', d: (r.x + r.w + G) - view.left});
+        }
+        if (view.autoY !== false) {
+            opts.push({ ax: 'top', d: (r.y - G - oh) - view.top});
+            opts.push({ ax: 'top', d: (r.y + r.h + G) - view.top});
+        }
+        const lim = function (o) {
+            const to = view[o.ax] + o.d;
+            const max = o.ax === 'left' ? vw - G - ow : vh - bottomGap() - oh;
+            return to >= G && to <= max;
+        };
+        const fits = opts.filter(lim).sort(function (a, b) { return Math.abs(a.d) - Math.abs(b.d); })[0];
+        if (fits) { view[fits.ax] += fits.d; return; }
+        if (!cfg.keepClearWidget) {
+            // No clean move: slide as far as there is room, away from the widget's side.
+            const part = opts.map(function (o) {
+                const cur = view[o.ax], max = o.ax === 'left' ? vw - G - ow : vh - bottomGap() - oh;
+                const to = Math.max(G, Math.min(max, cur + o.d));
+                return { ax: o.ax, to: to, moved: Math.abs(to - cur) };
+            }).sort(function (a, b) { return b.moved - a.moved; })[0];
+            if (part && part.moved > 0) view[part.ax] = part.to;
+            return;
+        }
+        // keepClearWidget and nowhere to go: shrink from the side the widget is on.
+        const low = r.y + r.h / 2 > vh / 2;
+        const capH = Math.max(MIN_FRAME, (low ? r.y - G * 2 : vh - bottomGap() - (r.y + r.h + G)) - insetY() * 2 - barDock());
         if (capH >= view.frameH) return;
         view.capH = capH;
         if (view.fixedH != null) view.fixedH = capH;
@@ -2678,7 +2702,7 @@
             view.fitScale = view.scale = Math.max(minScaleFor(view.natW, view.natH), view.scale * capH / view.frameH);
         }
         reflow();
-        view.top = EDGE_GAP;
+        view.top = low ? G : r.y + r.h + G;
     }
 
     const MIN_FRAME = 48;
@@ -4190,11 +4214,20 @@
         const kind = posKind();
         if (kind) posApply(posLoad(kind));
         else {
-            // Centred on the pointer ('under'), else beside it on whichever side has more room.
             const rightRoom = m.vw - pointer.x;
-            view.left = cfg.position === 'under' ? pointer.x - ow / 2 : rightRoom >= ow ? pointer.x : pointer.x - ow;
-            view.top = pointer.y - oh / 2;
-            if (!activeSmall) nudgeIntoReach();
+            if (cfg.position === 'auto') {
+                // Centred in the window; when the pointer is not on it there, centred on the pointer.
+                view.left = (m.vw - ow) / 2;
+                view.top = (usableHeight() - oh) / 2;
+                const on = pointer.x >= view.left + REACH_INSET && pointer.x <= view.left + ow - REACH_INSET &&
+                    pointer.y >= view.top + REACH_INSET && pointer.y <= view.top + oh - REACH_INSET;
+                if (!on) { view.left = pointer.x - ow / 2; view.top = pointer.y - oh / 2; if (!activeSmall) nudgeIntoReach(); }
+            } else {
+                view.left = cfg.position === 'under' ? pointer.x - ow / 2 : rightRoom >= ow ? pointer.x : pointer.x - ow;
+                view.top = pointer.y - oh / 2;
+                if (!activeSmall) nudgeIntoReach();
+            }
+            view.autoX = view.autoY = true;
         }
         if (activeSmall) besidePicture(ow, oh, m);
 
@@ -4287,7 +4320,7 @@
         resetCaption();
 
         reflow();
-        posApply(tour && tour.hold || posLoad('spot'));
+        posApply(posLoad('spot'));
 
         setMedia(res);
         layout();
@@ -4450,7 +4483,7 @@
 
     // ------------------------------------------------------------- remembered positions
 
-    // One memory, read by the slideshow and by a hover preview that opens 'last'. A spec is
+    // One memory, read by the slideshow and by a hover preview that opens 'remember'. A spec is
     // {x:{m,o}, y:{m,o}} — the window's start/centre/end point, o px from the viewport's same
     // point, m the nearest third (with the widgets' hysteresis). See VIEWER.md.
     const POS_KEY = 'hoverZoomPos';     // GM: { spot: { sites, last } }; the old { tour, hover } pair is folded into spot on read
@@ -4468,13 +4501,25 @@
         return {};
     }
 
-    // This site's spot when per-site is on and it has one, else the last drop anywhere, else the centre.
+    const POS_TAB_KEY = 'hoverZoomTabSpot';     // sessionStorage: where the user last dropped a window in this tab
+
+    function posTab() {
+        try { return JSON.parse(sessionStorage.getItem(POS_TAB_KEY)) || null; } catch (e) { return null; }
+    }
+
+    // 'remember': this site's spot when per-site is on and it has one, else the last drop anywhere. Otherwise the
+    // tab's last drop. Either way, the centre where there is none.
     function posLoad(kind) {
+        if (cfg.position !== 'remember') return posTab() || POS_CENTRE;
         const k = posStore()[kind] || {};
         return (cfg.posPerSite && k.sites && k.sites[pageHost()]) || k.last || POS_CENTRE;
     }
 
     function posSave(kind, spec) {
+        if (cfg.position !== 'remember') {
+            try { sessionStorage.setItem(POS_TAB_KEY, JSON.stringify(spec)); } catch (e) { /* storage refused */ }
+            return;
+        }
         const st = posStore();
         const k = st[kind] = st[kind] || {};
         k.sites = k.sites || {};
@@ -4485,7 +4530,7 @@
 
     // Which memory a window opened now answers to, if any.
     function posKind() {
-        return tourActive() || cfg.position === 'last' ? 'spot' : null;
+        return tourActive() || cfg.position === 'remember' ? 'spot' : null;
     }
 
     function posPt(lo, len, m) { return m === 's' ? lo : m === 'c' ? lo + len / 2 : lo + len; }
@@ -4501,6 +4546,9 @@
         view.left = posAxis(spec.x, outerW(), vpW());
         view.top = posAxis(spec.y, outerH(), vpH());
         view.anchor = spec;
+        const mid = function (a) { return !a || (a.m === 'c' && !a.o); };
+        view.autoX = mid(spec.x);       // an axis the user placed is theirs: nothing nudges it
+        view.autoY = mid(spec.y);
     }
 
     // A drop flush with an edge or the centre anchors there; anywhere else, the nearest third.
@@ -4545,17 +4593,17 @@
         if (!vw || !vh) return;
         const cur = posSpec(view.anchor);
         view.anchor = cur;
-        if (tour && tour.hold) tour.hold = cur;
-        const kind = posKind();
+        view.autoX = view.autoY = false;
+        const kind = 'spot';
         const room = function (len, V) { return V - len >= Math.max(POS_ROOM_MIN, V * 0.1); };
         const takeX = Math.abs(dx) >= POS_MOVE_MIN && room(outerW(), vw);
         const takeY = Math.abs(dy) >= POS_MOVE_MIN && room(outerH(), vh);
-        if (kind && (takeX || takeY)) {
+        if (takeX || takeY) {
             const saved = posLoad(kind);
             posSave(kind, { x: takeX ? cur.x : saved.x, y: takeY ? cur.y : saved.y });
         }
         dbg('window dropped', { kind: kind || '(not remembered)', spec: JSON.stringify(cur),
-            remembered: kind ? (takeX ? 'x' : '') + (takeY ? 'y' : '') || 'nothing — too small a move, or no room' : '-' });
+            remembered: (takeX ? 'x' : '') + (takeY ? 'y' : '') || 'nothing — too small a move, or no room' });
     }
 
     // ------------------------------------------------------------- fullscreen
@@ -4704,7 +4752,7 @@
         view.scale = swapped ? view.fitScale
             : Math.max(p.scale, minScaleFor(view.natW, view.natH));
         reflow();
-        if (swapped) posApply(tour && tour.hold || posLoad('spot'));
+        if (swapped) posApply(posLoad('spot'));
         else {
             view.left = p.left;
             view.top = p.top;
@@ -9790,7 +9838,6 @@
     function tourTurnOn() {
         if (!tour || tour.on) return;
         tour.on = true;
-        if (!view.anchor) tour.hold = posSpec(null);      // a window placed by hand or beside the pointer stays where it is
         dbg('tour entered: ' + describeEl(tourScopeNow(tourPics(tourFloor()))), { floor: tour.floor + 'px' });
     }
 
@@ -14774,17 +14821,22 @@
         act.el.addEventListener('change', syncModKey);
         syncModKey();
         const pos = pick('position', 'Opens', ' ', [
-            ['cursor', 'Beside the pointer'], ['under', 'Under the pointer'], ['last', 'Where I last put it']]);
+            ['auto', 'Centred, or under the pointer'], ['cursor', 'Beside the pointer'], ['under', 'Under the pointer'],
+            ['remember', 'Where I last put it, for good']]);
         const posHint = pos.row.querySelector('.hint');
         function syncPos() {
-            posHint.textContent = pos.el.value !== 'last'
-                ? 'Click the preview to pin it.'
-                : 'Centred until you move one. Click the picture to pin, then drag; later ones open there.';
+            posHint.textContent = pos.el.value !== 'remember'
+                ? 'Click the preview to pin it. A window you drag stays where you put it for this tab.'
+                : 'Centred until you move one. Click the picture to pin, then drag; later ones open there, on every visit.';
         }
         pos.el.addEventListener('change', syncPos);
         syncPos();
         check('posPerSite', 'Remember positions per site',
-            'Each site keeps its own; others use the last one.');
+            'For "Where I last put it": each site keeps its own; others use the last one.');
+        check('keepClearWidget', 'Never cover the ◀ ▶ widget',
+            "The preview is always nudged aside when there is room; this shrinks it when there is none.");
+        check('keepClearStatus', 'Keep the browser link bar uncovered',
+            "Leaves the strip along the bottom free, where the browser shows a link's address over the page.");
         num('hoverDelay', 'Hover delay',
             'How long the pointer rests on an image before the preview loads, in ms. ' +
             '(default: 120)', 0, 3000, 10);

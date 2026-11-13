@@ -94,6 +94,8 @@ is still undecided.
 
 - **v0.314.0**: a pinned picture shows its number in the widget (`tourSync` at `place()`); a wheel over a hover preview or its picture pins and zooms it (`twWheel`) instead of scrolling the page. Pane-checked by synthetic events.
 
+- **v0.315.0** (user's design, 2026-11-13): the window may fill the whole viewport (no widget floor, no link-bar strip unless `keepClearStatus`); `clearWidget` nudges it off the widget (`keepClearWidget` shrinks instead); `position` default `auto` (centre, else under the pointer; `last` retired → `remember`); flips go back to the centre unless dragged, drops held per tab in `sessionStorage`; `tour.hold` gone. Pane-checked: fills, no overlap at 1500×800. Nudge fallbacks, shrink option, tab memory not exercised; Tampermonkey not tried. Gallery's corner picture unchanged.
+
 ## Not verified
 
 Not tried in LibreWolf + Tampermonkey (incl. v0.300.0–v0.309.0).

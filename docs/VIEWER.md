@@ -185,16 +185,18 @@ window.
 
 ### Remembered positions · `E64`
 
-One memory (`spot`, v0.312.0; was two, `tour` and `hover`, kept apart by the user's call 2026-09-22
-as different jobs). Read by every slideshow picture, and by a hover preview only under
-`position: 'last'`; beside-the-pointer never reads or writes it. A stored `{tour, hover}` pair is
-folded into `spot` on read (`tour` wins). **A slideshow begun on a window already placed by hand or
-beside the pointer keeps that window's spot** (`tour.hold`, set at entry when `view.anchor` is null;
-a drop in the slideshow moves it); one begun on a remembered-spot window follows the memory.
+Where a window opens (user's design 2026-11-13, v0.315.0; `position` setting, default `auto`):
+**`auto`** centres it in the window, and centres it on the pointer (`nudgeIntoReach`) when the
+centred frame would not be under the pointer; `cursor` / `under` are the older beside / under rules;
+`remember` reads the persistent `spot` (per site, last drop as fallback; `posKind()`). A slideshow
+step (`commitSwap`) always re-reads the memory: `posLoad('spot')` is the persistent `spot` under
+`remember`, else the **tab's** last drop (`sessionStorage` `hoverZoomTabSpot`), else the centre — so
+flips migrate back to the centre until the user drags once; then the dropped axes hold for the tab.
+A fresh hover still opens by the position rule. A pinned window stays put until the next flip.
+Old `last`/`center` values migrate to `auto`. One memory (`spot`; was `tour` + `hover`, v0.312.0).
 
 - **Written only by a drop** (`endDrag` → `posDropped`) of a placed window moved by a drag — see
-  the threshold below — and only to `spot`, and only when `posKind()` says the window answers to it. Moving a beside-the-pointer preview out of the
-  way saves nothing. Resizes and zooms save nothing.
+  the threshold below — and to `spot` (the persistent one under `remember`, else the tab's). Resizes and zooms save nothing.
 - **Spec = the widgets' window anchor**: `{x:{m,o}, y:{m,o}}`, the window's start/centre/end point
   `o` px from the viewport's same point, so a different-sized picture grows away from the edge it
   is anchored to. A drop flush with an edge or the centre anchors THERE (a wide picture's centre can
@@ -210,7 +212,7 @@ a drop in the slideshow moves it); one begun on a remembered-spot window follows
   an axis is saved only when the drag moved it at least `POS_MOVE_MIN` (40 px) AND the window has
   `POS_ROOM_MIN` (80 px, or 10% of the window) of spare room on it. A picture nearly the window's
   size is janky to position, and nudging it must not overwrite the default (user's call).
-- **A slideshow step re-reads the memory** (`commitSwap` → `tour.hold` or `posLoad('spot')`), not `view.anchor`,
+- **A slideshow step re-reads the memory** (`commitSwap` → `posLoad('spot')`), not `view.anchor`,
   so a drop too small to be remembered lasts until the next step and no longer.
 - `posApply` keeps the window whole on screen when it fits; `view.anchor` remembers the spec so an
   upgrade and a window resize re-place from it instead of keeping the centre. A hover preview still
@@ -1433,3 +1435,12 @@ looked correct, hovered correctly, and did nothing. Both handlers now `return` e
 popover, the zoom cluster and the video strip. Any new control placed inside the box
 goes in there — it is not optional, and the symptom is silence. Found 2026-09-03 in browser testing; nothing
 static catches it — `node --check` passes and the markup is fine.
+
+### Widget and link bar vs the window (v0.315.0)
+
+The frame is capped at the viewport (4 px edge gap); `bottomGap()` is that gap plus `STATUS_TIP_H` only
+under `keepClearStatus` (the browser's link-address bar paints over the page's bottom-left). The widget no
+longer reserves floor. `clearWidget()` (from `clampPosition`) nudges a window that overlaps the widget
+sideways or up/down, smallest move that stays on screen, only on axes still auto (`view.autoX/autoY`:
+false once the user placed that axis); with no clean move it slides as far as there is room, or under
+`keepClearWidget` shrinks the frame from the widget's side. Fullscreen still uses `widgetFloor()`.
