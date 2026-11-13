@@ -59,8 +59,23 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   `galLists` (the cached list, mutated) by URL path of thumb + every srcset entry (`galItemKeys`,
   so an HTML read and a frame read of one picture match), `galAppend` adds cells in
   `GAL_APPEND_MS` batches, relayout keeps the page. `galGrown` = read to the end this visit, not
-  read again. `galHide` ends it.
+  read again. (No longer ended by `galHide`, v0.297.0.)
   Cost: the open's page loads a second time (the first frame, if any, is gone by then).
+- **Where the gallery ends** (user v0.298.0: nsfw.xxx's /user/PogiOne shows its 37 posts, then
+  appends the site's feed of *other users* in the same grid, which read on as more pictures). In
+  the frame (`galProbeReport` `mine`/`judge`): each item carries its card shape (`galCardSig`, the
+  first `GAL_CARD_DEPTH` 4 levels of `domChain` — an outer load-state class like `init` must not
+  count). The first list **holding any pictures** (an empty first report must not seed it) sets
+  the gallery's own shapes: the commonest one and every shape up to its last card. A shape seen
+  later is judged once: **another gallery** when most of its cards are learned doors
+  (`doorReason`) or link to a page shaped like this one (`galPathShape`: first segment kept,
+  others `#`/`w` — /user/PogiOne vs /user/x); **anything else is the gallery's own** (no evidence
+  = keep reading, as before). `GAL_FOREIGN_END` 4 such pictures in a row end the reading.
+  Not used (tried in v0.298.0's draft): `galLeafAt` on the shape's links — a video post's page has
+  no bigger *picture*, so it called the gallery's own video posts "more thumbnails" and cut a
+  37-post gallery at 15. Every verdict and the end reason go into the open's trace as `frame: …`
+  (`notes` on the frame's messages; `hover-zoom:gallery-state` prints them) — the frame's own
+  `dbg` never reaches the console.
 - Why the 683-picture gallery showed 9–15: the frame reported once, 4 s after load, and the page
   mounts posts as it is scrolled. Unverified on nsfw.xxx itself.
 

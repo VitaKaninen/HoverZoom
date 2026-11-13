@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.297.0
+// @version     0.298.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -10786,6 +10786,8 @@
     const GAL_GROW_TICK = 400;          // the reading frame scrolls a screen this often
     const GAL_GROW_IDLE_MS = 4000;      // at its bottom with nothing new this long, the page is read
     const GAL_GROW_MAX_MS = 180000;     // longest a gallery's page is read on
+    const GAL_FOREIGN_END = 4;          // this many pictures of another card shape in a row: the gallery ended, the site's feed follows
+    const GAL_CARD_DEPTH = 4;           // levels of the ancestor chain that make a card's shape
     const GAL_DOOR_MARK = 'data-hz-door';      // the ▦ chip, in the card like the marks
     const GAL_PILL = 'data-hz-marks';          // one dark pill per picture holding chip, tick, disc
     let galPeek = false, galPeekTapAt = 0, galGrowing = null, galGrowEnd = null, galChipHot = null, galLeftAt = 0;
@@ -11020,6 +11022,7 @@
                 if (e.source !== f.contentWindow || !e.data || e.data.hzGallery !== token) return;
                 if (e.data.title) keepPageInfo(href, e.data.title, e.data.site);
                 const items = Array.isArray(e.data.items) ? e.data.items : [];
+                if (Array.isArray(e.data.notes)) e.data.notes.forEach(function (n) { galTrace(href, 'frame: ' + String(n)); });
                 if (!done) { fin(items, 'reported', !!onMore && !e.data.done); return; }
                 if (items.length) onMore(items);
                 if (e.data.done) end('grown');
@@ -11091,6 +11094,16 @@
         } catch (e) { /* loadstart still catches media */ }
     }
 
+    // A picture's card shape: the first GAL_CARD_DEPTH levels of its ancestor chain (an outer load-state class does not count).
+    function galCardSig(el) {
+        return domChain(el).split('>').slice(0, GAL_CARD_DEPTH).join('>');
+    }
+
+    // A path's shape: its first segment as written, later ones as # (a number) or w (anything else).
+    function galPathShape(p) {
+        return String(p || '/').split('/').filter(Boolean).map(function (s, i) { return i === 0 ? s.toLowerCase() : /^\d+$/.test(s) ? '#' : 'w'; }).join('/');
+    }
+
     // Inside the hidden frame: once no picture has arrived for GAL_SETTLE_MS (or at GAL_QUIET_CAP_MS), send the parent what the widget would count.
     function galProbeReport() {
         const tag = String(window.name).slice(GAL_NAME.length + 1).split(':');
@@ -11104,45 +11117,91 @@
         const list = function () {
             try {
                 return widgetEntries().filter(function (e) { return e.el && e.el.tagName === 'IMG'; })
-                    .map(function (e) { return galItem(e.el, shownUrl(e.el) || e.url, location.href); })
+                    .map(function (e) { const x = galItem(e.el, shownUrl(e.el) || e.url, location.href); x.sig = galCardSig(e.el); x.el = e.el; return x; })
                     .filter(function (x) { return x.thumb && !/^(data|blob):/.test(x.thumb); }).slice(0, GAL_MAX);
             } catch (err) { dbg('gallery frame could not list the page', String(err)); return []; }
         };
-        const post = function (items, done) {
-            items.forEach(function (x) { known.add(x.thumb); });
-            try { window.parent.postMessage({ hzGallery: token, items: items, done: done, title: document.title, site: siteNameOf(document) }, location.origin); }
+        let shapes = null, foreign = 0;
+        const linkOf = function (x) {
+            try { const u = new URL(x.link || x.links[0], location.href); return u.origin === location.origin ? u : null; } catch (e) { return null; }
+        };
+        // A card shape seen after the gallery's own leads to other galleries when most of its cards are learned doors or link to pages shaped like this one; else it is the gallery's.
+        const judge = function (sig, items) {
+            const half = items.length / 2, here = galPathShape(location.pathname);
+            if (items.filter(function (x) { return doorReason(x.el); }).length > half) return 'other galleries (learned doors)';
+            if (items.filter(function (x) { const u = linkOf(x); return u && galPathShape(u.pathname) === here; }).length > half) return 'other galleries (links shaped like this page, ' + here + ')';
+            return 'own';
+        };
+        // The gallery's own pictures: the commonest card shape and every shape up to its last card, from the first list holding any; a shape after it is judged once.
+        const mine = async function (items) {
+            if (!items.length) return [];
+            if (!shapes) {
+                shapes = new Map();
+                const n = {};
+                items.forEach(function (x) { n[x.sig] = (n[x.sig] || 0) + 1; });
+                let dom = null, last = -1;
+                Object.keys(n).forEach(function (k) { if (!dom || n[k] > n[dom]) dom = k; });
+                items.forEach(function (x, i) { if (x.sig === dom) last = i; });
+                items.forEach(function (x, i) { if (i <= last) shapes.set(x.sig, 'own'); });
+            }
+            const fresh = new Map();
+            items.forEach(function (x) { if (!shapes.has(x.sig)) { if (!fresh.has(x.sig)) fresh.set(x.sig, []); fresh.get(x.sig).push(x); } });
+            for (const [sig, xs] of fresh) {
+                const v = await judge(sig, xs);
+                shapes.set(sig, v);
+                notes.push('a card shape after the gallery’s own (' + xs.length + ' pictures) is ' + v);
+            }
+            const out = [];
+            items.forEach(function (x) {
+                if (shapes.get(x.sig) === 'own') { out.push(x); foreign = 0; }
+                else { known.add(x.thumb); foreign++; }
+            });
+            return out;
+        };
+        const notes = [];
+        const post = function (items, done, why) {
+            if (why) notes.push(why);
+            items.forEach(function (x) { known.add(x.thumb); delete x.el; delete x.sig; });
+            try { window.parent.postMessage({ hzGallery: token, items: items, done: done, notes: notes.splice(0), title: document.title, site: siteNameOf(document) }, location.origin); }
             catch (e) { /* parent gone */ }
         };
-        // Reading on: a screen further down every GAL_GROW_TICK, new pictures sent as they mount, done once the bottom stays quiet.
+        // Reading on: a screen further down every GAL_GROW_TICK, new pictures sent as they mount, done once the bottom stays quiet or the site's feed begins.
         const readOn = function () {
             const t0 = Date.now();
             let idle = 0;
             const tick = function () {
                 const fresh = list().filter(function (x) { return !known.has(x.thumb); });
-                if (fresh.length) { idle = 0; post(fresh, false); }
-                const se = document.scrollingElement || document.documentElement, max = se.scrollHeight - window.innerHeight;
-                if (se.scrollTop < max - 4) {
-                    se.scrollTop = Math.min(max, se.scrollTop + Math.round(window.innerHeight * 0.9));
-                    idle = 0;
-                    try { window.dispatchEvent(new Event('scroll')); } catch (e) { /* the real one follows */ }     // a frame not painted sends none
-                } else {
-                    if (idle % 2000 === 0) { try { window.dispatchEvent(new Event('scroll')); } catch (e) { /* as above */ } }
-                    idle += GAL_GROW_TICK;
-                }
-                if (idle >= GAL_GROW_IDLE_MS || Date.now() - t0 > GAL_GROW_MAX_MS) { post([], true); return; }
-                setTimeout(tick, GAL_GROW_TICK);
+                (fresh.length ? mine(fresh) : Promise.resolve([])).then(function (ok) {
+                    if (fresh.length) idle = 0;
+                    if (ok.length) post(ok, false);
+                    if (foreign >= GAL_FOREIGN_END) { post([], true, 'read on: stopped, ' + foreign + ' pictures in a row were not the gallery\u2019s'); return; }
+                    const se = document.scrollingElement || document.documentElement, max = se.scrollHeight - window.innerHeight;
+                    if (se.scrollTop < max - 4) {
+                        se.scrollTop = Math.min(max, se.scrollTop + Math.round(window.innerHeight * 0.9));
+                        idle = 0;
+                        try { window.dispatchEvent(new Event('scroll')); } catch (e) { /* the real one follows */ }     // a frame not painted sends none
+                    } else {
+                        if (idle % 2000 === 0) { try { window.dispatchEvent(new Event('scroll')); } catch (e) { /* as above */ } }
+                        idle += GAL_GROW_TICK;
+                    }
+                    if (idle >= GAL_GROW_IDLE_MS || Date.now() - t0 > GAL_GROW_MAX_MS) { post([], true, idle >= GAL_GROW_IDLE_MS ? 'read on: the bottom stayed quiet' : 'read on: time limit'); return; }
+                    setTimeout(tick, GAL_GROW_TICK);
+                });
             };
             setTimeout(tick, GAL_GROW_TICK);
         };
         const send = function (final) {
             if (sent) return;
-            const items = list();
-            if (!items.length && !final) return;
+            const all = list();
+            if (!all.length && !final) return;
             sent = true;
             clearTimeout(quietT); clearTimeout(capT);
             if (obs) obs.disconnect();
-            post(items, !grow);
-            if (grow) readOn();
+            mine(all).then(function (items) {
+                const end = !grow || foreign >= GAL_FOREIGN_END;
+                post(items, end);
+                if (!end) readOn();
+            });
         };
         const bump = function () { clearTimeout(quietT); quietT = setTimeout(function () { send(false); }, GAL_SETTLE_MS); };
         const isPic = function (n) { return n.nodeType === 1 && (n.tagName === 'IMG' || (n.querySelector && !!n.querySelector('img'))); };
@@ -11394,11 +11453,10 @@
         return L;
     }
 
-    // The page line, top centre: only when the gallery has pages, or is still being read.
+    // The page line, top centre: page, count, and whether more are being read.
     function galPageNote(set) {
         if (!set) return;
         const many = set.pages && set.pages.length > 1, reading = galGrowing === set.href;
-        if (!many && !reading) { if (set.pg) set.pg.hidden = true; return; }
         if (!set.pg) {
             set.pg = document.createElement('div');
             set.pg.className = 'pg';
@@ -11408,7 +11466,7 @@
         const n = set.cells.length;
         const total = set.pages ? set.pages.length : 1;
         set.pg.textContent = 'Page ' + ((set.page || 0) + 1) + ' / ' + total + (reading ? '+' : '') + ' · ' +
-            n + ' picture' + (n === 1 ? '' : 's') + (reading ? ', finding more…' : '') + ' · mouse wheel turns pages';
+            n + ' picture' + (n === 1 ? '' : 's') + (reading ? ', finding more…' : '') + (many || reading ? ' · mouse wheel turns pages' : '');
     }
 
     // The cells of the page on screen, as their pics.
