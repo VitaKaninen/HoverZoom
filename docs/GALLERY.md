@@ -142,7 +142,7 @@ so the user can judge whether that gallery is worth opening. Look only: the floa
 - **Seen check** (user): a gallery that stays on screen `GAL_SEEN_MS` (1 s) as the current set has its
   link stored (user, v0.249.0: a shorter look, a hover without Ctrl, and preloading never count) (`hoverZoomGallerySeen`, an ordered list,
   last `GAL_SEEN_MAX` 10,000, re-read before each write so tabs don't erase each other) and every
-  page `<img>` linking there gets a 24 px bare green tick (inline SVG, dark outline, no box) in a span (`data-hz-seen`) inserted right after it,
+  page `<img>` linking there gets a 24 px bare green tick (inline SVG, dark outline, no box) in a span (`data-hz-seen`) appended to the result's link (`galMarkHost`; found again by `__hzAt`),
   absolutely positioned by measuring its own containing block (`galMarkImg`; size = the larger of img and `<picture>`, `galMarkRect`, as an inline picture measures as a line box) — so no ancestor's
   `position` is changed. `galMarkAll` re-derives on boot (+1.5 s), 250 ms after a scroll or resize,
   and after each show; it holds no element references.
@@ -150,6 +150,15 @@ so the user can judge whether that gallery is worth opening. Look only: the floa
   hidden/replaced`; `gallery marks` (logged only when it changes) gives counts, `tooSmall`, up to 3
   drawn-but-`hidden` ticks (clipped/covered/zero size), up to 3 `small` (img and picture sizes), and `lastSeenUnmatched` + `nearestLinks` when
   the newest seen link matches no page picture.
+- **Mark rules (user, v0.278.0–v0.280.0):** only the **biggest** picture linking to a result is marked
+  (nsfw.xxx cards hold the profile avatar too); corner = first on-screen one not under a page element
+  (`galMarkCorner`: top-right, bottom-right, bottom-left, top-left; the saved disc's top-left is skipped),
+  re-derived when any `<img>` loads (masonry relayouts move cards). **Marks go in the link, not beside
+  the picture:** nsfw.xxx's card container is a z-index 1 layer under the link's z-index 2 gradient
+  `::before`, so a mark inside it was dimmed and unclickable at any z-index. z-index 3.
+  **A click on a tick or saved disc clears the link** from seen, visited and saved-from (`galMarkClear`,
+  capture on the mark, claims the click per `../CLICK_COLLISIONS.md`, toast). Saved-disc clearing is
+  untested live.
 - **Visited = double tick** (user): two of the same ticks, 10 px apart in a 34 × 24 box, both fully
   outlined. Stored in `hoverZoomGalleryVisited` (same list rules, `galList`/`galListAdd`). **Only the
   browser loading the page counts** (user, v0.252.0): at boot, every top-frame page on a
