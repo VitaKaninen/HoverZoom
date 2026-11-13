@@ -202,7 +202,7 @@ Old `last`/`center` values migrate to `auto`. One memory (`spot`; was `tour` + `
   upgrade and a window resize re-place from it instead of keeping the centre. A hover preview still
   goes through `clampPosition()`, so under `keepClearStatus` it sits `STATUS_TIP_H` higher than the pinned drop.
 - **Storage** only under `position: remember`: GM `hoverZoomPos` = `{spot:{sites,last}}`. A site gets an entry only
-  when something is dropped there; `last` is the fallback. `posPerSite` off: `last` only. Otherwise a drop is
+  when something is dropped there; `last` is the fallback. Otherwise a drop is
   kept in `sessionStorage` (`hoverZoomTabSpot`) for the tab. The user's
   idea of consolidating a common default and storing only exceptions was declined: ~60 bytes a site,
   and a site matching today's default would silently follow a later change.

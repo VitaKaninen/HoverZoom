@@ -1289,7 +1289,7 @@ const galPH = function (min) {
     const cut = function (from, to) { const a = src.indexOf(from), b = src.indexOf(to, a); return src.slice(a, b); };
     const S = new Function('const GAL_GAP = 12, GAL_MIN_H = 120, GAL_FLY_FRAC = 0.2, POS_SNAP_EDGE = 16, POS_SNAP_CENTRE = 40, GAL_STRIP_H = 60, cfg = {};' + NL +
         cut('    function posPt(', '    // The window placed by a spec') +
-        cut('    function galRowLines(', '    // The strip\'s box') + cut('    function galSnapH(', '    function galFlyPut(') +
+        cut('    function galRowLines(', '    // The clicked picture\'s resize corners follow it.') + cut('    function galSnapH(', '    function galFlyPut(') +
         NL + 'return {galRowLines, galSnapH, galPagedRows, galLines, galEdgeOn, galEdgeAt, galPlace, galBoxSnap};')();
     const r768 = S.galPagedRows(768), r900 = S.galPagedRows(900);
     eq('anchor: paged row lines come from the window height alone', r768, [12, 151, 157, 163, 302, 309, 315, 454, 460, 466, 605, 611, 617, 756]);

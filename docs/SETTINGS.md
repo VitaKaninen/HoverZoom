@@ -2,6 +2,17 @@
 
 The settings panel, how `cfg` is read and written, the per-tab staleness trap, the site and block list editors, the manager's menu command, and the in-window controls that are not stored settings.
 
+## Tuning knobs folded into constants (v0.317.0, user)
+
+Retired as settings, fixed at their old defaults; sections below that discuss them describe the
+behaviour, not a panel row: `fadeMs` 200, `barIdleMs` 250, `barFadeMs` 250, `shadowSize` 24,
+`shadowStrength` 50 %, `spinnerTheme` auto, `tourFadeTo` 35 % (`TW_FADE_TO`), `posPerSite` on,
+`tourWorkers` 6 (`PL_WORKERS`), `preloadAhead` all (12 under data saver), `preloadMB` automatic,
+`tourHoldRate` none, `wheelRange` gone (the wheel steps over the widget itself). Kept on purpose:
+`displayScale` (left at 1 on a scaled display it makes the readout wrong — below) and `galleryRowMin`
+(asked for by the user, v0.301.0). The panel's debug row is labelled *Enable debug mode*; it also
+gates the failure reason and ↻ (`E53`, `E56`).
+
 ## Everything saves as it is changed (v0.40.0)
 
 There is no Save button. Every control writes `cfg` and calls `persist()` (`saveSettings()` +

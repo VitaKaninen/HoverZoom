@@ -3,7 +3,7 @@
 What the preview **window** does, as a state machine. Menus, buttons, the status bar contents and
 the loading ring are out of scope except where they change what the window itself accepts.
 
-Describes `Hover-Zoom.user.js` **v0.144.0**.
+Describes `Hover-Zoom.user.js` **v0.317.0**.
 
 **Two words the user uses:** *the widget* is the floating ◀ `n / N` ▶ box; *the slideshow* is the pinned
 preview stepping through a queue of the page's pictures. The code and `docs/` say `tour` for the slideshow.
@@ -198,8 +198,8 @@ window.
 
 #### S05 · hover-held
 The window is up and transient.
-- **Placement:** decided once, when it opens, and never revisited. With `position: cursor` (the
-  default) it opens beside the pointer and is nudged the smallest distance that puts the pointer
+- **Placement:** decided once, when it opens, and never revisited. With `position: auto` (the
+  default) it opens centred, or centred on the pointer when the centre misses it. With `position: cursor` it opens beside the pointer and is nudged the smallest distance that puts the pointer
   `REACH_INSET` (10 px) inside its edge. (`cursorGap` was retired in v0.40.0: that nudge always
   overrode it, so the gap could never survive.) With `position: under` (v0.269.0) it opens
   centred on the pointer, then clamped on screen like the others. With `position: remember` it opens where a pinned
@@ -210,8 +210,8 @@ The window is up and transient.
   the distinction that matters:
   - **hover** passes through. `mouseover` reaches the element underneath, which is what makes a
     scan across a row of thumbnails give one window per thumbnail.
-  - **the wheel** passes through. The page scrolls, and the scroll then closes the window
-    (`K2`).
+  - **the wheel over it** pins it and zooms it (`twWheel`); off it, the page scrolls and the
+    scroll closes the window (`K2`).
   - **a press or click does NOT.** It genuinely lands on the page, but the script's own
     document-level capture listeners test the pointer against the window's rectangle and claim
     it before the page sees it. See `E1` — that is the price of click-to-pin.
@@ -221,9 +221,8 @@ The window is up and transient.
   the browser's own menu is suppressed with it. Default button map `B1`. This is the one state
   that keeps right-click: the window is transparent here, so the browser's menu would come up for
   the *thumbnail* underneath (`E9`).
-- **The wheel is NOT accepted — it belongs to the page** (`E22`). It scrolls, and the scroll
-  takes the preview down with it (`K2`). Growing the window is a placed-window gesture; one
-  click first.
+- **The wheel over the window or its picture pins it and zooms** (`E22`); anywhere else it is the
+  page's, and the scroll takes the preview down with it (`K2`).
 - **Ends on:** leaving the image, **immediately** — no grace period, even though the window is
   sitting under the cursor.
 
@@ -245,14 +244,15 @@ growth ceiling, and only a hand resize pins its edges** (`E22`, `E23`).
 - **On screen:** the window and an invisible backdrop. Nothing is dimmed: the reason to
   place a window is to compare it with what is behind it.
 - **Held by:** nothing. It outlives hover, scrolling and focus loss entirely.
-- **The page underneath stays alive to read.** It still scrolls — the window is fixed and stays
-  put while the page moves under it. What it does not do is act on clicks, and no new preview
-  opens while this one is up (`R2`).
+- **The page underneath stays alive to read.** The scrollbar and keys still scroll it under the
+  window. A **wheel off the window** scrolls it too and **closes the window** (a gallery turns its
+  page instead). It does not act on clicks, and no new preview opens while this one is up (`R2`).
 - **Accepts:** wheel **over the frame** → grow the whole window about the pointer to the viewport,
   then zoom the picture inside it, also about the pointer (`wheelZoomStep`, 15 % per
-  notch, `E22`); a wheel anywhere else flips pictures (`S25`); `+` / `−` → zoom about the frame centre (1.25× per press), **down past the
+  notch, `E22`); the wheel **over the widget** flips pictures (`S25`); anywhere else it scrolls the page and closes
+  the window; `+` / `−` → zoom about the frame centre (1.25× per press), **down past the
   fit and into the frame's background** (`E26`); `0` → fit the picture to the current frame;
-  arrows step pictures (the keyboard never pans — drag does); **a corner or an edge → resize** (`S19`, `E23`);
+  ← → `[` `]` step pictures, ↑ ↓ turn the page (the keyboard never pans — drag does); **a corner or an edge → resize** (`S19`, `E23`);
   **the frame margin or the status bar → move, always** (`S14`, `E25`, `E21`); **the middle
   → move the frame, or pan the picture once it is spilling** (`S14` / `S13`).
 - **Its status bar carries five buttons, and only here**, right to left: ✕ close (`E68`), ⛶ fill the screen
@@ -289,8 +289,7 @@ The frame has reached the viewport, or has been pinned by a hand resize, so zoom
 pushes the image out past its edges. That is the moment panning starts to mean something — and the moment the frame around the
 picture becomes what moves the window, because the middle is now the pan surface (`E25`, `E21`).
 - **Cursor:** `grab` over the image.
-- **Accepts:** drag the image to pan (`S13`); arrows to pan; wheel keeps the pixel under the pointer
-  where it is.
+- **Accepts:** drag the image to pan (`S13`); wheel keeps the pixel under the pointer where it is.
 - **Zoom ceiling:** `maxZoom` (32×), hard-capped at 64×.
 
 #### S13 · dragging (pan), placed
@@ -389,18 +388,26 @@ Hover the sound button and a vertical column appears above it; clicking the butt
 A placed window stepping through a queue of the page's pictures. Each step swaps a different
 picture into the same window, at the slideshow's spot (`E64`); the page scrolls behind it to keep
 the current picture on screen (`T35`).
-- **Entered from:** the blue ⇅ button or the wheel near the widget (starts at the pinned picture, else
-  picture 1; a second ⇅ click closes it — `T38`); ▶ on the widget or → with nothing open (the
-  **first** picture), ◀ or ← (the **last**); or ◀ / ▶, the arrows (← → ↑ ↓ and `[ ]`) or the wheel off
-  the window on a hovered or placed window, which step from that picture (`T29`, `T30`). A wheel over
-  the window zooms it instead.
+- **Entered from:** the ⇅ button or the wheel over the widget (the widget's number; on a pinned
+  picture, that picture; a second ⇅ click closes it — `T38`); ▶ / → with nothing open (the number + 1),
+  ◀ / ← (− 1); a typed number (click either number on the widget); or ◀ / ▶, ← → `[ ]` or the
+  wheel over the widget on a hovered or placed window, which step from that picture (`T29`, `T30`). A
+  wheel over the window zooms it instead.
+- **The same in a gallery** (v0.317.0): a gallery's pictures are the list (`tour.gal`, `galEntries`), and
+  every rule here — spot, size reset, page picture at once, ends, hold, wheel, keys — is the same code.
+  "Page" is the gallery's page there (`galPageStep`), a screen of scrolling elsewhere (`twPage`).
 - **The widget** (`E63`) is a page row `◀ Page n / N ▶` (scrolls like Page Down; with a window open
-  it also jumps ahead by the pictures on that screen) above `◀ n / N ▶` and the blue ⇅ button, in a
-  box of its own, placed by the shared dock that Forum Stumbler and RNFP also use. Faint until the
-  pointer is within 60 px (a setting, with its opacity); shown on pages with two pictures at the
-  slideshow's floor, or while a slideshow runs. A pinned picture shows its own number. After the
-  count: a yellow `(N)` for skipped duplicates, then an orange ⚠ when most pictures looked
-  up on this site had links to a larger file that all failed to load (TOUR.md "Dead-link ⚠").
+  it also jumps to the first picture on that screen; in a gallery, the gallery's pages) above `◀ n / N ▶`
+  and the ⇅ button, in a box of its own, placed by the shared dock that Forum Stumbler and RNFP also
+  use. **One widget for pages and galleries**: in a gallery it counts the gallery (`+` while still
+  reading), and the clicked picture sits beside it. Faint until the pointer is within 60 px (setting
+  `tourFade`); shown on pages with two pictures at the slideshow's floor, while a slideshow runs, or
+  while a gallery is open. A pinned picture shows its own number. Click either number to type where
+  to go (`twAsk`): past what is loaded it goes to the last loaded and asks for more, so the next try
+  reaches further. Right-click: a menu of where the preview opens, the widget's options and the
+  gallery options (`galMenuShow`). After the count: a yellow `(N)` for skipped duplicates, then an
+  orange ⚠ when most pictures looked up on this site had links to a larger file that all failed to
+  load (TOUR.md "Dead-link ⚠").
 - **The list is derived on every press and kept nowhere** (`E54`). Lazy-loaded and newly appended
   images are picked up for free, and a virtualised feed deleting the picture under you is
   survivable — the anchor is the element, then its URL, then the place it was last seen.
@@ -422,8 +429,7 @@ the current picture on screen (`T35`).
 
 #### S26 · scrubbing
 An arrow held down, or ◀ ▶ held (repeating after 500 ms at 30/s, Windows' keyboard defaults).
-- The counter steps at the key's repeat rate — uncapped since v0.163.0 (user's call); `tourHoldRate`
-  caps it, 0 by default — and **every step shows its picture** (v0.164.0; before, nothing resolved
+- The counter steps at the key's repeat rate — uncapped since v0.163.0 (user's call) — and **every step shows its picture** (v0.164.0; before, nothing resolved
   until the key was still). **No step waits** (v0.167.0): it shows the loaded original, else the
   page's own picture, else an empty frame with a centred ring; the original replaces it once the
   user rests `TOUR_REST_MS` (`tourRest`). See `E72`.
@@ -449,7 +455,7 @@ No window, and the image it came from is blocked from opening another one.
   it (a caption over a background image) counts, since v0.78.0. Other images are unaffected.
 
 #### S17 · fading out
-The window has been ended and is running out its `fadeMs` (90 ms) opacity transition. It is already
+The window has been ended and is running out its fade (200 ms; none under `activation: modifier`). It is already
 inert.
 - **Accepts:** nothing. Not hit-testable, holds no state. A clip is paused the instant the fade
   starts, so sound never outlives the window (v0.78.0).
@@ -477,15 +483,15 @@ inert.
 | `T18` | `S10` | Press `0` | `S10`, the picture fitted to the current frame |
 | `T19` | `S10` | Resize the browser window | `S10`, kept at the size you gave it — it does not close or re-fit |
 | `T21` | `S10` | Right-click the window | `S10` unchanged — the browser raises its own menu over the picture (`E9`) |
-| `T22` | `S05` | Wheel over the window | `S01` — the wheel is the page's here; it scrolls, and the scroll closes the preview (`K2`, `E22`) |
+| `T22` | `S05` | Wheel over the window or its picture | `S10`, zoomed one notch (`E22`) |
 | `T23` | `S10` | Drag a corner or an edge | `S19` → `S10` at the new size, frozen there (`E23`) |
-| `T24` | `S10` | Wheel anywhere **but** the frame | `S10` unchanged — the page scrolls under it |
+| `T24` | `S10` | Wheel anywhere **but** the frame or the widget | `S01` — the page scrolls and the window closes; in a gallery the gallery turns a page (`galWheel`) |
 | `T26` | `S10` | Single click on the picture — not the bar, not a control — with under 4 px of travel | `S10`; a clip pauses or resumes, a still image does nothing (`E39`) |
 | `T27` | `S10` | Double click in the same place | `S10` fullscreen, or back out of it if already there. Click 1's pause is undone (`E39`); the border comes off for as long as it lasts (`E43`) |
 | `T28` | `S10` fullscreen | Drag the picture, an edge, or the status bar | Nothing moves — fullscreen is locked to the screen, and the cursor stays an arrow. A spilling picture still pans, with the `grab` cursor, and panning past its edge does not carry the window with it (`E35`, `E40`) |
-| `T29` | `S05` | `→` or `←` (or `[` / `]`) on a preview you are only hovering | `S25` — it pins and steps to the next picture, at the slideshow's spot (`E54`) |
-| `T30` | `S10`/`S25` | ◀ ▶ on the widget, or the arrow keys or `[` `]` (the keyboard never pans) | `S25` on the next picture, at the slideshow's spot. A hand-set size stays; zoom and pan reset (`E54`, `E55`). Past either end it wraps (`E67`) |
-| `T31` | `S25` | Hold the key, or ◀ ▶ for 500 ms | `S26` — the counter steps at the repeat rate (`tourHoldRate` caps it; 0 = none) and every step shows at once what is on hand (`E72`). Stops and wraps at the ends like any step (`E72`). A held button's release does not step again |
+| `T29` | `S05` | `→` or `←` (or `[` / `]`) on a preview you are only hovering, page or gallery | `S25` — it pins and steps to the next picture, at the slideshow's spot (`E54`) |
+| `T30` | `S10`/`S25` | ◀ ▶ on the widget, ← → or `[` `]` (the keyboard never pans; ↑ ↓ turn the page) | `S25` on the next picture, at the slideshow's spot. Size, zoom and pan all reset — a hand-set size belongs to its picture (v0.317.0, user) (`E54`, `E55`). Past either end it wraps (`E67`) |
+| `T31` | `S25` | Hold the key, or ◀ ▶ for 500 ms | `S26` — the counter steps at the repeat rate and every step shows at once what is on hand (`E72`). Stops and wraps at the ends like any step (`E72`). A held button's release does not step again |
 | `T32` | `S25` | ⊘ on the picture | `S25` on the next one — mid-slideshow, blocking means "not this one", not "close the window" |
 | `T33` | `S25` | Reach a picture that will not resolve | `S25` showing the page's own thumbnail with the reason in the bar, and ↻ to ask again (`E56`) |
 | `T34` | `S25` fullscreen | `f`, or the button, after stepping | `S25` windowed, fitted to the picture now in the frame and at the slideshow's spot — not the zoom and top-left of the picture that went in (`E57`) |
@@ -494,7 +500,7 @@ inert.
 | `T37` | — | (retired v0.313.0: `{` `}` narrowed the scope; the slideshow is always the whole page) |
 | `T38` | `S01` | ▶ on the widget, or → (◀ or ← for the last) | `S25` on the **first** picture of the smallest area holding them all, sidebars left out, opened at the slideshow's spot and pinned. Nothing on the page is hovered on the way (`E63`) |
 | `T39` | any | Drag the widget (Ctrl held: no snapping) | It moves, snapping 8 px to window edges, the window's centre and other scripts' widgets; widgets attached to it move with it. The drop is remembered for this site and as the default for new ones (`E63`) |
-| `T41` | any | The widget's ⇅ button: wheel over it, or click it | Wheel over it steps like ◀ ▶ (starting the slideshow from idle always at the first picture, either direction, v0.186.0). The wheel always steps within `wheelRange` (65 px) of the button, lit even when the pointer arrived there without moving (a still pointer carried over a navigation), and unlit when the pointer leaves the window. The tick that starts the slideshow drops the rest of its spin until the wheel rests 300 ms or 500 ms pass. A click starts the slideshow and **arms** it (filled blue — as it also is while the pointer is in reach): the wheel then steps anywhere on the page, the settings panel excepted. A second click disarms and leaves the slideshow open; any close, navigation or reload disarms (`E72`) |
+| `T41` | any | The wheel over the widget, or a click on ⇅ | The wheel over the widget (4 px round it) steps like ◀ ▶; from idle it opens at the widget's number. The tick that starts the slideshow drops the rest of its spin until the wheel rests 300 ms or 500 ms pass. ⇅ starts the slideshow (filled blue while one runs); clicked again it closes it. There is no armed state and no reach setting since v0.317.0 (`E72`) |
 | `T42` | `S10`/`S25` | The magnifier, then paste or drop the original's address | The window upgrades to it in place, and the pattern from the small address to the big one is kept for that image host (`E75`) |
 | `T40` | `S10`/`S25` | Drag a pinned window and let go (Ctrl held: no snapping) | It snaps to the window's corners and edge middles (16 px) and centre (40 px) on the axes the drag moved, and stays where it is dropped. A drop is kept for the tab (`sessionStorage`; for good under `position: remember`) and holds the axes moved — but only on an axis moved 40 px or more with 80 px (10%) of room to spare; otherwise nothing is remembered (`E64`) |
 | `T43` | `S05`/`S06`/`S10`/`S25` | Middle-click the window | The original (`view.url`) saves to the browser's download folder with no dialog; the window is left as it was — a hover preview is not pinned (`E76`) |
@@ -511,7 +517,7 @@ states.
 | ID | Trigger | Notes |
 |---|---|---|
 | `K1` | The pointer leaves the source image | Immediate, no grace. |
-| `K2` | Page scroll | A placed window survives it, and stays put while the page moves underneath. A wheel over a *hover* preview scrolls the page like any other, so this fires wherever the pointer is (`T22`, `E22`). |
+| `K2` | Page scroll | A placed window survives a scroll it did not cause (scrollbar, keys, the slideshow's own), but a wheel off it closes it (`T24`). A wheel over a *hover* preview pins and zooms it instead (`T22`). |
 | `K3` | Browser window loses focus | Modifier mode forgets a held key, since no keyup will ever arrive for it (`E28`). |
 | `K4` | Browser window resize | A placed window keeps the size it was given (`T19`). |
 | `K5` | Escape | Closes it, but does **not** suppress the image (`E2`). |
@@ -544,11 +550,11 @@ in a blue ring. Detail: [`docs/GALLERY.md`](docs/GALLERY.md).
 | `G1` | Peek | A click on the ▦ chip of a **gallery door** (`P17`; not a door to more results) opens its gallery on any site, no mode needed; middle-click does too when Settings → Galleries → *Middle-click opens a gallery* is on (off by default). The chip sits top-left on every gallery door (Settings → Galleries → *Show the ▦ chip on every gallery*; off: only under the pointer); hovering a door reads its gallery ahead |
 | `G2` | Gallery mode | **Retired v0.291.0.** Was a per-site switch with previews off; `G1` does its job |
 | `G3` | Open | Locked on the result it was opened from; the page under it takes no hovers |
-| `G4` | Closes on | The door's chip (now a yellow ✕), a left or middle press on the clicked picture — it flies to the bottom-right corner on open (a fifth of the window tall, full size, blue border) and back to its card on close — middle-click on the same result when middle-click opens galleries (another result switches), Esc (after any preview), a Ctrl tap, a page scroll. A browser-window resize does **not** close it: the picture goes to its place for the new size and the rows are laid out again (same picture's page). A press between pictures does nothing |
-| `G5` | Cells | Hover = the ordinary hover preview of the cell's original, from the picture's own page (`S05`); a press on the cell or the preview pins it, wherever the preview opened (`S10`, `E30`, as on a page); middle-click on the preview saves; with no preview up, a click opens the page the picture links to |
-| `G6` | Pages and the strip | Rows never under 120 px; more pictures than fit become pages. A strip inside the clicked picture's frame, below it (default) or above; dragged off by its background it docks to the picture's top or bottom or sits anywhere, as wide as its text: ◀ Page n / N ▶ (only with 2+ pages; also PageUp/PageDown) and ◀ picture n / N ▶ (`+` while still reading). The wheel (anywhere but over a preview, where it zooms — a hover preview is pinned first — and a drag pans), ← → or [ ] step through the pictures in a pinned preview, the page following; the first step starts at a pinned preview's picture, else the page's first (a hover never moves the start); wraps at the ends. The wheel never scrolls the page behind. The dock widget hides while a gallery is open |
+| `G4` | Closes on | The door's chip (now a yellow ✕), a left or middle press on the clicked picture — it flies beside the widget on open (its remembered place, moved off the widget; a fifth of the window tall, full size, blue border) and back to its card on close — middle-click on the same result when middle-click opens galleries (another result switches), Esc (after any preview), a Ctrl tap, a page scroll. A browser-window resize does **not** close it: the picture goes to its place for the new size and the rows are laid out again (same picture's page). A press between pictures does nothing. A page scroll cannot happen: the wheel turns the gallery's page |
+| `G5` | Cells | Hover = the ordinary hover preview of the cell's original, from the picture's own page (`S05`); a press on the cell or the preview pins it and starts the slideshow on the gallery (`S10`, `S25`, `E30`, as on a page); middle-click on the preview saves; with no preview up, a click opens the page the picture links to |
+| `G6` | Pages and the widget | Rows never under 120 px (`galleryRowMin`); more pictures than fit become pages. **The page widget is the gallery's widget** (v0.317.0; the separate strip with its in/dock/out places and join prompt is gone): `Page n / N` and `n / N` count the gallery, `+` while reading on. Stepping is the slideshow's (`S25`, `T30`); ↑ ↓ PageUp PageDown and the page row turn pages; the wheel over the widget steps, over a preview zooms, elsewhere turns the page (closing a pinned preview). The rows keep clear of the widget and the picture |
 | `G7` | Reading on | While open, a hidden frame scrolls the linked page a screen every 0.4 s and lists every picture it mounts without loading it; the set loads thumbnails only through the pages ahead of the furthest one reached (more ahead the further the user goes). The strip shows the full count, "N+" until 4 s at the bottom with nothing new (cap 3 min). Closing does not stop it; it closes a pinned gallery preview |
-| `G9` | Picture menu, moving | Drag the clicked picture to move it, a corner to resize it (edges snap to the window's edges and centre lines, the gallery's margin, the rows' tops and bottoms and the gaps' middles; Ctrl = free; dropping the strip against the picture's top or bottom docks it and asks to join them; the drop is remembered per site, the start for sites not seen yet, and an edge on a line follows that line when the window resizes). Right-click: the chip / tick / saved-mark / middle-click settings, close |
+| `G9` | Picture menu, moving | Drag the clicked picture to move it, a corner to resize it (edges snap to the window's edges and centre lines, the gallery's margin, the rows' tops and bottoms and the gaps' middles; Ctrl = free; the drop is remembered per site, the start for sites not seen yet, and an edge on a line follows that line when the window resizes). Dragging the widget moves the picture off it again (`galWidgetMoved`). Right-click on it or the widget: the one menu (`galMenuShow`) |
 | `G8` | Marks | Seen (one tick), visited (two), saved (blue disc) on results, on sites with learned doors; chip, tick and disc side by side on one dark pill; a click on a mark clears it |
 
 ---
@@ -583,7 +589,7 @@ this table is a table.
 | `E19` | An upgrade has to be the same picture, not just a bigger file | [`docs/GATES.md`](docs/GATES.md) |
 | `E20` | The band across the top of the page | [`docs/GATES.md`](docs/GATES.md) |
 | `E21` | A placed window may hang off the edges of the screen | [`docs/VIEWER.md`](docs/VIEWER.md) |
-| `E22` | The wheel is the page's until the window is placed, then it grows the window | [`docs/VIEWER.md`](docs/VIEWER.md) |
+| `E22` | The wheel over a preview zooms it (a hover one is pinned first); over the widget it flips; anywhere else it scrolls the page and closes a pinned window (v0.317.0) | [`docs/VIEWER.md`](docs/VIEWER.md) |
 | `E23` | Edges and corners resize, and what the picture does depends on what it was doing | [`docs/VIEWER.md`](docs/VIEWER.md) |
 | `E24` | A drag outlives the frame's edges and the browser's | [`docs/VIEWER.md`](docs/VIEWER.md) |
 | `E25` | *Retired in v0.71.0 — the grab border is gone.* The frame was a margin you could grab, drawn over the picture | [`docs/VIEWER.md`](docs/VIEWER.md) |
@@ -617,32 +623,32 @@ this table is a table.
 | `E50` | Size parameters are dropped from an extensionless CDN path only when the last segment is an opaque id and the path is not a script endpoint | [`docs/RESOLVER.md`](docs/RESOLVER.md) |
 | `E51` | GM_xhr's own timeout does not cover a pending permission dialog, so every GM_xhr here carries a second timer of its own | [`docs/RESOLVER.md`](docs/RESOLVER.md) |
 | `E52` | A picture still silent after 3 s earns one ranged request, which says whether to keep waiting and for how long; a diagnostic that times out means slow, never dead | [`docs/RESOLVER.md`](docs/RESOLVER.md) |
-| `E53` | A hover that resolved nothing AND hit a real failure shows the page's own picture with the reason; one that merely found nothing bigger still shows nothing | [`docs/RESOLVER.md`](docs/RESOLVER.md) |
+| `E53` | **Debug mode only** (v0.317.0): a hover that resolved nothing AND hit a real failure shows the page's own picture with the reason; otherwise, and always when merely nothing bigger was found, nothing shows | [`docs/RESOLVER.md`](docs/RESOLVER.md) |
 
 | `E54` | The slideshow's list is derived on every press and kept nowhere; the anchor is an element and a position, never an index; every picture opens at the slideshow's remembered spot (the centre until one is dropped), because the buttons live in the widget rather than on the frame | [`docs/TOUR.md`](docs/TOUR.md) |
-| `E55` | `←`/`→` navigate only where the picture cannot pan sideways — per axis, so a tall picture pans up and down while they still step. `[` and `]` always navigate | [`docs/TOUR.md`](docs/TOUR.md) |
-| `E56` | A slideshow never drops an entry: one that will not resolve shows the page's own picture with the reason and a ↻, where an ordinary hover shows nothing | [`docs/TOUR.md`](docs/TOUR.md) |
+| `E55` | The keyboard never pans: ← → `[` `]` step, ↑ ↓ turn the page (screens on a page, pages in a gallery) | [`docs/TOUR.md`](docs/TOUR.md) |
+| `E56` | A slideshow never drops an entry: one that will not resolve shows the page's own picture; the reason and a ↻ show only in debug mode (v0.317.0) | [`docs/TOUR.md`](docs/TOUR.md) |
 | `E57` | A zoom and a top-left corner belong to the picture they were taken on, so leaving fullscreen after a slideshow step fits the new picture and puts it at the slideshow's spot instead | [`docs/TOUR.md`](docs/TOUR.md) |
 
 | `E58` | A lazy page loads more only because the slideshow scrolls the page along ahead of itself (`T35`) — never a jump to the bottom, which skipped the middle of feeds that mount batches near the viewport (Google in Firefox); removed v0.144.0. Only on sites where the user's own scrolling has been seen to add pictures (`scrollSites`, v0.141.0; forgotten after 5 empty page loads in a row, v0.143.0). A page that loaded nothing is not asked again until it has grown | [`docs/TOUR.md`](docs/TOUR.md) |
 
 | `E59` | Which link is forward is decided by three rungs — a declared `rel=next`, the hole in a numbered pager's range, then a forward word — and **ambiguity is refused, never guessed**. A harvested entry is a detached element carrying the page it came from, so its relative URLs resolve against that page and not against this one | [`docs/TOUR.md`](docs/TOUR.md) |
-| `E60` | The slideshow is stricter than a hover, and the picture it started on is the example: a floor on the longer side as drawn (`tourMinDisplayed`, lowered to the start picture's own size when that is smaller), and a **scope** — the outermost ancestor holding the same pictures as the smallest one that holds two, climbed past every wrapper (under 8 elements of chrome and 200 characters of text). `{`/`}` move it a level; the next page is only fetched from the whole page | [`docs/TOUR.md`](docs/TOUR.md) §1a |
+| `E60` | The slideshow is stricter than a hover: a floor on the longer side as drawn (`tourMinDisplayed`, lowered to the start picture's own size when that is smaller). The scope and `{`/`}` retired v0.313.0 | [`docs/TOUR.md`](docs/TOUR.md) §1a |
 | `E61` | A player that arrives AFTER the hover — YouTube's inline preview landing on the thumbnail — is withdrawn from under, by geometry, polled every 100 ms rather than waited for as a mouse event; and a page holding a dormant `<video>` refuses its video-link thumbnails under `all` up front, because its own player is coming. So do thumbnails in an area where the site's player has landed 3 times (learned per area, v0.210.0; 3 watched hovers with no player drop it). A late cover that is not a player only makes the hover a covered one | [`docs/GATES.md`](docs/GATES.md) |
 | `E62` | **No preview paints before 150 ms**, on any site, so a player that lands at once never flashes. A site whose player lands later is **learned** from the one event that matters: a preview that was on screen closing with the pointer still on the picture, by any path. After three from one area, a hover in that area — the shared head of their ancestry, on the shared head of their page paths, so the site's photo pages are not covered — waits 1.25× the slowest before showing anything; the resolve runs during the wait, and a close inside it is the wait working. Three flashes after the wait make it longer (the row says `updating, n of 3` and the wait is off meanwhile); three on pictures no area covers add another area. Nothing is ever site-wide unless the user adds the site by hand. A flash within 2.5 s of a press or key (a bare modifier and a repeat excepted — every mousedown, a pinned window's keys and an arrow that starts the slideshow all stamp it) is the user's doing and never counts, and **a close counts only if a `<video>` or frame is then where the picture was** — a page redrawing its grid teaches nothing. **Three covered waits in a row that run out with no player drop the rule** (the site's entry with its last one); a player inside a wait, or a flash under the rule, clears the strikes. A user's own entry in the panel is never touched, and 0 ms turns learning off for that site | [`docs/GATES.md`](docs/GATES.md) |
 | `E63` | The widget is a separate fixed box positioned by the shared dock (`dock/us-dock.js`, identical in Forum Stumbler and RNFP): anchors to the nearest window third or to another widget, chosen only by a drop; attached widgets move as a group; a growing widget pushes others; per-site memory | [`docs/WIDGET-DOCK.md`](docs/WIDGET-DOCK.md) |
 | `E64` | Where a window opens: centred, or under the pointer when the centre misses it (`position: auto`); a slideshow flip migrates back to the centre unless the user dragged — then the dropped axes hold for the tab (`sessionStorage`); `remember` keeps a persistent per-site spot; anchored like the widgets (edge, centre or nearest third per axis). The widget nudges the window aside, `keepClearWidget` / `keepClearStatus` forbid overlap | [`docs/VIEWER.md`](docs/VIEWER.md) |
-| `E65` | One click model, whatever `position` says: a press on the preview or on its picture pins; a right press on a hover preview or its picture closes it; once pinned, a right press on the window is our menu and **any press off it, either button, closes it with no browser menu**. A close with the pointer on the picture suppresses it (`S16`), so the next click and right-click there are the page's. `pinButton` is retired | [`docs/VIEWER.md`](docs/VIEWER.md) |
+| `E65` | One click model, whatever `position` says: a press on the preview or on its picture pins; a right press on a hover preview or its picture closes it; once pinned, a right press on the window is the browser's menu (`E9`) and **any press off it, either button, closes it with no browser menu**. A close with the pointer on the picture suppresses it (`S16`), so the next click and right-click there are the page's. `pinButton` is retired | [`docs/VIEWER.md`](docs/VIEWER.md) |
 | `E66` | The hotkey is always live. `hover`: held, it holds previews back and a press closes the open one (`K9`); with `hotkeyToggle` a lone tap (nothing else pressed before it comes up) turns previews off for the tab instead — the widget still works. `modifier`: previews only while held, with no hover delay, no 150 ms grace, no learned wait and no fade; release closes; a second press (within 450 ms, or while the picture that just closed is still under the pointer) pins, even before it has painted; a press on a pinned window closes it and shows nothing until the key is up, so the next hold brings it back with no re-hover; a click pins, and a right press with the key held pins and keeps the browser's menu when it lands on the preview (`K7`) | [`docs/SETTINGS.md`](docs/SETTINGS.md) |
-| `E67` | The slideshow's ends wrap: ◀/← on the first picture goes to the last one loaded, ▶/→ on the last to the first, with "Wrapped to the first/last picture" faded over it after 1 s; ▶ first asks for more (the page scrolled on, then the next page) and wraps only when `tourExhausted()`. It never closes at an end (v0.162.0). With nothing open the widget shows the start number (first picture on screen); the wheel / ⇅ open at it, ▶ at +1, ◀ at −1 (wrapping) | [`docs/TOUR.md`](docs/TOUR.md) |
+| `E67` | The slideshow's ends wrap: ◀/← on the first picture goes to the last one loaded, ▶/→ on the last to the first, with "Wrapped to the first/last picture" faded over it after 1 s; ▶ first asks for more (the page scrolled on, then the next page) and wraps only when `tourExhausted()`. It never closes at an end (v0.162.0). With nothing open the widget shows the start number (first picture on screen; in a gallery the first on its page, or the last one stepped to there); the wheel / ⇅ open at it, ▶ at +1, ◀ at −1 (wrapping) | [`docs/TOUR.md`](docs/TOUR.md) |
 | `E68` | Two ✕: one at the right end of the bar (fullscreen moved left of it, and `btnGutter` counts it, so the minimum pinned width grew by one button), and a transparent ring-and-✕ 26 px across, 10 px in from the top-right corner, on a pinned window, fading with the status bar (hover-only when the bar is off). `hitRegion` answers null over it, so the corner still resizes from the ring round it | [`docs/VIEWER.md`](docs/VIEWER.md) |
 | `E69` | The window keeps its status bar off the ◀ ▶ widget. Widget docked at the window's bottom (its bottom within `TW_FLOOR_BAND` of it): `bottomGap()` grows to clear it, so the opening size, the slideshow and fullscreen all stop above it. Widget higher up: a bar that lands on it moves the window up or down, whichever is less and still on screen and above the bottom strip, and if neither fits it shrinks from the bottom to end above the widget (`clearWidget()` from `clampPosition()`, `view.capH`); not during a drag, nor in fullscreen | [`docs/VIEWER.md`](docs/VIEWER.md) |
 | `E70` | A click outside a placed window that lands on a page **control** — a button, field, label, `[role=button]`-like, or another userscript's docked widget (`[data-us-dock]`) — closes the window AND reaches the control; links and pictures still only close it. The backdrop goes `thru` while the pointer is over one (`thruSync()` on mousemove, trusted mouseover, and every `layout()`, so a window that opened or changed under a still pointer is covered); not in fullscreen | [`docs/VIEWER.md`](docs/VIEWER.md) |
 | `E73` | **A small picture's preview never covers it** (v0.175.0): an avatar opens beside it (`besidePicture()`, after any remembered spot), with no `nudgeIntoReach()`, and a press ON the picture goes to the page instead of pinning (`pressPinsPreview`) — small pictures are mostly buttons. Not inside a learned avatar area (`P16`). An emoji gets no window at all (v0.176.0, user's call): `emojiHover` shows only the picture at `emojiSize` on a plain backing, pointer-transparent, 18 px below-right of the pointer (flipped for room) and following it — no bar, no ✕, no pin, no name; moving to the next emoji within 800 ms skips the hover delay | [`docs/GATES.md`](docs/GATES.md) |
-| `E72` | **Every user step — click, key, hold, wheel — follows one rule** (`tourNav(dir, repeat, user)`, v0.166.0): it never waits for a picture — the loaded original, else the page's own picture, else an empty frame, and the full search only after the user rests on it (`tourShow`/`tourRest`, v0.167.0); a step past an end does not wrap but shows "Last picture"/"First picture" and steps in that direction are ignored for 1 s (`SEAM_HOLD_MS`; dropped, not queued; a step back the other way is taken at once, v0.198.0), so a hold or free-spinning wheel visibly stops; the next step after wraps. Internal steps (⊘, a grown list, a failed picture) pass no `user`. The wheel (`T41`) steps once per event carrying 50 px of travel (a notch is 100; touchpad deltas accumulate, reset after 500 ms idle or a reversal). **Any user step within `STEP_GAP_MS` (150) of the last one taken is dropped** (an accidental second notch or a key repeat), until `tourFast()` lifts it for the rest of that slideshow (`tour.fast`, v0.187.0): a key or ◀ ▶ held `FAST_HOLD_MS` (3 s); 10 wheel steps in a row each under `STEP_GAP_MS` apart; or 15 wheel steps within 1.5 s. The wheel counts steps it *asked* for, dropped ones included. Its listener is `window` capture bound at boot, ahead of `onPinWheel`, with `stopImmediatePropagation` | [`docs/TOUR.md`](docs/TOUR.md) |
+| `E72` | **Every user step — click, key, hold, wheel — follows one rule** (`tourNav(dir, repeat, user)`, v0.166.0): it never waits for a picture — the loaded original, else the page's own picture, else an empty frame, and the full search only after the user rests on it (`tourShow`/`tourRest`, v0.167.0); a step past an end does not wrap but shows "Last picture"/"First picture" and steps in that direction are ignored for 1 s (`SEAM_HOLD_MS`; dropped, not queued; a step back the other way is taken at once, v0.198.0), so a hold or free-spinning wheel visibly stops; the next step after wraps. Internal steps (⊘, a grown list, a failed picture) pass no `user`. Galleries step through the same function. The wheel (`T41`) steps once per event carrying 50 px of travel (a notch is 100; touchpad deltas accumulate, reset after 500 ms idle or a reversal). **Any user step within `STEP_GAP_MS` (150) of the last one taken is dropped** (an accidental second notch or a key repeat), until `tourFast()` lifts it for the rest of that slideshow (`tour.fast`, v0.187.0): a key or ◀ ▶ held `FAST_HOLD_MS` (3 s); 10 wheel steps in a row each under `STEP_GAP_MS` apart; or 15 wheel steps within 1.5 s. The wheel counts steps it *asked* for, dropped ones included. Its listener is `window` capture bound at boot, ahead of `onPinWheel`, with `stopImmediatePropagation` | [`docs/TOUR.md`](docs/TOUR.md) |
 | `E75` | **The user can teach where the original lives** (v0.218.0): the bar's magnifier, on a placed window still showing the page's own copy (`teachShown`), opens a popover taking a pasted or dropped address; it must load and be bigger, then `taughtRuleFrom()` turns the pair into a rewrite kept per image host in `taughtRules`, tried first for every later picture from that host. Listed under *Per-site fixes* | [`docs/RESOLVER.md`](docs/RESOLVER.md) |
 | `E74` | **One list per page, tracked whether a slideshow is open or not** (v0.187.0–v0.188.0): the widget's list is the page's roll — live pictures plus *ghosts* whose elements left the page (a recycling feed), at their stored positions — so the idle `– / N` and the slideshow's `n / N` only grow, and survive closing and reopening (Imgur: 96 stayed 96 on the way back up). ▶/◀ from idle and a pin on one of those pictures open the SAME list, at the first/last picture or at the pinned one; a pin on a picture the widget does not count (a reply, a sidebar, under the floor) keeps the area rule (`E54`). Arriving on a ghost shows the preloaded answer at once, then binds to the page's element when it remounts, or shows the different picture now in that spot; ▶ from idle on an unmounted first picture waits for it. A picture that fits the first screen scrolls the page to its very top | [`docs/TOUR.md`](docs/TOUR.md) §1d |
-| `E71` | On a thread or an article with comments, the slideshow keeps to the **post** (`postEnd()`): a thread's replies start at its 2nd post; comments under a post start at their list. Always for ▶/→ from idle and the widget's count; from a pinned picture only when it is in the post. `}` at the whole page lets the replies in. Page 2+ of a thread has no post end. Setting `showPostEnd` draws the cut as a red line and each sidebar's inner edge as an orange one, and logs what it found to the console | [`docs/TOUR.md`](docs/TOUR.md) §1c |
+| `E71` | On a thread or an article with comments, the widget's count and a start from it keep to the **post** (`postEnd()`): a thread's replies start at its 2nd post; comments under a post start at their list. From a pinned picture only when it is in the post. Page 2+ of a thread has no post end. Setting `showPostEnd` draws the cut as a red line and each sidebar's inner edge as an orange one, and logs what it found to the console | [`docs/TOUR.md`](docs/TOUR.md) §1c |
 
 `E3` is retired with the detached state (v0.28.0); `E4` and `E5` are retired as dangling.
 

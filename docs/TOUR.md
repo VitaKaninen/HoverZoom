@@ -25,15 +25,15 @@ fight that. They are deleted. Do not put nav controls back on the frame.
 - **Visibility is `style.display`, not `[hidden]`**: the host's inline `all:initial` out-ranks the UA
   `[hidden]` rule. `twRefresh` sets both, and `dock.show()` tells the other scripts.
 - **Shown** on pages with two drawn pictures at `idleFloor()` (`twCount`, stops at 2), or while a
-  tour runs, and never while a gallery is open (`twGalOpen`, `GALLERY.md` strip). Hidden again when the
+  tour runs, or while a gallery is open (it then counts the gallery, `GALLERY.md`). Hidden again when the
   count drops under 2 (the v0.155.0 debugging stickiness, `twShownOn`, was removed in v0.299.0 at the user's word). The `– / N` total (`tourPics`) is taken with every recount — load, scroll stopping, SPA
   navigation, any `<img>` `load` (document capture; a lazy picture landing after page load, v0.150.0)
   — and again when the pointer comes near, which catches a page that changed without
   scrolling (no MutationObserver: design invariant). With `debug` on, a changed count logs
   `twReport()`: every drawn picture and the gate that dropped it, URLs replaced by `U1…` labels
-  (the user diagnoses private sites with it — keep it URL-free). Faint (`tourFade`, at `tourFadeTo` %) until the
+  (the user diagnoses private sites with it — keep it URL-free). Faint (`tourFade`, at `TW_FADE_TO` 35 %) until the
   pointer is within `TW_NEAR`; under a window that covers it the widget sits at `TW_COVER_OPACITY` (0.25, `twOpacity`, not a setting) unless the pointer is near; a `mouseover` on the host covers a pointer resting where it appears.
-- **The idle widget always shows the start number** `twStartAt` (`twStartOf`: the first picture at or below the top of the screen; `1 / N` on arrival, `21 / 50` after Page ▶ past 20). The wheel button and the wheel over the widget open at that number; ▶ at number+1, ◀ at number−1 (wrapping) — `tourFromStart(dir, same)` (v0.316.0, user). `twWarmFirst` only warms entry 0, so a start elsewhere resolves cold. **→ / ← do the same as ▶ / ◀** (`tourKeyStart`, default on):
+- **The idle widget always shows the start number** (in a gallery `galStartAt`) `twStartAt` (`twStartOf`: the first picture at or below the top of the screen; `1 / N` on arrival, `21 / 50` after Page ▶ past 20). The wheel button and the wheel over the widget open at that number; ▶ at number+1, ◀ at number−1 (wrapping) — `tourFromStart(dir, same)` (v0.316.0, user). `twWarmFirst` only warms entry 0, so a start elsewhere resolves cold. **→ / ← do the same as ▶ / ◀** (`tourKeyStart`, default on):
   window bubble phase, so a page that preventDefaults or stops → keeps it; not while focus is in a
   form control, media, or a slider/tab/menu role. Starting from a chosen picture = hover or pin it.
 - **The first picture is resolved on landing** (`twWarmFirst`, from `twRefresh` whenever the widget
@@ -56,21 +56,24 @@ fight that. They are deleted. Do not put nav controls back on the frame.
   (`twSync` → `sizeChanged`), since the Browser pane never fires `ResizeObserver`.
 - **Arrow keys** are ours while a preview or tour is up, plus → from idle (above). Forum Stumbler has
   no key handler of its own (checked twice, 2026-09-22).
-- **The ⇅ wheel button** (`T41`, `E72`, v0.162.0): for 50+ step tours, where a pointer drifting off
-  ▶ costs a click. Armed state is `twWheelArmed` = the URL it was armed on; `twRefresh` disarms on a
-  different URL, `tourEnd` on any close. Reach (`wheelRange`, 65) is always live and measured from the
-  button, not the widget (user's call); armed means anywhere. A setting because the user tunes it.
+- **The wheel over the widget steps** (`T41`, `E72`; v0.317.0 replaced the ⇅ reach and armed state,
+  user: over a preview zooms, off it scrolls the page and closes a pinned window, over the widget
+  flips). `twWheelZone(x, y, TW_WHEEL_PAD)` tests the widget box. ⇅ click starts / closes.
   **Lit without a move** (v0.172.0): `twPtr` is the last pointer seen (move, trusted mouseover, wheel),
   saved to sessionStorage on `pagehide` and restored on the next page in the tab if <30 s old and the
   window is the same size; `twNearAgain()` re-tests it whenever the widget is shown or docked.
-  **Unlit on leaving the window** (v0.177.0): a document `mouseout` with no `relatedTarget` calls
-  `twLeave()` — clears `twPtr`, `twWheelIn` and `tw.near`; armed stays lit. The browser sends nothing
-  outside the window, so reach cannot extend past its edge. Also fires entering an iframe (correct: our
-  wheel listener cannot see a wheel there either).
   **The opening spin is dropped** (`twWheelHush`, v0.172.0, user's call): after the tick that starts
   a slideshow, wheel events in reach are swallowed until the wheel rests 300 ms or 500 ms pass, so
-  one flick opens at picture 1. The cap is what answers the earlier objection to waiting for the
-  wheel to stop (a free-spinning wheel would need stopping by hand).
+  one flick opens at picture 1.
+- **Typed numbers** (`twAsk`, v0.317.0, user; Forum Stumbler's counter box): click the picture or page
+  number; Enter or leaving the box goes, Esc cancels. A window-capture keydown registered before every
+  other key listener of ours gives the box the keyboard. Past what is loaded → the last loaded, and
+  more is asked for (`twLoadFurther`: `tourMoreOnce(true)` / a gallery's `far`). Page k on a page =
+  scroll to screen k; with a slideshow up, its first picture there (`twGoPage`).
+- **Right-click menu** (`galMenuShow`, shared with a gallery's picture): `position`, `keepClearWidget`,
+  `keepClearStatus`, `tourKeyStart`, `tourFade`, the gallery options where galleries exist, All settings.
+- **A step resets the size** (`commitSwap` clears `fixedW/fixedH`, v0.317.0, user): a hand-set size
+  belongs to the picture it was set on.
   ◀ ▶ repeat when held (`twHoldOn`); that listener must be capture — see `../../CLAUDE.md`.
 - **One help tip, on the counter** (v0.171.0, user's call): the buttons have none; resting on the
   middle for `TW_HELP_MS` lists all three in three lines. The loaded count (`twLoadSync`) shows only
@@ -1011,15 +1014,10 @@ The keys in `DEFAULTS`. Remember the hoisting trap in `../CLAUDE.md`: every
 | Key | Default | What |
 |---|---|---|
 | `tourButtons` | `true` | show the widget |
-| `tourFade`, `tourFadeTo` | `false`, `35` | the widget faint until the pointer nears, at this opacity % |
+| `tourFade` | `false` | the widget faint (35 %) until the pointer nears |
 | `tourKeyStart` | `true` | → / ← with nothing open start at the first / last picture |
 | `tourKeys` | `true` | arrows navigate when the picture cannot pan horizontally |
 | `tourMinDisplayed` | `128` | the tour's floor on the longer side as drawn, px (§1a) |
-| `preloadAhead` | `0` | entries loaded either way of the anchor; 0 = all. Replaced `tourWindow` (12) |
-| `preloadMB` | `0` | memory for held files; 0 = automatic |
-| `tourWorkers` | `6` | concurrent preload resolves |
-| `tourHoldRate` | `0` | max steps/sec while an arrow or ◀ ▶ is held; 0 = the repeat rate. Replaced `tourScrubRate` (5), retired so a stored 5 does not survive |
-| `wheelRange` | `65` | px around the wheel button in which the wheel steps. Replaced `wheelReach` (50; a stored 50 migrates to 65, other values carry over), which replaced `wheelZone` (20) |
 | `tourLoadMore` | `true` | scrolling along ahead so a feed loads more (§9) |
 | `tourCrossPage` | `true` | harvest the next page in the background |
 
