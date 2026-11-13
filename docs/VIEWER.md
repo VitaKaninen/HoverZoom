@@ -192,15 +192,15 @@ window.
 
 ### Remembered positions · `E64`
 
-Two memories, kept apart on purpose (user's call, 2026-09-22): a preview opened beside the pointer
-to be pinned is a different job from a slideshow parked at the bottom centre.
+One memory (`spot`, v0.312.0; was two, `tour` and `hover`, kept apart by the user's call 2026-09-22
+as different jobs). Read by every slideshow picture, and by a hover preview only under
+`position: 'last'`; beside-the-pointer never reads or writes it. A stored `{tour, hover}` pair is
+folded into `spot` on read (`tour` wins). **A slideshow begun on a window already placed by hand or
+beside the pointer keeps that window's spot** (`tour.hold`, set at entry when `view.anchor` is null;
+a drop in the slideshow moves it); one begun on a remembered-spot window follows the memory.
 
-- **`tour`** — every slideshow picture: `showViewer` while `tourActive()`, every `swapViewer`, and
-  leaving fullscreen onto a different picture. Default the centre.
-- **`hover`** — only under `position: 'last'` ("Where I last put it"). Beside-the-pointer never
-  reads or writes it.
 - **Written only by a drop** (`endDrag` → `posDropped`) of a placed window moved by a drag — see
-  the threshold below — and only to the memory the window answers to (`posKind()`). Moving a beside-the-pointer preview out of the
+  the threshold below — and only to `spot`, and only when `posKind()` says the window answers to it. Moving a beside-the-pointer preview out of the
   way saves nothing. Resizes and zooms save nothing.
 - **Spec = the widgets' window anchor**: `{x:{m,o}, y:{m,o}}`, the window's start/centre/end point
   `o` px from the viewport's same point, so a different-sized picture grows away from the edge it
@@ -217,12 +217,12 @@ to be pinned is a different job from a slideshow parked at the bottom centre.
   an axis is saved only when the drag moved it at least `POS_MOVE_MIN` (40 px) AND the window has
   `POS_ROOM_MIN` (80 px, or 10% of the window) of spare room on it. A picture nearly the window's
   size is janky to position, and nudging it must not overwrite the default (user's call).
-- **A slideshow step re-reads the memory** (`swapViewer` → `posLoad('tour')`), not `view.anchor`,
+- **A slideshow step re-reads the memory** (`commitSwap` → `tour.hold` or `posLoad('spot')`), not `view.anchor`,
   so a drop too small to be remembered lasts until the next step and no longer.
 - `posApply` keeps the window whole on screen when it fits; `view.anchor` remembers the spec so an
   upgrade and a window resize re-place from it instead of keeping the centre. A hover preview still
   goes through `clampPosition()`, so at the bottom it sits `STATUS_TIP_H` higher than the pinned drop.
-- **Storage** `hoverZoomPos` = `{tour:{sites,last}, hover:{sites,last}}`. A site gets an entry only
+- **Storage** `hoverZoomPos` = `{spot:{sites,last}}`. A site gets an entry only
   when something is dropped there; `last` is the fallback. `posPerSite` off: `last` only. The user's
   idea of consolidating a common default and storing only exceptions was declined: ~60 bytes a site,
   and a site matching today's default would silently follow a later change.

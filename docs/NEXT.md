@@ -73,6 +73,13 @@ is still undecided.
   nsfw.xxx "Irina" (/post/27358429): the site's copy is 960×1710, its source imgur (NSFW purged
   2023) — no bigger file exists to find.
 
+- **v0.310.0–v0.311.0**: gallery frame lists video posts; boot fix (constant declared late).
+- **v0.312.0** (D, part): one remembered window position (`spot`); a slideshow keeps a window already
+  placed by hand or beside the pointer (`tour.hold`). Syntax + 587 assertions only; not tried in the
+  pane or Tampermonkey. D left alone: scope (a pin on a widget-counted picture already opens the
+  widget's list since v0.188.0; the start-picture scope only serves pictures the widget does not
+  count, TOUR.md §1a) and the lightbox cap vs `E21` — both need the user's call.
+
 ## Not verified
 
 Not tried in LibreWolf + Tampermonkey (incl. v0.300.0–v0.309.0).

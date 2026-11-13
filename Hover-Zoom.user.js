@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.311.0
+// @version     0.312.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -4295,7 +4295,7 @@
         resetCaption();
 
         reflow();
-        posApply(posLoad('tour'));
+        posApply(tour && tour.hold || posLoad('spot'));
 
         setMedia(res);
         layout();
@@ -4458,16 +4458,20 @@
 
     // ------------------------------------------------------------- remembered positions
 
-    // Two memories: the slideshow's, and the hover preview's when it opens 'last'. A spec is
+    // One memory, read by the slideshow and by a hover preview that opens 'last'. A spec is
     // {x:{m,o}, y:{m,o}} — the window's start/centre/end point, o px from the viewport's same
     // point, m the nearest third (with the widgets' hysteresis). See VIEWER.md.
-    const POS_KEY = 'hoverZoomPos';     // GM: { tour: { sites, last }, hover: { sites, last } }
+    const POS_KEY = 'hoverZoomPos';     // GM: { spot: { sites, last } }; the old { tour, hover } pair is folded into spot on read
     const POS_CENTRE = { x: { m: 'c', o: 0 }, y: { m: 'c', o: 0 } };
 
     function posStore() {
         try {
             const v = JSON.parse(GM_getValue(POS_KEY, 'null'));
-            if (v && typeof v === 'object') return v;
+            if (v && typeof v === 'object') {
+                if (!v.spot && (v.tour || v.hover)) v.spot = v.tour || v.hover;
+                delete v.tour; delete v.hover;
+                return v;
+            }
         } catch (e) { console.warn('[Hover Zoom] remembered positions unreadable; using the centre', e); }
         return {};
     }
@@ -4489,8 +4493,7 @@
 
     // Which memory a window opened now answers to, if any.
     function posKind() {
-        if (tourActive()) return 'tour';
-        return cfg.position === 'last' ? 'hover' : null;
+        return tourActive() || cfg.position === 'last' ? 'spot' : null;
     }
 
     function posPt(lo, len, m) { return m === 's' ? lo : m === 'c' ? lo + len / 2 : lo + len; }
@@ -4550,6 +4553,7 @@
         if (!vw || !vh) return;
         const cur = posSpec(view.anchor);
         view.anchor = cur;
+        if (tour && tour.hold) tour.hold = cur;
         const kind = posKind();
         const room = function (len, V) { return V - len >= Math.max(POS_ROOM_MIN, V * 0.1); };
         const takeX = Math.abs(dx) >= POS_MOVE_MIN && room(outerW(), vw);
@@ -4708,7 +4712,7 @@
         view.scale = swapped ? view.fitScale
             : Math.max(p.scale, minScaleFor(view.natW, view.natH));
         reflow();
-        if (swapped) posApply(posLoad('tour'));
+        if (swapped) posApply(tour && tour.hold || posLoad('spot'));
         else {
             view.left = p.left;
             view.top = p.top;
@@ -9798,6 +9802,7 @@
         scrubDir = dir;
         if (!tour.on) {
             tour.on = true;
+            if (!view.anchor) tour.hold = posSpec(null);      // a window placed by hand or beside the pointer stays where it is
             dbg('tour entered: ' + describeEl(tourScopeNow(tourPics(tourFloor()))), { floor: tour.floor + 'px' });
         }
         const list = tourEntries();
