@@ -915,3 +915,27 @@ Measured on an Amazon search page: 16 sprite uses flagged, one missed by the syn
 (`clothingcolorsprite` at `0px 0px`, auto) — the reason for `sheetCheck()`. `test-page.html`'s five
 backgrounds are all `cover`, unaffected. Regression page: `test-pages/sprite.html` (#s1–#s4 refused,
 #c1/#c2 controls preview).
+
+## Door areas — navigation thumbnails stay quiet · `P17` · PLANNED, not built (user, 2026-11-12)
+
+The user wants previews only on the **final product**. Classify each thumbnail by what its link
+leads to, never the page type (a gallery page holds both kinds: its pictures, and a rotating
+related strip at the bottom):
+
+- **Leaf** = link is the image file, or the linked page holds this same picture bigger (`E15`
+  fetch gives a `trusted` / `sameStem()` hit) → preview as today.
+- **Door** = linked page holds no copy of this picture but many distinct pictures (gallery, tag
+  feed, search results) → no preview. Site shapes the user named: 1A landing feed → galleries; 1B
+  landing feed → tag feeds → galleries; B paged listing → galleries; search results on any.
+- Infinite scroll is not a signal (galleries lazy-load too).
+
+Learning = the `../CLAUDE.md` area pattern, user-approved with a learning period (first ~3 doors in
+an area still preview). Ground truth = the linked-page fetch; extends `linkAreas` (`resolve()`),
+which today only skips the fetch. **Way out, user's requirement:** 10 % recheck under a rule; a
+recheck finding a leaf in a door area hides a real preview, so it `areaDrop`s at once; ageing as
+`P16`; an area whose samples disagree (look-alike pages that differ) never forms a rule. Add a user
+teach/override per area. Gallery mode could switch on per door area instead of per site.
+
+Unmeasured assumptions — check on the user's example sites (adult; pane first, console snippet
+dumping structure only as fallback; age gates need the user's yes per site): gallery images link to
+a page carrying the same filename stem; gallery pages hold many distinct pictures.
