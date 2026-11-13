@@ -113,7 +113,8 @@ D. One slideshow scope whatever the start (old reason: a forum post's pictures w
    window where it is; same frame rules pinned or touring (`E21` vs `growBox`).
 E. Arrows always step; pan by drag (today → pans when the picture can pan sideways, `T30`).
 F. Newcomer: first-use hint line in the bar, a `?` gesture sheet, tooltips on seen/visited/saved
-   marks, settings split into ~8 basic and the rest of the 70 advanced.
+   marks, settings split into ~8 basic and the rest of the 70 advanced. **Shelved (user, 2026-11-13):
+   the script is unfinished, has one user and is not near publishing; do not propose it until asked.**
 
 ## Last exchange
 
