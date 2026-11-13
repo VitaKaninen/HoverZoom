@@ -1,4 +1,4 @@
-# Next work — consistency pass (handoff 2026-11-12, session ended at ~340k tokens)
+# Next work — consistency pass (handoff 2026-11-13, session ended at ~311k tokens)
 
 ## What the user asked for
 
@@ -64,6 +64,10 @@ F. Newcomer: first-use hint line in the bar, a `?` gesture sheet, tooltips on se
 
 ## Last exchange
 
-User tested B on sexygirlspics.com: expected the gallery widget and menu item gone (that is "Retire
-gallery mode" above — never built, still waits on a yes), and saw no chip. v0.283.0 fixes the chip
-cause; the user then saw home-page tiles (→ result lists) get the chip — v0.284.0. No question is outstanding.
+2026-11-13 session: user asked for the nsfw.xxx gallery changes in v0.292.0–v0.293.0 (above), the
+last being: clicked picture flies to the bottom-right corner and back, chip/tick/disc in one dark
+pill, press-to-pin the same inside the gallery. All built, checked in Chrome by synthetic events
+only (the flight animation itself unseen; LibreWolf untested). One question asked, **unanswered**:
+should nsfw.xxx post pages preview a picture the page already draws as tall as the window
+(`bigEnough` refuses it today)? Leftover: an empty stray file `C:\Users\VITAKA~1\AppData\Local\Temp\s1.py`
+(a safety check blocked deleting it; the user was asked to remove it).
