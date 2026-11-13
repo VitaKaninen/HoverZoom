@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.294.0
+// @version     0.295.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -11381,8 +11381,9 @@
         }
         set.pg.hidden = false;
         const n = set.cells.length;
-        set.pg.textContent = (many ? 'Page ' + (set.page + 1) + ' / ' + set.pages.length + (reading ? '+' : '') + ' · ' : '') +
-            n + ' picture' + (n === 1 ? '' : 's') + (reading ? ', finding more…' : '') + (many ? ' · mouse wheel turns pages' : '');
+        const total = set.pages ? set.pages.length : 1;
+        set.pg.textContent = 'Page ' + ((set.page || 0) + 1) + ' / ' + total + (reading ? '+' : '') + ' · ' +
+            n + ' picture' + (n === 1 ? '' : 's') + (reading ? ', finding more…' : '') + ' · mouse wheel turns pages';
     }
 
     // The cells of the page on screen, as their pics.
@@ -11417,13 +11418,14 @@
 
     let galFlipAt = 0, galWheelSum = 0, galWheelAt = 0;
 
-    // The wheel turns a paged gallery's pages; over a pinned preview it stays the preview's.
+    // The wheel turns an open gallery's pages and never scrolls the page; over a pinned preview it stays the preview's.
     function galWheel(e) {
         const set = galCur;
-        if (!set || !set.pages || set.pages.length < 2) return;
+        if (!set) return;
         if (placed && pointInPreview(e.clientX, e.clientY)) return;
         e.preventDefault();
         e.stopImmediatePropagation();
+        if (!set.pages || set.pages.length < 2) return;
         const now = performance.now();
         if (now - galWheelAt > 300) galWheelSum = 0;
         galWheelAt = now;

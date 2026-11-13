@@ -43,7 +43,11 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   `GAL_PG_TOP` kept for the `.pg` line. Tested in `test-resolver.js` (683 at 1920×1080 → 10 pages of
   ~73). `set.page` survives a rebuild of the same href. `galPageWork` = upgrades and `galHqAll`
   for the page on screen only (was every cell). `galWheel` on `CAP_TARGET` capture, non-passive:
-  60 px of delta, one flip per `GAL_FLIP_MS`; skipped over a pinned preview.
+  60 px of delta, one flip per `GAL_FLIP_MS`; skipped over a pinned preview. **It eats the wheel even
+  with one page** (user, v0.295.0): a page scroll closes the gallery and its `galGrowEnd('closed')`
+  stops the reading, so a first open (read at the site's pace, nsfw.xxx ~15 per 2 s) never got a
+  second page. The `.pg` line shows from the first picture ("Page 1 / 1+ · … · mouse wheel turns
+  pages"); it used to wait for 2 pages, and with v0.291.0's preload gone that took ~20 s.
 - **Reading on** (`galGrow`, after `galBuild` of a locked open): `galRender(href, onMore, onEnd)` names
   the frame `…:<token>:grow`; the frame's `galProbeReport` reports as before, then `readOn()`:
   every `GAL_GROW_TICK` it posts only new items, scrolls `scrollingElement` 0.9 screen and
