@@ -1,3 +1,28 @@
+# Handoff 2026-11-13 (second session, ~411k tokens) — read this first
+
+**Asked:** (1) audit the window and widget for mode-dependent differences (done, report given in chat);
+(2) then: gallery stepping identical to the page slideshow; a hand-set size never carried to the next
+picture; failure reason + ↻ only in debug mode; panel debug row renamed "Enable debug mode"; ↑ ↓ turn
+the page (screens on a page, layout pages in a gallery); one widget for page and gallery (hold-repeat,
+start number that follows page turns); click a number to type a target (Forum Stumbler's box); a
+right-click menu on the widget with preview-position and widget settings; wheel: over preview zooms,
+over widget flips, elsewhere scrolls the page and closes a pinned preview; cut the tuning settings.
+Avatars/emoji left as they are (user).
+
+**Done:** all of it, v0.317.0 (commit 7b14836, pushed). Where it lives: INTERACTION.md `S25`, `T24`,
+`T30`, `T41`, `E22`, `E53`, `E56`, `G6`, `G9`; GALLERY.md "The widget" and "Stepping is the
+slideshow's"; TOUR.md widget section (typed numbers, menu, wheel); SETTINGS.md "Tuning knobs folded
+into constants". Verified only in the Browser pane on test-page.html and test-pages/door-search.html
+(d6, 240 pictures): widget counts, steps, ↑ ↓, wheel on/off preview, typed picture and page, menu.
+**Not verified:** a real site, LibreWolf, Tampermonkey; hand-resize reset (code only).
+
+**Open, user to judge (asked in chat, no answer yet):** whether a stray wheel off a pinned preview
+should close it (built: closes) or leave it open while the page scrolls under it. Also told the user:
+`displayScale` and `galleryRowMin` were kept on purpose; the manager menu had no debug item, so the
+panel row was renamed — the user may have meant "Draw where the slideshow stops".
+
+---
+
 # Next work — consistency pass (handoff 2026-11-13, session ended at ~311k tokens)
 
 ## What the user asked for
