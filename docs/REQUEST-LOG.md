@@ -45,7 +45,7 @@ rows capped at 400 (front evicted); the host summary outlives eviction.
 |---|---|
 | `t` `ms` | start (epoch ms), elapsed |
 | `h` `i` | hostname; random per-page-instance id (two at once = two tabs or a re-render) |
-| `k` | kind: `range` `quick` `verify` `tail` `hunt` (FS reads; `quick` = arrival read that stops at the last read, `verify` = its slow background re-check), `gallery` (HZ preload of result galleries), `origs` (HZ originals of an open gallery), `gthumbs` (HZ one retry of a gallery's failed thumbnails), `busy` `norush` (HZ) `pace` (FS) (notes) |
+| `k` | kind: `range` `quick` `verify` `tail` `hunt` (FS reads; `quick` = arrival read that stops at the last read, `verify` = its slow background re-check), `gallery` (HZ preload of result galleries, retired v0.291.0), `origs` (HZ originals of an open gallery), `gthumbs` (HZ one retry of a gallery's failed thumbnails), `busy` `norush` (HZ) `pace` (FS) (notes) |
 | `p` | pace label the read ran under, e.g. `v0.84.0 w6 g300-800 d400` (workers, start gap, serial delay) |
 | `n` `ok` `pg` | requests made; answered 2xx/3xx; pages that had topics |
 | `sp` | measured gap between request starts, `[min, median, max]` ms |
@@ -74,7 +74,7 @@ UTC as local, so local would be ambiguous).
   One row per host per page (`loggedBusy`); `out` is `first`, or `slowed` if the host was already
   one-at-a-time — the row that says the climb-down did not stop the refusals.
 - `hardBlock()` adds a `norush set` row. `hzLog()` re-reads `cfg.logRequests` on every call
-  (another tab may have changed it). `start()` only for the gallery preload (`galPreNext`, one row per run); other requests are per picture.
+  (another tab may have changed it). HZ calls no `start()` since the gallery preload went (v0.291.0); its requests are per picture.
 - **Hover Zoom's one-at-a-time list has no undo** — nothing ever deletes from `hoverZoomNoRush`.
 - Settings → Diagnostics: the switch, the count, Copy for sharing / Show / Clear.
 - The test page stubs no `GM_xmlhttpRequest`, so `rangeGet` returns null and `diagnose()` can only

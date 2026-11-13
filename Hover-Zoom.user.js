@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.290.0
+// @version     0.291.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -261,7 +261,6 @@
         skipFurniture: true,        // never preview the page's own furniture: its background, a
         siteMode: 'blacklist',      // 'blacklist' | 'whitelist'
         siteList: [],               // hostnames, matched by suffix
-        gallerySites: [],           // gallery mode: on these, where previews are off, a link floats its page's thumbnails
         blockList: DEFAULT_BLOCKS.slice(),  // image URLs never to preview; '*' matches anything
         blockOffered: DEFAULT_BLOCKS.slice(),   // shipped entries already put in blockList once; removing one sticks
 
@@ -514,30 +513,7 @@
     }
 
     function siteEnabled() {
-        return (cfg.siteMode === 'whitelist' ? siteListed() : !siteListed()) && !galleryActive();
-    }
-
-    var galOnHosts = null;      // var, not let: siteEnabled() can run before this line. Hosts gallery mode is on for
-    var GAL_ON_KEY = 'hoverZoomGalleryHosts';
-
-    function galOnList() {
-        if (!galOnHosts) {
-            try { galOnHosts = JSON.parse(GM_getValue(GAL_ON_KEY, '') || '[]'); } catch (e) { galOnHosts = []; }
-            if (!Array.isArray(galOnHosts)) galOnHosts = [];
-        }
-        return galOnHosts;
-    }
-
-    // Gallery mode is switched on for this site, on a site that has the button.
-    function galleryActive() {
-        return galOnList().indexOf(pageHost()) >= 0 && galleryListed();
-    }
-
-    function galleryListed() {
-        const list = cfg.gallerySites || [];
-        if (!list.length) return false;
-        const url = pageUrl();
-        return list.some(function (entry) { return siteEntryMatches(entry, url); });
+        return cfg.siteMode === 'whitelist' ? siteListed() : !siteListed();
     }
 
     // A captcha's picture grid is never something to preview, and it is almost always an iframe.
@@ -557,7 +533,6 @@
 
     let siteMenuId = null;
     let linesMenuId = null;         // the debug lines' toggle, beside the site one
-    let galleryMenuId = null;
 
     function siteMenuLabel() {
         const on = siteEnabled();
@@ -574,17 +549,12 @@
             try { GM_unregisterMenuCommand(siteMenuId); } catch (e) { return; }
             siteMenuId = null;
         }
-        if (galleryMenuId != null) {
-            try { GM_unregisterMenuCommand(galleryMenuId); } catch (e) { return; }
-            galleryMenuId = null;
-        }
         if (linesMenuId != null) {
             try { GM_unregisterMenuCommand(linesMenuId); } catch (e) { return; }
             linesMenuId = null;
         }
         try {
             siteMenuId = GM_registerMenuCommand(siteMenuLabel(), toggleSite);
-            galleryMenuId = GM_registerMenuCommand((galleryListed() ? 'Hide' : 'Show') + ' gallery button on this site', toggleGallery);
             linesMenuId = GM_registerMenuCommand((cfg.showPostEnd ? '☑' : '☐') + ' Draw where the slideshow stops', toggleLines, { autoClose: false });
         } catch (e) { /* nothing to fall back to; the panel still has the list */ }
     }
@@ -615,24 +585,6 @@
         twRefresh();                        // the widget goes or comes back now, not at the next load
         dbg('site toggled', { host: host, list: cfg.siteList, enabledHere: siteEnabled() });
         toast('Hover Zoom ' + (siteEnabled() ? 'enabled' : 'disabled') + ' for ' + host, 3000);
-    }
-
-    // The gallery list's entry for this page goes, or this host goes on.
-    function toggleGallery() {
-        reloadSettings();
-        const host = pageHost();
-        const url = pageUrl();
-        const list = cfg.gallerySites || [];
-        const kept = list.filter(function (entry) { return !siteEntryMatches(entry, url); });
-        if (kept.length === list.length) kept.push(host);
-        cfg.gallerySites = kept;
-        saveSettings();
-        refreshSiteMenu();
-        refreshPanel();
-        if (!galleryListed()) galHide('mode off');
-        galBtnSync();
-        twRefresh();
-        toast('Gallery button ' + (galleryListed() ? 'shown' : 'hidden') + ' on ' + host, 3000);
     }
 
     function version() {
@@ -7293,7 +7245,7 @@
             cancel();
             return;
         }
-        if (hotTap && cfg.hotkeyToggle && isTopFrame && !(e.key === 'Control' && (galleryHere() || galPeek || Date.now() - galPeekTapAt < 100))) setOff(!hzOff);   // Ctrl there is the gallery's key
+        if (hotTap && cfg.hotkeyToggle && isTopFrame && !(e.key === 'Control' && (galPeek || Date.now() - galPeekTapAt < 100))) setOff(!hzOff);   // Ctrl there is the gallery's key
         hotTap = false;
     }, true);
 
@@ -9668,7 +9620,7 @@
         document.addEventListener('load', function (e) {
             const t = e.target;
             if (t && (t.tagName === 'IMG' || t.tagName === 'VIDEO') && !tour) twRecount();
-            if (t && t.tagName === 'IMG' && (cfg.gallerySites || []).length) galMarkSoon();   // a picture landing moves its neighbours' marks
+            if (t && t.tagName === 'IMG' && galMarksHere()) galMarkSoon();   // a picture landing moves its neighbours' marks
         }, true);
         window.addEventListener('scroll', perfWrap(twRecount, 'event'), { passive: true });
         CAP_TARGET.addEventListener('wheel', perfWrap(twWheel, 'event'), WHEEL_OPTS);
@@ -10771,7 +10723,6 @@
 
     const GAL_WAIT_MS = 2500;           // longest wait for thumbnails before laying out without the rest
     const GAL_GAP = 12;                 // px between cells and at the edges
-    const GAL_GRACE_MS = 500;           // off every link this long before the set fades
     const GAL_FADE_MS = 200;
     const GAL_UPGRADE = 1.3;            // drawn this much larger than the thumbnail's file -> fetch the next size
     const GAL_CACHE = 300;              // fetched pages kept by URL
@@ -10804,127 +10755,30 @@
     const galCache = new Map();         // href -> Promise of [{thumb, ss, cands, base}] | null | 'cancel'
     let galFrameStop = null;
     let galHost = null, galRoot = null, galBlur = null, galCur = null, galWant = null;
-    let galHoverTimer = 0, galGraceTimer = 0, galPt = { x: 0, y: 0 };
+    let galHoverTimer = 0, galPt = { x: 0, y: 0 };
     const GAL_SEEN_KEY = 'hoverZoomGallerySeen';   // linked pages whose gallery was shown, oldest first
     const GAL_SEEN_MAX = 10000;
     const GAL_SEEN_MS = 1000;           // a gallery counts as seen once it has been on screen this long
     const GAL_MARK = 'data-hz-seen';
-    const GAL_EDGE = 50;                // px band inside the window's edge where the set goes at once
     const GAL_VISITED_KEY = 'hoverZoomGalleryVisited';   // linked pages clicked or opened, oldest first
     const GAL_SAVED_KEY = 'hoverZoomGallerySaved';       // thumbnails whose picture was saved from the gallery
     const GAL_SAVEDFROM_KEY = 'hoverZoomGallerySavedFrom';   // linked pages something was saved from
     const GAL_SAVED_MARK = 'data-hz-saved';
-    let galSeen = {}, galLock = null, galMarkTimer = 0, galEdge = false, galHole = null;
-    let galOn = false, galTap = false, galAt = null, galMidAt = 0;      // toggled on and locked; Ctrl down with nothing else yet; the result under the pointer {href, hole}
-    let galPre = null, galPreStop = false, galPreLog = null;   // the preload in flight; stopped by a refusal; its log row
+    let galSeen = {}, galMarkTimer = 0, galHole = null;
+    let galOn = false, galTap = false, galMidAt = 0;      // a peek is up and locked; Ctrl down with nothing else yet
     const GAL_PEND_MS = 3000;           // the pressed result lights up only if its gallery is not on screen by then
-    const GAL_AHEAD = 3;                // screens below the window the preload reaches
-    const GAL_BEHIND = 1;               // screens above it
     const GAL_DIAG_MS = 10000;          // an open that shows nothing this long after the press gets the diagnostics popup
-    const GAL_USER_HIDE = ['press', 'esc', 'middle', 'ctrl', 'resize', 'mode off', 'scroll'];
+    const GAL_USER_HIDE = ['press', 'esc', 'middle', 'ctrl', 'resize', 'scroll'];
     const galTraces = new Map();        // href -> [[ms, what]], sanitised, the last 60 links
     let galPend = null, galInputAt = 0; // the open waiting for its gallery; the user's last wheel/key/press
-    const galPreTried = new Set();
 
-    // Seen / visited / saved marks: sites with the gallery button, and sites with learned doors.
+    // Seen / visited / saved marks: sites with learned doors.
     function galMarksHere() {
-        if (galleryListed()) return true;
         const e = (cfg.doorAreas || {})[pageHost()];
         return !!(e && e.rules && e.rules.length);
     }
 
-    // Gallery mode runs where the gallery list covers the page and ordinary previews are off.
-    function galleryHere() {
-        return isTopFrame && !CAPTCHA_HERE && galleryActive();
-    }
-
-    // The button: gallery mode on or off for this site, remembered until toggled again.
-    function galToggle() {
-        galOnHosts = null;
-        const h = pageHost(), on = galOnList().indexOf(h) < 0;
-        const l = galOnList().filter(function (x) { return x !== h; });
-        if (on) l.push(h);
-        galOnHosts = l;
-        try { GM_setValue(GAL_ON_KEY, JSON.stringify(l)); } catch (e) { /* this page only, until a reload */ }
-        galApply();
-        toast('Gallery mode ' + (on ? 'on' : 'off'), 3000);
-    }
-
-    // Everything that follows the on-state.
-    function galApply() {
-        if (galleryActive()) { if (placed) unplace(); else cancel(); setTimeout(galPreNext, 0); galMarkAll(); }
-        else galHide('mode off');
-        twRefresh();
-        galBtnSync();
-    }
-
-    let galBtn = null;
     const ICON_GALLERY = 'M4 4h7v7H4V4zm9 0h7v7h-7V4zM4 13h7v7H4v-7zm9 0h7v7h-7v-7z';
-
-    // Shown on sites in the gallery list only; blue when on.
-    function galBtnSync() {
-        if (!isTopFrame || !document.body) return;
-        const want = galleryListed() && !CAPTCHA_HERE;
-        if (!galBtn) {
-            if (!want) return;
-            galBtnBuild();
-        }
-        galBtn.host.hidden = !want;
-        galBtn.host.style.display = want ? 'block' : 'none';
-        const on = galleryActive();
-        galBtn.b.classList.toggle('on', on);
-        setTip(galBtn.b, 'Gallery mode ' + (on ? 'on' : 'off') + ' — click to turn it ' + (on ? 'off' : 'on'));
-        if (galBtn.dock) galBtn.dock.relayout();
-    }
-
-    function galBtnBuild() {
-        const host = document.createElement('div');
-        host.id = 'hover-zoom-gallery';
-        host.style.cssText = 'all:initial;position:fixed;right:8px;top:8px;z-index:2147483647;width:max-content;display:none';
-        const sr = host.attachShadow({ mode: 'open' });
-        const st = document.createElement('style');
-        st.textContent = ':host{all:initial}' +
-            '.g{box-sizing:border-box;display:flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:6px;' +
-            'background:#1e1e2e;border:1px solid #45475a;box-shadow:0 2px 8px rgba(0,0,0,.45);color:#6c7086;cursor:pointer;user-select:none}' +
-            '.g:hover{color:#cdd6f4}' +
-            '.g.on{background:#89b4fa;border-color:#89b4fa;color:#1e1e2e}' +
-            '.g svg{display:block;width:14px;height:14px;fill:currentColor}';
-        sr.appendChild(st);
-        const b = document.createElement('div');
-        b.className = 'g';
-        b.appendChild(mkIcon(ICON_GALLERY));
-        sr.appendChild(b);
-        let down = null;
-        b.addEventListener('mousedown', function (e) { down = { x: e.clientX, y: e.clientY }; });
-        b.addEventListener('click', function (e) {
-            e.preventDefault();
-            e.stopPropagation();
-            if (down && Math.abs(e.clientX - down.x) + Math.abs(e.clientY - down.y) > 4) return;     // a drag, not a click
-            galToggle();
-        });
-        document.body.appendChild(host);
-        galBtn = { host: host, b: b, dock: null };
-        const corner = { x: { r: 'win', m: 'e', t: 'e', o: -8 }, y: { r: 'win', m: 's', t: 's', o: 8 } };
-        galBtn.dock = usDock.create({ id: 'hover-zoom-gallery', el: host, radius: 6,
-            load: function () {
-                let all = {};
-                try { all = JSON.parse(GM_getValue('hoverZoomGalleryDock', '') || '{}') || {}; } catch (e) { /* fresh */ }
-                return all[pageHost()] || null;
-            },
-            save: function (spec) {
-                let all = {};
-                try { all = JSON.parse(GM_getValue('hoverZoomGalleryDock', '') || '{}') || {}; } catch (e) { /* fresh */ }
-                all[pageHost()] = spec;
-                GM_setValue('hoverZoomGalleryDock', JSON.stringify(all));
-            },
-            initial: function () { return { x: corner.x, y: corner.y, fx: corner.x, fy: corner.y, ov: [] }; },
-            apply: function (r) {
-                host.style.left = r.x + 'px';
-                host.style.top = r.y + 'px';
-                host.style.right = 'auto';
-            },
-            onDrag: function (on) { if (on) hideTip(); } });
-    }
 
     // The page a hovered picture links to, or null.
     function galLinkOf(t) {
@@ -11127,8 +10981,6 @@
                 const late = performance.now() - lagAt - GAL_LAG_TICK;
                 if (late > GAL_LAG_MS && document.visibilityState !== 'hidden') {   // a hidden tab's timers are throttled, not frozen
                     if (done) end('froze'); else fin(null, 'the page froze for ' + Math.round(late) + ' ms');
-                    galPreHalt('froze');
-                    toast('Gallery preload stopped: the page froze for ' + (late / 1000).toFixed(1) + ' s loading a linked page', 3000);
                     return;
                 }
                 lagAt = performance.now();
@@ -11252,7 +11104,7 @@
         let refused = null;
         const html = fetchDoc(href, function (res) {
             refused = res;
-            if (res.status === 429 || res.status === 503) { logBusy(href, res); galPreHalt(); }
+            if (res.status === 429 || res.status === 503) logBusy(href, res);
             dbg('gallery page refused', { href: href, status: res.status });
         }).then(function (doc) {
             const busy = !!refused && (refused.status === 429 || refused.status === 503);
@@ -11285,7 +11137,6 @@
                 galLists.set(href, v);
                 if (galLists.size > GAL_CACHE) galLists.delete(galLists.keys().next().value);
             }
-            setTimeout(galPreNext, 0);
             return v;
         });
         galCache.set(href, p);
@@ -11515,17 +11366,6 @@
         return out;
     }
 
-    // The hole is the picture under the pointer; on no picture it stays.
-    function galSteer(x, y) {
-        const set = galCur;
-        if (!set) return;
-        const hole = galPics().find(function (r) { return x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h; });
-        if (!hole) return;
-        const o = set.open;
-        if (o && o.x === hole.x && o.y === hole.y && o.w === hole.w && o.h === hole.h) return;
-        galLayout(set, hole);
-    }
-
     // Bigger files for one thumbnail, the next size up first: srcset widths ascending, else the resolver's list.
     function galBigger(item, nw, need) {
         const ss = [];
@@ -11706,7 +11546,6 @@
         galCur = set;
         galTrace(href, 'shown: ' + pics.length + ' thumbnails');
         galPendClear();
-        if (!galOn) galSteer(galPt.x, galPt.y);
         setTimeout(function () {
             if (galCur !== set) { dbg('gallery not counted as seen: ' + (galCur ? 'replaced' : 'hidden') + ' within ' + GAL_SEEN_MS + ' ms', { href: href }); return; }
             galListAdd(GAL_SEEN_KEY, href);
@@ -11715,7 +11554,8 @@
             galMarkAll();
         }, GAL_SEEN_MS);
         galPageWork(set, L);
-        if (galOn) { galCatchUp(set); galGrow(href); }
+        galCatchUp(set);
+        galGrow(href);
     }
 
     // Pictures of this gallery already known but not in the set (read after it was built): add them.
@@ -11852,7 +11692,6 @@
             galPendClear();
             if (GAL_USER_HIDE.indexOf(why) < 0) galDiag(p, why || 'hidden: pointer left');
         }
-        clearTimeout(galGraceTimer);
         clearTimeout(galHoverTimer);
         galWant = null;
         galOn = false;
@@ -11957,41 +11796,21 @@
         return m;
     }
 
-    function galOver(e) {
-        if (!galWant && !galCur && !(cfg.gallerySites || []).length) return;
-        if (!galleryHere()) { if ((galWant || galCur) && !galPeek) galHide(); return; }
-        if (galLock || galAtEdge(e.clientX, e.clientY)) return;
-        const href = galLinkOf(e.target);
-        if (!href) return;
-        if (!galOn) clearTimeout(galGraceTimer);
-        if (galAt && galAt.href === href) return;
-        const a = e.target.closest('a[href]'), pic = e.target.tagName === 'IMG' ? e.target : a && a.querySelector('img');
-        const hr = galHoleRect(pic || e.target);
-        galAt = { href: href, hole: { x: hr.left, y: hr.top, w: hr.width, h: hr.height } };
-        if (galOn) return;                          // locked on its target
-        clearTimeout(galHoverTimer);
-        galHoverTimer = setTimeout(function () {
-            galLoad(href).then(function (list) { if (Array.isArray(list)) galWarm(list); });
-        }, cfg.hoverDelay);
-    }
-
     // The result's visible box: clipped like a mark's, since a site may scale the picture under the pointer (nsfw.xxx 1.1×).
     function galHoleRect(el) {
         return galMarkRect(el, el.closest('picture') || el);
     }
 
-    // Middle press on a result: its gallery, locked; on the open one, closed; on another, switched.
+    // A peek at a door's gallery, locked; on the open one, closed; on another, switched.
     function galMiddle(t, href) {
         if (galOn && (galWant === href || (galCur && galCur.href === href))) { galHide('middle'); return; }
         const a = t.closest('a[href]'), pic = t.tagName === 'IMG' ? t : a && a.querySelector('img');
         const hr = galHoleRect(pic || t);
-        galAt = { href: href, hole: { x: hr.left, y: hr.top, w: hr.width, h: hr.height } };
         if (galOwns(active)) cancel();
         galOn = true;
-        galHole = galAt.hole;
+        galHole = { x: hr.left, y: hr.top, w: hr.width, h: hr.height };
         galWant = href;
         clearTimeout(galHoverTimer);
-        clearTimeout(galGraceTimer);
         galPendStart(href, 'middle press');
         galLoad(href).then(function (list) { galShow(href, list); });
     }
@@ -12074,9 +11893,8 @@
         el.style.cssText = 'left:' + (h.x - 3) + 'px;top:' + (h.y - 3) + 'px;width:' + (h.w + 6) + 'px;height:' + (h.h + 6) + 'px';
         root.appendChild(el);
         const at = 'cache ' + (galCache.has(href) ? 'has this link' : 'empty for this link') +
-            '; preload ' + (galPre ? (galPre === href ? 'busy on this link' : 'busy on another link') : galPreStop ? 'stopped by a refusal' : 'idle') +
             '; hidden frame ' + (galFrameStop ? 'busy' : 'idle') + '; gallery on screen ' + (galCur ? 'yes' : 'no') +
-            '; tab ' + document.visibilityState + '; links tried by preload ' + galPreTried.size + '; originals fetching ' + galHqText();
+            '; tab ' + document.visibilityState + '; originals fetching ' + galHqText();
         galTrace(href, 'press (' + how + ')');
         galPend = { href: href, how: how, t0: performance.now(), el: el, at: at };
         galPend.lit = setTimeout(function () { el.hidden = false; }, GAL_PEND_MS);
@@ -12095,16 +11913,6 @@
         clearTimeout(galPend.lit);
         galPend.el.remove();
         galPend = null;
-    }
-
-    // A middle press in gallery mode that found no result link, though one sits under the pointer.
-    function galMissed(e) {
-        let under = [];
-        try { under = document.elementsFromPoint(e.clientX, e.clientY); } catch (x) { return; }
-        const hit = under.find(function (n) { return n !== galHost && galLinkOf(n); });
-        if (!hit) return;
-        galDiag({ how: 'middle press', at: 'pressed ' + domChain(e.target) + '; the result link is on ' + domChain(hit), t0: performance.now() },
-            'the press landed on an element covering the result, not on the result');
     }
 
     // A URL with every word and number replaced: only its shape and where it points survive.
@@ -12142,10 +11950,9 @@
         return lines.join('\n');
     }
 
-    // Gallery mode's switches and the recent load traces (ms from each load's first step), URLs reduced to shape.
+    // The gallery's state and the recent load traces (ms from each load's first step), URLs reduced to shape.
     function galStateText() {
-        const lines = ['top frame ' + isTopFrame + ', host ' + pageHost() + ', listed ' + galleryListed() + ', on ' + galleryActive() +
-            ', here ' + galleryHere() + ', open ' + !!galCur + ', locked ' + !!galOn + ', preload ' + (galPreStop ? 'halted' : 'running')];
+        const lines = ['top frame ' + isTopFrame + ', host ' + pageHost() + ', doors ' + galMarksHere() + ', open ' + !!galCur + ', locked ' + !!galOn];
         galTraces.forEach(function (l, href) {
             const t0 = l.length ? l[0][0] : 0;
             lines.push('link ' + galSane(href) + ' (cached ' + galCache.has(href) + ')');
@@ -12192,66 +11999,24 @@
         e.stopImmediatePropagation();
     }
 
-    // A Ctrl tap (nothing else pressed, clicked or scrolled meanwhile) toggles the gallery, locked on the result under the pointer.
+    // A Ctrl tap (nothing else pressed, clicked or scrolled meanwhile) closes an open peek.
     function galKeyDown(e) {
         if (e.key !== 'Control') { galTap = false; return; }
         if (e.repeat) return;
-        galTap = !e.shiftKey && !e.altKey && !e.metaKey && !typingIn(e) && (galleryHere() || (galPeek && !!(galWant || galCur)));
+        galTap = !e.shiftKey && !e.altKey && !e.metaKey && !typingIn(e) && galPeek && !!(galWant || galCur);
     }
 
     function galKeyUp(e) {
         if (e.key !== 'Control' || !galTap) return;
         galTap = false;
-        if (galOn || galWant || galCur) { if (galPeek) galPeekTapAt = Date.now(); galHide('ctrl'); return; }
-        if (!galleryHere()) return;
-        if (!galAt || galLock || galEdge) return;
-        galOn = true;
-        galHole = galAt.hole;
-        galWant = galAt.href;
-        clearTimeout(galHoverTimer);
-        clearTimeout(galGraceTimer);
-        const href = galWant;
-        galPendStart(href, 'Ctrl tap');
-        galLoad(href).then(function (list) { galShow(href, list); });
+        if (galOn || galWant || galCur) { galPeekTapAt = Date.now(); galHide('ctrl'); }
     }
 
-    // Within GAL_EDGE of the window's edge: no grace period, the set goes at once.
-    function galAtEdge(x, y) {
-        return x < GAL_EDGE || y < GAL_EDGE || x > vpW() - GAL_EDGE || y > vpH() - GAL_EDGE;
-    }
-
-    function galOut(e) {
-        if (!e.relatedTarget) { galAt = null; if (!galOn && (galWant || galCur)) galHide(); return; }
-        const from = galLinkOf(e.target);
-        if (!from || galLinkOf(e.relatedTarget)) return;
-        galAt = null;
-        clearTimeout(galHoverTimer);
-        if (!galWant || galOn) return;
-        clearTimeout(galGraceTimer);
-        galGraceTimer = setTimeout(galHide, GAL_GRACE_MS);
-    }
-
-    // Tracks the pointer; hides at the window edge; a move ends the scroll lock; steers the hole.
+    // Tracks the pointer; the chip goes once it leaves its door.
     function galMove(e) {
         galPt.x = e.clientX;
         galPt.y = e.clientY;
         if (galHintFor && !holds(galHintFor.getBoundingClientRect(), galPt.x, galPt.y)) galHintHide();
-        if (galAtEdge(galPt.x, galPt.y)) {
-            if (!galEdge) { galEdge = true; galAt = null; if (!galOn && (galWant || galCur)) galHide(); }
-            return;
-        }
-        if (galEdge) {
-            galEdge = false;
-            galLock = null;
-            galOver(e);
-            return;
-        }
-        if (galLock) {
-            if (galPt.x === galLock.x && galPt.y === galLock.y) return;
-            galLock = null;
-            galOver(e);
-        }
-        if (!galOn) galSteer(galPt.x, galPt.y);
     }
 
     // A page scroll hides the set; nothing shows again until the pointer itself moves.
@@ -12260,8 +12025,6 @@
         if (!galMarksHere() && !galWant && !galCur) return;
         const t = e.target;
         if (t !== document && !(t && t.nodeType === 1 && t.clientHeight >= vpH() / 2)) return;
-        galLock = { x: galPt.x, y: galPt.y };
-        galAt = null;
         if (galWant || galCur) galHide(performance.now() - galInputAt < 600 ? 'scroll' : 'page scrolled by itself');
         galMarkSoon();
     }
@@ -12557,31 +12320,7 @@
 
     function galMarkSoon() {
         clearTimeout(galMarkTimer);
-        galMarkTimer = setTimeout(function () { galMarkAll(); galPreNext(); setTimeout(galPreNext, 2000); }, 250);   // again once lazily added results land
-    }
-
-    // ---- preload: every same-origin result's gallery, one page at a time, nearest the pointer first
-
-    // The next result link not yet read: in the window nearest the pointer, then below by distance, then above; within GAL_AHEAD / GAL_BEHIND screens.
-    function galPrePick() {
-        const seen = new Set(), H = vpH(), diag = Math.hypot(vpW(), H);
-        let best = null, bestD = Infinity;
-        document.querySelectorAll('a[href] img').forEach(function (img) {
-            const h = galLinkOf(img);
-            if (!h || seen.has(h)) return;
-            seen.add(h);
-            if (galPreTried.has(h) || galCache.has(h)) return;
-            try { if (new URL(h).origin !== location.origin) return; } catch (e) { return; }
-            let r = img.getBoundingClientRect();
-            if (!r.width || !r.height) r = img.closest('a[href]').getBoundingClientRect();     // a lazy picture not drawn yet
-            if (!r.width && !r.height && !r.top && !r.left) return;                            // not laid out at all
-            if (r.top > H * (1 + GAL_AHEAD) || r.bottom < -H * GAL_BEHIND) return;
-            const d = r.bottom < 0 ? diag + H * GAL_AHEAD - r.bottom
-                : r.top > H ? diag + r.top - H
-                : Math.hypot(r.left + r.width / 2 - galPt.x, r.top + r.height / 2 - galPt.y);
-            if (d < bestD) { bestD = d; best = h; }
-        });
-        return best;
+        galMarkTimer = setTimeout(galMarkAll, 250);
     }
 
     // Load a gallery's thumbnails into the browser's cache, up to GAL_WAIT_MS.
@@ -12591,61 +12330,21 @@
             .then(function () { clearTimeout(t); });
     }
 
-    // One more page, unless one is in flight, a hover's frame is loading, or a refusal stopped it. Kicked by every load's end.
-    function galPreNext() {
-        if (galPre || galPreStop || galFrameStop || document.visibilityState === 'hidden' || !galleryHere()) return;
-        const href = galPrePick();
-        if (!href) { if (galPreLog) { galPreLog.end('done'); galPreLog = null; } return; }
-        if (!galPreLog) {
-            usLog.enable(cfg.logRequests !== false);
-            galPreLog = usLog.start('gallery', { host: pageHost(), pace: version().replace(/\?/g, '') + ' serial', slowed: noRush(pageHost()) });
-        }
-        galPre = href;
-        galPreTried.add(href);
-        galLoad(href, galPreLog).then(function (list) {
-            if (list === 'cancel') galPreTried.delete(href);
-            return Array.isArray(list) ? galWarm(list) : null;
-        }).then(function () {
-            galPre = null;
-            galPreNext();
-        });
-    }
-
-    // A refusal: no more preloading on this page.
-    function galPreHalt(why) {
-        galPreStop = true;
-        if (galPreLog) { galPreLog.end(why || 'limited'); galPreLog = null; }
-    }
-
     if (isTopFrame) {
         document.addEventListener('scroll', galScroll, { capture: true, passive: true });
-        setTimeout(function () { galMarkAll(); galPreNext(); }, 1500);
+        setTimeout(galMarkAll, 1500);
         window.addEventListener('keydown', galKeyDown, true);
         ['mouseup', 'auxclick', 'click'].forEach(function (t) { document.addEventListener(t, galMidEat, true); });
-        setTimeout(galBtnSync, 0);
-        try {
-            if (typeof GM_addValueChangeListener === 'function') GM_addValueChangeListener(GAL_ON_KEY, function (n, o, v, remote) {
-                if (!remote) return;
-                const was = galleryActive();
-                galOnHosts = null;
-                if (galleryActive() !== was) galApply();
-            });
-        } catch (e) { /* other tabs follow on their next load */ }
         window.addEventListener('keyup', galKeyUp, true);
         window.addEventListener('blur', function () { galTap = false; if (galPend) galTrace(galPend.href, 'window lost focus'); });
         document.addEventListener('visibilitychange', function () {
             if (galPend) galTrace(galPend.href, 'tab ' + document.visibilityState);
-            if (document.visibilityState === 'hidden') { if (galPre && galFrameStop) galFrameStop(); }   // only the tab in view preloads
-            else galPreNext();
         });
         window.addEventListener('wheel', function () { galTap = false; galInputAt = performance.now(); }, { capture: true, passive: true });
         window.addEventListener('touchstart', function () { galInputAt = performance.now(); }, { capture: true, passive: true });
-        window.addEventListener('pagehide', function () { if (galPreLog) { galPreLog.end('cut'); galPreLog = null; } });
         setTimeout(function () {
             if (galMarksHere()) galListAdd(GAL_VISITED_KEY, location.href.split('#')[0]);
         }, 0);
-        document.addEventListener('mouseover', galOver, true);
-        document.addEventListener('mouseout', galOut, true);
         document.addEventListener('mousemove', galMove, { capture: true, passive: true });
         document.addEventListener('mousedown', function (e) {
             galTap = false;
@@ -12661,18 +12360,7 @@
                 return;
             }
             const plain = e.button === 1 && cfg.galleryMiddle && !e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey;
-            if (plain && galleryHere()) {
-                if (e.target === galHost) { e.preventDefault(); return; }      // no autoscroll over the gallery
-                const href = galLinkOf(e.target);
-                if (href) {
-                    e.preventDefault();
-                    e.stopImmediatePropagation();
-                    galMidAt = Date.now();
-                    galMiddle(e.target, href);
-                    return;
-                }
-                galMissed(e);
-            } else if (plain && !CAPTCHA_HERE && siteEnabled()) {
+            if (plain && !CAPTCHA_HERE && siteEnabled()) {
                 if (e.target === galHost && galCur) { e.preventDefault(); return; }
                 const door = doorAt(e.target, e.clientX, e.clientY), href = door && galLinkOf(door);
                 if (href && galKindDone.get(domChain(door)) !== 'results') {     // a door to a gallery, anywhere: peek at its pictures. See P17.
@@ -12700,7 +12388,6 @@
         CAP_TARGET.addEventListener('wheel', galWheel, WHEEL_OPTS);
         window.addEventListener('resize', function () {
             if (galMarksHere()) galMarkSoon();
-            galAt = null;
             if (galWant || galCur) galHide('resize');
         });
     } else if (String(window.name || '').indexOf(GAL_NAME + ':') === 0) {
@@ -12773,7 +12460,7 @@
     let panelOpened = null;     // Undo's snapshot — see openPanel(); MUST outlive a re-render
 
     // What the user entered per site, not knobs: `Reset to defaults` leaves these alone.
-    const RESET_KEEPS = ['siteList', 'gallerySites', 'blockList', 'referrerSites', 'siteAudio', 'videoDelays', 'avatarAreas', 'ownPlayerAreas', 'linkAreas', 'doorAreas', 'areasAgedOn', 'scrollSites', 'taughtRules'];
+    const RESET_KEEPS = ['siteList', 'blockList', 'referrerSites', 'siteAudio', 'videoDelays', 'avatarAreas', 'ownPlayerAreas', 'linkAreas', 'doorAreas', 'areasAgedOn', 'scrollSites', 'taughtRules'];
 
     // Open/closed, the fold, scroll and position for this TAB — sessionStorage is per tab and
     // per origin, so it follows a same-site link or a refresh and dies with the tab.
@@ -14071,20 +13758,9 @@
             currentValue: function () { return pageHost(); },
         });
 
-        section('Gallery mode');
+        section('Galleries');
         check('galleryMiddle', 'Middle-click opens a gallery',
             'Off: middle-click opens the link in a new tab as usual, and clicking the ▦ chip on a result opens its gallery.');
-        const gallerySites = list('gallerySites', {
-            heading: 'Sites with the gallery button',
-            description: 'The button sits top right on these sites and turns gallery mode on or off for the page it is on. ' +
-                'The menu item “Show gallery button on this site” adds a site here.',
-            examples: 'Examples: example.com, example.com/tags',
-            placeholder: 'e.g. example.com',
-            addCurrentLabel: '+ This site',
-            addCurrentTitle: pageHost(),
-            currentValue: function () { return pageHost(); },
-        });
-
         const foot = document.createElement('div');
         foot.className = 'foot';
 
@@ -14127,7 +13803,6 @@
         // An open "edit as text" box commits on blur, which a click can outrun; every exit runs this.
         panelFlush = function () {
             sites.flush();
-            gallerySites.flush();
             blocks.flush();
             refSites.flush();
         };

@@ -695,9 +695,8 @@ anyone makes, and doing it through the panel means opening it and scrolling to t
 - **"☑/☐ Draw where the slideshow stops"** (`toggleLines()`, v0.160.0) is the Diagnostics
   checkbox `showPostEnd`, put in the menu at the user's request because it is toggled often while
   the post end is tuned; expected to go when that work settles. `refreshSiteMenu()` re-registers
-  every entry each time, in the order site, gallery, lines.
-- **"Show / Hide gallery button on this site"** (`toggleGallery()`, v0.230.0; renamed v0.252.0) works like
-  `toggleSite()` on `gallerySites`; see [`GALLERY.md`](GALLERY.md).
+  every entry each time, in the order site, lines.
+- The gallery-button menu item is gone with gallery mode (v0.291.0; [`GALLERY.md`](GALLERY.md)).
 - **`toggleSite()` removes EVERY entry that covers the host, not an exact match.** `siteEnabled()`
   matches by suffix, so on `www.example.com` a listed `example.com` is what is in force —
   removing only an exact `www.example.com` would leave the site listed and the menu would report

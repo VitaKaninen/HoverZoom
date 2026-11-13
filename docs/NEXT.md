@@ -28,6 +28,9 @@ is still undecided.
   hover; clicking the chip opens the gallery; middle-click peek is now a setting, **off by default**;
   chip kind decided once per area per page; `<picture>` left out of the signature; seen mark, hole
   and ring sit on the visible (clipped) card, not the picture the site enlarges.
+- **v0.290.0** — marks and chip read the card's own badges (`galMarkBlockers`, not hit-tested), so
+  they land clear of nsfw.xxx's count badge from the start; a saved card shows disc and tick side by side.
+- **v0.291.0** — gallery mode retired (`GALLERY.md` top). Peek on doors is the only way in.
 
 ## Not verified
 
@@ -41,7 +44,6 @@ user may want `GAL_MIN_H` lower.
 B (rest). The slideshow widget inside an open gallery, counting that gallery's pictures.
 C. User's idea: widget ◀ ▶ flip gallery pages showing "page n / N". Recommended instead: ◀ ▶ always
    mean next picture; the gallery follows a slideshow to the page holding it. Undecided.
-Retire gallery mode (per-site switch, previews off, widget hidden) now that peek works without it.
 D. One slideshow scope whatever the start (old reason: a forum post's pictures without the replies;
    `S25`, `E60`); one remembered window position instead of two (`E64`); a slideshow keeps the
    window where it is; same frame rules pinned or touring (`E21` vs `growBox`).

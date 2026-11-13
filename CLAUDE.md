@@ -42,7 +42,7 @@ point**; if a task genuinely spans two, read two.
 | any banner-gate threshold | [`banner-test-sites.md`](banner-test-sites.md) — ~40 live pages measured in two browsers; every number in the gate sits next to a row |
 | the widget's position, or any floating widget shared with Forum Stumbler / RNFP | [`docs/WIDGET-DOCK.md`](docs/WIDGET-DOCK.md) — the shared `dock/us-dock.js`; never edit a synced copy |
 | rate limiting, a 429, the one-at-a-time list, or the request log shared with Forum Stumbler | [`docs/REQUEST-LOG.md`](docs/REQUEST-LOG.md) — the shared `shared/us-log.js`; never edit a synced copy; **log first, no new pacing logic without a log** |
-| gallery mode — hovering a result floats the linked page's thumbnails | [`docs/GALLERY.md`](docs/GALLERY.md); resuming it: [`docs/NEXT.md`](docs/NEXT.md) |
+| galleries — the ▦ chip on a door floats the linked page's thumbnails (gallery mode retired v0.291.0) | [`docs/GALLERY.md`](docs/GALLERY.md); resuming it: [`docs/NEXT.md`](docs/NEXT.md) |
 | the zoom **percentage** — what it counts, and why it once moved with browser zoom | [`docs/ZOOM-UNITS.md`](docs/ZOOM-UNITS.md) |
 | the user cited an ID — `S05`, `E22`, `T17`, `P4` | [`INTERACTION.md`](INTERACTION.md) says what it is in one line; then `grep -rn "E22" docs/` for the argument |
 

@@ -963,7 +963,7 @@ an area still preview). Ground truth = the linked-page fetch; extends `linkAreas
 which today only skips the fetch. **Way out, user's requirement:** 10 % recheck under a rule; a
 recheck finding a leaf in a door area hides a real preview, so it `areaDrop`s at once; ageing as
 `P16`; an area whose samples disagree (look-alike pages that differ) never forms a rule. Add a user
-teach/override per area. Gallery mode could switch on per door area instead of per site.
+teach/override per area.
 
 **Measured 2026-11-12 — the test is "a BIGGER copy of this picture on the linked page", nothing
 weaker.** "Same stem there" and "many pictures there" both fail: eporner's listing → gallery has the

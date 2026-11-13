@@ -1,33 +1,24 @@
-# Gallery mode
+# Galleries (peek)
 
-Hovering a result on a search/listing page floats the thumbnails of the page that result links to,
-so the user can judge whether that gallery is worth opening. Look only: the floating layer is
-`pointer-events:none`, nothing on it is clickable. Code: `galleryHere` … `galMove`, after `harvest`.
+A click on a door's ▦ chip (or a middle press, with `galleryMiddle`) floats the linked page's
+thumbnails over the page, so the user can judge whether that gallery is worth opening. Code:
+`galDoorHover` … `galMove`, after `harvest`. Where it runs = wherever doors are learned (`P17`).
 
-## Where it runs (user, v0.252.0)
+**Gallery mode is retired (v0.291.0, user):** the per-site switch (`gallerySites`, the ▦ dock
+button, the "Show / Hide gallery button" menu item), previews-off while on, Ctrl tap to open,
+unlocked hover galleries (grace period, hole steering, edge band, scroll lock) and the whole-page
+preload (`galPreNext`). Reason: peek on doors does the same without a mode, and the mode hid
+previews and the chip (nsfw.xxx: no chip ever, because the mode was on). `hoverZoomGalleryHosts` /
+`hoverZoomGalleryDock` are left in storage, unread. A setting `gallerySites` in old stored settings
+is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
 
-- `gallerySites` (Settings → Advanced → Gallery mode; `RESET_KEEPS`) = the sites that get the **gallery
-  button** (peeking a door needs none of this — see above), a 26 px docked widget (`galBtnBuild`, dock id `hover-zoom-gallery`, own per-site position
-  in `hoverZoomGalleryDock`, first placed top-right). Menu item `toggleGallery()`: "Show / Hide gallery
-  button on this site" (removes every entry covering the page, else adds the host). Elsewhere nothing
-  shows, nothing preloads, nothing listens for Ctrl or the middle button.
-- The button (`galToggle`) turns gallery mode on/off **for the site** (user, v0.254.0): hosts in
-  `hoverZoomGalleryHosts` (GM storage, own key, survives Reset), read synchronously, so on until the
-  button is pressed again on that host, in every tab; open tabs follow via `GM_addValueChangeListener`.
-  Cost: a gallery opened in a new tab on the same host is also in gallery mode (the reason v0.253.0
-  used per-tab `GM_saveTab`; v0.252.0 was per host + path). The user chose per site over that.
-- `galleryHere()` = top frame, not a captcha, `galleryActive()`. **While active, ordinary previews
-  are off on that page** (`siteEnabled()` is false; the slideshow widget hides). Off = the page as it
-  is without gallery mode. Seen/visited/saved marks show either way (`galMarkAll` needs only the list).
-- `galOnHosts` / `GAL_ON_KEY` are `var`s: `siteEnabled()` reads it and can run before its line.
 ## Peek, pages, reading on (v0.282.0; INTERACTION.md `G1`, `G6`, `G7`)
 
 - **Peek**: the document mousedown handler: a left press on the `.hint` chip (`composedPath()[0]`,
-  read before `galHintHide()`) peeks at `galHintFor`; outside gallery mode and where `siteEnabled()`,
+  read before `galHintHide()`) peeks at `galHintFor`; where `siteEnabled()`,
   a plain middle press on `doorAt()` does too, but only with `cfg.galleryMiddle` (default off, user
-  2026-11-12 — it gates gallery mode's middle press as well; Ctrl tap still opens there). Both set
-  `galPeek` and call `galMiddle()`. A door whose `galKindOf()` is `results` gets neither. While `galPeek`, `galOver` does
-  not hide the set, a Ctrl tap closes it (and `galPeekTapAt` keeps the previews hotkey from also
+  2026-11-12). Both set
+  `galPeek` and call `galMiddle()`. A door whose `galKindOf()` is `results` gets neither. While `galPeek`, a Ctrl tap closes it (and `galPeekTapAt` keeps the previews hotkey from also
   toggling), `galScroll` runs. `onOver` returns while `galCur || (galOn && galWant)`: with previews
   on, the page under the set would otherwise preview through the gaps. `galHide` clears `galPeek`.
 - **Door hover** (`doorHover(el, x, y)` → `galDoorHover`): the event's x, y go into `galPt` first —
@@ -53,7 +44,7 @@ so the user can judge whether that gallery is worth opening. Look only: the floa
   `galLists` (the cached list, mutated) by URL path of thumb + every srcset entry (`galItemKeys`,
   so an HTML read and a frame read of one picture match), `galAppend` adds cells in
   `GAL_APPEND_MS` batches, relayout keeps the page. `galGrown` = read to the end this visit, not
-  read again. The frame holds `galFrameStop`, so no preload runs meanwhile; `galHide` ends it.
+  read again. `galHide` ends it.
   Cost: the open's page loads a second time (the first frame, if any, is gone by then).
 - Why the 683-picture gallery showed 9–15: the frame reported once, 4 s after load, and the page
   mounts posts as it is scrolled. Unverified on nsfw.xxx itself.
@@ -62,28 +53,17 @@ so the user can judge whether that gallery is worth opening. Look only: the floa
 
 - Every picture the page has (`GAL_MAX` = Infinity, user v0.251.0: galleries run 10-100 and a cap
   silently hid the rest; more pictures = smaller cells).
-- **A Ctrl tap toggles it, locked on one result** (user, v0.250.0; held-Ctrl was v0.248.0-v0.249.0).
-  Hovering alone shows nothing (it only preloads). A tap = Ctrl down then up with no other key,
-  mouse press or wheel between (`galTap`; Ctrl+F, Ctrl+click, Ctrl+wheel never toggle), not typing.
-  On: the result under the pointer (`galAt`, kept by `galOver`/`galOut` even while on; cleared on
-  scroll, resize, window edge) is locked (`galOn`): no hover delay, the hole and gallery never change
-  while on, and leaving the link, the window edge band and leaving the window do not hide it — so the
-  pointer can go over the thumbnails. Off: another tap, Esc (with no preview up), a left press on the
-  page (not on the gallery or a preview; middle and right presses leave it up), a scroll, a resize
-  (`galHide` clears `galOn`). Tap with no result under the pointer does nothing. A Ctrl tap on a
-  gallery page does not run the previews hotkey toggle (`hotkeyToggle`'s keyup).
-- **Middle button, one-handed** (user, v0.252.0), only while gallery mode is on: a middle press on a
-  result (`galMiddle`) opens its gallery locked, as a Ctrl tap does; on the open result (the one in
-  the ring) it closes it; on another result it switches. `preventDefault` on the press (no
-  autoscroll; also over the gallery itself), and `galMidEat` swallows that press's
-  mouseup/auxclick/click (no new tab; `galMidAt`, reset by every press). Any modifier (Ctrl+middle =
-  new tab) goes to the browser. A middle press on the preview is still `midSave` (window capture,
-  runs first). Visited is not touched by any of it.
-- **Layout: the hole is the picture under the pointer** (user, v0.248.0): `galSteer` on every
-  `mousemove` and once at build, unless locked (`galOn`, always now); on no picture it stays. The user rejected looking past the
-  hovered picture: a 3 × 3 rule picking a neighbour (v0.243.0–v0.247.0) gave no way to tell which
-  page pictures were still unseen on a non-grid page. The moving slot is v0.240.0, commit de9996a
-  ("take it back to here" means that).
+- **Locked on its door** (`galOn`): no hover delay, the hole and gallery never change while open, and
+  leaving the link or the window does not hide it, so the pointer can go over the thumbnails. Closes
+  on a Ctrl tap (Ctrl down then up, no other key, press or wheel between: `galTap`; it does not also
+  run the previews hotkey, `galPeekTapAt`), Esc (with no preview up), a left press on the page (not on
+  the gallery or a preview; middle and right presses leave it up), a scroll, a resize.
+- **Middle press** (`galMiddle`, with `galleryMiddle`): on the open door it closes it; on another it
+  switches. `preventDefault` on the press (no autoscroll), and `galMidEat` swallows that press's
+  mouseup/auxclick/click (no new tab; `galMidAt`, reset by every press). Any modifier goes to the
+  browser. A middle press on the preview is still `midSave` (window capture, runs first).
+- **The hole is the door's picture** (`galHole`, clipped card box). The moving slot that followed the
+  pointer was v0.240.0, commit de9996a ("take it back to here" means that).
 - `galShow` loads every thumbnail first (`galImg`, up to `GAL_WAIT_MS` 2.5 s; late or failed ones are
   left out), so each shape is known **before** anything is placed — the user does not want pictures
   swimming as they load.
@@ -93,21 +73,8 @@ so the user can judge whether that gallery is worth opening. Look only: the floa
   picture (none fits even at 8 px → the unplaced cells are hidden). Rows are one height because a
   segment beside the hole cannot be justified independently of the rows above and below.
 - Resize hides the set (the hole's rect is stale). Upgrade check uses each picture's drawn width.
-- **Preload** (user, v0.248.0): `galPreNext` reads every same-origin result's gallery (`galLoad`) and
-  then its thumbnails (`galWarm`, into the browser cache), **one page at a time** (`galPrePick`,
-  re-derived each step, so a scroll re-orders it): results in the window nearest the pointer, then
-  below it by distance, then above; only within `GAL_AHEAD` 3 screens below / `GAL_BEHIND` 1 above
-  (user, v0.256.0: sites load 1.5-5 screens of results; keep ~3 ahead). A lazy `<img>` with no size
-  yet is measured by its link's box — skipping it (pre-v0.256.0) left everything below the fold
-  unread. Kicked at boot +1.5 s, 250 ms and 2 s after a scroll/resize (the second for results a
-  site appends late), and by the end of every `galLoad`. Throughput is the limit (one frame + its
-  thumbnails at a time, ~1-5 s each); going parallel is new pacing, so log first. It never starts while a frame is
-  loading (`galFrameStop`), so it cannot cancel a hover's frame; a hover's frame does cancel it (that
-  page is retried). Tried pages are not retried (`galPreTried`). A hover still loads its own result
-  at once after `cfg.hoverDelay`. A 429/503 on any gallery fetch stops preloading for the page
-  (`galPreHalt`). Logged: one `gallery` us-log row per run on the page's host (stored in
-  `gallerySites`, so the privacy rule holds); the hidden frame's requests are not counted.
-  `GAL_CACHE` is 300 so a long results page is not evicted while it preloads.
+- **Read-ahead**: hovering a door, after `cfg.hoverDelay`, reads its gallery (`galLoad`) and warms its
+  thumbnails (`galWarm`). `GAL_CACHE` 300. No whole-page preload since v0.291.0.
 - **Originals on open** (user, v0.263.0 — hovering each cell then waiting for its fetch was the
   complaint): when a set is built and its thumbnails preview (`set.pv`), `galHqAll` runs `galResolve`
   on every cell, `GAL_HQ_PAR` 4 at a time, in cell order. Same probe as the hover, so `probeCache`
@@ -132,9 +99,7 @@ so the user can judge whether that gallery is worth opening. Look only: the floa
   centre, `#f9e2af`) inside `set.el`, "would not load" / "still loading after 15 s". Not a toast:
   hovering a cell replaces the tip. v0.265.0's "middle-click twice" notice is gone.
 - **Safeguards** (user, v0.262.0, after gallery mode on YouTube with several tabs open crashed the
-  browser — every tab follows the per-site on-state, and each preload frame is a full watch page):
-  - Only the tab in view preloads: `galPreNext` returns while `document.visibilityState` is hidden;
-    going hidden cancels the preload's frame, coming back resumes.
+  browser — each hidden frame is a full watch page):
   - No media in the hidden frame (`galNoMedia`, run by the frame's own copy at the start of
     `galProbeReport`): every video/audio is emptied (src, `<source>`, srcObject, `load()`), every
     iframe/embed/object removed, now, on `loadstart`, and via a MutationObserver (allowed here: the
@@ -142,13 +107,10 @@ so the user can judge whether that gallery is worth opening. Look only: the floa
     may have begun fetching. Rejected: refusing pages that have a player — the user's gallery pages
     carry videos at the bottom.
   - Lag watchdog in `galRender`: a `GAL_LAG_TICK` 250 ms timer while a frame exists; firing more than
-    `GAL_LAG_MS` 1 s late (tab visible) removes the frame, `galPreHalt('froze')`, and a 3 s toast.
+    `GAL_LAG_MS` 1 s late (tab visible) removes the frame.
   - Rejected by the user: stopping on galleries with few pictures (show whatever is there), and a
     confirm on first enable (the user can't judge whether a site is a bad idea).
-- Hover delay = `cfg.hoverDelay`. Off every result link for `GAL_GRACE_MS` 500 → fade out. Moving
-  to another link within that time keeps the old set until the new one is ready, then crossfades
-  (`GAL_FADE_MS` 200). A linked page with no pictures clears the old set.
-- Leaving gallery-mode pages hides it.
+- A newer open crossfades from the old set (`GAL_FADE_MS` 200). A linked page with no pictures clears it.
 - **Previews on the thumbnails** (user, v0.251.0 — the use: save chosen pictures without opening the
   result). When the linked page would preview (`siteEnabledAt(href)` = the site list run on that URL)
   (`set.pv`) a cell's hover previews; otherwise the first hover toasts which site-list entry turns
@@ -160,7 +122,7 @@ so the user can judge whether that gallery is worth opening. Look only: the floa
   thumbnail wins, else the thumbnail; then `showViewer`. `mouseleave` cancels unless placed. None of
   `refusal()`'s gates run (no layout of that page), like harvested tour entries. `galOwns(el)` = el is
   in the gallery's shadow root; `onMove` skips `playerArrived` for it; `galHide` cancels its preview.
-  The document's `onOver` never acts on the gallery: previews are off while gallery mode is on.
+  The document's `onOver` never acts on the page under it: it returns while `galCur || (galOn && galWant)`.
 - Presses: on the gallery (`galHost`), on our preview/backdrop (`ours`) or inside the preview keep the
   gallery, so middle-click save, pinning and click-away-from-a-pinned-preview all leave it up.
 - **Saved mark** (user): a middle-click save (`midSave` → `saveOriginal(url, quiet, done)`, `done` on
@@ -169,16 +131,10 @@ so the user can judge whether that gallery is worth opening. Look only: the floa
   `#89b4fa` disc with a down arrow (`galSavedIcon`), top-left: `.svd` in the cell, and on the result's
   picture a `data-hz-saved` span (`galMarkSaved`). Marks are found by scanning the next 3 siblings
   (`galMarkFind`), since a picture can now have two.
-- **The grace period is for inside the page only** (user): the pointer within `GAL_EDGE` 50 px of
-  the window's edge, or leaving the window (`mouseout` with no `relatedTarget`), hides it at once.
-  Hovers inside that band are ignored; coming back out of it counts as a hover on whatever is under
-  the pointer (no `mouseover` fires for a move within one element).
-- **Scroll hides it and locks hovering** (user): `galScroll` (document or a container ≥ half the
-  viewport tall — a carousel must not count) stores the pointer as `galLock`; `galOver` ignores
-  everything until `galMove` sees different coordinates, then treats that move as the hover. The lock
-  exists because a scroll fires `mouseover` under a still pointer.
+- **Scroll hides it** (`galScroll`: the document or a container ≥ half the viewport tall — a carousel
+  must not count).
 - **Seen check** (user): a gallery that stays on screen `GAL_SEEN_MS` (1 s) as the current set has its
-  link stored (user, v0.249.0: a shorter look, a hover without Ctrl, and preloading never count) (`hoverZoomGallerySeen`, an ordered list,
+  link stored (user, v0.249.0: a shorter look never counts) (`hoverZoomGallerySeen`, an ordered list,
   last `GAL_SEEN_MAX` 10,000, re-read before each write so tabs don't erase each other) and every
   page `<img>` linking there gets a 24 px bare green tick (inline SVG, dark outline, no box) in a span (`data-hz-seen`) appended to the result's link (`galMarkHost`; found again by `__hzAt`),
   absolutely positioned by measuring its own containing block (`galMarkImg`; size = the larger of img and `<picture>`, `galMarkRect`, as an inline picture measures as a line box) — so no ancestor's
@@ -208,10 +164,8 @@ so the user can judge whether that gallery is worth opening. Look only: the floa
 - **Visited = double tick** (user): two of the same ticks, 10 px apart in a 34 × 24 box, both fully
   outlined. Stored in `hoverZoomGalleryVisited` (same list rules, `galList`/`galListAdd`). **Only the
   browser loading the page counts** (user, v0.252.0): at boot, every top-frame page on a
-  `gallerySites` site stores its own URL (the tab's on-state is not known yet at boot; storing the
-  search page too is harmless). A link, middle-click or context-menu "Open in
-  new tab" all land there; hovering, the gallery, middle-click-to-gallery and the hidden preload
-  frame (not top frame) never do. No click counting (`galClick` removed). Untested assumptions,
+  site with learned doors stores its own URL (storing the search page too is harmless). A link, middle-click or context-menu "Open in
+  new tab" all land there; hovering, the gallery, a peek and the hidden frame (not top frame) never do. No click counting (`galClick` removed). Untested assumptions,
   true on the user's site so far: the result link is the URL that loads (no redirect / extra params)
   and the site reloads between pages (no SPA). `:visited` cannot be read by script, hence our own
   list. Visited wins over seen; a mark of the wrong kind is replaced.
@@ -248,7 +202,7 @@ press reads again (v0.277.0). Cutting the frame off at 2.5 s (`GAL_PREFER_MS`, v
 cached nsfw.xxx's 1-picture logo read for every result: its frames take 2.5–3.3 s. The frame's copy
 reports from `DOMContentLoaded`, not `load` (ads keep some pages loading forever).
 Diagnose with `document.dispatchEvent(new CustomEvent('hover-zoom:gallery-state'))`: one console
-line with listed/on/here/open and every load's trace (`galStateText`, URLs reduced by `galSane`).
+line with doors/open/locked and every load's trace (`galStateText`, URLs reduced by `galSane`).
 
 The frame **fails** → the plain HTML read below: load lands on an error page or another origin
 (cross-origin links always do), the page not loaded in `GAL_FRAME_MS` (10 s), or no report
@@ -291,18 +245,17 @@ the drawn size does not change. At most `GAL_TRIES` per picture.
 ## Open feedback and diagnostics (user, v0.255.0)
 
 Asked for because an open on one live site does nothing ~1 in 4 presses and a second press works.
-- A middle press or Ctrl tap that opens lights the result (`.pend`: blue ring, the rest dimmed by its
+- A peek that opens lights the result (`.pend`: blue ring, the rest dimmed by its
   200vmax shadow) until `galBuild` shows the set (`galPendStart`/`galPendClear`) — but only from
   `GAL_PEND_MS` 3 s after the press (user, v0.256.0: a normal open is under 3 s and must look as before).
-- `galTrace(href, what)` records every step of every load, preloads included (`galTraces`, 60 links),
-  so a press that hit an in-flight preload still shows the preload's earlier steps (negative ms).
+- `galTrace(href, what)` records every step of every load, read-aheads included (`galTraces`, 60 links),
+  so a press that hit an in-flight read still shows its earlier steps (negative ms).
 - The popup (`galDiag`, copy button) opens when: nothing shows `GAL_DIAG_MS` (10 s) after the press;
   a failure ends the open early (`galHide('fail: …')` — no pictures, none loaded in `GAL_WAIT_MS`,
   load cancelled); or the hide reason is not the user's (`GAL_USER_HIDE`: press, esc, middle, ctrl,
-  resize, mode off, scroll). A scroll counts as the user's only within 600 ms of a wheel, key (not
+  resize, scroll). A scroll counts as the user's only within 600 ms of a wheel, key (not
   Control), touch or left press (`galInputAt`); the middle press itself must not count, or a page
-  scroll it triggers would be silent. `galMissed`: a middle press whose target is no result but has
-  one under it (`elementsFromPoint`) — an overlay covering the result.
+  scroll it triggers would be silent.
 - Privacy: no URL leaves `galSane()` — scheme, same host / sibling subdomain / other host, path
   with letter runs → `w` and digit runs → `#`, query keys only. Trace strings never carry a URL
   (the frame's "landed on <url>" is rewritten). Element chains are `domChain()` (digits → `#`).
@@ -313,12 +266,15 @@ Asked for because an open on one live site does nothing ~1 in 4 presses and a se
 ## Requests
 
 Fetched pages are cached by URL (`GAL_CACHE` 300; failures are not cached). A 429/503 is logged
-with `logBusy` — the host is already stored in `gallerySites`, so the log privacy rule holds.
+with `logBusy` — the host is already stored in `doorAreas`, so the log privacy rule holds.
 
 ## Test
 
-`test-pages/gallery-search.html` (sets its own localStorage settings on first load; click the
-gallery button top-right once, or nothing happens — the on-state is not part of those settings):
+`test-pages/door-search.html`: hover d1–d3 to learn the door area, then the chip on d4 opens
+`gallery-mixed.html`. Synthetic `mouseover`/`mousemove` with `clientX/Y` learns; a synthetic
+`mousedown` on the chip (inside the gallery layer's shadow root, `composed: true`) opens; the
+preview caption also has a `.hint` — pick the one holding an `<svg>`. `gallery-search.html` and
+`gallery-masonry.html` still seed `gallerySites` (ignored now); their linked pages:
 "built by script" → 25 through the frame in ~1.5 s, logo left out; A → (frame times out: A has no
 script) all 40 grid pictures from the HTML, none of the 6 related; B → 10; the last → nothing. Synthetic
 `mouseover` on `#ra img` works; the pane's hover coordinates are scaled (×1.28 measured), so aim
