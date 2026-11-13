@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version     0.296.0
+// @version     0.297.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -252,6 +252,7 @@
         galleryChips: true,         // the ▦ chip on every gallery thumbnail; off: only on the one under the pointer
         galleryTicks: true,         // seen / visited ticks on results
         gallerySavedMarks: true,    // saved discs on results and in galleries
+        galleryPreload: true,       // read the first page of every gallery on screen ahead of a click
         hoverPreload: true,         // load the page's pictures ahead of the user, as far as they show interest
         minDisplayed: 16,           // ignore images displayed smaller than this, whatever they are
         smallBelow: 48,             // px: smaller pictures preview only as an avatar or an emoji
@@ -11003,6 +11004,7 @@
                 if (galGrowEnd === end) galGrowEnd = null;
                 f.remove();
                 if (done && onEnd) onEnd(why);
+                setTimeout(galPreNext, 0);
             };
             const fin = function (v, why, keep) {
                 if (done) return;
@@ -11046,6 +11048,7 @@
             const lagCheck = function () {
                 const late = performance.now() - lagAt - GAL_LAG_TICK;
                 if (late > GAL_LAG_MS && document.visibilityState !== 'hidden') {   // a hidden tab's timers are throttled, not frozen
+                    galPreHalt('froze');
                     if (done) end('froze'); else fin(null, 'the page froze for ' + Math.round(late) + ' ms');
                     return;
                 }
@@ -11170,7 +11173,7 @@
         let refused = null;
         const html = fetchDoc(href, function (res) {
             refused = res;
-            if (res.status === 429 || res.status === 503) logBusy(href, res);
+            if (res.status === 429 || res.status === 503) { logBusy(href, res); galPreHalt('limited'); }
             dbg('gallery page refused', { href: href, status: res.status });
         }).then(function (doc) {
             const busy = !!refused && (refused.status === 429 || refused.status === 503);
@@ -11813,7 +11816,6 @@
         galWant = null;
         galOn = false;
         galPeek = false;
-        if (galGrowEnd) galGrowEnd('closed');
         if (galOwns(active)) cancel();
         if (galCur) { galDrop(galCur); galCur = null; }
         if (galBlur) galBlur.classList.remove('on');
@@ -12865,7 +12867,7 @@
 
     function galMarkSoon() {
         clearTimeout(galMarkTimer);
-        galMarkTimer = setTimeout(galMarkAll, 250);
+        galMarkTimer = setTimeout(function () { galMarkAll(); galPreNext(); }, 250);
     }
 
     // Load a gallery's thumbnails into the browser's cache, up to GAL_WAIT_MS.
@@ -12875,15 +12877,72 @@
             .then(function () { clearTimeout(t); });
     }
 
+    // ---- preload: the first page of every gallery on screen, one at a time, nearest the pointer first
+
+    let galPre = null, galPreStop = false, galPreLog = null;
+    const galPreTried = new Set();
+
+    // The nearest door on screen whose area leads to galleries and whose pictures are not read yet.
+    function galPrePick() {
+        const seen = new Set(), W = vpW(), H = vpH();
+        let best = null, bestD = Infinity;
+        document.querySelectorAll('a[href] img').forEach(function (img) {
+            const h = galLinkOf(img);
+            if (!h || seen.has(h)) return;
+            seen.add(h);
+            if (galPreTried.has(h) || galCache.has(h) || galLists.has(h)) return;
+            const key = domChain(img);
+            if (!galKindDone.has(key) || galKindDone.get(key) === 'results' || !doorReason(img)) return;     // where a chip shows
+            try { if (new URL(h).origin !== location.origin) return; } catch (e) { return; }
+            const r = galHoleRect(img);
+            if (!r.width || !r.height || r.bottom < 0 || r.top > H || r.right < 0 || r.left > W) return;
+            const d = Math.hypot(r.left + r.width / 2 - galPt.x, r.top + r.height / 2 - galPt.y);
+            if (d < bestD) { bestD = d; best = h; }
+        });
+        return best;
+    }
+
+    // One more gallery, unless one is in flight, a frame is busy (a hover, or an open gallery read on), or a refusal stopped it.
+    function galPreNext() {
+        if (!isTopFrame || !cfg.galleryPreload || galPre || galPreStop || galFrameStop || galGrowing || galWant || galCur ||
+            document.visibilityState === 'hidden' || !siteEnabled() || CAPTCHA_HERE) return;
+        const href = galPrePick();
+        if (!href) { if (galPreLog) { galPreLog.end('done'); galPreLog = null; } return; }
+        if (!galPreLog) {
+            usLog.enable(cfg.logRequests !== false);
+            galPreLog = usLog.start('gallery', { host: pageHost(), pace: version().replace(/\?/g, '') + ' serial', slowed: noRush(pageHost()) });
+        }
+        galPre = href;
+        galPreTried.add(href);
+        galLoad(href, galPreLog).then(function (list) {
+            if (list === 'cancel') galPreTried.delete(href);
+            return Array.isArray(list) ? galWarm(list) : null;
+        }).then(function () {
+            galPre = null;
+            setTimeout(galPreNext, 0);
+        });
+    }
+
+    // A refusal or a frozen page: no more preloading on this page.
+    function galPreHalt(why) {
+        if (galPreStop) return;
+        galPreStop = true;
+        dbg('gallery preload stopped: ' + why);
+        if (galPreLog) { galPreLog.end(why); galPreLog = null; }
+    }
+
     if (isTopFrame) {
         document.addEventListener('scroll', galScroll, { capture: true, passive: true });
-        setTimeout(galMarkAll, 1500);
+        window.addEventListener('pagehide', function () { if (galPreLog) { galPreLog.end('cut'); galPreLog = null; } });
+        setTimeout(function () { galMarkAll(); galPreNext(); }, 1500);
         window.addEventListener('keydown', galKeyDown, true);
         ['mouseup', 'auxclick', 'click'].forEach(function (t) { document.addEventListener(t, galMidEat, true); });
         window.addEventListener('keyup', galKeyUp, true);
         window.addEventListener('blur', function () { galTap = false; if (galPend) galTrace(galPend.href, 'window lost focus'); });
         document.addEventListener('visibilitychange', function () {
             if (galPend) galTrace(galPend.href, 'tab ' + document.visibilityState);
+            if (document.visibilityState === 'hidden') { if (galPre && galFrameStop) galFrameStop(); }   // only the tab in view preloads
+            else galPreNext();
         });
         window.addEventListener('wheel', function () { galTap = false; galInputAt = performance.now(); }, { capture: true, passive: true });
         window.addEventListener('touchstart', function () { galInputAt = performance.now(); }, { capture: true, passive: true });
@@ -14315,6 +14374,8 @@
             'One green tick for a gallery you looked at, two for a page you opened.').el.addEventListener('change', galMarkSoon);
         check('gallerySavedMarks', 'Mark results something was saved from',
             'A blue disc on the result, and on each saved picture in its gallery.').el.addEventListener('change', galMarkSoon);
+        check('galleryPreload', 'Read the galleries on screen ahead of a click',
+            'One at a time, nearest the pointer first, so a gallery opens at once. Stops on this page if the site refuses a request.').el.addEventListener('change', galMarkSoon);
         const foot = document.createElement('div');
         foot.className = 'foot';
 

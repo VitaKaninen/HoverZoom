@@ -44,9 +44,11 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   ~73). `set.page` survives a rebuild of the same href. `galPageWork` = upgrades and `galHqAll`
   for the page on screen only (was every cell). `galWheel` on `CAP_TARGET` capture, non-passive:
   60 px of delta, one flip per `GAL_FLIP_MS`; skipped over a pinned preview. **It eats the wheel even
-  with one page** (user, v0.295.0): a page scroll closes the gallery and its `galGrowEnd('closed')`
-  stops the reading, so a first open (read at the site's pace, nsfw.xxx ~15 per 2 s) never got a
-  second page. The `.pg` line shows from the first picture ("Page 1 / 1+ · … · mouse wheel turns
+  with one page** (user, v0.295.0): a page scroll closed the gallery, which then also stopped the
+  reading, so a first open (read at the site's pace, nsfw.xxx ~15 per 2 s) never got a second page.
+  **Closing no longer stops the reading** (user, v0.297.0): it runs to its end (`GAL_GROW_MAX_MS`) so
+  a reopen has the later pages; a hover read-ahead or another open still replaces it (`galRender`
+  stops the busy frame) and the reopen then reads again. The `.pg` line shows from the first picture ("Page 1 / 1+ · … · mouse wheel turns
   pages"); it used to wait for 2 pages, and with v0.291.0's preload gone that took ~20 s.
 - **Reading on** (`galGrow`, after `galBuild` of a locked open): `galRender(href, onMore, onEnd)` names
   the frame `…:<token>:grow`; the frame's `galProbeReport` reports as before, then `readOn()`:
@@ -122,7 +124,15 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   segment beside the hole cannot be justified independently of the rows above and below.
 - Resize hides the set (the hole's rect is stale). Upgrade check uses each picture's drawn width.
 - **Read-ahead**: hovering a door, after `cfg.hoverDelay`, reads its gallery (`galLoad`) and warms its
-  thumbnails (`galWarm`). `GAL_CACHE` 300. No whole-page preload since v0.291.0.
+  thumbnails (`galWarm`). `GAL_CACHE` 300.
+- **Preload** (`galPreNext`, user v0.297.0, `cfg.galleryPreload` on): the first page (`galLoad` +
+  `galWarm`, never the reading on) of every door **on screen** that shows a chip (kind settled, not
+  `results`), same origin, one at a time, nearest the pointer first; kicked after each `galMarkAll`
+  (boot, scroll, new results) and each frame's end. Waits while any frame is busy (`galFrameStop`,
+  `galGrowing`) or a gallery is wanted or open — `galRender` would kill that frame. Stops for the
+  page on a 429/503 or a frozen page (`galPreHalt`); a hidden tab stops its frame. Logged as one
+  `gallery` row in `us-log`. The v0.291.0 retirement removed the old whole-page one only because it
+  belonged to gallery mode (`galPreTried` = tried this page).
 - **A cell's preview asks the picture's own page first** (`galLinkedHit`, v0.292.0): its `og:image`
   (same shape as the thumbnail unless the names match) or a same-named copy, the biggest wider than
   the thumbnail. nsfw.xxx profile cells: 300×533 thumbnail → the post's 960×1704.
