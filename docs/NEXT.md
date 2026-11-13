@@ -24,10 +24,14 @@ is still undecided.
   gallery / results (`galKindOf()`, `GATES.md` P17): results doors get no chip and no peek. Checked
   against sexygirlspics' real pages by hand-run fetch snippet only; user tests it in Tampermonkey.
 - INTERACTION.md was out of date (no gallery IDs at all); the `G` section now covers it.
+- **v0.285.0–v0.289.0** (nsfw.xxx, tested live in Chrome — `TESTING.md`): chip shows on every door
+  hover; clicking the chip opens the gallery; middle-click peek is now a setting, **off by default**;
+  chip kind decided once per area per page; `<picture>` left out of the signature; seen mark, hole
+  and ring sit on the visible (clipped) card, not the picture the site enlarges.
 
 ## Not verified
 
-Only local fixtures in the Browser pane. Not tried on nsfw.xxx or in LibreWolf + Tampermonkey.
+Not tried in LibreWolf + Tampermonkey.
 The pane sends no scroll events, so the reading frame dispatches its own; pages that load via
 IntersectionObserver are untested. ~100-picture galleries now take 2 pages (row floor 120) — the
 user may want `GAL_MIN_H` lower.
