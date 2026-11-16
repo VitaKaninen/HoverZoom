@@ -1338,5 +1338,24 @@ const galPH = function (min) {
         { w: 22, h: 22, order: M.GAL_SAVED_ORDER, rel: { i: 0, side: 'below' } }]);
     eq('marks: no room below the chip, the disc takes a free corner', [low[1].left, low[1].top], [74, 14]);
 }
+// The widget's pages: screens of whole pictures, and whether the page row is worth showing.
+{
+    const a = src.indexOf('    // Pure: entries {y, h} in reading order');
+    const b = src.indexOf('    // The slideshow\'s list cut into pages');
+    if (a < 0 || b < 0) { console.error('pageSplit markers not found'); process.exit(1); }
+    const P = new Function('const TW_PAGE_TOP = 8, TW_PAGE_MIN_PER = 4;' + src.slice(a, b) +
+        '\nreturn {pageSplit, pageOfIndex, pagesWorth};')();
+    const col = [0, 900, 1800, 2700].map(function (y) { return { y: y, h: 700 }; });
+    eq('pages: a column of big pictures is a page each', P.pageSplit(col, 1000), [0, 1, 2, 3]);
+    eq('pages: one per page is not worth a row', P.pagesWorth(4, 4), false);
+    const grid = [];
+    for (let r = 0; r < 9; r++) for (let c = 0; c < 4; c++) grid.push({ y: 100 + r * 260, h: 240 });
+    const gs = P.pageSplit(grid, 1000);
+    eq('pages: a grid of 4 across, 3 rows a screen', gs, [0, 12, 24]);
+    eq('pages: the grid is worth a row', P.pagesWorth(grid.length, gs.length), true);
+    eq('pages: a picture cut by the screen\'s bottom starts the next page', P.pageSplit([{ y: 0, h: 500 }, { y: 600, h: 500 }], 1000), [0, 1]);
+    eq('pages: page of index', [P.pageOfIndex(gs, 0), P.pageOfIndex(gs, 13), P.pageOfIndex(gs, 35)], [0, 1, 2]);
+    eq('pages: a single page is never worth a row', P.pagesWorth(30, 1), false);
+}
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

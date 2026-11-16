@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.320.0
+// @version      0.321.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -273,6 +273,7 @@
         // the slideshow ("tour" in the code) — next/previous through the page's pictures
         tourButtons: true,          // the widget: ◀ ▶ and the counter, in its own box
         tourFade: false,            // the widgets fade out with the pointer's distance, gone at TW_FADE_PX
+        widgetColors: {},           // { dark: {key: '#hex'}, light: {...} } over twPalette()'s defaults; replaced whole, never mutated
         tourKeyStart: true,         // → (←) with nothing open starts the slideshow at the first (last) picture
         tourMinDisplayed: 128,      // the tour's own floor: longer side as drawn, px; emoji and badges fall under it
         tourLoadMore: true,         // the scroll excursion that makes a lazy page load more
@@ -8599,7 +8600,7 @@
             dupOf.set(pk, dupRoot(k));
             dbg('duplicates: the same picture at two addresses', { first: o.orig.slice(-60), copy: me.orig.slice(-60) });
             if (tour) tourSync();
-            else if (tw) twTotal = widgetEntries().length;
+            else if (tw) { const l = widgetEntries(); twTotal = l.length; twPg = twPagesOf(l); }
             twSync();
             return;
         }
@@ -8848,6 +8849,9 @@
     let twPics = 0;             // pictures on the page by the cheap count, capped at 2
     let twStartAt = 0;          // the index the idle widget shows and the wheel / ⇅ open at: the first picture on screen
     let twTotal = -1;          // the real count: at load, when scrolling stops, and when the pointer nears the widget
+    let twPg = { list: [], starts: [] };    // the idle widget's pages ({y, h} only), taken with each count
+    const TW_PAGE_TOP = 8;          // px left above a page's first picture (boot runs twRefresh: keep above it)
+    const TW_PAGE_MIN_PER = 4;      // the page row shows only when a page holds this many pictures on average
     let twStarting = null;      // the token of a tour being opened from the widget
     let twRecountTimer = 0;
     let twLoadTimer = 0;
@@ -8913,33 +8917,7 @@
             'width:max-content;display:none';
         const sr = host.attachShadow({ mode: 'open' });
         const style = document.createElement('style');
-        style.textContent = [
-            ':host{all:initial}',
-            '.tw{display:flex;flex-direction:column;align-items:stretch;box-sizing:border-box;border-radius:8px;',
-            '--tw-row:' + VCTL_H + 'px;',
-            'background:var(--bg);border:1px solid var(--border);box-shadow:var(--shadow);',
-            'font:13px/16px ' + usDock.FONT + ';color:var(--text);white-space:nowrap;cursor:move;',
-            'user-select:none;transition:opacity .15s ease}',
-            '.tr{display:flex;align-items:center;justify-content:center;gap:' + NAV_GAP + 'px;height:var(--tw-row);padding:0 ' + TW_PAD + 'px}',
-            '.tp{display:none}',
-            '.tp.on{display:flex}',
-            '.pg{flex:1;padding:0 4px;text-align:center;font-variant-numeric:tabular-nums;color:var(--text);cursor:text}',
-            '.count{flex:1;padding:0 4px;text-align:center;font-variant-numeric:tabular-nums;color:var(--text);cursor:text}',
-            '.tw input.ask{width:4.5em;box-sizing:border-box;margin:0 2px;padding:1px 4px;font:inherit;text-align:center;color:var(--text);' +
-                'background:var(--bg3);border:1px solid #89b4fa;border-radius:4px;outline:none}',
-            '.load{flex:none;padding:0 2px;font-size:11px;font-variant-numeric:tabular-nums;color:var(--muted)}',
-            '.load.done{color:var(--done)}',
-            '.dup{margin-left:3px;font-size:9px;color:var(--dup)}',
-            '.dup:empty{display:none}',
-            '.dead{margin-left:3px;font-size:10px;color:var(--dead)}',
-            '.dead:empty{display:none}',
-            '.load:empty{display:none}',
-        ].concat(vbtnCss(), [
-            '.tw .vbtn{height:24px;border-radius:5px;color:var(--text);background:#313244}',
-            '.tw .vbtn:hover{background:#45475a}',
-            '.tw .vbtn.faint:hover{background:#313244}',
-            '.tw .vbtn.wheel.armed,.tw .vbtn.wheel.armed:hover{background:#89b4fa;color:#1e1e2e}',
-        ]).join('');
+        style.textContent = twCss();
         sr.appendChild(style);
         const box = document.createElement('div');
         box.className = 'tw';
@@ -9041,7 +9019,7 @@
         }
         twPics = twCount();
         const was = twTotal;
-        if (!tour) { const l = twPics >= 2 ? widgetEntries() : []; twTotal = l.length; twStartAt = twStartOf(l); }
+        if (!tour) { const l = twPics >= 2 ? widgetEntries() : []; twTotal = l.length; twStartAt = twStartOf(l); twPg = twPagesOf(l); }
         if (!tour && twTotal !== was && debugOn()) dbg('widget count ' + twTotal, twReport());
         const on = twWanted();
         if (on) twTheme();
@@ -9078,12 +9056,59 @@
         tw.dock.sizeChanged();
     }
 
-    // The gallery widget's palette (user, v0.319.0), whatever the page behind.
-    const TW_THEME = { bg: '#1e1e2e', bg3: '#45475a', border: '#45475a', text: '#cdd6f4', muted: '#a6adc8',
-        shadow: '0 4px 14px rgba(0,0,0,.6)', done: '#a6e3a1', dup: '#f9e2af', dead: '#fab387' };
-    function twTheme() {
-        Object.keys(TW_THEME).forEach(function (k) { tw.box.style.setProperty('--' + k, TW_THEME[k]); });
-        tw.box.style.colorScheme = 'dark';
+    // Forum Stumbler's palette (usDock's, light on a light page) with Catppuccin accents; the user's own colours over it.
+    const TW_COLOR_KEYS = ['bg', 'border', 'btn', 'btnHover', 'text', 'muted', 'accent', 'dup', 'dead', 'done'];
+    const TW_ACCENTS = {
+        dark: { accent: '#89b4fa', dup: '#f9e2af', dead: '#fab387', done: '#a6e3a1' },
+        light: { accent: '#1e66f5', dup: '#df8e1d', dead: '#fe640b', done: '#40a02b' },
+    };
+    function twPaletteDefault(scheme) {
+        const t = usDock.THEME[scheme];
+        return Object.assign({ bg: t.bg, border: t.border, btn: t.bg2, btnHover: t.bg3, text: t.text, muted: t.muted }, TW_ACCENTS[scheme]);
+    }
+    function twPalette(scheme) {
+        const own = (cfg.widgetColors && cfg.widgetColors[scheme]) || {};
+        const p = twPaletteDefault(scheme);
+        TW_COLOR_KEYS.forEach(function (k) { if (/^#[0-9a-f]{6}$/i.test(own[k] || '')) p[k] = own[k]; });
+        return p;
+    }
+    function twPaint(el, scheme) {
+        const p = twPalette(scheme);
+        TW_COLOR_KEYS.forEach(function (k) { el.style.setProperty('--' + k, p[k]); });
+        el.style.setProperty('--shadow', usDock.THEME[scheme].shadow);
+        el.style.colorScheme = scheme;
+    }
+    function twTheme() { if (tw) twPaint(tw.box, usDock.theme().scheme); }
+
+    // The widget's stylesheet; the colour editor's sample wears the same one.
+    function twCss() {
+        return [
+            ':host{all:initial}',
+            '.tw{display:flex;flex-direction:column;align-items:stretch;box-sizing:border-box;border-radius:8px;',
+            '--tw-row:' + VCTL_H + 'px;',
+            'background:var(--bg);border:1px solid var(--border);box-shadow:var(--shadow);',
+            'font:13px/16px ' + usDock.FONT + ';color:var(--text);white-space:nowrap;cursor:move;',
+            'user-select:none;transition:opacity .15s ease}',
+            '.tr{display:flex;align-items:center;justify-content:center;gap:' + NAV_GAP + 'px;height:var(--tw-row);padding:0 ' + TW_PAD + 'px}',
+            '.tp{display:none}',
+            '.tp.on{display:flex}',
+            '.pg{flex:1;padding:0 4px;text-align:center;font-variant-numeric:tabular-nums;color:var(--text);cursor:text}',
+            '.count{flex:1;padding:0 4px;text-align:center;font-variant-numeric:tabular-nums;color:var(--text);cursor:text}',
+            '.tw input.ask{width:4.5em;box-sizing:border-box;margin:0 2px;padding:1px 4px;font:inherit;text-align:center;color:var(--text);' +
+                'background:var(--btn);border:1px solid var(--accent);border-radius:4px;outline:none}',
+            '.load{flex:none;padding:0 2px;font-size:11px;font-variant-numeric:tabular-nums;color:var(--muted)}',
+            '.load.done{color:var(--done)}',
+            '.dup{margin-left:3px;font-size:9px;color:var(--dup)}',
+            '.dup:empty{display:none}',
+            '.dead{margin-left:3px;font-size:10px;color:var(--dead)}',
+            '.dead:empty{display:none}',
+            '.load:empty{display:none}',
+        ].concat(vbtnCss(), [
+            '.tw .vbtn{box-sizing:border-box;height:24px;border-radius:5px;color:var(--text);background:var(--btn);border:1px solid var(--border)}',
+            '.tw .vbtn:hover{background:var(--btnHover)}',
+            '.tw .vbtn.faint:hover{background:var(--btn)}',
+            '.tw .vbtn.wheel.armed,.tw .vbtn.wheel.armed:hover{background:var(--accent);border-color:var(--accent);color:var(--bg)}',
+        ]).join('');
     }
 
     // Debug: every drawn picture and why the widget did or did not count it. No URLs, only shapes.
@@ -9131,37 +9156,86 @@
         twTrackTimer = 0;
         if (!tw || twStarting) return;
         if (tour) { if (tourIsWidget()) { tourSync(); twSync(); } return; }
-        if (twPics >= 2) { const l = widgetEntries(); twTotal = l.length; twStartAt = twStartOf(l); twSync(); }
+        if (twPics >= 2) { const l = widgetEntries(); twTotal = l.length; twStartAt = twStartOf(l); twPg = twPagesOf(l); twSync(); }
     }
 
-    // The page as PageDown counts it: screens of height, and which one the top of the view is on.
-    function twPages() {
-        const h = vpH(), dh = docHeight();
-        if (!(h > 0)) return { at: 1, n: 1 };
-        const n = Math.max(1, Math.ceil((dh - 1) / h));
-        return { at: Math.max(1, Math.min(n, Math.floor(((window.scrollY || 0) + 1) / h) + 1)), n: n };
+    // A page is a screen of whole pictures: it starts at a picture's top and takes each next one that fits whole below it.
+    // Pure: entries {y, h} in reading order, the screen's height → the index each page starts at.
+    function pageSplit(list, h) {
+        const out = [], room = Math.max(1, h - TW_PAGE_TOP);
+        let i = 0;
+        while (i < list.length) {
+            out.push(i);
+            const end = list[i].y + room + 1;
+            let j = i + 1;
+            while (j < list.length && list[j].y + list[j].h <= end) j++;
+            i = j;
+        }
+        return out;
+    }
+    function pageOfIndex(starts, k) {
+        let p = 0;
+        while (p + 1 < starts.length && starts[p + 1] <= k) p++;
+        return p;
+    }
+    // Pure: does a page press save enough presses to be worth a row?
+    function pagesWorth(n, pages) { return pages >= 2 && n / pages >= TW_PAGE_MIN_PER; }
+
+    // The slideshow's list cut into pages: pictures on this document only (a fetched page's come last and have no place).
+    function twPagesOf(list) {
+        let n = 0;
+        while (n < list.length && !(list[n].el && list[n].el.ownerDocument !== document)) n++;
+        const live = [];
+        for (let i = 0; i < n; i++) live.push({ y: list[i].y, h: list[i].h });
+        return { list: live, starts: pageSplit(live, vpH()) };
     }
 
-    // ◀ / ▶ on the page row: what Page Down does, and a window that is open jumps ahead by the pictures on that screen.
+    // Which page the screen is on: the one holding the first picture at its top; at the bottom of the document, the last one begun on it.
+    function twPageNow(pg) {
+        const st = pg.starts, l = pg.list;
+        if (!st.length) return 0;
+        const top = window.scrollY || 0;
+        if (top + vpH() >= docHeight() - 2) {
+            let p = st.length - 1;
+            while (p > 0 && l[st[p]].y >= top + vpH()) p--;
+            return p;
+        }
+        return pageOfIndex(st, twStartOf(l));
+    }
+
+    // The pages of the list the counter shows: a running slideshow's, else the idle count's (fresh for a press).
+    function twPagesNow(fresh) {
+        if (galCur) return null;
+        if (tour && !tour.gal && (tour.on || (placed && tour.index >= 0))) return twPagesOf(tourEntries());
+        if (fresh) twPg = twPagesOf(twPics >= 2 ? widgetEntries() : []);
+        return twPg;
+    }
+
+    // Page p shown: scrolled to its first picture; with a slideshow up, that picture opened.
+    function twShowPage(pg, p, dir) {
+        const e = pg.list[pg.starts[p]];
+        if (!e) return;
+        window.scrollTo({ left: window.scrollX || 0, top: Math.max(0, e.y - TW_PAGE_TOP), behavior: 'instant' });
+        if (placed && view && tour) {
+            const list = tourEntries(), at = pg.starts[p];
+            if (at < list.length && at !== tour.index) { tourTurnOn(); tour.total = list.length; seamDir = 0; plVidLeft(); tourGo(list, at, dir, false); }
+        } else twRecount();
+    }
+
+    // ◀ / ▶ on the page row and ↑ ↓: the next screen of whole pictures from the slideshow's list.
     function twPage(dir) {
         if (galCur) { galPageStep(dir); return; }
-        const h = vpH();
-        if (!(h > 0)) return;
-        if (!(placed && view && tour)) { window.scrollBy({ left: 0, top: dir * Math.round(h * 0.875), behavior: 'instant' }); twRecount(); return; }
-        const now = Date.now();
-        if (!tour.fast && now - userStepAt < STEP_GAP_MS) return;
-        userStepAt = now;
-        tourTurnOn();
-        const list = tourEntries();
-        const top = window.scrollY || 0;
-        let k = 0;
-        list.forEach(function (e) { if (e.y >= top && e.y < top + h) k++; });
-        const to = Math.max(0, Math.min(list.length - 1, tour.index + dir * Math.max(1, k)));
-        if (to === tour.index || tour.index < 0) { tourNav(dir, false, true); return; }
-        tour.total = list.length;
-        seamDir = 0;
-        plVidLeft();
-        tourGo(list, to, dir, false);
+        const pg = twPagesNow(true);
+        if (!pg || !pg.starts.length) return;
+        if (placed && view && tour) {
+            const now = Date.now();
+            if (!tour.fast && now - userStepAt < STEP_GAP_MS) return;
+            userStepAt = now;
+        }
+        const at = placed && view && tour && tour.index >= 0 ? pageOfIndex(pg.starts, tour.index) : twPageNow(pg);
+        const to = at + dir;
+        if (to < 0 || to >= pg.starts.length) { if (placed && view && tour) tourNav(dir, false, true); return; }
+        twShowPage(pg, to, dir);
     }
 
     // Counter and buttons: the slideshow's position (`–` when its picture is not in the list), else the page's total.
@@ -9181,9 +9255,9 @@
         tw.next.classList.toggle('faint', !n);
         tw.wheel.classList.toggle('faint', !n);
         tw.wheel.classList.toggle('armed', !!(tour && tour.on && placed));
-        const pages = twPages();
-        tw.pageRow.classList.toggle('on', pages.n >= 2);
-        tw.pgNum.textContent = 'Page ' + pages.at + ' / ' + pages.n;
+        const pg = twPagesNow() || twPg, np = pg.starts.length;
+        tw.pageRow.classList.toggle('on', pagesWorth(pg.list.length, np));
+        tw.pgNum.textContent = 'Page ' + (np ? (on && tour.index >= 0 ? pageOfIndex(pg.starts, tour.index) : twPageNow(pg)) + 1 : 1) + ' / ' + Math.max(1, np);
         twOpacity();
         if (tw.host.style.display !== 'none') tw.dock.sizeChanged();     // the counter's width
     }
@@ -9435,16 +9509,11 @@
             if (to !== g.page) { if (galOwns(active) && !placed) cancel(); g.page = to; galPageWork(g, galLayout(g, g.open)); }
             return;
         }
-        const h = vpH();
-        if (!(h > 0)) return;
-        const top = Math.max(0, Math.min(docHeight() - h, k * h));
-        window.scrollTo({ left: window.scrollX || 0, top: top, behavior: 'instant' });
-        if (placed && view && tour) {
-            const list = tourEntries();
-            let at = list.findIndex(function (e) { return e.y >= top; });
-            if (at < 0) at = list.length - 1;
-            if (at >= 0 && at !== tour.index) { tourTurnOn(); seamDir = 0; tourGo(list, at, at > tour.index ? 1 : -1, false); }
-        } else twRecount();
+        const pg = twPagesNow(true);
+        if (!pg || !pg.starts.length) return;
+        const to = Math.max(0, Math.min(pg.starts.length - 1, k));
+        const at = placed && view && tour && tour.index >= 0 ? pageOfIndex(pg.starts, tour.index) : twPageNow(pg);
+        twShowPage(pg, to, to >= at ? 1 : -1);
     }
 
     // ◀ ▶ held: after TW_HOLD_DELAY_MS they repeat like a held arrow key, scrubbing.
@@ -11530,15 +11599,15 @@
             '.svd{position:absolute;left:4px;top:4px;width:22px;height:22px;pointer-events:none}' +
             '.strip[hidden]{display:none}' +
             '.strip{position:fixed;z-index:4;display:flex;flex-direction:column;justify-content:space-evenly;padding:0 4px;box-sizing:border-box;cursor:move;' +
-            'background:#1e1e2e;border:1px solid #45475a;border-radius:8px;color:#cdd6f4;' +
-            'font:12px/1 system-ui,sans-serif;pointer-events:auto;box-shadow:0 4px 14px rgba(0,0,0,.6);user-select:none}' +
+            'background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);' +
+            'font:12px/1 system-ui,sans-serif;pointer-events:auto;box-shadow:var(--shadow);user-select:none}' +
             '.strip .r{display:flex;align-items:center;gap:4px;height:24px}' +
             '.strip .r.pg{height:16px}.strip .r.pg .b{height:16px;font-size:8px}.strip .r.pg .t{font-size:11px}.strip.one .r.pg{display:none}' +
             '.strip.out{width:max-content}.strip.out .t{padding:0 6px}' +
-            '.strip .b{flex:none;display:flex;align-items:center;justify-content:center;width:20px;height:24px;border-radius:5px;background:#313244;cursor:pointer;font-size:11px}' +
-            '.strip .b:hover{background:#45475a}.strip .b.faint{opacity:.35;cursor:default}.strip .b.faint:hover{background:#313244}' +
-            '.strip input.ask{width:4.5em;box-sizing:border-box;margin:0 auto;padding:1px 4px;font:inherit;text-align:center;color:#cdd6f4;' +
-            'background:#45475a;border:1px solid #89b4fa;border-radius:4px;outline:none;cursor:text}' +
+            '.strip .b{flex:none;display:flex;align-items:center;justify-content:center;width:20px;height:24px;box-sizing:border-box;border-radius:5px;background:var(--btn);border:1px solid var(--border);cursor:pointer;font-size:11px}' +
+            '.strip .b:hover{background:var(--btnHover)}.strip .b.faint{opacity:.35;cursor:default}.strip .b.faint:hover{background:var(--btn)}' +
+            '.strip input.ask{width:4.5em;box-sizing:border-box;margin:0 auto;padding:1px 4px;font:inherit;text-align:center;color:var(--text);' +
+            'background:var(--btn);border:1px solid var(--accent);border-radius:4px;outline:none;cursor:text}' +
             '.strip .t{cursor:text;flex:1;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}' +
             '.strip.own{border:3px solid #89b4fa;box-shadow:0 0 14px 2px rgba(137,180,250,.55),0 8px 22px rgba(0,0,0,.6)}' +
             '.strip.edit:not(.in){outline:2px dashed #f9e2af;outline-offset:3px}' +
@@ -12028,6 +12097,7 @@
         const el = document.createElement('div');
         el.className = 'strip';
         el.hidden = true;
+        twPaint(el, 'dark');        // it sits on the gallery's dark veil, whatever the page
         const s = { el: el };
         const row = function (cls, pk, tk, nk, prevTip, nextTip, act) {
             const r = document.createElement('div');
@@ -14189,6 +14259,23 @@
             '.guide p:last-child{margin-bottom:0}',
             '.guide b{color:' + C.text + ';font-weight:600}',
             '.guidebtn{margin-bottom:14px;padding:5px 12px;font-size:12px}',
+            '.wcwrap{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.45);pointer-events:auto}',
+            '.wc{width:560px;max-width:94vw;max-height:90vh;overflow:auto;padding:14px 18px;background:' + C.base + ';color:' + C.text + ';',
+            'border:1px solid ' + C.surface2 + ';border-radius:10px;box-shadow:0 18px 60px rgba(0,0,0,.75)}',
+            '.wchead{display:flex;align-items:center;gap:8px}',
+            '.wchead b{flex:1;font-size:15px}',
+            '.wchead button{padding:4px 12px}',
+            '.wc .hint{margin:6px 0 10px}',
+            '.wcstage{position:relative;height:170px;border-radius:8px;background:#0e0e10;overflow:hidden}',
+            '.wcstage.light{background:#f2f2f2}',
+            '.wcpic{position:absolute;left:24px;top:18px;width:300px;height:134px;box-sizing:border-box;',
+            'background:linear-gradient(135deg,#4c6a92 0%,#8fb3c9 45%,#e0c48a 75%,#b9785a 100%)}',
+            '.wcmocks{position:absolute;right:16px;bottom:14px}',
+            '.wcgrid{display:grid;grid-template-columns:1fr 1fr;gap:6px 14px;margin:12px 0}',
+            '.wcgrid label{display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer}',
+            '.wcgrid input{flex:none}',
+            '.wcfoot{display:flex;align-items:center;gap:8px}',
+            '.wcfoot .auto{flex:1;font-size:11px;color:' + C.sub + '}',
         ].join('');
         sr.appendChild(st);
 
@@ -14937,6 +15024,173 @@
             return { el: el, row: row(labelText, null, el) };
         }
 
+        // The widget colour editor: two sample widgets over a sample preview, a picker for each colour, light and dark pages apart.
+        const WC_LABELS = [
+            ['bg', 'Background'], ['border', 'Edge and button edges'], ['btn', 'Buttons'], ['btnHover', 'Button under the pointer'],
+            ['text', 'Numbers and arrows'], ['accent', 'Highlight (typing box, running ⇅)'], ['dup', 'Duplicates skipped (2)'],
+            ['dead', 'Broken links ⚠'], ['muted', 'Pictures loaded (debug mode)'], ['done', 'All loaded (debug mode)']];
+        function widgetColorsEditor() {
+            const old = sr.querySelector('.wcwrap');
+            if (old) { old.remove(); return; }
+            let scheme = usDock.theme().scheme;
+            const wrap = document.createElement('div');
+            wrap.className = 'wcwrap';
+            const dlg = document.createElement('div');
+            dlg.className = 'wc';
+            wrap.appendChild(dlg);
+            const head = document.createElement('div');
+            head.className = 'wchead';
+            const ttl = document.createElement('b');
+            ttl.textContent = 'Widget colours';
+            head.appendChild(ttl);
+            const tabs = {};
+            ['dark', 'light'].forEach(function (k) {
+                const b = document.createElement('button');
+                b.textContent = k === 'dark' ? 'Dark pages' : 'Light pages';
+                b.addEventListener('click', function () { scheme = k; draw(); });
+                tabs[k] = b;
+                head.appendChild(b);
+            });
+            dlg.appendChild(head);
+            const note = document.createElement('p');
+            note.className = 'hint';
+            note.textContent = 'The widget takes the dark or light set by the page behind it. A gallery’s widget always takes the dark set.';
+            dlg.appendChild(note);
+
+            const stage = document.createElement('div');
+            stage.className = 'wcstage';
+            const fake = document.createElement('div');
+            fake.className = 'wcpic';
+            stage.appendChild(fake);
+            const sh = document.createElement('div');
+            sh.className = 'wcmocks';
+            const msr = sh.attachShadow({ mode: 'open' });
+            const mst = document.createElement('style');
+            mst.textContent = twCss() + '.mocks{display:flex;gap:14px;align-items:flex-end}.tw{cursor:default}.pg,.count{cursor:default}';
+            msr.appendChild(mst);
+            const mocks = document.createElement('div');
+            mocks.className = 'mocks';
+            msr.appendChild(mocks);
+            const noop = function () {};
+            function mock(running) {
+                const b = document.createElement('div');
+                b.className = 'tw';
+                const pr = document.createElement('div');
+                pr.className = 'tr tp on';
+                const pn = document.createElement('span');
+                pn.className = 'pg';
+                pn.textContent = 'Page 2 / 6';
+                pr.appendChild(mkVBtn(ICON_PREV, null, noop));
+                pr.appendChild(pn);
+                pr.appendChild(mkVBtn(ICON_NEXT, null, noop));
+                const r = document.createElement('div');
+                r.className = 'tr';
+                r.appendChild(mkVBtn(ICON_PREV, null, noop));
+                if (running) {
+                    const ask = document.createElement('input');
+                    ask.className = 'ask';
+                    ask.value = '12';
+                    ask.readOnly = true;
+                    r.appendChild(ask);
+                } else {
+                    const c = document.createElement('span');
+                    c.className = 'count';
+                    c.appendChild(document.createTextNode('5 / 17'));
+                    const d = document.createElement('span');
+                    d.className = 'dup';
+                    d.textContent = '(2)';
+                    const w = document.createElement('span');
+                    w.className = 'dead';
+                    w.textContent = '⚠';
+                    c.appendChild(d);
+                    c.appendChild(w);
+                    r.appendChild(c);
+                }
+                r.appendChild(mkVBtn(ICON_NEXT, null, noop));
+                const wh = mkVBtn(ICON_WHEEL, null, noop);
+                wh.classList.add('wheel');
+                if (running) wh.classList.add('armed');
+                r.appendChild(wh);
+                const ld = document.createElement('span');
+                ld.className = 'load' + (running ? ' done' : '');
+                ld.textContent = running ? 'all loaded' : '9 loaded';
+                r.appendChild(ld);
+                b.appendChild(pr);
+                b.appendChild(r);
+                mocks.appendChild(b);
+                return b;
+            }
+            const mA = mock(false), mB = mock(true);
+            stage.appendChild(sh);
+            dlg.appendChild(stage);
+
+            const grid = document.createElement('div');
+            grid.className = 'wcgrid';
+            dlg.appendChild(grid);
+            const inputs = {};
+            WC_LABELS.forEach(function (lk) {
+                const l = document.createElement('label');
+                const inp = document.createElement('input');
+                inp.type = 'color';
+                const t = document.createElement('span');
+                t.textContent = lk[1];
+                l.appendChild(inp);
+                l.appendChild(t);
+                grid.appendChild(l);
+                inputs[lk[0]] = inp;
+                inp.addEventListener('input', function () { setColor(lk[0], inp.value, false); });
+                inp.addEventListener('change', function () { setColor(lk[0], inp.value, true); });
+            });
+
+            function setColor(k, v, save) {
+                const all = Object.assign({}, cfg.widgetColors || {});
+                const own = Object.assign({}, all[scheme] || {});
+                own[k] = v;
+                all[scheme] = own;
+                cfg.widgetColors = all;
+                paintAll();
+                if (save) saveSettings();
+            }
+            function paintAll() {
+                twPaint(mA, scheme);
+                twPaint(mB, scheme);
+                stage.classList.toggle('light', scheme === 'light');
+                fake.style.border = cfg.borderWidth > 0 ? cfg.borderWidth + 'px solid ' + cfg.borderColor : 'none';
+                fake.style.borderRadius = cfg.cornerRadius + 'px';
+                twTheme();
+                if (galSt) twPaint(galSt.el, 'dark');
+            }
+            function draw() {
+                const p = twPalette(scheme);
+                Object.keys(inputs).forEach(function (k) { inputs[k].value = p[k]; });
+                tabs.dark.className = scheme === 'dark' ? 'primary' : '';
+                tabs.light.className = scheme === 'light' ? 'primary' : '';
+                paintAll();
+            }
+
+            const foot = document.createElement('div');
+            foot.className = 'wcfoot';
+            const rs = document.createElement('button');
+            rs.className = 'danger';
+            rs.textContent = 'Reset to default colours';
+            setTip(rs, 'Both sets, dark and light pages');
+            rs.addEventListener('click', function () { cfg.widgetColors = {}; saveSettings(); draw(); });
+            const done = document.createElement('button');
+            done.className = 'primary';
+            done.textContent = 'Done';
+            done.addEventListener('click', function () { wrap.remove(); });
+            const sp = document.createElement('span');
+            sp.className = 'auto';
+            sp.textContent = 'Changes save as you make them.';
+            foot.appendChild(rs);
+            foot.appendChild(sp);
+            foot.appendChild(done);
+            dlg.appendChild(foot);
+            wrap.addEventListener('mousedown', function (e) { if (e.target === wrap) wrap.remove(); });
+            sr.appendChild(wrap);
+            draw();
+        }
+
         const intro = document.createElement('p');
         intro.className = 'intro';
         intro.textContent =
@@ -15218,6 +15472,10 @@
             ['off', 'Hidden']]);
         check('shadow', 'Drop shadow',
             'Separates the preview from the page behind it.');
+        const wcBtn = document.createElement('button');
+        wcBtn.textContent = 'Change…';
+        wcBtn.addEventListener('click', widgetColorsEditor);
+        row('Widget colours', 'The ◀ ▶ widget’s and a gallery’s, for dark and light pages.', wcBtn);
         section('Diagnostics');
         check('debug', 'Enable debug mode',
             'One line per hover in the console (F12), and a picture that could not be found says why, with ↻ to try again. Leave off unless chasing a problem.');

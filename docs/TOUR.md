@@ -34,6 +34,19 @@ fight that. They are deleted. Do not put nav controls back on the frame.
   (the user diagnoses private sites with it — keep it URL-free). With `tourFade` both widgets (this and a gallery's) fade by the pointer's
   distance from their edges: 1 over them, 0 at `TW_FADE_PX` 75 (`twFadeAt`, `twOpacity`, `galStripFade`; user v0.319.0 — a
   step at a fixed distance was the complaint). Without it, under a window that covers it the widget sits at `TW_COVER_OPACITY` (0.25) unless the pointer is within `TW_NEAR`; a `mouseover` on the host covers a pointer resting where it appears.
+- **Colours** (v0.321.0, user): Forum Stumbler's — `usDock.THEME` dark or light by the page behind, Catppuccin
+  accents (`TW_ACCENTS`, Latte on light) — with the user's own over them (`widgetColors`, edited in Advanced →
+  Appearance → Widget colours: two sample widgets over a sample preview, a picker per colour, both sets, one reset).
+  `twPaint(el, scheme)` sets the CSS variables; `twCss()` is the one stylesheet, also worn by the samples. The
+  gallery's strip always takes the dark set: it sits on the gallery's dark veil.
+- **The page row** (`◀ Page n / N ▶`, v0.321.0, user): a page is a screen of WHOLE pictures from the counter's own
+  list (`widgetEntries`, or the running slideshow's) — it starts at a picture's top (`TW_PAGE_TOP` above it) and takes
+  each next picture that fits whole below (`pageSplit`, pure, asserted). Never the document's height: footer and
+  reply pictures past the post end are not pages. ▶ scrolls the next page's first picture to the top (pinned: opens
+  it). Shown only when a page press saves work: ≥ 2 pages and on average ≥ `TW_PAGE_MIN_PER` (4) pictures a page
+  (`pagesWorth`) — a forum post or Wikipedia article, one picture a screen, hides it. ↑ ↓ still page when hidden.
+  The idle pages (`twPg`, `{y, h}` only) are retaken with every count, including the one a late duplicate triggers,
+  or the row judges a list the counter no longer shows.
 - **The idle widget always shows the start number** `twStartAt` (`twStartOf`: the first picture at or below the top of the screen; `1 / N` on arrival, `21 / 50` after Page ▶ past 20). The wheel button and the wheel over the widget open at that number; ▶ at number+1, ◀ at number−1 (wrapping) — `tourFromStart(dir, same)` (v0.316.0, user). `twWarmFirst` only warms entry 0, so a start elsewhere resolves cold. **→ / ← do the same as ▶ / ◀** (`tourKeyStart`, default on):
   window bubble phase, so a page that preventDefaults or stops → keeps it; not while focus is in a
   form control, media, or a slider/tab/menu role. Starting from a chosen picture = hover or pin it.

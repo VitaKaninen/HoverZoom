@@ -24,7 +24,7 @@ including stepping through the slideshow engine (the strip's picture row → `ga
 **v0.319.0 (user's picks from that list):** the gallery widget got the start number, hold-to-repeat,
 typed numbers, the page row as `galPageStep`, and the fade. The typed box closes on any press outside it.
 The wheel flips pictures over either widget or the gallery's clicked picture, and never turns pages.
-The fade is by distance (0 at 75 px). The page widget uses the gallery's palette and 4 px edge.
+The fade is by distance (0 at 75 px). The page widget has a 4 px edge; colours are Forum Stumbler's since v0.321.0 (TOUR.md).
 Originals preload for the page on screen plus `galAhead` pages.
 ⇅ stays for now (user, after being told the wheel over the widget does the same). Typed numbers past what is loaded tested in Chrome
 (v0.320.0): Google Images 100 → 300 → 380 over three tries, Bing 43 → 135; first try ~5 s cold, later ~0.2 s.
