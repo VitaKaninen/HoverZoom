@@ -265,6 +265,20 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   page on a 429/503 or a frozen page (`galPreHalt`); a hidden tab stops its frame. Logged as one
   `gallery` row in `us-log`. The v0.291.0 retirement removed the old whole-page one only because it
   belonged to gallery mode (`galPreTried` = tried this page).
+- **Next page** (`nextCheck` … `nextWarmReport`, user v0.325.0–v0.327.0): within a screen of the
+  bottom of a page with learned doors, idle (`nextIdle`: no preload, frame, gallery or slideshow), and
+  going through it — `nextEngaged`: galleries ticked since arrival ≥ `NEXT_SHARE` (20 %) of those
+  unticked at arrival (`nextTicked`, snapshot at boot; ticks = seen ∪ visited, re-read from GM so
+  other tabs count) — it reads `nextPageIn()`'s page and loads its first `NEXT_GALLERIES` (3)
+  unticked doors: `galLoad`, `galWarm`, then every original through `galResolve` on a stand-in img,
+  4 at a time, pausing while not idle. Once per page; a skim (0 opened) loads nothing and asks again
+  on the next scroll. Lists + hits + file URLs go to `sessionStorage` `hzNextPage`; the next page
+  (`nextArrive`) seeds `galLists`/`galCache` from it, so those peeks open at once. Originals survive
+  the navigation only in the browser's cache, so `nextWarmSeen` times each one asked again and
+  `nextWarmReport` logs `nextwarm` (ok = arrived under `PL_COLD_MS`) per opened gallery — the
+  evidence for whether loading originals a page ahead is worth its bytes. No scroll-depth tracking:
+  it is only asked at the bottom, and a hidden pane fires no scroll events (v0.325.0 counted 4 of 37).
+  Pane, 2026-11-16: 3 galleries / 123 originals in ~30 s; 12 of 17 kept. us-log `nextpg` row.
 - **A cell's preview asks the picture's own page first** (`galLinkedHit`, v0.292.0): its `og:image`
   (same shape as the thumbnail unless the names match) or a same-named copy, the biggest wider than
   the thumbnail. nsfw.xxx profile cells: 300×533 thumbnail → the post's 960×1704.
