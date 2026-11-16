@@ -24,6 +24,11 @@ user's browser/Tampermonkey; real byte counts; whether their cache keeps origina
 **Last question asked:** none open. The user's earlier ideas not built: on a skimmed page, load a
 gallery's originals after a 1 s hover.
 
+**2026-11-16 later:** cache across pages measured in Chrome (kept: 2-5 ms vs 325 ms cold; GALLERY.md
+"Next page"). v0.328.0: ⤓ ⧉ ↗ tools on the clicked picture (`G10`), `saveFolder` setting asked on
+the first quiet save (SETTINGS.md). Pane-checked only; Chrome's Tampermonkey copy was still v0.327.0
+and girlstop has no learned door there. Not verified: Tampermonkey creating subfolders / saving .avif.
+
 # Next work — consistency pass (handoff 2026-11-13, session ended at ~311k tokens)
 
 ## What the user asked for

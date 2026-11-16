@@ -82,6 +82,18 @@ Two sweeps, both asked for after reading the panel end to end:
 what reads as one idea. It is **Opening zoom limit** now: `maxZoom` is how far you may zoom by
 hand, `zoomFactor` only how far a small image is enlarged on the way up.
 
+## `saveFolder` — where saves go (user, v0.328.0)
+
+A subfolder of the browser's download folder, prefixed to the `GM_download` name (`saveFolderFor`:
+split on `/` or `\`, each part filled by `fillNameTemplate` / `templateName` so `[site]` etc. work,
+`.`/`..`/empty parts dropped). A script cannot name a folder outside the download folder: both
+browsers' download APIs take relative paths only, and a save dialog's chosen folder is never
+reported back — so "ask the first time and remember" is a `prompt()` on the first save without a
+dialog (`saveFolderAsk`, `saveFolderAsked`), not the dialog. Empty = the download folder itself.
+**Not verified:** that Tampermonkey makes the subfolders; it may need its Download mode set to
+Browser API, and its extension whitelist may refuse `.avif` (`saveName` already keeps a known
+extension). The plain-link fallback (`viaLink`) ignores the folder.
+
 ## `sizeGate` and `zoomLimit` (v0.168.0)
 
 The user's call: a small picture is worth enlarging even when no bigger file exists, so a hover

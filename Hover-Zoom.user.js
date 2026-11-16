@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.327.0
+// @version      0.328.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -15,6 +15,7 @@
 // @grant       GM_saveTab
 // @grant       GM_download
 // @grant       GM_openInTab
+// @grant       GM_setClipboard
 // @connect     *
 // @run-at      document-idle
 // @downloadURL https://raw.githubusercontent.com/VitaKaninen/HoverZoom/master/Hover-Zoom.user.js
@@ -302,6 +303,8 @@
         saveJpegQuality: 92,        // %, for 'jpg' and 'webp'
         saveRename: 'meaningless',  // 'off' | 'meaningless' (0001.jpg, image.jpg) | 'always'
         saveNameTemplate: '[site] - [page_title] - [orig_name]',
+        saveFolder: '',             // subfolder of the browser's download folder, same terms as the name, / between parts
+        saveFolderAsked: false,     // the first save without a dialog asks for saveFolder
         referrerSites: [],          // sites to load previews from WITHOUT a referrer
         videoDelays: {},            // host -> {ms, rules, samples, fixes, user}: wait for the page's
                                     // own player before previewing; learned, or set by the user
@@ -5036,14 +5039,36 @@
         return stem + '.' + ext;
     }
 
-    function templateName(page, stem) {
+    // The folder part of a download name: each part filled like a file name, empty parts dropped.
+    function saveFolderFor(page) {
+        const parts = String(cfg.saveFolder || '').split(/[\\/]+/).map(function (seg) {
+            return /\[|#/.test(seg) ? templateName(page || location.href, '', seg) : fillNameTemplate(seg, {});
+        }).filter(function (seg) { return seg && seg !== '.' && seg !== '..'; });
+        return parts.length ? parts.join('/') + '/' : '';
+    }
+
+    // First save without a dialog: where to put it, asked once.
+    function saveFolderAsk() {
+        if (cfg.saveFolderAsked || !isTopFrame) return;
+        reloadSettings();
+        if (cfg.saveFolderAsked) return;
+        const v = window.prompt('Hover Zoom: save pictures into which folder?\n\nIt is made inside your browser\'s download folder; / makes subfolders, ' +
+            'and terms like [site] and [page_title] fill in as in the file name. Leave it empty (or Cancel) to save into the download folder itself. ' +
+            'Change it later under Settings, Saving.', 'Hover Zoom/[site]/[page_title]');
+        cfg.saveFolder = v == null ? '' : v.trim();
+        cfg.saveFolderAsked = true;
+        saveSettings();
+        refreshPanel();
+    }
+
+    function templateName(page, stem, tpl) {
         const here = page === location.href.split('#')[0];
         const info = here ? { title: document.title, site: siteNameOf(document) } : (pageInfos.get(page) || { title: '', site: '' });
         let host = '';
         try { host = new URL(page).hostname.replace(/^www\./, ''); } catch (e) { /* none */ }
         const tp = titleParts(info.title, info.site, host);
         const nums = String(stem).match(/\d+/g);
-        let out = fillNameTemplate(cfg.saveNameTemplate, {
+        let out = fillNameTemplate(tpl || cfg.saveNameTemplate, {
             site: tp.site, title: tp.title, full: tp.full, host: host, pageId: pageIdOf(page),
             name: stem, num: nums ? nums[nums.length - 1] : '',
         });
@@ -5112,7 +5137,7 @@
     }
 
     // A converted file to the download folder: the manager's download, else a plain link download.
-    function saveBlob(blob, name, quiet, done, url, page) {
+    function saveBlob(blob, name, quiet, done, url, page, fail) {
         const obj = URL.createObjectURL(blob);
         const viaLink = function () {
             try {
@@ -5124,41 +5149,43 @@
                 a.click();
                 a.remove();
                 if (done) done();
-            } catch (e) { dbg('saving the converted file failed', String(e)); saveAsServed(url, quiet, done, page); }
+            } catch (e) { dbg('saving the converted file failed', String(e)); saveAsServed(url, quiet, done, page, fail); }
             setTimeout(function () { URL.revokeObjectURL(obj); }, 60000);
         };
         try {
-            GM_download({ url: obj, name: name, saveAs: !quiet,
+            GM_download({ url: obj, name: saveFolderFor(page) + name, saveAs: !quiet,
                 onload: function () { setTimeout(function () { URL.revokeObjectURL(obj); }, 60000); if (done) done(); },
-                onerror: function (r) { dbg('manager refused the converted file', { error: r && r.error }); if (!(r && r.error === 'not_succeeded')) viaLink(); } });
+                onerror: function (r) { dbg('manager refused the converted file', { error: r && r.error }); if (!(r && r.error === 'not_succeeded')) viaLink(); else if (fail) fail(r.error); } });
         } catch (e) { viaLink(); }
     }
 
     // Saving: converted when the setting covers the file's real format, else exactly as served.
-    async function saveOriginal(url, quiet, done, page) {
-        if (cfg.saveConvert === 'off' || typeof GM_xmlhttpRequest !== 'function' || /^(data|blob):/.test(url)) { saveAsServed(url, quiet, done, page); return; }
-        toast('Saving…', 60000);
+    async function saveOriginal(url, quiet, done, page, fail) {
+        if (quiet) saveFolderAsk();
+        if (cfg.saveConvert === 'off' || typeof GM_xmlhttpRequest !== 'function' || /^(data|blob):/.test(url)) { saveAsServed(url, quiet, done, page, fail); return; }
+        if (!fail) toast('Saving…', 60000);
         const buf = await fetchForSave(url);
         const fmt = buf ? sniffFormat(new Uint8Array(buf, 0, Math.min(4096, buf.byteLength))) : null;
-        if (!convertWanted(fmt)) { hideTip(); saveAsServed(url, quiet, done, page); return; }
-        toast('Converting ' + fmt.fmt.toUpperCase() + ' to ' + cfg.saveConvert.toUpperCase() + '…', 60000);
+        if (!convertWanted(fmt)) { if (!fail) hideTip(); saveAsServed(url, quiet, done, page, fail); return; }
+        if (!fail) toast('Converting ' + fmt.fmt.toUpperCase() + ' to ' + cfg.saveConvert.toUpperCase() + '…', 60000);
         const out = await convertBytes(buf, fmt);
-        if (!out) { toast('Could not convert this ' + fmt.fmt.toUpperCase() + '; saved as it is', 3000); saveAsServed(url, quiet, done, page); return; }
-        hideTip();
-        saveBlob(out, saveName(url, page, cfg.saveConvert), quiet, done, url, page);
+        if (!out) { if (!fail) toast('Could not convert this ' + fmt.fmt.toUpperCase() + '; saved as it is', 3000); saveAsServed(url, quiet, done, page, fail); return; }
+        if (!fail) hideTip();
+        saveBlob(out, saveName(url, page, cfg.saveConvert), quiet, done, url, page, fail);
     }
 
-    function saveAsServed(url, quiet, done, page) {
-        if (typeof GM_download !== 'function') { openOriginal(url); return; }
+    function saveAsServed(url, quiet, done, page, fail) {
+        if (typeof GM_download !== 'function') { if (fail) fail('no GM_download'); else openOriginal(url); return; }
         try {
-            GM_download({ url: url, name: saveName(url, page), saveAs: !quiet,
+            GM_download({ url: url, name: saveFolderFor(page) + saveName(url, page), saveAs: !quiet,
                 onload: function () { if (done) done(); },
                 onerror: function (r) {
                     const why = r && r.error;
                     dbg('saving the original failed', { url: url, error: why, details: r && r.details });
-                    if (why && why !== 'not_succeeded') openOriginal(url);   // refused outright: save it from the tab
+                    if (fail) fail(why || 'failed');
+                    else if (why && why !== 'not_succeeded') openOriginal(url);   // refused outright: save it from the tab
                 } });
-        } catch (e) { dbg('saving the original threw', String(e)); openOriginal(url); }
+        } catch (e) { dbg('saving the original threw', String(e)); if (fail) fail(String(e)); else openOriginal(url); }
     }
 
     function openOriginal(url) {
@@ -11708,6 +11735,11 @@
             '.fly .bt span{display:flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:16px;' +
             'background:#1e1e2e;border:1px solid #45475a;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.6)}' +
             '.fly .bt svg{width:18px;height:18px;fill:#a6e3a1}.fly .bt .no svg{fill:#f38ba8}' +
+            '.fly .tools{position:absolute;top:6px;right:' + (GAL_HD + 4) + 'px;display:flex;gap:6px;opacity:0;transition:opacity .15s ease;pointer-events:none}' +
+            '.fly:hover .tools,.fly .tools.busy{opacity:1;pointer-events:auto}.fly.edit .tools,.fly.asking .tools{display:none}' +
+            '.fly .tools span{display:flex;align-items:center;justify-content:center;min-width:26px;height:26px;padding:0 7px;box-sizing:border-box;border-radius:13px;' +
+            'background:rgba(30,30,46,.92);border:1px solid #45475a;color:#cdd6f4;font:13px/1 system-ui,sans-serif;white-space:nowrap;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.5)}' +
+            '.fly .tools span:hover{background:#313244;color:#89b4fa}' +
             '.menu[hidden]{display:none}' +
             '.menu{position:fixed;z-index:5;min-width:240px;padding:4px;box-sizing:border-box;background:#1e1e2e;border:1px solid #45475a;border-radius:8px;' +
             'box-shadow:0 8px 28px rgba(0,0,0,.6);color:#cdd6f4;font:13px/1.3 system-ui,sans-serif;pointer-events:auto}' +
@@ -12813,11 +12845,130 @@
     // A picture saved from the gallery: its thumbnail and the result it came from are marked.
     function galSaved(img, href) {
         if (!img || !img.__hzItem) return;
-        galListAdd(GAL_SAVED_KEY, img.__hzItem.thumb);
-        if (href) galListAdd(GAL_SAVEDFROM_KEY, href);
-        const cell = img.parentNode;
-        if (cell && cfg.gallerySavedMarks && !cell.querySelector('.svd')) cell.appendChild(galSavedIcon('svd'));
+        galSavedItem(href, img.__hzItem, img);
         galMarkAll();
+    }
+
+    function galSavedItem(href, item, img) {
+        galListAdd(GAL_SAVED_KEY, item.thumb);
+        if (href) galListAdd(GAL_SAVEDFROM_KEY, href);
+        if (!img && galCur && galCur.href === href) {
+            galCur.cells.some(function (c) {
+                const i = c.querySelector('img');
+                if (i && i.__hzItem && (i.__hzItem === item || i.__hzItem.thumb === item.thumb)) { img = i; return true; }
+                return false;
+            });
+        }
+        const cell = img && img.parentNode;
+        if (cell && cfg.gallerySavedMarks && !cell.querySelector('.svd')) cell.appendChild(galSavedIcon('svd'));
+    }
+
+    // ---- the clicked picture's tools: download all, copy the originals' addresses, open the gallery's page
+    let galDl = null;                   // {href, stop, n, done, failed, btn}: the download running now
+
+    function galToolsBuild(pw, href) {
+        const bar = document.createElement('div');
+        bar.className = 'tools';
+        const tool = function (text, tip, act) {
+            const b = document.createElement('span');
+            b.textContent = text;
+            setTip(b, tip);
+            b.addEventListener('mousedown', function (e) {
+                e.preventDefault();
+                e.stopPropagation();
+                if (e.button === 0) act(b);
+            });
+            ['mouseup', 'click', 'auxclick', 'dblclick', 'contextmenu'].forEach(function (t) {
+                b.addEventListener(t, function (e) { e.preventDefault(); e.stopPropagation(); });
+            });
+            bar.appendChild(b);
+            return b;
+        };
+        const dl = tool('⤓', 'Download every picture of this gallery not saved yet, into the folder under Settings, Saving · click again to stop',
+            function (b) { galDownloadAll(href, b); });
+        tool('⧉', 'Copy the addresses of every original in this gallery', function () { galCopyAll(href); });
+        tool('↗', 'Open the gallery\'s page in a new tab', function () { openOriginal(href); });
+        pw.appendChild(bar);
+        if (galDl && galDl.href === href) { galDl.btn = dl; galDlShow(galDl); }
+    }
+
+    function galDlShow(job) {
+        const b = job.btn;
+        if (!b || !b.isConnected) return;
+        const live = galDl === job;
+        b.textContent = live ? '⤓ ' + (job.done + job.failed) + ' / ' + job.n : '⤓';
+        b.parentNode.classList.toggle('busy', live);
+    }
+
+    // The best file for one listed picture, as the gallery's own preview finds it.
+    function galBestOf(item, tok) {
+        return galResolve({ __hzItem: item, naturalWidth: 0, naturalHeight: 0, src: item.thumb, currentSrc: item.thumb }, tok);
+    }
+
+    async function galDownloadAll(href, btn) {
+        if (galDl) {
+            if (galDl.href === href) galDl.stop = true;
+            else toast('Still downloading another gallery', 2500);
+            return;
+        }
+        const list = galLists.get(href);
+        if (!Array.isArray(list) || !list.length) { toast('No pictures found in this gallery yet', 2500); return; }
+        const saved = galList(GAL_SAVED_KEY);
+        let todo = list.filter(function (it) { return !saved.has(it.thumb); });
+        if (!todo.length) {
+            if (!window.confirm('All ' + list.length + ' pictures of this gallery are saved already. Save them again?')) return;
+            todo = list.slice();
+        }
+        saveFolderAsk();
+        const job = galDl = { href: href, stop: false, n: todo.length, done: 0, failed: 0, btn: btn };
+        galDlShow(job);
+        usLog.enable(cfg.logRequests !== false);
+        const lg = usLog.start('saveall', { host: pageHost(), pace: version().replace(/\?/g, '') + ' one at a time' });
+        const tok = { cancelled: false, fresh: false };
+        for (const item of todo) {
+            if (job.stop) break;
+            const r = lg && lg.req();
+            let hit = null;
+            try { hit = await galBestOf(item, tok); } catch (e) { hit = null; }
+            const ok = hit && hit.url ? await new Promise(function (res) {
+                const t = setTimeout(function () { res(false); }, SAVE_FETCH_MS);
+                saveOriginal(hit.url, true, function () { clearTimeout(t); res(true); }, href,
+                    function (why) { clearTimeout(t); dbg('download all: a picture failed', { url: hit.url, error: why }); res(false); });
+            }) : false;
+            if (r) r.done({ status: ok ? 200 : 0 });
+            if (ok) { job.done++; galSavedItem(href, item); } else job.failed++;
+            galDlShow(job);
+        }
+        galDl = null;
+        galDlShow(job);
+        galMarkAll();
+        if (lg) lg.end(job.stop ? 'cut' : 'done');
+        toast('Saved ' + job.done + ' of ' + job.n + (job.failed ? ', ' + job.failed + ' failed' : '') + (job.stop ? ' (stopped)' : ''), 4000);
+    }
+
+    async function galCopyAll(href) {
+        const list = galLists.get(href);
+        if (!Array.isArray(list) || !list.length) { toast('No pictures found in this gallery yet', 2500); return; }
+        toast('Finding ' + list.length + ' originals…', 60000);
+        const tok = { cancelled: false, fresh: false }, out = new Array(list.length);
+        let k = 0;
+        const worker = async function () {
+            while (k < list.length) {
+                const i = k++;
+                let hit = null;
+                try { hit = await galBestOf(list[i], tok); } catch (e) { hit = null; }
+                out[i] = hit && hit.url ? hit.url : '';
+            }
+        };
+        const pool = [];
+        for (let w = 0; w < GAL_HQ_PAR; w++) pool.push(worker());
+        await Promise.all(pool);
+        const urls = out.filter(Boolean), text = urls.join('\n');
+        try {
+            if (typeof GM_setClipboard === 'function') GM_setClipboard(text, 'text');
+            else await navigator.clipboard.writeText(text);
+            toast('Copied ' + urls.length + ' address' + (urls.length === 1 ? '' : 'es'), 2500);
+        } catch (e) { dbg('copying the addresses failed', String(e)); toast('Could not copy the addresses', 2500); }
     }
 
     // The saved mark: a blue disc with a down arrow, no outline (user).
@@ -13277,6 +13428,7 @@
             pw.appendChild(bt);
         };
         pair('bt ask', 'Join the strip to the picture?', 'Join them: the strip goes inside the picture\'s frame', 'Keep them apart', galJoin);
+        galToolsBuild(pw, href);
         el.addEventListener('mousedown', function (e) {
             if (e.button !== 0 && e.button !== 1) return;
             e.preventDefault();         // middle too: no autoscroll, and galMidEat eats its click
@@ -15611,6 +15763,40 @@
         const ren = pick('saveRename', 'Rename saved pictures',
             'Meaningless names are ones like 0001.jpg, 12.png or image.jpg, which pile up as 0001 (1).jpg, 0001 (2).jpg.', [
                 ['meaningless', 'Only meaningless names'], ['always', 'Always'], ['off', 'Never']]);
+        const dirWrap = document.createElement('div');
+        dirWrap.className = 'listwrap';
+        const dirHead = document.createElement('div');
+        dirHead.className = 'listhead';
+        dirHead.textContent = 'Save into this folder';
+        const dirDesc = document.createElement('div');
+        dirDesc.className = 'listdesc';
+        dirDesc.textContent = 'Inside the browser\'s download folder; a script cannot reach outside it. Empty saves into the download folder itself. ' +
+            '/ makes subfolders; the terms below fill in as in the file name, e.g. Hover Zoom/[site]/[page_title]. Used by middle-click saves and ⤓ on a gallery.';
+        const dirIn = document.createElement('input');
+        dirIn.type = 'text';
+        dirIn.value = cfg.saveFolder || '';
+        dirIn.placeholder = 'The download folder itself';
+        dirIn.spellcheck = false;
+        dirIn.style.cssText = 'width:100%;box-sizing:border-box;padding:6px 10px;font-size:13px';
+        const dirEx = document.createElement('div');
+        dirEx.className = 'tplex';
+        const syncDir = function () {
+            const keep = cfg.saveFolder;
+            cfg.saveFolder = dirIn.value.trim();
+            const f = saveFolderFor(location.href.split('#')[0]);
+            cfg.saveFolder = keep;
+            dirEx.textContent = 'On this page: ' + (f ? 'Downloads/' + f : 'Downloads/ (the folder itself)') +
+                (cfg.saveFolderAsked ? '' : ' · not set yet: the first save asks');
+        };
+        dirIn.addEventListener('input', syncDir);
+        dirIn.addEventListener('change', function () { cfg.saveFolder = dirIn.value.trim(); cfg.saveFolderAsked = true; persist(); syncDir(); });
+        dirIn.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); dirIn.blur(); } });
+        dirWrap.appendChild(dirHead);
+        dirWrap.appendChild(dirDesc);
+        dirWrap.appendChild(dirIn);
+        dirWrap.appendChild(dirEx);
+        mount.appendChild(dirWrap);
+        syncDir();
         const tplWrap = document.createElement('div');
         tplWrap.className = 'listwrap';
         const tplHead = document.createElement('div');
