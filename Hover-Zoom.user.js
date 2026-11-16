@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.323.0
+// @version      0.324.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -4246,18 +4246,32 @@
     function holdUntilDecoded(url) {
         const mine = waitTok = {};
         box.classList.add('wait');
-        const im = new Image();
-        if (noReferrerHere()) im.referrerPolicy = 'no-referrer';
-        im.src = url;
+        const held = heldImage(url);
+        const im = held || new Image();
+        if (!held) {
+            if (noReferrerHere()) im.referrerPolicy = 'no-referrer';
+            im.src = url;
+        }
         const t0 = performance.now();
-        const go = function () {
+        const go = function (decoded) {
             if (waitTok !== mine) return;
             waitTok = null;
-            if (box) box.classList.remove('wait');
-            dbg('window shown after decoding', { ms: Math.round(performance.now() - t0) });
+            if (!box) return;
+            box.classList.remove('wait');
+            if (decoded && held && view && view.url === url) showCover(im);     // paint from memory; imgEl's own load may refetch
+            dbg('window shown after decoding', { ms: Math.round(performance.now() - t0), held: !!held, decoded: !!decoded });
         };
-        im.decode().then(go, go);
-        setTimeout(go, DECODE_WAIT_MS);
+        im.decode().then(function () { go(true); }, function () { go(false); });
+        setTimeout(function () { go(false); }, DECODE_WAIT_MS);
+    }
+
+    // A loaded copy of this picture the script is holding (gallery originals, the preloader), or null.
+    function heldImage(url) {
+        const ok = function (im) { return im && im.src === url && im.complete && im.naturalWidth > 0; };
+        const p = preDecoded.find(ok);
+        if (p) return p;
+        const k = plKeep.find(function (x) { return x.url === url && ok(x.im); });
+        return k ? k.im : null;
     }
 
     function stopDecodeWait() {
@@ -4269,9 +4283,12 @@
     const preDecoded = [];
     function preDecode(url) {
         if (!url || preDecoded.some(function (p) { return p.src === url; })) return;
-        const im = new Image();
-        if (noReferrerHere()) im.referrerPolicy = 'no-referrer';
-        im.src = url;
+        let im = heldImage(url);
+        if (!im) {
+            im = new Image();
+            if (noReferrerHere()) im.referrerPolicy = 'no-referrer';
+            im.src = url;
+        }
         im.decode().catch(function () {});
         preDecoded.push(im);
         while (preDecoded.length > 3) preDecoded.shift();
@@ -4380,7 +4397,7 @@
         coverEl.hidden = false;
         const lift = function () { setTimeout(function () { if (seq === swapSeq) dropCover(); }, COVER_HOLD_MS); };
         imgEl.decode().then(lift, lift);
-        setTimeout(function () { if (seq === swapSeq) dropCover(); }, 3000);
+        setTimeout(function () { if (seq === swapSeq) dropCover(); }, 10000);
     }
 
     // imgEl may paint its last picture at the new size: hide it, decode off-screen, then show it under coverEl. See VIEWER.md.
