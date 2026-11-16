@@ -616,9 +616,12 @@ jobs that scrolled away. The hover's own `resolve()` then hits `probeCache`. Off
 
 Without a slideshow, interest sets how far the page loads (`pgTick`/`pgWant`/`pgFill`, the
 slideshow's own list `idlePics`, nearest the screen first, `page: true` hover jobs that `hwFill`
-leaves alone): **1** what is on screen, from arrival; **2** the next screen too, after a preview
-opened with the pointer below `PG_LOW` of the viewport; **3** the whole page, once scrolled
-`PG_ALL_SCREENS` down or a screen away from where the last preview opened. Re-read on every
+leaves alone): **2** the screen and the next one, from arrival (v0.323.0, user: "stay about a
+screen's length ahead"; level 1 is now only data saver's); **3** the whole page, once scrolled
+`PG_ALL_SCREENS` down or a screen away from where the last preview opened, or from arrival when
+`pgFromDoor()` — the referrer is this origin on a path a learned door rule covers (a gallery opened
+from its link, any click). Not built yet (user's ask): next index page's galleries when at the
+bottom and not skimming; an opened-share measure separating "seeing everything" from skimming. Re-read on every
 `twRefresh` (scroll-stop, lazy loads, navigation; reset on a URL change). A limit in `plDepth()`
 (`preloadAhead`, or data saver) keeps it at 1. The widget shows the answered count of its list
 (`twLoadSync`: "212 loaded", then "all loaded"), the user's signal that a show is ready to run

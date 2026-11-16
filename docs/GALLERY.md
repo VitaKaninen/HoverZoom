@@ -270,10 +270,14 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   the thumbnail. nsfw.xxx profile cells: 300×533 thumbnail → the post's 960×1704.
 - **Originals on open** (user, v0.263.0 — hovering each cell then waiting for its fetch was the
   complaint): when a set is built and its thumbnails preview (`set.pv`), `galHqAll` runs `galResolve`
-  on every cell, `GAL_HQ_PAR` 4 at a time, in cell order. Same probe as the hover, so `probeCache`
-  shares an in-flight fetch and a hover finds the answer (and the browser cache the file). `galDrop`
+  on every built cell (v0.323.0: all of them, the page on screen first — before, only that page and
+  `galAhead`), `GAL_HQ_PAR` 4 at a time. Same probe as the hover, so `probeCache` shares an in-flight
+  fetch and a hover finds the answer. **Each found original is held** (`plKeepImage`): the browser
+  cache cannot be relied on to keep it (user: a hover minutes later still downloaded). `galDrop`
   cancels it (`set.hqTok`); probes in flight finish. us-log kind `origs`, one row per open, on the
-  page's host. No pacing beyond the 4: log first.
+  page's host, with its bytes (`b`; `transferBytes`, else `diagnose()`'s Content-Range total — one
+  small range request per file, only with `logRequests`). Measured 2026-11-16: girlstop galleries
+  are 30–52 MB for 41 originals. No pacing beyond the 4: log first.
   Each item keeps its winner (`item.hit`, v0.267.0): a hover is a `fresh` probe, which re-asks every
   settled miss, and a gallery's candidates usually start with guesses that 404 — every hover waited on
   them (spinner, 100-500 ms) even when preloaded. The kept hit is re-probed (cache) and dropped if gone.

@@ -681,6 +681,16 @@ cells) put the new `src` over the old bitmap, and LibreWolf painted the old pict
 `imgEl.decode()` alone and still flashed: that signal does not mean imgEl has painted. Not used by
 `upgradeViewer` (same picture, a brief stretch is harmless) or `commitSwap` (already covers).
 
+**A new image window stays invisible until its picture decodes** (`holdUntilDecoded`, `.box.on.wait`
+= opacity 0, `DECODE_WAIT_MS` 1500 cap; v0.323.0, user: the black frame before a picture "is really
+annoying"). It decodes the copy the script already holds (`heldImage`: `preDecoded`, then `plKeep`)
+and paints it with `showCover()`, because `imgEl`'s own `src` is a new request that a browser with
+no disk cache, or Chromium's memory cache (measured in the pane: a held gallery original fetched
+again, 270 ms), does not serve from the held copy. `galPv` starts `preDecode()` on mouseenter so the
+decode overlaps the hover delay. `showCover`'s safety drop is 10 s, not 3, so a slow refetch is
+still covered. Unmeasured: decode time of a 20 MP AVIF in a visible browser — a hidden pane never
+resolves `decode()`.
+
 **`hot` is set by `layout()` and MUST be cleared by `hideViewer()`.** `layout()` stops running once
 the frame is down, so a `hot` left set leaves the box with `pointer-events:auto` and `cursor:move`
 at its last position: an invisible full-size rectangle that shows the move cursor, swallows every

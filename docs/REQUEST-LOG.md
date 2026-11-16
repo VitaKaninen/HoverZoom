@@ -52,6 +52,7 @@ rows capped at 400 (front evicted); the host summary outlives eviction.
 | `since` | ms from this host's previous read *ending* — the refresh-a-minute-later signal |
 | `nr` | the host was already on the one-at-a-time list |
 | `out` | `done` `end` `limited` `error` `cancelled` `cut`; notes: `set` `clear` `first` `slowed` (HZ), `slower` `faster` `normal` `clear` (FS `pace`; `p` = new gap `g<ms>`), `missed` (FS `quick`: its background check found a link the quick read did not show) |
+| `b` | bytes the read transferred, when the caller measured them (HZ `origs`); absent otherwise |
 | `ev` | refusals: `{ a: request #, s: status, w: hard/soft, ra: Retry-After s, dt: ms into the read }` |
 
 A successful request logs status 200 whatever 2xx/3xx it was. Text export: one line per row,
