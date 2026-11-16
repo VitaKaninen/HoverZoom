@@ -339,7 +339,10 @@ do not ask for that). Push, then in the page via `javascript_tool`: define `GM_g
 not `master`: the CDN caches) and run it with `new Function(src)()`. Synthetic `mouseover` on the
 `elementFromPoint` target learns areas; real pointer input is the `computer` tool's `hover` by `ref`
 (from `find`; no screenshot needed). Hook `console.log` to collect `dbg` lines as JSON. Synthetic
-hovers passed where real ones failed twice — finish on real hovers.
+hovers passed where real ones failed twice — finish on real hovers. A `fetch`-backed
+`GM_xmlhttpRequest` stub cannot read cross-origin, so `diagnose()` says unknown and every dead guess
+logs `retrying` ×3 — an artefact of the stub, not of the manager. The pane works for this too
+(`<script>` text injection; girlstop.info 2026-11-16), so Chrome being disconnected is no blocker.
 
 ## Two Browser-pane traps that fire before you act
 
