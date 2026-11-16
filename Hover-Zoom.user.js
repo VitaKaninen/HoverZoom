@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.321.0
+// @version      0.322.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -293,7 +293,8 @@
         borderWidth: 1,
         borderColor: '#45475a',
         cornerRadius: 6,
-        barMode: 'hover',           // 'always' | 'hover' | 'off' — the status bar
+        barMode: 'hover',           // 'always' | 'hover' (only once pinned) | 'off' — the status bar
+        barStillFade: true,         // 'hover': fade once the pointer is still for barIdleMs()
         shadow: true,
         smoothing: 'auto',          // 'auto' | 'pixelated' | 'crisp-edges' — image-rendering
         saveConvert: 'off',         // saving converts to: 'off' | 'png' | 'jpg' | 'webp'
@@ -2416,6 +2417,7 @@
             // barFadeMs drives BOTH directions: in from 0, and out again after barIdleMs.
             '.cap,.vctl{transition:opacity var(--barfade) ease}',
             '.box.baridle .cap,.box.baridle .vctl{opacity:0;pointer-events:none}',
+            '.box.barpin:not(.placed) .cap{opacity:0;pointer-events:none}',
             // The idle classes still decide whether they show; this only takes the animation off.
             // Equal specificity to the two rules above, so source order is what beats them.
             // Docked: the bar sits BELOW the picture rather than on it, so it must be opaque —
@@ -2698,7 +2700,8 @@
 
     // The status bar answers 'always' | 'hover' | 'off' for itself.
     function barShown() { return cfg.barMode !== 'off'; }
-    function barFades() { return cfg.barMode === 'hover'; }
+    function barPinOnly() { return cfg.barMode === 'hover'; }
+    function barFades() { return cfg.barMode === 'hover' && cfg.barStillFade !== false; }
 
     // Height the bar claims BELOW the picture instead of over it. Only 'always' docks: a bar that
     // fades cannot own layout, or the picture would resize itself every time the bar came and went.
@@ -3031,6 +3034,7 @@
     // this on every frame of a drag — fileInfo() and transferBytes() are not frame work.
     function caption() {
         box.classList.toggle('nobar', !barShown());
+        box.classList.toggle('barpin', barPinOnly());
         if (!barShown()) {
             capEl.style.display = 'none';
             return;
@@ -3765,6 +3769,7 @@
     // this and the cursor promises a move where the press pans. See E40.
     function pointerOverCap() {
         if (!capEl || !view || !box || !box.classList.contains('on')) return false;
+        if (barPinOnly() && !placed) return false;
         return capEl.style.display !== 'none' && overRect(capEl);
     }
 
@@ -3797,7 +3802,7 @@
     }
 
     function barIdleMs() {
-        return 250;
+        return 500;
     }
 
     // The DELAY only. At 0 the answer is given on the spot rather than a frame later, which is
@@ -3807,13 +3812,9 @@
         return barFades() && !barIdleMs();
     }
 
-    // Should it be up right now, asked only where there is no timer to ask it later.
-    // Outside fullscreen the whole preview holds the bar open, so it never fades out from under
-    // the picture you are reading — only leaving the window starts the fade. Fullscreen keeps the
-    // still-pointer rule, because there is nowhere to leave to: the window IS the screen.
+    // Should it stay up once the pointer has been still for barIdleMs(): only on the bar itself.
     function barWanted() {
         if (popOpen() || !!drag || zoomBusy()) return true;
-        if (!fullActive()) return pointInPreview(pointer.x, pointer.y);
         return pointerOverChrome();
     }
 
@@ -4453,6 +4454,7 @@
         if (galCur && galOwns(active)) { const i = galShownAt(galCur); if (i >= 0) { galCur.at = i; galPageNote(galCur); } }
         reflow();       // the controls appear with `placed`, and minFrameW() grows with them
         layout();
+        showBar();
         twSync();
     }
 
@@ -15468,8 +15470,10 @@
         num('cornerRadius', 'Corner radius', 'In px. (default: 6)', 0, 40, 1);
         pick('barMode', 'Status bar', 'Filename, size, zoom and the buttons.', [
             ['always', 'Always shown'],
-            ['hover', 'Shown while the pointer is on the preview'],
+            ['hover', 'Shown once the preview is pinned'],
             ['off', 'Hidden']]);
+        check('barStillFade', 'Fade the status bar when the mouse stops',
+            'With “Shown once the preview is pinned”: it fades half a second after the pointer stops, and comes back when it moves. Off: it stays up while pinned.');
         check('shadow', 'Drop shadow',
             'Separates the preview from the page behind it.');
         const wcBtn = document.createElement('button');

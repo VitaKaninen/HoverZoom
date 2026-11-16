@@ -5,7 +5,7 @@ The settings panel, how `cfg` is read and written, the per-tab staleness trap, t
 ## Tuning knobs folded into constants (v0.317.0, user)
 
 Retired as settings, fixed at their old defaults; sections below that discuss them describe the
-behaviour, not a panel row: `fadeMs` 200, `barIdleMs` 250, `barFadeMs` 250, `shadowSize` 24,
+behaviour, not a panel row: `fadeMs` 200, `barIdleMs` 500, `barFadeMs` 250, `shadowSize` 24,
 `shadowStrength` 50 %, `spinnerTheme` auto, `tourFadeTo` (gone: v0.319.0 fades by distance, `TW_FADE_PX`), `posPerSite` on,
 `tourWorkers` 6 (`PL_WORKERS`), `preloadAhead` all (12 under data saver), `preloadMB` automatic,
 `tourHoldRate` none, `wheelRange` gone (the wheel steps over the widget itself). Kept on purpose:

@@ -1178,12 +1178,14 @@ height, to `viewportBox().h` and to `fitFull()`'s `fixedH`.
 - **The video strip needs no change.** It sits at `bottom: BAR_MIN_H + VCTL_GAP`, and the dock is
   exactly `BAR_MIN_H`, so it lands just above the docked bar on its own.
 
-### Outside fullscreen the whole preview holds the bar open
+### The bar shows once pinned and fades on a still pointer (v0.322.0, user)
 
-`barWanted()` splits on `fullActive()`: outside fullscreen it is `pointInPreview()`, so the bar
-never fades out from under a picture you are still looking at — **leaving the window is what starts
-the fade**. In fullscreen the still-pointer rule stays, because there is nowhere to leave to: the
-window is the screen.
+`barMode` 'hover' = hidden while hovering (`.box.barpin:not(.placed) .cap`, and `pointerOverCap()`
+answers false so the invisible bar is no move handle), shown on `place()`, faded `barIdleMs()` (500)
+after the pointer stops anywhere — `barWanted()` is `pointerOverChrome()` in and out of fullscreen,
+so a pointer parked on the bar keeps it. `barStillFade` off: shown for as long as it is pinned.
+Reversed: v0.73.0–v0.321.0 held the bar open while the pointer was anywhere on the preview, so it
+never faded from under a picture being looked at; the user now wants the picture clear when still.
 
 **`onMove` calls `showBar()` once on the way OUT**, guarded by a `barOver` flag. Calling it on every
 move outside the window would push the fade back on any movement anywhere on screen — which is the
