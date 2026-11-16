@@ -125,8 +125,9 @@ const usLog = (function () {
         // Append this read and update its host's running totals. The store is RE-READ here
         // rather than trusted from when the read began: another tab may have written since,
         // and this saves the whole list back.
-        function end(outcome) {
+        function end(outcome, bytes) {
             if (ended) return;
+            if (bytes > 0) row.b = Math.round(bytes);
             ended = true;
             open.delete(handle);
             row.ms = clock() - row.t;
@@ -221,7 +222,7 @@ const usLog = (function () {
             '# No URL, path, query or page title is ever recorded.'
             + (opts.anon ? ' Hostnames are replaced with siteN.' : ' Hostnames are real in this copy.'),
             '# cols: when (UTC) | site | kind | pace | ok/req | pages | elapsed | spacing min/med/max'
-            + ' | since prev read | slowed | outcome | limit events',
+            + ' | since prev read | slowed | outcome | bytes | limit events',
             ''
         ];
         const hosts = Object.keys(d.hosts).sort();
@@ -238,7 +239,7 @@ const usLog = (function () {
                 r.sp ? 'sp ' + r.sp.join('/') : 'sp -',
                 'prev ' + dur(r.since),
                 r.nr ? 'SLOWED' : '-',
-                r.out, evText(r.ev)
+                r.out, r.b ? (r.b / 1048576).toFixed(1) + 'MB' : '-', evText(r.ev)
             ].join('  ').trimEnd());
         }
         return out.join('\n') + '\n';

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.322.0
+// @version      0.323.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -2242,6 +2242,7 @@
             '.box{position:fixed;opacity:0;pointer-events:none;transition:opacity var(--fade) ease;',
             'background:#1e1e2e;box-sizing:content-box;overflow:hidden}',
             '.box.on{opacity:1}',
+            '.box.on.wait{opacity:0;transition:none}',
             '.box.hot{pointer-events:auto}',
             '.box.placed:not(.pan){cursor:move}',
             '.box.pan{cursor:grab}',
@@ -4180,6 +4181,7 @@
 
     function showViewer(res, pointer) {
         buildViewer();
+        stopDecodeWait();
 
         const m = viewportBox();
         const fit = Math.min(fromShown(cfg.zoomLimit), m.w / res.w, m.h / res.h);
@@ -4232,8 +4234,47 @@
         box.style.transition = '';
         box.style.opacity = '';
         box.classList.add('on');
+        if (mediaEl === imgEl) holdUntilDecoded(res.display || res.url);
         twOpacity();
         showBar();
+    }
+
+    const DECODE_WAIT_MS = 1500;    // longest a new window stays invisible waiting for its picture to decode
+    let waitTok = null;
+
+    // Keep a just-opened window invisible until its picture can paint, instead of an empty frame.
+    function holdUntilDecoded(url) {
+        const mine = waitTok = {};
+        box.classList.add('wait');
+        const im = new Image();
+        if (noReferrerHere()) im.referrerPolicy = 'no-referrer';
+        im.src = url;
+        const t0 = performance.now();
+        const go = function () {
+            if (waitTok !== mine) return;
+            waitTok = null;
+            if (box) box.classList.remove('wait');
+            dbg('window shown after decoding', { ms: Math.round(performance.now() - t0) });
+        };
+        im.decode().then(go, go);
+        setTimeout(go, DECODE_WAIT_MS);
+    }
+
+    function stopDecodeWait() {
+        waitTok = null;
+        if (box) box.classList.remove('wait');
+    }
+
+    // Decode a known original ahead of its window, so the window can paint at once.
+    const preDecoded = [];
+    function preDecode(url) {
+        if (!url || preDecoded.some(function (p) { return p.src === url; })) return;
+        const im = new Image();
+        if (noReferrerHere()) im.referrerPolicy = 'no-referrer';
+        im.src = url;
+        im.decode().catch(function () {});
+        preDecoded.push(im);
+        while (preDecoded.length > 3) preDecoded.shift();
     }
 
     // A better original arrived while the preview is already up.
@@ -8112,8 +8153,9 @@
             // Append this read and update its host's running totals. The store is RE-READ here
             // rather than trusted from when the read began: another tab may have written since,
             // and this saves the whole list back.
-            function end(outcome) {
+            function end(outcome, bytes) {
                 if (ended) return;
+                if (bytes > 0) row.b = Math.round(bytes);
                 ended = true;
                 open.delete(handle);
                 row.ms = clock() - row.t;
@@ -8208,7 +8250,7 @@
                 '# No URL, path, query or page title is ever recorded.'
                 + (opts.anon ? ' Hostnames are replaced with siteN.' : ' Hostnames are real in this copy.'),
                 '# cols: when (UTC) | site | kind | pace | ok/req | pages | elapsed | spacing min/med/max'
-                + ' | since prev read | slowed | outcome | limit events',
+                + ' | since prev read | slowed | outcome | bytes | limit events',
                 ''
             ];
             const hosts = Object.keys(d.hosts).sort();
@@ -8225,7 +8267,7 @@
                     r.sp ? 'sp ' + r.sp.join('/') : 'sp -',
                     'prev ' + dur(r.since),
                     r.nr ? 'SLOWED' : '-',
-                    r.out, evText(r.ev)
+                    r.out, r.b ? (r.b / 1048576).toFixed(1) + 'MB' : '-', evText(r.ev)
                 ].join('  ').trimEnd());
             }
             return out.join('\n') + '\n';
@@ -10921,7 +10963,6 @@
     function hwStart(el) {
         if (!cfg.hoverPreload || tour || !el || !el.isConnected) return;
         pgHovered = window.scrollY || 0;
-        if (pointer.y > vpH() * PG_LOW) pgWant(2);
         if (!(hwScope && hwScope.isConnected && hwScope.contains(el))) {
             const pics = tourPics(idleFloor());
             const levels = tourLevels(el, pics);
@@ -10958,10 +10999,9 @@
 
     // ---- loading the page ahead of the user
     //
-    // Interest decides how far: what is on screen on arrival, the next screen after a hover near
-    // the bottom, and everything once they scroll a few screens down or scroll after a hover.
+    // Interest decides how far: a screen ahead from arrival; everything on a page opened from a
+    // gallery link, or once they scroll a few screens down or scroll after a hover.
 
-    const PG_LOW = 0.6;             // a hover below this fraction of the viewport looks ahead
     const PG_ALL_SCREENS = 3;       // scrolled this many screens down: they want the whole page
 
     let pgLevel = 0;                // 1 on screen, 2 the next screen too, 3 everything
@@ -10980,8 +11020,18 @@
     function pgTick() {
         if (pgHref !== location.href) { pgHref = location.href; pgLevel = 0; pgHovered = -1; }
         const y = window.scrollY || 0, h = vpH();
-        if (h > 0 && (y >= h * PG_ALL_SCREENS || (pgHovered >= 0 && Math.abs(y - pgHovered) >= h))) pgWant(3);
-        else pgWant(1);
+        if (pgFromDoor() || (h > 0 && (y >= h * PG_ALL_SCREENS || (pgHovered >= 0 && Math.abs(y - pgHovered) >= h)))) pgWant(3);
+        else pgWant(2);
+    }
+
+    // This page was opened from a learned gallery link on this site: its pictures are what was asked for.
+    function pgFromDoor() {
+        const e = (cfg.doorAreas || {})[pageHost()];
+        if (!e || !e.rules || !e.rules.length || !document.referrer) return false;
+        let r;
+        try { r = new URL(document.referrer); } catch (x) { return false; }
+        if (r.origin !== location.origin || r.href.split('#')[0] === location.href.split('#')[0]) return false;
+        return e.rules.some(function (rule) { return !rule.path || r.pathname.indexOf(rule.path) === 0; });
     }
 
     // Queue the pictures the current level covers, nearest the screen first.
@@ -12208,9 +12258,8 @@
         }
         if (!set.pv) return;
         if (set.hqTok) set.hqTok.cancelled = true;
-        const P = set.pages || [[0, set.pics.length]], pg = set.page || 0;
-        const last = Math.min(P.length - 1, pg + galAhead(pg + 1)), to = P[last] ? P[last][1] : set.pics.length;
-        galHqAll(set, set.pics.slice(p[0], Math.max(p[1], to)).map(function (q) { return q.img; }));
+        const order = set.pics.slice(p[0]).concat(set.pics.slice(0, p[0]));     // every original: this page first, then on, then back
+        galHqAll(set, order.map(function (q) { return q.img; }));
     }
 
     // One page on (+1) or back (-1). False at either end.
@@ -12586,12 +12635,19 @@
         usLog.enable(cfg.logRequests !== false);
         const lg = usLog.start('origs', { host: pageHost(), pace: version().replace(/\?/g, '') + ' ' + GAL_HQ_PAR + ' at once', slowed: noRush(pageHost()) });
         const tok = set.hqTok = { cancelled: false, fresh: false };
-        let i = 0, running = 0, ended = false, got = 0;
+        let i = 0, running = 0, ended = false, got = 0, bytes = 0, sizing = 0;
         const end = function (why) {
-            if (ended) return;
+            if (ended || sizing) return;
             ended = true;
-            if (lg) lg.end(why);
-            dbg('gallery originals: ' + why, { href: set.href, pictures: imgs.length, found: got });
+            if (lg) lg.end(why, bytes);
+            dbg('gallery originals: ' + why, { href: set.href, pictures: imgs.length, found: got, bytes: humanBytes(bytes) });
+        };
+        const size = function (hit) {
+            const n = transferBytes(hit.url);
+            if (n || cfg.logRequests === false) { bytes += n; return; }
+            sizing++;
+            diagnose(hit.url).then(function (d) { bytes += (d && d.total) || 0; }, function () {})
+                .then(function () { sizing--; if (!running && (tok.cancelled || i >= imgs.length)) end(tok.cancelled ? 'cut' : 'done'); });
         };
         const next = function () {
             if (tok.cancelled) { if (!running) end('cut'); return; }
@@ -12601,7 +12657,7 @@
                 running++;
                 galHqLive.add(live);
                 galResolve(img, tok).then(function (hit) {
-                    if (hit) got++;
+                    if (hit) { got++; if (!hit.video) plKeepImage(hit); size(hit); }
                     if (!tok.cancelled && img.__hzItem) img.__hzItem.hqTried = true;
                     if (r) r.done({ status: hit ? 200 : 0 });
                 }, function () { if (r) r.done({ status: 0 }); }).then(function () { galHqLive.delete(live); running--; next(); });
@@ -12664,6 +12720,7 @@
     function galPv(img) {
         if (placed || !img.__hzItem) return;
         cancel();
+        if (img.__hzItem.hit && !img.__hzItem.hit.video) preDecode(img.__hzItem.hit.url);
         active = img;
         activeShown = img.__hzItem.thumb;
         hoverAt = Date.now();
