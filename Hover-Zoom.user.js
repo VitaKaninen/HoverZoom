@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.324.0
+// @version      0.325.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -11048,7 +11048,8 @@
         let r;
         try { r = new URL(document.referrer); } catch (x) { return false; }
         if (r.origin !== location.origin || r.href.split('#')[0] === location.href.split('#')[0]) return false;
-        return e.rules.some(function (rule) { return !rule.path || r.pathname.indexOf(rule.path) === 0; });
+        const rp = '/' + r.pathname.split('/').filter(Boolean).join('/');
+        return e.rules.some(function (rule) { return pathMatches(rp, rule.path); });
     }
 
     // Queue the pictures the current level covers, nearest the screen first.
@@ -12660,27 +12661,32 @@
             dbg('gallery originals: ' + why, { href: set.href, pictures: imgs.length, found: got, bytes: humanBytes(bytes) });
         };
         const size = function (hit) {
-            const n = transferBytes(hit.url);
-            if (n || cfg.logRequests === false) { bytes += n; return; }
             sizing++;
-            diagnose(hit.url).then(function (d) { bytes += (d && d.total) || 0; }, function () {})
+            galBytes(hit.url).then(function (n) { bytes += n; })
                 .then(function () { sizing--; if (!running && (tok.cancelled || i >= imgs.length)) end(tok.cancelled ? 'cut' : 'done'); });
         };
         const next = function () {
             if (tok.cancelled) { if (!running) end('cut'); return; }
             if (i >= imgs.length) { if (!running) end('done'); return; }
             while (running < GAL_HQ_PAR && i < imgs.length) {
-                const img = imgs[i++], r = lg && lg.req(), live = { t: performance.now(), mine: tok };
+                const img = imgs[i++], r = lg && lg.req(), live = { t: performance.now(), mine: tok }, t0 = performance.now();
                 running++;
                 galHqLive.add(live);
                 galResolve(img, tok).then(function (hit) {
-                    if (hit) { got++; if (!hit.video) plKeepImage(hit); size(hit); }
+                    if (hit) { got++; if (!hit.video) plKeepImage(hit); size(hit); nextWarmSeen(hit.url, performance.now() - t0); }
                     if (!tok.cancelled && img.__hzItem) img.__hzItem.hqTried = true;
                     if (r) r.done({ status: hit ? 200 : 0 });
                 }, function () { if (r) r.done({ status: 0 }); }).then(function () { galHqLive.delete(live); running--; next(); });
             }
         };
         next();
+    }
+
+    // A file's size: Resource Timing when the host allows it, else one small range request (only while the request log is on).
+    function galBytes(url) {
+        const n = transferBytes(url);
+        if (n || cfg.logRequests === false) return Promise.resolve(n);
+        return diagnose(url).then(function (d) { return (d && d.total) || 0; }, function () { return 0; });
     }
 
     function galDrop(set) {
@@ -13969,7 +13975,7 @@
 
     function galMarkSoon() {
         clearTimeout(galMarkTimer);
-        galMarkTimer = setTimeout(function () { galMarkAll(); galPreNext(); }, 250);
+        galMarkTimer = setTimeout(function () { galMarkAll(); galPreNext(); nextCheck(); }, 250);
     }
 
     // Load a gallery's thumbnails into the browser's cache, up to GAL_WAIT_MS.
@@ -14009,7 +14015,7 @@
         if (!isTopFrame || !cfg.galleryPreload || galPre || galPreStop || galFrameStop || galGrowing || galWant || galCur ||
             document.visibilityState === 'hidden' || !siteEnabled() || CAPTCHA_HERE) return;
         const href = galPrePick();
-        if (!href) { if (galPreLog) { galPreLog.end('done'); galPreLog = null; } return; }
+        if (!href) { if (galPreLog) { galPreLog.end('done'); galPreLog = null; } nextCheck(); return; }
         if (!galPreLog) {
             usLog.enable(cfg.logRequests !== false);
             galPreLog = usLog.start('gallery', { host: pageHost(), pace: version().replace(/\?/g, '') + ' serial', slowed: noRush(pageHost()) });
@@ -14033,10 +14039,164 @@
         if (galPreLog) { galPreLog.end(why); galPreLog = null; }
     }
 
+    // ---- the next page of galleries: near the bottom of a page the user is going through, its first galleries load ahead
+
+    const NEXT_GALLERIES = 3;           // galleries of the next page loaded ahead
+    const NEXT_SHARE = 0.2;             // opened at least this share of the unseen galleries scrolled past: going through them
+    const NEXT_KEY = 'hzNextPage';      // sessionStorage: {page, lists: {href: items}, files: [urls]}
+    let nextDone = false, nextBusy = false, nextDeep = 0;
+    let nextTicked = null;              // door links already ticked when this page arrived
+    let nextWarm = null;                // arrival: {files: Set, n, warm, lg} for the originals the last page loaded ahead
+
+    // The learned doors in a document, page order, one per link.
+    function nextDoors(root, path) {
+        const e = (cfg.doorAreas || {})[pageHost()];
+        const out = [], seen = new Set();
+        if (!e || !e.rules || !e.rules.length) return out;
+        root.querySelectorAll('a[href] img').forEach(function (img) {
+            const h = galLinkOf(img);
+            if (!h || seen.has(h) || !vdRuleFor(e, domChain(img), path)) return;
+            seen.add(h);
+            out.push({ href: h, img: img });
+        });
+        return out;
+    }
+
+    function nextTickedNow() {
+        galSeen[GAL_SEEN_KEY] = null;
+        galSeen[GAL_VISITED_KEY] = null;
+        const a = galList(GAL_SEEN_KEY), b = galList(GAL_VISITED_KEY);
+        return function (h) { return a.has(h) || b.has(h); };
+    }
+
+    // Opened vs unseen galleries the user has scrolled to, this visit.
+    function nextEngaged() {
+        if (!nextTicked) return { fresh: 0, opened: 0, ok: false };
+        const ticked = nextTickedNow(), y = window.scrollY || 0;
+        let fresh = 0, opened = 0;
+        nextDoors(document, pagePath()).forEach(function (d) {
+            if (nextTicked.has(d.href)) return;
+            if (d.img.getBoundingClientRect().top + y > nextDeep) return;
+            fresh++;
+            if (ticked(d.href)) opened++;
+        });
+        return { fresh: fresh, opened: opened, ok: opened > 0 && opened >= fresh * NEXT_SHARE };
+    }
+
+    function nextIdle() {
+        return !galPre && !galFrameStop && !galGrowing && !galWant && !galCur && !tour && document.visibilityState !== 'hidden';
+    }
+
+    // At the bottom, idle, going through the galleries: load the next page's first ones.
+    function nextCheck() {
+        if (!isTopFrame || nextDone || nextBusy || !cfg.galleryPreload || galPreStop || !galMarksHere() || !siteEnabled() || CAPTCHA_HERE) return;
+        const h = vpH(), y = window.scrollY || 0, full = (document.scrollingElement || document.documentElement).scrollHeight;
+        if (!(h > 0) || y + h < full - h || !nextIdle()) return;
+        const eng = nextEngaged();
+        if (!eng.ok) { dbg('next page: not loaded ahead, galleries skipped', eng); return; }
+        const href = nextPageIn(document, location.href);
+        nextDone = true;
+        if (!href) { dbg('next page: none found'); return; }
+        dbg('next page: loading its first galleries ahead', { page: href, opened: eng.opened, of: eng.fresh });
+        nextRun(href);
+    }
+
+    function nextWait() {
+        return new Promise(function (r) { (function tick() { if (nextIdle()) r(); else setTimeout(tick, 1000); })(); });
+    }
+
+    async function nextRun(href) {
+        nextBusy = true;
+        usLog.enable(cfg.logRequests !== false);
+        const lg = usLog.start('nextpg', { host: pageHost(), pace: version().replace(/\?/g, '') + ' serial, ' + GAL_HQ_PAR + ' originals at once', slowed: noRush(pageHost()) });
+        const req = lg && lg.req();
+        let refused = false, bytes = 0;
+        const doc = await fetchDoc(href, function (res) {
+            refused = true;
+            if (res.status === 429 || res.status === 503) { logBusy(href, res); galPreHalt('limited'); }
+        });
+        if (req) req.done({ status: doc ? 200 : 0 });
+        const store = { page: href.split('#')[0], lists: {}, files: [] };
+        const save = function () { try { sessionStorage.setItem(NEXT_KEY, JSON.stringify(store)); } catch (e) { /* full or blocked */ } };
+        let path = '/';
+        try { path = '/' + new URL(href).pathname.split('/').filter(Boolean).join('/'); } catch (e) { /* keep / */ }
+        const ticked = nextTickedNow();
+        const doors = doc && !refused ? nextDoors(doc, path).filter(function (d) { return !ticked(d.href); }).slice(0, NEXT_GALLERIES) : [];
+        for (const d of doors) {
+            await nextWait();
+            if (galPreStop) break;
+            const list = await galLoad(d.href, lg);
+            if (!Array.isArray(list)) continue;
+            store.lists[d.href] = list;
+            save();
+            await galWarm(list);
+            const tok = { cancelled: false, fresh: false };
+            let k = 0;
+            const worker = async function () {
+                while (k < list.length && !galPreStop) {
+                    const item = list[k++];
+                    await nextWait();
+                    const hit = await galResolve({ __hzItem: item, naturalWidth: 0, naturalHeight: 0, src: item.thumb, currentSrc: item.thumb }, tok);
+                    if (!hit || hit.video || hit.url === item.thumb) continue;
+                    store.files.push(hit.url);
+                    bytes += await galBytes(hit.url);
+                }
+            };
+            const pool = [];
+            for (let w = 0; w < GAL_HQ_PAR; w++) pool.push(worker());
+            await Promise.all(pool);
+            save();
+        }
+        dbg('next page: loaded ahead', { page: store.page, galleries: Object.keys(store.lists).length, originals: store.files.length, bytes: humanBytes(bytes) });
+        if (lg) lg.end(galPreStop ? 'limited' : 'done', bytes);
+        nextBusy = false;
+    }
+
+    // Arrival: the lists the last page read are this page's galleries already; its files are measured as they are asked for.
+    function nextArrive() {
+        let st = null;
+        try { st = JSON.parse(sessionStorage.getItem(NEXT_KEY) || 'null'); } catch (e) { st = null; }
+        if (!st || st.page !== location.href.split('#')[0]) return;
+        try { sessionStorage.removeItem(NEXT_KEY); } catch (e) { /* blocked */ }
+        Object.keys(st.lists || {}).forEach(function (h) {
+            const list = st.lists[h];
+            if (!Array.isArray(list) || galLists.has(h)) return;
+            galLists.set(h, list);
+            galCache.set(h, Promise.resolve(list));
+        });
+        nextWarm = { files: new Set(st.files || []), n: 0, warm: 0, lg: null };
+        dbg('next page: arrived with galleries read ahead', { galleries: Object.keys(st.lists || {}).length, originals: nextWarm.files.size });
+    }
+
+    // One original the last page loaded ahead, asked for again here: did the browser keep it?
+    function nextWarmSeen(url, ms) {
+        if (!nextWarm || !nextWarm.files.delete(url)) return;
+        if (!nextWarm.lg) {
+            usLog.enable(cfg.logRequests !== false);
+            nextWarm.lg = usLog.start('nextwarm', { host: pageHost(), pace: version().replace(/\?/g, '') + ' kept under ' + PL_COLD_MS + 'ms' }) || { req: function () { return null; }, end: function () {} };
+        }
+        const warm = ms < PL_COLD_MS, r = nextWarm.lg.req();
+        nextWarm.n++;
+        if (warm) nextWarm.warm++;
+        if (r) r.done({ status: warm ? 200 : 0 });
+        if (!nextWarm.files.size) {
+            dbg('next page: originals loaded ahead that the browser kept', { kept: nextWarm.warm, of: nextWarm.n });
+            nextWarm.lg.end('done');
+            nextWarm = null;
+        }
+    }
+
     if (isTopFrame) {
         document.addEventListener('scroll', galScroll, { capture: true, passive: true });
         window.addEventListener('pagehide', function () { if (galPreLog) { galPreLog.end('cut'); galPreLog = null; } });
         setTimeout(function () { galMarkAll(); galPreNext(); }, 1500);
+        setTimeout(function () {
+            nextArrive();
+            const ticked = nextTickedNow();
+            nextTicked = new Set(nextDoors(document, pagePath()).map(function (d) { return d.href; }).filter(ticked));
+            nextDeep = (window.scrollY || 0) + vpH();
+        }, 0);
+        window.addEventListener('scroll', function () { nextDeep = Math.max(nextDeep, (window.scrollY || 0) + vpH()); }, { passive: true });
         window.addEventListener('keydown', galKeyDown, true);
         ['mouseup', 'auxclick', 'click'].forEach(function (t) { document.addEventListener(t, galMidEat, true); });
         window.addEventListener('keyup', galKeyUp, true);
