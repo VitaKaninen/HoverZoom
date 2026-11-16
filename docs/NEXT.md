@@ -1,35 +1,28 @@
-# Handoff 2026-11-13 (second session, ~411k tokens) — read this first
+# Handoff 2026-11-16 (~355k tokens) — read this first
 
-**Asked:** (1) audit the window and widget for mode-dependent differences (done, report given in chat);
-(2) then: gallery stepping identical to the page slideshow; a hand-set size never carried to the next
-picture; failure reason + ↻ only in debug mode; panel debug row renamed "Enable debug mode"; ↑ ↓ turn
-the page (screens on a page, layout pages in a gallery); one widget for page and gallery (hold-repeat,
-start number that follows page turns); click a number to type a target (Forum Stumbler's box); a
-right-click menu on the widget with preview-position and widget settings; wheel: over preview zooms,
-over widget flips, elsewhere scrolls the page and closes a pinned preview; cut the tuning settings.
-Avatars/emoji left as they are (user).
+**Asked, in order:** (1) status bar hidden until the preview is pinned, fading 500 ms after the
+pointer stops, with an option to disable the fade; (2) on girlstop.info, gallery originals were not
+loading until hovered; (3) a peek's originals still downloaded on hover minutes later, and a new
+window showed black ~1 s before its picture; (4) opened galleries preload all originals, pages stay a
+screen ahead, byte logging; (5) "build the next index page preloading now".
 
-**Done:** all of it, v0.317.0 (commit 7b14836, pushed). Where it lives: INTERACTION.md `S25`, `T24`,
-`T30`, `T41`, `E22`, `E53`, `E56`, `G6`, `G9`; GALLERY.md "The widget" and "Stepping is the
-slideshow's"; TOUR.md widget section (typed numbers, menu, wheel); SETTINGS.md "Tuning knobs folded
-into constants". Verified only in the Browser pane on test-page.html and test-pages/door-search.html
-(d6, 240 pictures): widget counts, steps, ↑ ↓, wheel on/off preview, typed picture and page, menu.
-**Not verified:** a real site, LibreWolf, Tampermonkey; hand-resize reset (code only).
+**Done, all pushed:** v0.322.0 status bar (`barPinOnly`, `barStillFade`; VIEWER.md E41 section).
+v0.323.0–v0.324.0: every original of an opened gallery loads and is held (`plKeepImage`); a new window
+stays invisible until decoded and paints from the held copy (`holdUntilDecoded`, `heldImage`,
+`preDecode`; VIEWER.md); pages load a screen ahead, the whole page when `pgFromDoor()` (TOUR.md);
+us-log rows carry bytes `b` (shared/us-log.js, synced to Forum Stumbler v0.90.0). v0.325.0–v0.327.0:
+next page of galleries loaded ahead (GALLERY.md "Next page"). Measured: girlstop galleries 30–52 MB
+for 41 originals; the user measured 32.91 MB for psto.php?id=256380 (theirs includes thumbnails).
 
-**User's answers (same day):** a wheel off a pinned preview closes it (keep as built). The gallery
-widget change was wrong: v0.318.0 brings the strip back (in the picture's frame, dock/out, join
-prompt, own memory) and hides the page widget in a gallery again; everything else of v0.317.0 stays,
-including stepping through the slideshow engine (the strip's picture row → `galStep` → `twPress`).
+**Verified only in the Browser pane** with an injected build (TESTING.md: the fetch stub cannot read
+cross-origin, so `bytes` log 0 B there): hover-to-picture ~200 ms with no black frame (pane visible);
+skim → nothing loaded; 12 of 37 opened → page 11's first 3 galleries (123 originals) in ~30 s; page 11
+peeks open from the stored lists; 12 of 17 originals still cached there. **Not verified:** the
+user's browser/Tampermonkey; real byte counts; whether their cache keeps originals across pages
+(read the `nextwarm` rows — if few kept, load only lists + thumbnails a page ahead).
 
-**v0.319.0 (user's picks from that list):** the gallery widget got the start number, hold-to-repeat,
-typed numbers, the page row as `galPageStep`, and the fade. The typed box closes on any press outside it.
-The wheel flips pictures over either widget or the gallery's clicked picture, and never turns pages.
-The fade is by distance (0 at 75 px). The page widget has a 4 px edge; colours are Forum Stumbler's since v0.321.0 (TOUR.md).
-Originals preload for the page on screen plus `galAhead` pages.
-⇅ stays for now (user, after being told the wheel over the widget does the same). Typed numbers past what is loaded tested in Chrome
-(v0.320.0): Google Images 100 → 300 → 380 over three tries, Bing 43 → 135; first try ~5 s cold, later ~0.2 s.
-
----
+**Last question asked:** none open. The user's earlier ideas not built: on a skimmed page, load a
+gallery's originals after a 1 s hover.
 
 # Next work — consistency pass (handoff 2026-11-13, session ended at ~311k tokens)
 
