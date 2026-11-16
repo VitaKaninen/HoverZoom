@@ -14074,13 +14074,14 @@
         if (!nextTicked) return { fresh: 0, opened: 0, ok: false };
         const ticked = nextTickedNow(), y = window.scrollY || 0;
         let fresh = 0, opened = 0;
-        nextDoors(document, pagePath()).forEach(function (d) {
+        const doors = nextDoors(document, pagePath());
+        doors.forEach(function (d) {
             if (nextTicked.has(d.href)) return;
             if (d.img.getBoundingClientRect().top + y > nextDeep) return;
             fresh++;
             if (ticked(d.href)) opened++;
         });
-        return { fresh: fresh, opened: opened, ok: opened > 0 && opened >= fresh * NEXT_SHARE };
+        return { fresh: fresh, opened: opened, doors: doors.length, before: nextTicked.size, deep: Math.round(nextDeep), ok: opened > 0 && opened >= fresh * NEXT_SHARE };
     }
 
     function nextIdle() {
@@ -14097,7 +14098,7 @@
         const href = nextPageIn(document, location.href);
         nextDone = true;
         if (!href) { dbg('next page: none found'); return; }
-        dbg('next page: loading its first galleries ahead', { page: href, opened: eng.opened, of: eng.fresh });
+        dbg('next page: loading its first galleries ahead', { page: href, engaged: eng });
         nextRun(href);
     }
 
