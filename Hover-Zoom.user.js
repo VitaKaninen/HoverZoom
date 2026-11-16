@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.325.0
+// @version      0.326.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -12658,6 +12658,7 @@
             if (ended || sizing) return;
             ended = true;
             if (lg) lg.end(why, bytes);
+            nextWarmReport();
             dbg('gallery originals: ' + why, { href: set.href, pictures: imgs.length, found: got, bytes: humanBytes(bytes) });
         };
         const size = function (hit) {
@@ -14169,22 +14170,25 @@
         dbg('next page: arrived with galleries read ahead', { galleries: Object.keys(st.lists || {}).length, originals: nextWarm.files.size });
     }
 
-    // One original the last page loaded ahead, asked for again here: did the browser keep it?
+    // One original the last page loaded ahead, asked for again here: was it still in the browser (under PL_COLD_MS)?
     function nextWarmSeen(url, ms) {
         if (!nextWarm || !nextWarm.files.delete(url)) return;
-        if (!nextWarm.lg) {
-            usLog.enable(cfg.logRequests !== false);
-            nextWarm.lg = usLog.start('nextwarm', { host: pageHost(), pace: version().replace(/\?/g, '') + ' kept under ' + PL_COLD_MS + 'ms' }) || { req: function () { return null; }, end: function () {} };
-        }
-        const warm = ms < PL_COLD_MS, r = nextWarm.lg.req();
         nextWarm.n++;
-        if (warm) nextWarm.warm++;
-        if (r) r.done({ status: warm ? 200 : 0 });
-        if (!nextWarm.files.size) {
-            dbg('next page: originals loaded ahead that the browser kept', { kept: nextWarm.warm, of: nextWarm.n });
-            nextWarm.lg.end('done');
-            nextWarm = null;
+        if (ms < PL_COLD_MS) nextWarm.warm++;
+    }
+
+    // An opened gallery's originals are in: one log row for those the last page had loaded ahead.
+    function nextWarmReport() {
+        if (!nextWarm || !nextWarm.n) return;
+        dbg('next page: originals loaded ahead that the browser kept', { kept: nextWarm.warm, of: nextWarm.n });
+        usLog.enable(cfg.logRequests !== false);
+        const lg = usLog.start('nextwarm', { host: pageHost(), pace: version().replace(/[?]/g, '') + ' kept under ' + PL_COLD_MS + 'ms' });
+        if (lg) {
+            for (let i = 0; i < nextWarm.n; i++) lg.req().done({ status: i < nextWarm.warm ? 200 : 0 });
+            lg.end('done');
         }
+        nextWarm.n = nextWarm.warm = 0;
+        if (!nextWarm.files.size) nextWarm = null;
     }
 
     if (isTopFrame) {
