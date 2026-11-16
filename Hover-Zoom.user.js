@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.326.0
+// @version      0.327.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -14045,7 +14045,7 @@
     const NEXT_GALLERIES = 3;           // galleries of the next page loaded ahead
     const NEXT_SHARE = 0.2;             // opened at least this share of the unseen galleries scrolled past: going through them
     const NEXT_KEY = 'hzNextPage';      // sessionStorage: {page, lists: {href: items}, files: [urls]}
-    let nextDone = false, nextBusy = false, nextDeep = 0;
+    let nextDone = false, nextBusy = false;
     let nextTicked = null;              // door links already ticked when this page arrived
     let nextWarm = null;                // arrival: {files: Set, n, warm, lg} for the originals the last page loaded ahead
 
@@ -14070,19 +14070,18 @@
         return function (h) { return a.has(h) || b.has(h); };
     }
 
-    // Opened vs unseen galleries the user has scrolled to, this visit.
+    // Opened vs unseen galleries on this page, this visit. Asked only at the bottom, where every one has been passed.
     function nextEngaged() {
         if (!nextTicked) return { fresh: 0, opened: 0, ok: false };
-        const ticked = nextTickedNow(), y = window.scrollY || 0;
+        const ticked = nextTickedNow();
         let fresh = 0, opened = 0;
         const doors = nextDoors(document, pagePath());
         doors.forEach(function (d) {
             if (nextTicked.has(d.href)) return;
-            if (d.img.getBoundingClientRect().top + y > nextDeep) return;
             fresh++;
             if (ticked(d.href)) opened++;
         });
-        return { fresh: fresh, opened: opened, doors: doors.length, before: nextTicked.size, deep: Math.round(nextDeep), ok: opened > 0 && opened >= fresh * NEXT_SHARE };
+        return { fresh: fresh, opened: opened, doors: doors.length, before: nextTicked.size, ok: opened > 0 && opened >= fresh * NEXT_SHARE };
     }
 
     function nextIdle() {
@@ -14199,9 +14198,7 @@
             nextArrive();
             const ticked = nextTickedNow();
             nextTicked = new Set(nextDoors(document, pagePath()).map(function (d) { return d.href; }).filter(ticked));
-            nextDeep = (window.scrollY || 0) + vpH();
         }, 0);
-        window.addEventListener('scroll', function () { nextDeep = Math.max(nextDeep, (window.scrollY || 0) + vpH()); }, { passive: true });
         window.addEventListener('keydown', galKeyDown, true);
         ['mouseup', 'auxclick', 'click'].forEach(function (t) { document.addEventListener(t, galMidEat, true); });
         window.addEventListener('keyup', galKeyUp, true);
