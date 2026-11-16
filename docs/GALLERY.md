@@ -286,13 +286,35 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
 - **Picture tools** (`galToolsBuild`, user v0.328.0, `G10`): ⤓ ↗ in `.tools` inside the clicked
   picture's `.pic`, inset `GAL_HD + 4` from the right so the invisible resize corner stays reachable.
   Each button eats its own mousedown, or the picture's handler closes the gallery or starts a drag.
-  ⤓ `galDownloadAll`: `galLists.get(href)` (what the read has found so far), minus `GAL_SAVED_KEY`
-  thumbs, one at a time through `galBestOf` (= `galResolve` on a stand-in img, as `nextRun`) and
-  `saveOriginal(…, fail)`; `fail` makes the save path skip its toast and its open-in-a-tab fallback
-  (a refused batch would open hundreds of tabs). Runs on after the gallery closes; one job at a time
-  (`galDl`); a reopened gallery's button picks the progress up. us-log `saveall`. A ⧉ copy-every-address button was
-  removed at the user's word (v0.329.0). Pane-checked by synthetic events on `door-big.html`: 240 saved with
-  the folder filled, confirm when all saved, stop at 6 page opened.
+  ⤓ `galDownloadAll` queues the gallery (`galBestOf` + `saveOriginal(…, fail)` per picture; `fail` skips the
+  save path's toast and open-in-a-tab fallback, or a refused batch opens hundreds of tabs). A ⧉ copy-every-address
+  button was removed at the user's word (v0.329.0).
+- **Download queue** (`dlq*`, user v0.331.0): lives in GM storage, so it survives navigation and tab closes.
+  - Keys: `hzDlJob:<id>` {href, origin, items, read: `reading`|`queued`, again, note}, `hzDlSt:<id>` one char per
+    item (0 to do, 1 in flight, 2 saved, 3 failed; written only by the working tab), `hzDlLock:<origin>` {tab, t}.
+    Needs `GM_listValues`/`GM_deleteValue`. Cancel (✕, or ⤓ again) deletes the job keys; workers check
+    `dlqAlive` before every write, or a late write resurrects the job.
+  - **One tab per origin works it** (`dlqTick` every 2 s claims the lock, works from the second tick). Jobs run only
+    in a tab of the gallery's own origin: `galLinkedHit` needs same-origin. `DLQ_LOCK_MS` is 75 s and the lock is
+    renewed before every download (`dlqMine`): a background tab's timers can run once a minute, and with 8 s the
+    other tab took over while the first was still downloading (pane, measured: both saved the same items).
+    `pagehide` releases the lock so the next page takes over at once. In-flight items (`1`) are redone by the next
+    owner: a download cut by navigation is not known to have landed, and a duplicate beats a lost picture.
+  - **Read whole before queueing** (user: an accurate count, 500 included): unless `galGrown` has the href, the
+    job is `reading` and the owner reads the page in its own frame (`galRender(…, solo)`: does not stop or get
+    stopped by hover reads; `DLQ_READ_MS` 15 min), merging by `galKeys`, saving every 1.5 s. An open gallery's
+    own read-on of the same href is waited for instead. Stopped short → again, `DLQ_READ_TRIES` 3, then it queues
+    what it has with `note` (shown in the toast). Frame refused → HTML. Each new page restarts the read (frames
+    die with their page); `beforeunload` asks before leaving while a read runs here. **⤓ greys out at
+    `DLQ_READ_MAX` 3 galleries reading** (user: never let reads pile up unseen; queued downloads do not count).
+  - Downloads: `DLQ_WORKERS` 3, starts `DLQ_GAP_MIN..MAX` 400–1200 ms apart (Forum Stumbler's pacing). us-log `saveall`.
+  - **Strip** (`dlStripPaint`/`dlStripPlace`, own host after `<body>`, in `ours()` and `galTopAt`): above the widget
+    (`tw.box`, not `tw.rect`, which is the dock's {x,y,w,h}), else above the gallery's strip/picture, else bottom-right.
+    Text = this origin's first job, ✕ right; `DLQ_SEGS` 30 segments of the block holding the first unfinished item.
+    Shown only in tabs of a job's origin. Fixture: `test-pages/door-search.html` shims `GM_listValues`/`GM_download`
+    (`window.__saved`); seed a `hzDlJob:` key in localStorage to drive it.
+- **Unopened galleries load at most `NEXT_VIDEOS` 3 clips ahead** (`nextRun`, user v0.331.0); opening one is the
+  normal `galHqAll`. Closing a gallery drops the slideshow's buffered clips (`plVidsDrop`), which kept loading.
 - **A cell's preview asks the picture's own page first** (`galLinkedHit`, v0.292.0): its `og:image`
   (same shape as the thumbnail unless the names match) or a same-named copy, the biggest wider than
   the thumbnail. nsfw.xxx profile cells: 300×533 thumbnail → the post's 960×1704.

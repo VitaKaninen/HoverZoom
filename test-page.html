@@ -527,6 +527,8 @@
     return v === null ? dflt : v;
   };
   var GM_setValue = function (key, val) { localStorage.setItem(key, val); };
+  var GM_listValues = function () { return Object.keys(localStorage); };
+  var GM_deleteValue = function (key) { localStorage.removeItem(key); };
   var GM_addValueChangeListener = function (key, fn) {
     window.addEventListener('storage', function (e) {
       if (e.key === key) fn(key, e.oldValue, e.newValue, true);

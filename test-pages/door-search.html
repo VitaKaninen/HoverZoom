@@ -34,6 +34,10 @@
   };
   var GM_setValue = function (key, val) { localStorage.setItem(key, val); };
   var GM_addValueChangeListener = function () {};
+  var GM_listValues = function () { return Object.keys(localStorage); };
+  var GM_deleteValue = function (key) { localStorage.removeItem(key); };
+  window.__saved = [];      // the download queue's saves, instead of files
+  var GM_download = function (d) { setTimeout(function () { window.__saved.push(d.url); if (d.onload) d.onload(); }, 150); };
   var GM_registerMenuCommand = function () { return 'x'; };
   var GM_unregisterMenuCommand = function () {};
 </script>

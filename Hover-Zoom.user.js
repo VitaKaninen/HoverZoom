@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.330.0
+// @version      0.331.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -14,6 +14,8 @@
 // @grant       GM_getTab
 // @grant       GM_saveTab
 // @grant       GM_download
+// @grant       GM_listValues
+// @grant       GM_deleteValue
 // @grant       GM_openInTab
 // @connect     *
 // @run-at      document-idle
@@ -5672,7 +5674,21 @@
         if (!view || !box || !box.classList.contains('on')) return false;
         const w = outerW();
         const h = outerH();
-        return x >= view.left && x <= view.left + w && y >= view.top && y <= view.top + h;
+        return x >= view.left && x <= view.left + w && y >= view.top && y <= view.top + h && !galTopAt(x, y);
+    }
+
+    // Is (x, y) on the gallery's top layer (the clicked picture, its strip, its menu)? That layer covers the preview.
+    function galTopAt(x, y) {
+        const on = function (el) {
+            if (!el || el.hidden || !el.isConnected) return false;
+            const r = el.getBoundingClientRect();
+            return r.width > 0 && x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+        };
+        try {       // declared further down: at boot these are still in their TDZ
+            if (on(dlStripEl)) return true;
+            if (!galCur && !galWant) return false;
+            return on(galSt && galSt.el) || on(galFly && galFly.el) || on(galMenuEl);
+        } catch (e) { return false; }
     }
 
     function ours(node) {
@@ -5680,6 +5696,7 @@
             (panelHost.contains && panelHost.contains(node)))) return true;
         if (tw && node === tw.host) return true;
         if (galTopHost && node === galTopHost) return true;
+        if (dlHost && node === dlHost) return true;
         return !!host && (node === host || (host.contains && host.contains(node)));
     }
 
@@ -8467,6 +8484,7 @@
     // Gallery layers and the open set: declared here, above the boot-time twRefresh(), which reaches galOwns().
     let galHost = null, galRoot = null, galBlur = null, galCur = null, galWant = null, galTopHost = null, galTop = null;
     let galHole = null, galFly = null;
+    let dlHost = null, dlStripEl = null;   // the download strip
 
     const TOUR_ROW = 0.5;       // share of the shorter item's height that puts two in one row
 
@@ -9248,6 +9266,7 @@
         }
         twSync();
         twLoadLater();
+        setTimeout(dlStripPlace, 0);
     }
 
     function twLoadLater() { if (!twLoadTimer) twLoadTimer = setTimeout(twLoadSync, 250); }
@@ -11137,6 +11156,12 @@
         }
     }
 
+    // Clips buffered ahead stop loading: their gallery closed.
+    function plVidsDrop() {
+        plVids.forEach(function (v) { v.removeAttribute('src'); v.load(); });
+        plVids = [];
+    }
+
     // ---- warming the section a hover started in
     //
     // One preview says the user is reading this part of the page, so the rest of it that is on
@@ -11508,8 +11533,8 @@
 
     // The rendered page's pictures, by the widget's own rules, from a hidden frame. null = the frame failed.
     // With onMore the frame stays after its first report and scrolls its page, reporting what joins (onEnd says why it stopped).
-    function galRender(href, onMore, onEnd) {
-        if (galFrameStop) galFrameStop();
+    function galRender(href, onMore, onEnd, solo) {
+        if (galFrameStop && !solo) galFrameStop();
         return new Promise(function (resolve) {
             const token = Math.random().toString(36).slice(2);
             const f = document.createElement('iframe');
@@ -11532,7 +11557,7 @@
                 galTrace(href, 'frame: ' + String(why).replace(/landed on .*/, 'landed on another page') + (v && v !== 'cancel' ? ' (' + v.length + ' pictures)' : ''));
                 dbg('gallery frame: ' + why, { href: href, pictures: v ? v.length : 0 });
                 resolve(v);
-                if (keep) { clearTimeout(t); t = setTimeout(function () { end('timed out'); }, GAL_GROW_MAX_MS + GAL_REPORT_MS); }
+                if (keep) { clearTimeout(t); t = setTimeout(function () { end('timed out'); }, (solo ? solo.maxMs : GAL_GROW_MAX_MS) + GAL_REPORT_MS); }
                 else end(why);
             };
 
@@ -11546,8 +11571,11 @@
                 if (items.length) onMore(items);
                 if (e.data.done) end('grown');
             };
-            galFrameStop = stop;
-            if (onMore) galGrowEnd = end;
+            if (solo) solo.stop = stop;
+            else {
+                galFrameStop = stop;
+                if (onMore) galGrowEnd = end;
+            }
             window.addEventListener('message', onMsg);
             f.name = GAL_NAME + ':' + token + (onMore ? ':grow' : '');
             f.setAttribute('sandbox', 'allow-scripts allow-same-origin');     // no top navigation, no popups
@@ -12197,6 +12225,7 @@
 
     // The strip: inside the clicked picture's frame ('in'), against its top or bottom with a frame of its own ('dock'), or anywhere ('out').
     function galStripPlace() {
+        setTimeout(dlStripPlace, 0);
         galHdPlace();
         const s = galSt;
         if (!s) return;
@@ -12901,7 +12930,7 @@
         galOn = false;
         galPeek = false;
         if (galOwns(active)) cancel();
-        if (galCur) { galDrop(galCur); galCur = null; }
+        if (galCur) { galDrop(galCur); galCur = null; plVidsDrop(); }
         if (galOwns(active) && placed) { unplace(); cancel(); }
         if (galBlur) galBlur.classList.remove('on');
         galVeil(false);
@@ -13023,7 +13052,7 @@
     }
 
     // ---- the clicked picture's tools: download all, open the gallery's page
-    let galDl = null;                   // {href, stop, n, done, failed, btn}: the download running now
+    let galDlBtn = null;                // {href, btn}: the ⤓ on screen
 
     function galToolsBuild(pw, href) {
         const bar = document.createElement('div');
@@ -13044,18 +13073,27 @@
             return b;
         };
         const dl = tool('⤓', 'Download every picture of this gallery not saved yet, into the folder under Settings, Saving · click again to stop',
-            function (b) { galDownloadAll(href, b); });
+            function () { galDownloadAll(href); });
         tool('↗', 'Open the gallery\'s page in a new tab', function () { openOriginal(href); });
         pw.appendChild(bar);
-        if (galDl && galDl.href === href) { galDl.btn = dl; galDlShow(galDl); }
+        galDlBtn = { href: href, btn: dl };
+        galDlShow();
     }
 
-    function galDlShow(job) {
-        const b = job.btn;
+    // The ⤓ on screen: its gallery's progress, or greyed while too many galleries are still being read.
+    function galDlShow(jobs) {
+        const g = galDlBtn, b = g && g.btn;
         if (!b || !b.isConnected) return;
-        const live = galDl === job;
-        b.textContent = live ? '⤓ ' + (job.done + job.failed) + ' / ' + job.n : '⤓';
-        b.parentNode.classList.toggle('busy', live);
+        jobs = jobs || dlqJobs();
+        const job = jobs.find(function (j) { return j.href === g.href; });
+        const full = !job && !galGrown.has(g.href) && dlqReading(jobs) >= DLQ_READ_MAX;
+        if (job && job.read === 'queued') {
+            const st = dlqStates(job);
+            b.textContent = '⤓ ' + (st.length - dlqLeft(st)) + ' / ' + st.length;
+        } else b.textContent = job ? '⤓ …' : '⤓';
+        b.style.opacity = full ? '0.35' : '';
+        b.style.cursor = full ? 'not-allowed' : '';
+        if (b.parentNode) b.parentNode.classList.toggle('busy', !!job);
     }
 
     // The best file for one listed picture, as the gallery's own preview finds it.
@@ -13063,45 +13101,374 @@
         return galResolve({ __hzItem: item, naturalWidth: 0, naturalHeight: 0, src: item.thumb, currentSrc: item.thumb }, tok);
     }
 
-    async function galDownloadAll(href, btn) {
-        if (galDl) {
-            if (galDl.href === href) galDl.stop = true;
-            else toast('Still downloading another gallery', 2500);
+    // ⤓: queue the whole gallery (read to its end first, in whichever tab of its site is open), or stop its queued download.
+    function galDownloadAll(href) {
+        const jobs = dlqJobs();
+        const mine = jobs.find(function (j) { return j.href === href; });
+        if (mine) { dlqCancel(mine.id); toast('Download of this gallery stopped', 2500); return; }
+        const whole = galGrown.has(href), list = galLists.get(href) || [];
+        if (!whole && dlqReading(jobs) >= DLQ_READ_MAX) {
+            toast(DLQ_READ_MAX + ' galleries are still being read to their end; ⤓ works again once one is done', 4000);
             return;
         }
-        const list = galLists.get(href);
-        if (!Array.isArray(list) || !list.length) { toast('No pictures found in this gallery yet', 2500); return; }
-        const saved = galList(GAL_SAVED_KEY);
-        let todo = list.filter(function (it) { return !saved.has(it.thumb); });
-        if (!todo.length) {
-            if (!window.confirm('All ' + list.length + ' pictures of this gallery are saved already. Save them again?')) return;
-            todo = list.slice();
+        let origin = '';
+        try { origin = new URL(href).origin; } catch (e) { return; }
+        let again = false;
+        if (whole && list.length) {
+            const saved = galList(GAL_SAVED_KEY);
+            if (list.every(function (it) { return saved.has(it.thumb); })) {
+                if (!window.confirm('All ' + list.length + ' pictures of this gallery are saved already. Save them again?')) return;
+                again = true;
+            }
         }
         saveFolderAsk();
-        const job = galDl = { href: href, stop: false, n: todo.length, done: 0, failed: 0, btn: btn };
-        galDlShow(job);
-        usLog.enable(cfg.logRequests !== false);
-        const lg = usLog.start('saveall', { host: pageHost(), pace: version().replace(/\?/g, '') + ' one at a time' });
-        const tok = { cancelled: false, fresh: false };
-        for (const item of todo) {
-            if (job.stop) break;
-            const r = lg && lg.req();
-            let hit = null;
-            try { hit = await galBestOf(item, tok); } catch (e) { hit = null; }
-            const ok = hit && hit.url ? await new Promise(function (res) {
-                const t = setTimeout(function () { res(false); }, SAVE_FETCH_MS);
-                saveOriginal(hit.url, true, function () { clearTimeout(t); res(true); }, href,
-                    function (why) { clearTimeout(t); dbg('download all: a picture failed', { url: hit.url, error: why }); res(false); });
-            }) : false;
-            if (r) r.done({ status: ok ? 200 : 0 });
-            if (ok) { job.done++; galSavedItem(href, item); } else job.failed++;
-            galDlShow(job);
+        const job = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), href: href, origin: origin,
+            made: Date.now(), items: list.slice(), read: 'reading', again: again, note: '' };
+        if (whole) dlqQueued(job, 'grown');
+        else dlqPut(job);
+        dlqTick();
+    }
+
+    // ---- the download queue: kept in the manager's storage so it outlives the page; one tab per site works it
+    const DLQ_JOB = 'hzDlJob:';         // + id: {id, href, origin, made, items, read: 'reading'|'queued', again, note, skipped}
+    const DLQ_ST = 'hzDlSt:';           // + id: one char per item, 0 to do, 1 in flight, 2 saved, 3 failed; only the working tab writes it
+    const DLQ_LOCK = 'hzDlLock:';       // + origin: {tab, t}, the tab working that site's queue
+    const DLQ_WORKERS = 3;              // downloads at once, at most
+    const DLQ_GAP_MIN = 400;            // ms between download starts, random in this range
+    const DLQ_GAP_MAX = 1200;
+    const DLQ_READ_MAX = 3;             // galleries still being read before ⤓ waits
+    const DLQ_READ_MS = 900000;         // longest one reading of a gallery's page
+    const DLQ_READ_TRIES = 3;           // readings that stopped short before the queue takes what was found
+    const DLQ_LOCK_MS = 75000;          // a lock not renewed this long is free (a background tab's timers may run once a minute)
+    const DLQ_TICK_MS = 2000;
+    const DLQ_SEGS = 30;                // segments the strip shows at once
+    const dlqTab = Math.random().toString(36).slice(2, 10);
+    let dlqRun = null;                  // this tab's work: {origin, owned, read, dl, nextAt}
+
+    function dlqJobs() {
+        if (typeof GM_listValues !== 'function') return [];
+        const out = [];
+        try {
+            GM_listValues().forEach(function (k) {
+                if (k.indexOf(DLQ_JOB) !== 0) return;
+                try { const j = JSON.parse(GM_getValue(k, 'null')); if (j && j.id && Array.isArray(j.items)) out.push(j); } catch (e) { /* unreadable: skipped */ }
+            });
+        } catch (e) { return []; }
+        return out.sort(function (a, b) { return a.made - b.made; });
+    }
+
+    function dlqAlive(id) { try { return !!GM_getValue(DLQ_JOB + id, ''); } catch (e) { return false; } }
+    function dlqPut(job) { try { GM_setValue(DLQ_JOB + job.id, JSON.stringify(job)); } catch (e) { dbg('download queue: could not store', String(e)); } }
+    function dlqStates(job) {
+        let s = '';
+        try { s = String(GM_getValue(DLQ_ST + job.id, '') || ''); } catch (e) { s = ''; }
+        return s.length === job.items.length ? s : s.slice(0, job.items.length) + '0'.repeat(Math.max(0, job.items.length - s.length));
+    }
+    function dlqLeft(st) { let n = 0; for (let i = 0; i < st.length; i++) if (st[i] === '0' || st[i] === '1') n++; return n; }
+    function dlqReading(jobs) { return jobs.filter(function (j) { return j.read === 'reading'; }).length; }
+
+    function dlqDrop(id) {
+        try { GM_deleteValue(DLQ_JOB + id); GM_deleteValue(DLQ_ST + id); } catch (e) { /* storage unavailable */ }
+    }
+
+    function dlqCancel(id) {
+        dlqDrop(id);
+        if (dlqRun && dlqRun.read && dlqRun.read.id === id) dlqReadStop();
+        if (dlqRun && dlqRun.dl && dlqRun.dl.id === id) dlqRun.dl.stop();
+        dlqTick();
+    }
+
+    // The gallery's list is whole (or as whole as it will get): drop the saved ones and queue the rest.
+    function dlqQueued(job, why) {
+        const saved = galList(GAL_SAVED_KEY), n = job.items.length;
+        if (!job.again) job.items = job.items.filter(function (it) { return !saved.has(it.thumb); });
+        job.skipped = n - job.items.length;
+        job.read = 'queued';
+        job.note = why === 'grown' || why === 'reported' ? '' : 'end of the gallery not reached (' + why + ')';
+        if (!job.items.length) {
+            dlqDrop(job.id);
+            toast(n ? 'Every picture of that gallery is saved already' : 'No pictures found in that gallery', 3500);
+            return;
         }
-        galDl = null;
-        galDlShow(job);
-        galMarkAll();
-        if (lg) lg.end(job.stop ? 'cut' : 'done');
-        toast('Saved ' + job.done + ' of ' + job.n + (job.failed ? ', ' + job.failed + ' failed' : '') + (job.stop ? ' (stopped)' : ''), 4000);
+        try { GM_setValue(DLQ_ST + job.id, '0'.repeat(job.items.length)); } catch (e) { /* storage unavailable */ }
+        dlqPut(job);
+        dbg('download queue: gallery queued', { href: job.href, pictures: job.items.length, saved: job.skipped, note: job.note });
+    }
+
+    function dlqLockHeld(origin) {
+        let l = null;
+        try { l = JSON.parse(GM_getValue(DLQ_LOCK + origin, 'null')); } catch (e) { l = null; }
+        return l && l.tab !== dlqTab && Date.now() - l.t < DLQ_LOCK_MS ? l : null;
+    }
+
+    // Still this tab's site queue? Renewed on the way, so a throttled tick cannot let it go stale mid-download.
+    function dlqMine(origin) {
+        if (dlqLockHeld(origin)) return false;
+        try { GM_setValue(DLQ_LOCK + origin, JSON.stringify({ tab: dlqTab, t: Date.now() })); } catch (e) { return false; }
+        return true;
+    }
+
+    function dlqRelease() {
+        if (!dlqRun) return;
+        let l = null;
+        try { l = JSON.parse(GM_getValue(DLQ_LOCK + dlqRun.origin, 'null')); } catch (e) { l = null; }
+        if (l && l.tab === dlqTab) { try { GM_deleteValue(DLQ_LOCK + dlqRun.origin); } catch (e) { /* storage unavailable */ } }
+    }
+
+    // Another tab took the site's queue, or nothing is left: this tab stops its own part.
+    function dlqHalt() {
+        if (!dlqRun) return;
+        dlqReadStop();
+        if (dlqRun.dl) dlqRun.dl.stop();
+        dlqRelease();
+        dlqRun = null;
+    }
+
+    // Every DLQ_TICK_MS: claim this site's queue unless another tab holds it, then read and download.
+    function dlqTick() {
+        if (!isTopFrame) return;
+        const jobs = dlqJobs(), here = jobs.filter(function (j) { return j.origin === location.origin; });
+        dlqOrphans(jobs);
+        dlStripPaint(jobs);
+        galDlShow(jobs);
+        if (!here.length) { dlqHalt(); return; }
+        if (dlqLockHeld(location.origin)) { if (dlqRun && dlqRun.owned) dbg('download queue: another tab took this site\'s queue'); dlqHalt(); return; }
+        try { GM_setValue(DLQ_LOCK + location.origin, JSON.stringify({ tab: dlqTab, t: Date.now() })); } catch (e) { return; }
+        if (!dlqRun) { dlqRun = { origin: location.origin, owned: false, read: null, dl: null, nextAt: 0 }; return; }     // work from the next tick, once a tab claiming at the same moment has had its say
+        dlqRun.owned = true;
+        const ids = new Set(here.map(function (j) { return j.id; }));
+        if (dlqRun.read && !ids.has(dlqRun.read.id)) dlqReadStop();
+        if (dlqRun.dl && !ids.has(dlqRun.dl.id)) dlqRun.dl.stop();
+        const r = here.find(function (j) { return j.read === 'reading'; });
+        if (r && !dlqRun.read) dlqRead(r);
+        const q = here.find(function (j) { return j.read === 'queued'; });
+        if (q && !dlqRun.dl) dlqDownload(q);
+    }
+
+    // States left by a job that was cancelled while its tab was writing them.
+    function dlqOrphans(jobs) {
+        if (typeof GM_listValues !== 'function' || Math.random() > 0.1) return;
+        const live = new Set(jobs.map(function (j) { return j.id; }));
+        try { GM_listValues().forEach(function (k) { if (k.indexOf(DLQ_ST) === 0 && !live.has(k.slice(DLQ_ST.length))) GM_deleteValue(k); }); } catch (e) { /* storage unavailable */ }
+    }
+
+    function dlqReadStop() {
+        const r = dlqRun && dlqRun.read;
+        if (!r) return;
+        dlqRun.read = null;
+        r.over = true;
+        if (r.solo.stop) r.solo.stop();
+    }
+
+    // Read a queued gallery's page to its end in a frame of its own: an open gallery reading the same page is waited for instead.
+    function dlqRead(job) {
+        const run = dlqRun, r = run.read = { id: job.id, tries: 0, over: false, solo: { maxMs: DLQ_READ_MS, stop: null } };
+        const keys = galKeys(job.items);
+        let dirty = false, flushT = 0;
+        const flush = function () {
+            clearTimeout(flushT);
+            flushT = 0;
+            if (!dirty || r.over || !dlqAlive(job.id)) return;
+            if (!dlqMine(run.origin)) { dlqReadStop(); return; }
+            dirty = false;
+            dlqPut(job);
+            dlStripPaint();
+        };
+        const add = function (items) {
+            (items || []).forEach(function (it) {
+                if (!it || !it.thumb || blocked(it.thumb) || galKeyHit(keys, it)) return;
+                galItemKeys(it).forEach(function (k) { keys.add(k); });
+                job.items.push(it);
+                dirty = true;
+            });
+            if (dirty && !flushT) flushT = setTimeout(flush, 1500);
+        };
+        const finish = function (why) {
+            if (r.over) return;
+            r.over = true;
+            dirty = false;
+            clearTimeout(flushT);
+            if (run.read === r) run.read = null;
+            if (!dlqAlive(job.id) || !dlqMine(run.origin)) return;
+            dlqQueued(job, why);
+            dlqTick();
+        };
+        const attempt = function () {
+            if (r.over) return;
+            if (galLists.has(job.href)) add(galLists.get(job.href));
+            if (galGrown.has(job.href)) { finish('grown'); return; }
+            if (galGrowing === job.href) { setTimeout(attempt, 1000); return; }
+            r.tries++;
+            r.solo.stop = null;
+            galRender(job.href, add, function (why) {
+                if (r.over) return;
+                flush();
+                if (why === 'grown' || why === 'reported') finish(why);
+                else if (r.tries < DLQ_READ_TRIES) { dbg('download queue: reading stopped short, again', { href: job.href, why: why, found: job.items.length }); setTimeout(attempt, 2000); }
+                else finish(why);
+            }, r.solo).then(function (v) {
+                if (r.over) return;
+                if (Array.isArray(v)) { add(v); return; }
+                if (v !== null) return;
+                fetchDoc(job.href).then(function (doc) {     // the page refused the frame: its HTML is all there is
+                    if (r.over) return;
+                    add(doc ? galPick(doc, job.href) : null);
+                    finish('the page would not load in a frame; read from its HTML');
+                });
+            });
+        };
+        attempt();
+    }
+
+    // Download a queued gallery's pictures: DLQ_WORKERS at once, starts DLQ_GAP_MIN..MAX ms apart.
+    function dlqDownload(job) {
+        const run = dlqRun, tok = { cancelled: false, fresh: false };
+        const d = run.dl = { id: job.id, stop: function () { tok.cancelled = true; if (run.dl === d) run.dl = null; } };
+        let st = dlqStates(job).replace(/1/g, '0');        // in flight when its tab went: not known to have landed, so again
+        const mark = function (i, c) {
+            st = st.slice(0, i) + c + st.slice(i + 1);
+            if (tok.cancelled || !dlqAlive(job.id)) return;
+            try { GM_setValue(DLQ_ST + job.id, st); } catch (e) { /* storage unavailable */ }
+            dlStripPaint();
+            galDlShow();
+        };
+        usLog.enable(cfg.logRequests !== false);
+        const lg = usLog.start('saveall', { host: pageHost(), pace: version().replace(/\?/g, '') + ' ' + DLQ_WORKERS + ' at once, ' + DLQ_GAP_MIN + '-' + DLQ_GAP_MAX + 'ms apart' });
+        const worker = async function () {
+            for (;;) {
+                if (tok.cancelled) return;
+                if (!dlqMine(run.origin)) { dbg('download queue: another tab took this site\'s queue'); d.stop(); return; }
+                const i = st.indexOf('0');
+                if (i < 0) return;
+                mark(i, '1');
+                const at = Math.max(Date.now(), run.nextAt);
+                run.nextAt = at + DLQ_GAP_MIN + Math.floor(Math.random() * (DLQ_GAP_MAX - DLQ_GAP_MIN + 1));
+                if (at > Date.now()) await new Promise(function (res) { setTimeout(res, at - Date.now()); });
+                if (tok.cancelled || !dlqMine(run.origin)) { d.stop(); return; }
+                const item = job.items[i], q = lg && lg.req();
+                let hit = null;
+                try { hit = await galBestOf(item, tok); } catch (e) { hit = null; }
+                const ok = hit && hit.url && !tok.cancelled ? await new Promise(function (res) {
+                    const t = setTimeout(function () { res(false); }, SAVE_FETCH_MS);
+                    saveOriginal(hit.url, true, function () { clearTimeout(t); res(true); }, job.href,
+                        function (why) { clearTimeout(t); dbg('download all: a picture failed', { url: hit.url, error: why }); res(false); });
+                }) : false;
+                if (q) q.done({ status: ok ? 200 : 0 });
+                if (tok.cancelled) return;
+                if (ok) galSavedItem(job.href, item);
+                mark(i, ok ? '2' : '3');
+            }
+        };
+        const pool = [];
+        for (let w = 0; w < DLQ_WORKERS; w++) pool.push(worker());
+        Promise.all(pool).then(function () {
+            if (lg) lg.end(tok.cancelled ? 'cut' : 'done');
+            if (tok.cancelled) return;
+            if (run.dl === d) run.dl = null;
+            const saved = (st.match(/2/g) || []).length, failed = (st.match(/3/g) || []).length;
+            dlqDrop(job.id);
+            galMarkAll();
+            toast('Saved ' + saved + ' of ' + st.length + (failed ? ', ' + failed + ' failed' : '') + (job.note ? ' · ' + job.note : ''), 5000);
+            dlqTick();
+        });
+    }
+
+    // ---- the download strip: over the widget (or the gallery's strip), the queue's progress, ✕ to stop
+    function dlStripBuild() {
+        dlHost = document.createElement('div');
+        dlHost.style.cssText = 'all:initial;position:fixed;z-index:2147483647;left:0;top:0';
+        const root = dlHost.attachShadow({ mode: 'open' });
+        const css = document.createElement('style');
+        css.textContent =
+            '.dl{box-sizing:border-box;background:#1e1e2e;color:#cdd6f4;border:1px solid #45475a;border-radius:6px;padding:4px 6px 5px;' +
+            'font:11px/14px system-ui,sans-serif;display:flex;flex-direction:column;gap:4px;box-shadow:0 2px 8px rgba(0,0,0,.4)}' +
+            '.top{display:flex;align-items:center;gap:6px}.txt{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
+            '.x{flex:none;cursor:pointer;color:#f38ba8;font-size:12px;line-height:12px;padding:1px 3px;border-radius:3px;user-select:none}.x:hover{background:#45475a}' +
+            '.bar{display:flex;gap:1px;height:4px}.bar[hidden]{display:none}.bar i{flex:1 1 0;min-width:0;height:100%;border-radius:1px;background:#45475a}' +
+            '.bar i.b{background:#f9e2af}.bar i.d{background:#89b4fa}.bar i.f{background:#f38ba8}';
+        root.appendChild(css);
+        dlStripEl = document.createElement('div');
+        dlStripEl.className = 'dl';
+        const top = document.createElement('div');
+        top.className = 'top';
+        const txt = document.createElement('span');
+        txt.className = 'txt';
+        const x = document.createElement('span');
+        x.className = 'x';
+        x.textContent = '✕';
+        setTip(x, 'Stop this gallery\'s download');
+        top.appendChild(txt);
+        top.appendChild(x);
+        const bar = document.createElement('div');
+        bar.className = 'bar';
+        dlStripEl.appendChild(top);
+        dlStripEl.appendChild(bar);
+        root.appendChild(dlStripEl);
+        ['mousedown', 'mouseup', 'click', 'auxclick', 'dblclick', 'contextmenu'].forEach(function (t) {
+            dlStripEl.addEventListener(t, function (e) {
+                e.preventDefault();
+                e.stopPropagation();
+                if (t === 'mousedown' && e.button === 0 && e.composedPath().indexOf(x) >= 0 && dlStripEl.__job) {
+                    dlqCancel(dlStripEl.__job);
+                    toast('Download stopped', 2000);
+                }
+            });
+        });
+        dlStripEl.__txt = txt;
+        dlStripEl.__bar = bar;
+    }
+
+    // The strip for this site's first job; hidden with nothing queued here.
+    function dlStripPaint(jobs) {
+        if (!isTopFrame) return;
+        jobs = jobs || dlqJobs();
+        const here = jobs.filter(function (j) { return j.origin === location.origin; });
+        if (!here.length) { if (dlHost) dlHost.style.display = 'none'; return; }
+        if (!dlHost) dlStripBuild();
+        if (!dlHost.isConnected) document.documentElement.appendChild(dlHost);
+        dlHost.style.display = '';
+        const job = here.find(function (j) { return j.read === 'queued'; }) || here[0];
+        const more = here.length - 1, away = jobs.length - here.length;
+        const tail = (more ? ' · +' + more + ' queued' : '') + (away ? ' · ' + away + ' on other sites' : '');
+        const bar = dlStripEl.__bar;
+        dlStripEl.__job = job.id;
+        if (job.read !== 'queued') {
+            dlStripEl.__txt.textContent = 'Reading the gallery: ' + job.items.length + ' found' + tail;
+            bar.hidden = true;
+        } else {
+            const st = dlqStates(job), n = st.length, left = dlqLeft(st), failed = (st.match(/3/g) || []).length;
+            dlStripEl.__txt.textContent = 'Saving ' + (n - left) + ' / ' + n + (failed ? ' · ' + failed + ' failed' : '') + tail;
+            let first = 0;
+            while (first < n && st[first] !== '0' && st[first] !== '1') first++;
+            const from = Math.floor(Math.min(first, n - 1) / DLQ_SEGS) * DLQ_SEGS, to = Math.min(n, from + DLQ_SEGS);
+            while (bar.childNodes.length > to - from) bar.lastChild.remove();
+            while (bar.childNodes.length < to - from) bar.appendChild(document.createElement('i'));
+            for (let i = from; i < to; i++) bar.childNodes[i - from].className = st[i] === '2' ? 'd' : st[i] === '3' ? 'f' : st[i] === '1' ? 'b' : '';
+            bar.hidden = false;
+        }
+        setTip(dlStripEl.__txt, job.href + (job.note ? '\n' + job.note : ''));
+        dlStripPlace();
+    }
+
+    // Above the widget, else above the gallery's strip, else the bottom-right corner; as wide as what it sits on.
+    function dlStripPlace() {
+        if (!isTopFrame || !dlHost || dlHost.style.display === 'none') return;
+        const W = vpW(), H = vpH();
+        let a = twShownRect() ? tw.box.getBoundingClientRect() : null;
+        if (!a && galOn) {
+            const el = galSt && !galSt.el.hidden ? (galStripM.m === 'in' && galFly ? galFly.el : galSt.el) : galFly && galFly.el;
+            if (el && el.isConnected) a = el.getBoundingClientRect();
+        }
+        const w = Math.min(W - 8, Math.max(200, a ? a.width : 240));
+        dlStripEl.style.width = w + 'px';
+        const h = dlStripEl.offsetHeight || 36;
+        let left, top;
+        if (a && a.width) {
+            left = Math.min(Math.max(4, a.left), W - w - 4);
+            top = a.top - h - 4 >= 4 ? a.top - h - 4 : Math.min(H - h - 4, a.bottom + 4);
+        } else { left = W - w - 16; top = H - h - 16; }
+        dlHost.style.left = Math.round(left) + 'px';
+        dlHost.style.top = Math.round(top) + 'px';
     }
 
     // The saved mark: a blue disc with a down arrow, no outline (user).
@@ -14328,6 +14695,7 @@
     // ---- the next page of galleries: near the bottom of a page the user is going through, its first galleries load ahead
 
     const NEXT_GALLERIES = 3;           // galleries of the next page loaded ahead
+    const NEXT_VIDEOS = 3;              // clips found in an unopened gallery before its loading ahead stops
     const NEXT_SHARE = 0.2;             // opened at least this share of the unseen galleries scrolled past: going through them
     const NEXT_KEY = 'hzNextPage';      // sessionStorage: {page, lists: {href: items}, files: [urls]}
     let nextDone = false, nextBusy = false;
@@ -14417,12 +14785,13 @@
             save();
             await galWarm(list);
             const tok = { cancelled: false, fresh: false };
-            let k = 0;
+            let k = 0, vids = 0;
             const worker = async function () {
-                while (k < list.length && !galPreStop) {
+                while (k < list.length && !galPreStop && vids < NEXT_VIDEOS) {
                     const item = list[k++];
                     await nextWait();
                     const hit = await galResolve({ __hzItem: item, naturalWidth: 0, naturalHeight: 0, src: item.thumb, currentSrc: item.thumb }, tok);
+                    if (hit && hit.video && ++vids >= NEXT_VIDEOS) dbg('next page: ' + NEXT_VIDEOS + ' clips found, the rest of this gallery waits for it to open', { href: d.href });
                     if (!hit || hit.video || hit.url === item.thumb) continue;
                     store.files.push(hit.url);
                     bytes += await galBytes(hit.url);
@@ -14477,7 +14846,14 @@
 
     if (isTopFrame) {
         document.addEventListener('scroll', galScroll, { capture: true, passive: true });
-        window.addEventListener('pagehide', function () { if (galPreLog) { galPreLog.end('cut'); galPreLog = null; } });
+        window.addEventListener('pagehide', function () { if (galPreLog) { galPreLog.end('cut'); galPreLog = null; } dlqRelease(); });
+        setTimeout(function () { dlqTick(); setInterval(dlqTick, DLQ_TICK_MS); }, 800);
+        window.addEventListener('beforeunload', function (e) {     // a gallery being read here for ⤓: the browser asks whether to leave
+            if (!dlqRun || !dlqRun.read) return;
+            e.preventDefault();
+            e.returnValue = '';
+        });
+        window.addEventListener('resize', function () { dlStripPlace(); });
         setTimeout(function () { galMarkAll(); galPreNext(); }, 1500);
         setTimeout(function () {
             nextArrive();
