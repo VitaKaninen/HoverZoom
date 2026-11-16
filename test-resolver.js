@@ -876,7 +876,7 @@ const vdStart = src.indexOf('    const VDELAY_SAMPLES');
 const vdEnd = src.indexOf('    // The entry for a host');
 if (vdStart < 0 || vdEnd < 0) { console.error('vdLearn markers not found'); process.exit(1); }
 const vd = new Function(src.slice(vdStart, vdEnd) +
-    NL + 'return {vdLearn, vdRound, vdRuleFor, chainPrefix, pathPrefix, chainMatches, pathMatches, sharedHead, vdWaitOf, vdForget, vdWorked, areaLearn, areaTouch, areaAge, areaDrop, doorVerdict, doorKindVerdict, VDELAY_SAMPLES, VDELAY_FORGET};')();
+    NL + 'return {vdLearn, vdRound, vdRuleFor, chainPrefix, pathPrefix, chainMatches, pathMatches, sharedHead, vdWaitOf, vdForget, vdWorked, areaLearn, areaTouch, areaAge, areaDrop, doorVerdict, doorKindVerdict, doorScanPick, doorChainOf, VDELAY_SAMPLES, VDELAY_FORGET};')();
 
 eq('vdRound rounds up to 50 ms', vd.vdRound(1001), 1050);
 eq('vdRound never goes under one step', vd.vdRound(10), 250);
@@ -1020,6 +1020,23 @@ eq('undecided: its pictures link to pages not yet checked', DK({}), null);
 eq('gallery: a checked page holds a bigger copy', DK({ checked: 1, leaves: 1 }), 'gallery');
 eq('results: two checked pages hold no bigger copy', DK({ checked: 2 }), 'results');
 eq('undecided: no pictures on the linked page', DK({ pics: 0, linked: 0 }), null);
+const SCAN = function (chain, n) { const o = []; for (let i = 0; i < n; i++) o.push({ chain: chain, href: '/g/' + i }); return o; };
+let scan = vd.doorScanPick(SCAN('A', 10).concat(SCAN('B', 5), [{ chain: 'A', href: '/g/0' }]), 6, 3);
+eq('door scan: only grids of 6 distinct links', scan.map(function (g) { return g.chain; }).join(), 'A');
+eq('door scan: first, middle and last of the grid', scan[0].hrefs.join(), '/g/0,/g/5,/g/9');
+eq('door scan: a repeated link counts once', scan[0].n, 10);
+scan = vd.doorScanPick(SCAN('C', 6).concat(SCAN('D', 8)), 6, 3);
+eq('door scan: the bigger grid first', scan.map(function (g) { return g.chain; }).join(), 'D,C');
+const EP = 'img>a>div.mbphoto#>div.photosgrid>main';
+eq('door chain: the link segment on the picture level', vd.doorChainOf(EP, 'https://e.com/gallery/abc/Name/'), 'img.to-gallery>a>div.mbphoto#>div.photosgrid>main');
+eq('door chain: a numbered segment is #', vd.doorChainOf('img>a', 'https://e.com/12345-title'), 'img.to-#>a');
+eq('door chain: the site root', vd.doorChainOf('img>a', 'https://e.com/?id=4'), 'img.to-root>a');
+let dmix = null;
+['a', 'b', 'c'].forEach(function (x) { dmix = vd.areaLearn(dmix && dmix.entry, vd.doorChainOf(EP, 'https://e.com/gallery/' + x + '/'), '/pics', 7, 'https://e.com/gallery/' + x + '/'); });
+eq('door chain: three gallery cards make an area', dmix.change, 'learned');
+eq('door chain: a photo card in the same grid is not in it', !!vd.vdRuleFor(dmix.entry, vd.doorChainOf(EP, 'https://e.com/photo/z/'), '/pics'), false);
+eq('door chain: a photo card leaf leaves the gallery area', vd.areaDrop(dmix.entry, vd.doorChainOf(EP, 'https://e.com/photo/z/'), '/pics').change, null);
+eq('door chain: an older rule without it still covers', !!vd.vdRuleFor({ rules: [{ dom: 'img>a>div.mbphoto#>div.photosgrid', path: '/pics' }] }, vd.doorChainOf(EP, 'https://e.com/gallery/q/'), '/pics'), true);
 const DR1 = 'img>a.card>div.item-#>div.grid', DR2 = 'img>a.card>div.item-#.hot>div.grid', DR3 = 'img>a.card.new>div.item-#>div.grid';
 let door = vd.areaLearn(null, DR1, '/search', 7, 'https://x.com/g/1');
 door = vd.areaLearn(door.entry, DR1, '/search', 7, 'https://x.com/g/1');

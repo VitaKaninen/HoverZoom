@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.329.0
+// @version      0.330.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -311,6 +311,8 @@
         ownPlayerAreas: {},         // host -> {rules, samples, idleDays}: video-link thumbnails the site's own player lands on
         linkAreas: {},              // host -> {rules, samples, idleDays}: thumbnails whose linked page never holds the original
         doorAreas: {},              // host -> {rules, samples, idleDays}: thumbnails that lead to other pages, not a bigger copy (P17)
+        doorScan: true,             // read a few linked pages of every grid of linked thumbnails, so doors are known before a hover
+        doorScanned: {},            // host -> {chain|path: {day, v}}: scanned grids that formed no door rule
         taughtRules: {},            // image host -> [{re, to, ex, one?, made}]: where the original lives, shown by the user
         areasAgedOn: 0,             // the day areaAgeAll() last ran
         siteAudio: {},              // host -> {muted, volume}; absent means muted, which is the
@@ -2060,7 +2062,7 @@
         }
         if (ownLink && full && token.door && !token.cancelled) doorLearn(doorVerdict({
             linked: lfetched ? 'fetched' : lskip ? 'skipped' : null, trusted: trusted,
-            displayed: displayed, failed: lfailed }), lchain, lpath, lt.href);
+            displayed: displayed, failed: lfailed }), doorChainOf(lchain, lt.href), lpath, lt.href);
         if (trusted) {
             // The linked page names the picture, but the page's own copy of it may be bigger.
             const own = shown && !trusted.video && !token.cancelled && !unstable.has(shown) ? await probe(shown, false) : null;
@@ -5906,7 +5908,7 @@
         const e = (cfg.doorAreas || {})[pageHost()];
         if (!e || !e.rules || !e.rules.length || el.ownerDocument !== document) return null;
         if (skipLinkedPage(el) || !linkTarget(el)) return null;
-        const r = vdRuleFor(e, domChain(el), pagePath());
+        const r = vdRuleFor(e, doorChainOf(domChain(el), linkTarget(el).href), pagePath());
         return r ? 'it leads to a page of other pictures, as thumbnails like it here have (' + r.dom + ' on ' + r.path + ')' : null;
     }
 
@@ -5924,8 +5926,9 @@
     function doorHover(el, x, y) {
         galDoorHover(el, x, y);
         if (doorCheckEl === el) return;
-        const chain = domChain(el), path = pagePath();
-        areaApply('doorAreas', areaTouch, chain, path);
+        const lt = linkTarget(el), path = pagePath();
+        if (!lt) return;
+        areaApply('doorAreas', areaTouch, doorChainOf(domChain(el), lt.href), path);
         if (Math.random() >= LINK_RECHECK) return;
         doorCheckEl = el;
         dbg('door area: rechecking this thumbnail against the page it links to');
@@ -5944,6 +5947,102 @@
         }
         return t;
     }
+    // ---- door scan: grids of linked thumbnails judged from their linked pages with no hover (P17)
+    const DOOR_SCAN_MIN = 6;        // linked thumbnails of one shape before it is a grid worth reading
+    const DOOR_SCAN_PER = 3;        // linked pages read per grid: three doors make the rule
+    const DOOR_SCAN_AREAS = 4;      // grids read per page view
+    const DOOR_SCAN_GAP_MS = 400;
+    const DOOR_SCAN_DAYS = 30;      // a grid that read as pictures is not read again for this long
+    const DOOR_SCAN_PX = 48;
+    let doorScanTimer = 0, doorScanBusy = false;
+    const doorScanSeen = new Set();     // chain|path read on this page
+
+    function doorScanSoon() {
+        if (cfg.doorScan === false || !isTopFrame) return;
+        clearTimeout(doorScanTimer);
+        doorScanTimer = setTimeout(doorScan, 1500);
+    }
+
+    // Every grid of linked thumbnails no rule covers yet: read a few of their linked pages, one at a time, as a hover would.
+    async function doorScan() {
+        if (doorScanBusy || cfg.doorScan === false || !siteEnabled() || CAPTCHA_HERE || !document.body) return;
+        const host = pageHost(), path = pagePath(), today = areaDay();
+        const memo = (cfg.doorScanned || {})[host] || {};
+        const els = new Map(), items = [];
+        document.querySelectorAll('a[href] img').forEach(function (el) {
+            const d = sizeOf(el);
+            if (!d || d.w < DOOR_SCAN_PX || d.h < DOOR_SCAN_PX || skipLinkedPage(el)) return;
+            const u = linkTarget(el);
+            if (!u || refusal(el)) return;
+            items.push({ chain: doorChainOf(domChain(el), u.href), href: u.href });
+            if (!els.has(u.href)) els.set(u.href, el);
+        });
+        const grids = doorScanPick(items, DOOR_SCAN_MIN, DOOR_SCAN_PER).filter(function (g) {
+            const k = g.chain + '|' + path, m = memo[k];
+            if (doorScanSeen.has(k)) return false;
+            if (m && today - m.day < (m.v === 'leaf' ? DOOR_SCAN_DAYS : 1)) { doorScanSeen.add(k); dbg('door scan: read before', { chain: g.chain, read: m }); return false; }
+            return true;
+        }).slice(0, DOOR_SCAN_AREAS);
+        if (!grids.length) return;
+        doorScanBusy = true;
+        usLog.enable(cfg.logRequests !== false);
+        const lg = usLog.start('doorscan', { host: host, pace: version().replace(/\?/g, '') + ' one at a time, ' + DOOR_SCAN_GAP_MS + 'ms apart' });
+        try {
+            for (const g of grids) {
+                const k = g.chain + '|' + path;
+                doorScanSeen.add(k);
+                let last = null;
+                for (const href of g.hrefs) {
+                    const el = els.get(href);
+                    if (!el || !el.isConnected || pagePath() !== path) break;
+                    const r = lg && lg.req();
+                    const v = await doorProbe(el, new URL(href));
+                    if (r) r.done({ status: v ? 200 : 0 });
+                    dbg('door scan', { link: href, verdict: v });
+                    if (v) { last = v; doorLearn(v, g.chain, path, href); }
+                    if (v === 'leaf') break;
+                    await sleep(DOOR_SCAN_GAP_MS);
+                }
+                if (!doorReason(els.get(g.hrefs[0]) || document.body)) doorScanNote(host, k, last, today);
+            }
+        } finally {
+            doorScanBusy = false;
+            if (lg) lg.end('done');
+        }
+    }
+
+    // A scanned grid that formed no rule: when, and what it read as.
+    function doorScanNote(host, k, v, today) {
+        reloadSettings();
+        const all = Object.assign({}, cfg.doorScanned), mine = Object.assign({}, all[host]);
+        Object.keys(mine).forEach(function (x) { if (today - mine[x].day >= DOOR_SCAN_DAYS) delete mine[x]; });
+        mine[k] = { day: today, v: v || 'none' };
+        all[host] = mine;
+        cfg.doorScanned = all;
+        saveSettings();
+    }
+
+    // One linked page's verdict for a thumbnail, as a hover's resolve takes it: 'leaf', 'door' or null.
+    async function doorProbe(el, u) {
+        const page = await linkedMedia(u);
+        if (!page) return null;
+        const shown = shownUrl(el), native = nativeSize(el), displayed = sizeOf(el);
+        const tries = [];
+        if (page.declared && page.declared.url !== shown)
+            tries.push({ url: page.declared.url, named: !!(shown && sameStem(page.declared.url, shown)) });
+        page.body.forEach(function (x) { if (shown && x !== shown && sameStem(x, shown)) tries.push({ url: x, named: true }); });
+        let trusted = null, failed = false;
+        for (const t of tries.slice(0, LINKED_TRIES)) {
+            if (blocked(t.url)) continue;
+            const dim = await probe(t.url, false);
+            if (!dim) { failed = true; continue; }
+            if (!t.named && !sameShape(native, dim)) continue;
+            if (!bigEnough(dim, displayed)) continue;
+            if (!trusted || dim.w * dim.h > trusted.w * trusted.h) trusted = { w: dim.w, h: dim.h };
+        }
+        return doorVerdict({ linked: 'fetched', trusted: trusted, displayed: displayed, failed: failed });
+    }
+
     const OP_WATCH_MS = 3000;       // how long a refused video-link hover watches for the site's player
     let opWatchEl = null, opWatchTimer = 0;
 
@@ -6255,6 +6354,35 @@
         if (k.leaves > 0) return 'gallery';
         if (k.checked >= 2) return 'results';
         return null;
+    }
+
+    // A door's area chain: the picture's chain with where its link goes as a class on its own level (img.to-gallery), so /gallery/ and /photo/ cards in one grid are two areas.
+    function doorChainOf(chain, href) {
+        let seg = '';
+        try { seg = (new URL(href).pathname.split('/')[1] || '').toLowerCase(); } catch (e) { seg = ''; }
+        seg = /\d/.test(seg) ? '#' : seg.replace(/[^a-z_-]/g, '') || 'root';
+        return String(chain).replace(/^[^>]*/, function (l) { return l + '.to-' + seg; });
+    }
+
+    // Grids worth a door scan from [{chain, href}]: chains with at least min distinct links, up to per links each spread first/middle/last.
+    function doorScanPick(items, min, per) {
+        const by = new Map();
+        items.forEach(function (x) {
+            if (!by.has(x.chain)) by.set(x.chain, []);
+            const l = by.get(x.chain);
+            if (l.indexOf(x.href) < 0) l.push(x.href);
+        });
+        const out = [];
+        by.forEach(function (l, chain) {
+            if (l.length < min) return;
+            const pick = [];
+            for (let i = 0; i < per; i++) {
+                const h = l[Math.round(i * (l.length - 1) / Math.max(1, per - 1))];
+                if (pick.indexOf(h) < 0) pick.push(h);
+            }
+            out.push({ chain: chain, hrefs: pick, n: l.length });
+        });
+        return out.sort(function (a, b) { return b.n - a.n; });
     }
 
     // The entry for a host: its own, else the most specific user entry covering it.
@@ -9098,6 +9226,7 @@
 
     function twRefresh() {
         if (!isTopFrame || !document.body) return;
+        doorScanSoon();
         setTimeout(pgTick, 0);                  // never during boot, as below
         if (cfg.showPostEnd || postLine || sideLines.length) tourLinesSync();
         if (!tw) {
@@ -14212,7 +14341,7 @@
         if (!e || !e.rules || !e.rules.length) return out;
         root.querySelectorAll('a[href] img').forEach(function (img) {
             const h = galLinkOf(img);
-            if (!h || seen.has(h) || !vdRuleFor(e, domChain(img), path)) return;
+            if (!h || seen.has(h) || !vdRuleFor(e, doorChainOf(domChain(img), h), path)) return;
             seen.add(h);
             out.push({ href: h, img: img });
         });
@@ -14495,7 +14624,7 @@
     let panelOpened = null;     // Undo's snapshot — see openPanel(); MUST outlive a re-render
 
     // What the user entered per site, not knobs: `Reset to defaults` leaves these alone.
-    const RESET_KEEPS = ['siteList', 'blockList', 'referrerSites', 'siteAudio', 'videoDelays', 'avatarAreas', 'ownPlayerAreas', 'linkAreas', 'doorAreas', 'areasAgedOn', 'taughtRules'];
+    const RESET_KEEPS = ['siteList', 'blockList', 'referrerSites', 'siteAudio', 'videoDelays', 'avatarAreas', 'ownPlayerAreas', 'linkAreas', 'doorAreas', 'doorScanned', 'areasAgedOn', 'taughtRules'];
 
     // Open/closed, the fold, scroll and position for this TAB — sessionStorage is per tab and
     // per origin, so it follows a same-site link or a refresh and dies with the tab.
@@ -15942,6 +16071,8 @@
         section('Galleries');
         check('galleryMiddle', 'Middle-click opens a gallery',
             'Off: middle-click opens the link in a new tab as usual, and clicking the ▦ chip on a result opens its gallery.');
+        check('doorScan', 'Find galleries without a hover',
+            'Reads up to 3 linked pages of each grid of linked thumbnails, one at a time, so gallery links are known before you hover one. Off: three hovers teach it.');
         check('galleryChips', 'Show the ▦ chip on every gallery',
             'Off: the chip shows only on the thumbnail under the pointer.').el.addEventListener('change', galMarkSoon);
         check('galleryTicks', 'Tick results whose gallery was seen',

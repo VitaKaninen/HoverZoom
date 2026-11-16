@@ -961,6 +961,20 @@ related strip at the bottom):
   landing feed → tag feeds → galleries; B paged listing → galleries; search results on any.
 - Infinite scroll is not a signal (galleries lazy-load too).
 
+**Door scan, no hover (v0.330.0, user: "can it just look at each of the images on the page").**
+`doorScan` (setting `doorScan`, on): 1.5 s after a quiet `twRefresh`, group `a[href] img` ≥ 48 px with a
+same-origin page link and no refusal by `doorChainOf` chain; each group with ≥ `DOOR_SCAN_MIN` 6 distinct
+links (`doorScanPick`, pure, tested) has its first/middle/last link read one at a time, 400 ms apart
+(`doorProbe` = the hover resolve's linked-page part only, no URL-rule probes, so no original downloads),
+verdicts into `doorLearn` as a hover's. ≤ 4 grids per page view; us-log `doorscan`. A grid that formed
+no rule is memoed in `doorScanned` (host → chain|path → day, verdict): a leaf for 30 days, anything else
+1 day — or every visit to a page of picture links would re-read 3 pages. The old objection ("following
+every thumbnail" is the cost the resolver avoids) is answered by reading 3 per grid, not every one.
+**The link's first path segment is part of the door chain** (`doorChainOf`: `img.to-gallery>a>…`, digits →
+`#`): eporner /pics/ mixes `/gallery/` and `/photo/` cards in one grid; one photo card (a true leaf) dropped
+the whole grid. As a class on the picture's level, older rules without it still match. Cost: a grid whose
+links start with a per-category segment splits into small areas that may not reach 6.
+
 Learning = the `../CLAUDE.md` area pattern, user-approved with a learning period (first ~3 doors in
 an area still preview). Ground truth = the linked-page fetch; extends `linkAreas` (`resolve()`),
 which today only skips the fetch. **Way out, user's requirement:** 10 % recheck under a rule; a
