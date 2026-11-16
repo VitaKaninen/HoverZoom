@@ -1424,4 +1424,4 @@ under `keepClearStatus` (the browser's link-address bar paints over the page's b
 longer reserves floor. `clearWidget()` (from `clampPosition`) nudges a window that overlaps the widget
 sideways or up/down, smallest move that stays on screen, only on axes still auto (`view.autoX/autoY`:
 false once the user placed that axis); with no clean move it slides as far as there is room, or under
-`keepClearWidget` shrinks the frame from the widget's side. Fullscreen still uses `widgetFloor()`.
+`keepClearWidget` shrinks the frame from the widget's side. Fullscreen ignores the widget too (v0.329.0, user: the widget only floats over the black, and fades there).

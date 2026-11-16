@@ -31,7 +31,8 @@ fight that. They are deleted. Do not put nav controls back on the frame.
   — and again when the pointer comes near, which catches a page that changed without
   scrolling (no MutationObserver: design invariant). With `debug` on, a changed count logs
   `twReport()`: every drawn picture and the gate that dropped it, URLs replaced by `U1…` labels
-  (the user diagnoses private sites with it — keep it URL-free). With `tourFade` both widgets (this and a gallery's) fade by the pointer's
+  (the user diagnoses private sites with it — keep it URL-free). With `tourFade` both widgets (this and a gallery's) fade, **only in fullscreen or while over the
+  preview / the gallery's clicked picture** (`twCovers`; user v0.329.0, elsewhere they stay solid), by the pointer's
   distance from their edges: 1 over them, 0 at `TW_FADE_PX` 75 (`twFadeAt`, `twOpacity`, `galStripFade`; user v0.319.0 — a
   step at a fixed distance was the complaint). Without it, under a window that covers it the widget sits at `TW_COVER_OPACITY` (0.25) unless the pointer is within `TW_NEAR`; a `mouseover` on the host covers a pointer resting where it appears.
 - **Colours** (v0.321.0, user): Forum Stumbler's — `usDock.THEME` dark or light by the page behind, Catppuccin
@@ -522,11 +523,12 @@ OS key repeat is ~30/s, ten times the target rate, and would outrun any buffer i
   two requests open, its current probe and the linked-page fetch running beside it. The worker
   count IS the cap. **Slot spacing is still what bounds the request rate** — `plReserve()` hands
   out start times `PL_GAP_MS` apart, computed synchronously before any `await`.
-- **A preload answer is only usable while the picture is still the size it was measured at.**
-  `plRun` records the `displayed` rect it applied the `minRatio` gate against; `tourShow` refuses
-  a buffered answer whose rect no longer matches (`sameDisplayed`). Without that, a below-the-fold
-  entry measured at 0×0 passes the size gate trivially and caches an answer the foreground would
-  have rejected.
+- **A preload answer is used while the picture is the size it was measured at, or still passes
+  `bigEnough` at its size now** (`preFits`). `plRun` records the `displayed` rect it gated against;
+  a below-the-fold entry measured at 0×0 passes trivially, so a changed rect is re-gated, never
+  trusted. Plain `sameDisplayed` alone (before v0.329.0) threw every preload away on entering
+  fullscreen — the page reflows, every rect changes — and each step showed the page's thumbnail,
+  then the original after `TOUR_REST_MS`.
 - **`probeCache` dedup is worth more than expected.** Five separate entries in one window resolved
   to the same slow URL and cost one request between them, because the cache holds the *promise*.
 - **Answers are kept for the life of the page** (v0.167.0; user skims 300 pictures, wraps and

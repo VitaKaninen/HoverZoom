@@ -933,7 +933,10 @@ every listing thumbnail a leaf. A viewer's main picture sits outside its related
 **Gallery door vs results door (v0.284.0):** `galKindOf()` reads the door's linked page once per
 area per page load; `doorKindVerdict()` (pure, tested): cells mostly unlinked or linking image files
 → gallery; else 2 of the cells' pages are checked with the leaf test (`galLeafAt()`) — any bigger copy
-→ gallery, none → results, unread → null (behaves as gallery). Results doors get no ▦ chip, no
+→ gallery, none → results, unread → null (behaves as gallery). A `results` read needs a second
+door of the area (`galKindOther`, another href) to agree, else the second's kind wins (v0.329.0: eporner's
+/search-photos/ first result named its /photo/ files `nurse-039-s` against the thumb's `nurse-s`, `sameStem`
+missed, and the whole area lost its chips). Results doors get no ▦ chip, no
 preload, and middle-click is left to the browser. The linked page "skipped" by a
 `linkAreas` rule counts as fetched-with-nothing (that rule caches the same fetch; its own 10 % recheck
 keeps it honest). Gate `doorReason()` in `refusal()` (`doorGate:`), so doors leave the slideshow and

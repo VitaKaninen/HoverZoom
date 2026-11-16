@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.328.0
+// @version      0.329.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -15,7 +15,6 @@
 // @grant       GM_saveTab
 // @grant       GM_download
 // @grant       GM_openInTab
-// @grant       GM_setClipboard
 // @connect     *
 // @run-at      document-idle
 // @downloadURL https://raw.githubusercontent.com/VitaKaninen/HoverZoom/master/Hover-Zoom.user.js
@@ -4769,12 +4768,12 @@
     function fitFull() {
         if (!view) return;
         view.fixedW = Math.max(MIN_FRAME, vpW() - insetX() * 2);
-        view.fixedH = Math.max(MIN_FRAME, usableHeight() - widgetFloor() - insetY() * 2 - barDock());
+        view.fixedH = Math.max(MIN_FRAME, usableHeight() - insetY() * 2 - barDock());
         view.fitScale = fitScaleFor(view.natW, view.natH);
         view.scale = view.fitScale;
         reflow();       // outerW()/outerH() read view.frameW/H, so they must be settled first
         view.left = Math.round((vpW() - outerW()) / 2);
-        view.top = Math.round((usableHeight() - widgetFloor() - outerH()) / 2);
+        view.top = Math.round((usableHeight() - outerH()) / 2);
         layout();
     }
 
@@ -9350,16 +9349,25 @@
         if (tw.host.style.display !== 'none') tw.dock.sizeChanged();     // the counter's width
     }
 
-    // With the fade setting: full over the widget, nothing TW_FADE_PX from its edges, in between by the distance. Else faint under a window that covers it until the pointer is near.
+    // With the fade setting, in fullscreen or over a picture: full over the widget, nothing TW_FADE_PX from its edges, in between by the distance. Else faint under a window that covers it until the pointer is near.
     const TW_COVER_OPACITY = 0.25;
     const TW_FADE_PX = 75;
     function twOpacity() {
         if (!tw) return;
         const r = tw.rect;
-        if (cfg.tourFade) { tw.box.style.opacity = r ? String(twFadeAt(r)) : '1'; return; }
-        const under = !!(r && view && box && box.classList.contains('on') && tw.host.style.display !== 'none' &&
-            !(r.x >= view.left + outerW() || r.x + r.w <= view.left || r.y >= view.top + outerH() || r.y + r.h <= view.top));
+        const under = !!(r && tw.host.style.display !== 'none' && twCovers(r));
+        if (cfg.tourFade) { tw.box.style.opacity = r && (fullActive() || under) ? String(twFadeAt(r)) : '1'; return; }
         tw.box.style.opacity = !tw.near && under ? String(TW_COVER_OPACITY) : '1';
+    }
+
+    // A widget at r {x, y, w, h} lies over the preview window or the gallery's clicked picture.
+    function twCovers(r) {
+        const hit = function (x, y, w, h) { return !(r.x >= x + w || r.x + r.w <= x || r.y >= y + h || r.y + r.h <= y); };
+        if (view && box && box.classList.contains('on') && hit(view.left, view.top, outerW(), outerH())) return true;
+        const pw = galFly && galFly.el && galFly.el.isConnected && galFly.el.querySelector('.pic');
+        if (!pw) return false;
+        const b = pw.getBoundingClientRect();
+        return b.width > 0 && hit(b.left, b.top, b.width, b.height);
     }
 
     // Opacity for a widget at r {x, y, w, h} by the pointer's distance from its edges.
@@ -9374,8 +9382,8 @@
         const el = galSt && galSt.el;
         if (!el || el.hidden) return;
         if (!cfg.tourFade) { el.style.opacity = ''; return; }
-        const b = el.getBoundingClientRect();
-        el.style.opacity = String(twFadeAt({ x: b.left, y: b.top, w: b.width, h: b.height }));
+        const b = el.getBoundingClientRect(), r = { x: b.left, y: b.top, w: b.width, h: b.height };
+        el.style.opacity = fullActive() || twCovers(r) ? String(twFadeAt(r)) : '';
     }
 
     // The first picture at or below the top of the screen: where a start from the widget begins.
@@ -10076,10 +10084,10 @@
                 displayed = sizeOf(el);
                 active = el;
                 activeShown = shownUrl(el);
-                const warm = twWarm && twWarm.el === el && twWarm.res && sameDisplayed(twWarm.displayed, displayed) ? twWarm.res : null;
+                const warm = twWarm && twWarm.el === el && preFits(twWarm, displayed) ? twWarm.res : null;
                 primeLink(el);
                 const pre = plGet(el);
-                res = warm || (pre && pre.res && sameDisplayed(pre.displayed, displayed) ? pre.res : null);
+                res = warm || (preFits(pre, displayed) ? pre.res : null);
                 fromPage = !res;
                 if (!res) res = await tourPageRes(el, displayed);
                 if (!res && !myToken.cancelled) { fromPage = false; res = await resolve(el, displayed, myToken, null); }
@@ -10217,7 +10225,7 @@
         const myToken = token = { cancelled: false, fresh: true };
         primeLink(el);
         const pre = plGet(el);
-        if (pre && pre.res && sameDisplayed(pre.displayed, displayed)) {
+        if (preFits(pre, displayed)) {
             dbg('tour: from the preload buffer', pre.res);
             swapViewer(pre.res, true);
             // The preload spent one guess, or the page has offered more since (Google fills a
@@ -10348,6 +10356,12 @@
     // number, so its answer is only usable while the picture is still that size.
     function sameDisplayed(a, b) {
         return !!a && !!b && Math.abs(a.w - b.w) <= 1 && Math.abs(a.h - b.h) <= 1;
+    }
+
+    // A preload still good for the picture as drawn now: same size, or a resize (fullscreen) it still passes the gate at.
+    function preFits(pre, displayed) {
+        return !!pre && !!pre.res && (sameDisplayed(pre.displayed, displayed) ||
+            (!!displayed && pre.res.w > 0 && pre.res.h > 0 && bigEnough(pre.res, displayed)));
     }
 
     // Never blank, never skipped: a page of 50 pictures gives a tour of 50, and one that will not
@@ -11253,12 +11267,28 @@
     function galKindOf(el, href) {
         const key = domChain(el);
         if (galKinds.has(key)) return galKinds.get(key);
-        const p = galKindRead(href).then(function (k) {
+        const p = galKindRead(href).then(async function (k) {
+            if (k === 'results') {          // one gallery with odd file names must not decide the area: a second door has to agree
+                const other = galKindOther(key, href);
+                const k2 = other ? await galKindRead(other) : null;
+                dbg('door kind: second opinion', { first: href, other: other, kind: k2 });
+                if (k2 && k2 !== 'results') k = k2;
+            }
             galKindDone.set(key, k);
             return k;
         });
         galKinds.set(key, p);
         return p;
+    }
+
+    // Another door in the same area on this page, leading somewhere else.
+    function galKindOther(key, href) {
+        const imgs = document.querySelectorAll('a[href] img');
+        for (let i = 0; i < imgs.length; i++) {
+            const h = galLinkOf(imgs[i]);
+            if (h && h !== href && domChain(imgs[i]) === key && doorReason(imgs[i])) return h;
+        }
+        return null;
     }
 
     async function galKindRead(href) {
@@ -12863,7 +12893,7 @@
         if (cell && cfg.gallerySavedMarks && !cell.querySelector('.svd')) cell.appendChild(galSavedIcon('svd'));
     }
 
-    // ---- the clicked picture's tools: download all, copy the originals' addresses, open the gallery's page
+    // ---- the clicked picture's tools: download all, open the gallery's page
     let galDl = null;                   // {href, stop, n, done, failed, btn}: the download running now
 
     function galToolsBuild(pw, href) {
@@ -12886,7 +12916,6 @@
         };
         const dl = tool('⤓', 'Download every picture of this gallery not saved yet, into the folder under Settings, Saving · click again to stop',
             function (b) { galDownloadAll(href, b); });
-        tool('⧉', 'Copy the addresses of every original in this gallery', function () { galCopyAll(href); });
         tool('↗', 'Open the gallery\'s page in a new tab', function () { openOriginal(href); });
         pw.appendChild(bar);
         if (galDl && galDl.href === href) { galDl.btn = dl; galDlShow(galDl); }
@@ -12944,31 +12973,6 @@
         galMarkAll();
         if (lg) lg.end(job.stop ? 'cut' : 'done');
         toast('Saved ' + job.done + ' of ' + job.n + (job.failed ? ', ' + job.failed + ' failed' : '') + (job.stop ? ' (stopped)' : ''), 4000);
-    }
-
-    async function galCopyAll(href) {
-        const list = galLists.get(href);
-        if (!Array.isArray(list) || !list.length) { toast('No pictures found in this gallery yet', 2500); return; }
-        toast('Finding ' + list.length + ' originals…', 60000);
-        const tok = { cancelled: false, fresh: false }, out = new Array(list.length);
-        let k = 0;
-        const worker = async function () {
-            while (k < list.length) {
-                const i = k++;
-                let hit = null;
-                try { hit = await galBestOf(list[i], tok); } catch (e) { hit = null; }
-                out[i] = hit && hit.url ? hit.url : '';
-            }
-        };
-        const pool = [];
-        for (let w = 0; w < GAL_HQ_PAR; w++) pool.push(worker());
-        await Promise.all(pool);
-        const urls = out.filter(Boolean), text = urls.join('\n');
-        try {
-            if (typeof GM_setClipboard === 'function') GM_setClipboard(text, 'text');
-            else await navigator.clipboard.writeText(text);
-            toast('Copied ' + urls.length + ' address' + (urls.length === 1 ? '' : 'es'), 2500);
-        } catch (e) { dbg('copying the addresses failed', String(e)); toast('Could not copy the addresses', 2500); }
     }
 
     // The saved mark: a blue disc with a down arrow, no outline (user).

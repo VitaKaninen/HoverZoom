@@ -283,17 +283,16 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   `?page=2`: the same 10 loaded in 2-5 ms, an unloaded control file 325 ms. The disk cache keeps them
   across pages there, so loading originals a page ahead is worth it in Chrome; other browsers' cache
   settings decide for themselves, and the `nextwarm` rows answer that per browser.
-- **Picture tools** (`galToolsBuild`, user v0.328.0, `G10`): ⤓ ⧉ ↗ in `.tools` inside the clicked
+- **Picture tools** (`galToolsBuild`, user v0.328.0, `G10`): ⤓ ↗ in `.tools` inside the clicked
   picture's `.pic`, inset `GAL_HD + 4` from the right so the invisible resize corner stays reachable.
   Each button eats its own mousedown, or the picture's handler closes the gallery or starts a drag.
   ⤓ `galDownloadAll`: `galLists.get(href)` (what the read has found so far), minus `GAL_SAVED_KEY`
   thumbs, one at a time through `galBestOf` (= `galResolve` on a stand-in img, as `nextRun`) and
   `saveOriginal(…, fail)`; `fail` makes the save path skip its toast and its open-in-a-tab fallback
   (a refused batch would open hundreds of tabs). Runs on after the gallery closes; one job at a time
-  (`galDl`); a reopened gallery's button picks the progress up. us-log `saveall`. ⧉ resolves
-  `GAL_HQ_PAR` at a time and copies with `GM_setClipboard` (`navigator.clipboard` loses the click's
-  activation after the awaits). Pane-checked by synthetic events on `door-big.html`: 240 saved with
-  the folder filled, confirm when all saved, stop at 6, 240 addresses copied, page opened.
+  (`galDl`); a reopened gallery's button picks the progress up. us-log `saveall`. A ⧉ copy-every-address button was
+  removed at the user's word (v0.329.0). Pane-checked by synthetic events on `door-big.html`: 240 saved with
+  the folder filled, confirm when all saved, stop at 6 page opened.
 - **A cell's preview asks the picture's own page first** (`galLinkedHit`, v0.292.0): its `og:image`
   (same shape as the thumbnail unless the names match) or a same-named copy, the biggest wider than
   the thumbnail. nsfw.xxx profile cells: 300×533 thumbnail → the post's 960×1704.
