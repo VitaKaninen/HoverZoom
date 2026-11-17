@@ -1,4 +1,25 @@
-# Handoff 2026-11-16 (~355k tokens) — read this first
+# Handoff 2026-11-17 (~305k tokens) — read this first
+
+**Asked, in order (all built, pushed v0.335.0–v0.341.0):** (1) clicked gallery picture: fade rejected →
+preview on top unless the pointer is on the picture (v0.336.0, `galFlyHost`/`galFlyZ`); (2) eporner ⤓
+stayed grey: the reading frame never loads in the user's browser (no `frame loaded`), now counts as
+read from HTML (v0.337.0–v0.338.0); (3) no tooltips on picture/strip, their text in the right-click
+menu; download row inside the gallery strip above the page row; menu over the raised picture
+(v0.339.0); (4) one progress bar; preloaded originals fetched once as bytes, kept (512 MB) and saved
+by ⤓ from memory, any site that serves GM_xhr (v0.340.0); (5) downloads stalled after Back and links
+were forgotten: worker try/catch, `pagehide` → `dlqHalt`, lists kept per tab in sessionStorage
+`hzGalLists` (v0.341.0). Reasons: GALLERY.md (sections named in each commit).
+
+**Verified:** Browser pane fixtures (strip rows, menu stacking, queue across Back/Forward, kept list →
+⤓ ready in 1.5 s); Chrome on eporner: 112 originals via bytes, 29.6 MB, no `<img>` loads.
+**Not verified:** saving from held bytes into real files (`saveHeld` → GM_download of a page blob URL
+in Tampermonkey/the user's manager; refusal falls back to `saveAsServed`); Back with the real script
+manager. The user's main browser is not Chrome (frames never load there).
+
+**Last question asked:** none open. The final reply asked the user to try ⤓ + Back on a gallery
+they don't mind saving and report.
+
+# Handoff 2026-11-16 (~355k tokens)
 
 **Asked, in order:** (1) status bar hidden until the preview is pinned, fading 500 ms after the
 pointer stops, with an option to disable the fade; (2) on girlstop.info, gallery originals were not
