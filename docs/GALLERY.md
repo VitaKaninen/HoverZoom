@@ -78,7 +78,7 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   `galHole` holds, what the rows avoid and what the memory places. An `out` strip is a second bar
   in `galRows` (`galBars`). With no clicked picture (no `<img>` on the door) it sits under the hole
   (`galStripRect`). The dock widget hides while a gallery is open (`twGalOpen`) — never two ◀ ▶.
-- **Two layers** (v0.302.0): cells, veil and pending glow in `galRoot` (`galHost`, z max − 1); the
+- **Two layers** (v0.302.0; a third for the clicked picture since v0.336.0, below): cells, veil and pending glow in `galRoot` (`galHost`, z max − 1); the
   clicked picture, the strip and the menu in `galTop` (`galTopHost`, z max, appended to `<html>` after
   `<body>`, which holds the preview's host). Same stylesheet cloned. Before this a pinned preview
   covered the strip and the second ◀ ▶ press landed on the preview. `galTopHost` is in `ours()` and
@@ -212,10 +212,14 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   item that is this picture (same URL, `sameStem`, or `galSameFile` — one file name ends with the
   other, nsfw.xxx prefixes `amateur-`) → `galLinkedHit`, else the card's URL-rule candidates. The yellow
   ring and Close tab of v0.292.0 are gone (user: blue again).
-- **Faded while the pointer is off it** (user, v0.335.0: it is in `galTop`, above the preview, and
-  covered previews of cells near the corner): `.rest`, added once the flight lands, sets opacity
-  `GAL_FLY_REST` 0.3 unless `:hover`, `.edit` or `.asking`. An `in` strip fades with it (it is inside
-  `.fly`); a `dock`/`out` strip does not. `galFlyBack` removes `.rest`, so it flies back opaque.
+- **Under the preview unless the pointer is on it** (user, v0.336.0; a v0.335.0 fade was rejected):
+  `.fly` and its corners live in `galFlyHost` (`galFlyLayer`, appended last to `<html>` on every open),
+  z max − 1 at rest — under the preview's host (z max, in `<body>`), over `galHost` (same z, later in
+  the tree). `galFlyZ` (from `galMove`, edit start/stop, open/close) raises it to z max, which wins
+  over the preview by tree order, while `galPt` is within its box ± `GAL_HD`/2 or `galEdit`. An `in`
+  strip rides inside `.fly`; `dock`/`out` strips and the menu stay in `galTop` (z max), over the
+  preview, or the v0.302.0 bug (◀ ▶ press landing on a pinned preview) returns. The test is by
+  coordinates, not `:hover`: a preview over the picture takes the pointer's hover itself.
 - **A left click or middle press on it closes** (v0.294.0: middle had stopped closing once the hole
   left the card — the document handler's middle branch only `preventDefault`s presses on our layer;
   the `.fly` listener closes and sets `galMidAt` so `galMidEat` eats the auxclick). Left closes on

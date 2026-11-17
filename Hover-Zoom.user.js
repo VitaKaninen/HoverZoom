@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.335.0
+// @version      0.336.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -5696,6 +5696,7 @@
             (panelHost.contains && panelHost.contains(node)))) return true;
         if (tw && node === tw.host) return true;
         if (galTopHost && node === galTopHost) return true;
+        if (galFlyHost && node === galFlyHost) return true;
         if (dlHost && node === dlHost) return true;
         return !!host && (node === host || (host.contains && host.contains(node)));
     }
@@ -8502,7 +8503,7 @@
 
     let tour = null;            // the pinned window's navigation state; null when nothing is pinned
     // Gallery layers and the open set: declared here, above the boot-time twRefresh(), which reaches galOwns().
-    let galHost = null, galRoot = null, galBlur = null, galCur = null, galWant = null, galTopHost = null, galTop = null;
+    let galHost = null, galRoot = null, galBlur = null, galCur = null, galWant = null, galTopHost = null, galTop = null, galFlyHost = null, galFlyRootEl = null;
     let galHole = null, galFly = null;
     let dlHost = null, dlStripEl = null;   // the download strip
 
@@ -11355,7 +11356,6 @@
     const GAL_SAVED_MARK = 'data-hz-saved';
     let galSeen = {}, galMarkTimer = 0;
     const GAL_FLY_MS = 320;             // the clicked picture's flight to the corner and back
-    const GAL_FLY_REST = 0.3;           // the clicked picture's opacity while the pointer is off it
     const GAL_FLY_FRAC = 0.2;           // its height there, of the window's (user)
     let galOn = false, galTap = false, galMidAt = 0;      // a peek is up and locked; Ctrl down with nothing else yet
     const GAL_PEND_MS = 3000;           // the pressed result lights up only if its gallery is not on screen by then
@@ -11895,6 +11895,26 @@
         return galTop;
     }
 
+    // The clicked picture's own layer, last in <html>: under the preview, over it while the pointer is on the picture (user).
+    function galFlyLayer() {
+        galLayer();
+        document.documentElement.appendChild(galFlyHost);
+        return galFlyRootEl;
+    }
+
+    // Raise the clicked picture over the preview while the pointer is on it or it is being dragged.
+    function galFlyZ() {
+        if (!galFlyHost) return;
+        const f = galFly, m = GAL_HD / 2;
+        let up = !!galEdit;
+        if (!up && f) {
+            const r = f.el.getBoundingClientRect();
+            up = galPt.x >= r.left - m && galPt.x <= r.right + m && galPt.y >= r.top - m && galPt.y <= r.bottom + m;
+        }
+        const z = up ? '2147483647' : '2147483646';
+        if (galFlyHost.style.zIndex !== z) galFlyHost.style.zIndex = z;
+    }
+
     function galLayer() {
         if (galRoot) return galRoot;
         galHost = document.createElement('div');
@@ -11944,7 +11964,6 @@
             '.fly .pic{position:relative;flex:1 1 0;min-height:0}' +
             '.fly img{width:100%;height:100%;object-fit:cover;border-radius:0;box-shadow:none;opacity:1}' +
             '.fly.edit{outline:2px dashed #f9e2af;outline-offset:3px}' +
-            '.fly.rest:not(:hover):not(.edit):not(.asking){opacity:' + GAL_FLY_REST + '}' +
             '.hd{position:fixed;z-index:6;width:' + GAL_HD + 'px;height:' + GAL_HD + 'px;pointer-events:auto}.hd.tl,.hd.br{cursor:nwse-resize}.hd.tr,.hd.bl{cursor:nesw-resize}' +
             '.fly .bt{display:none;gap:8px;position:absolute;left:50%;top:50%;transform:translate(-50%,-50%)}' +
             '.fly .bt.ask{display:none;flex-wrap:wrap;justify-content:center;width:max-content;max-width:90%}.fly.asking .bt{display:none}.fly.asking .bt.ask{display:flex}' +
@@ -11980,6 +11999,10 @@
         galTopHost.style.cssText = 'all:initial;position:fixed;inset:0;pointer-events:none;z-index:2147483647';
         galTop = galTopHost.attachShadow({ mode: 'open' });
         galTop.appendChild(st.cloneNode(true));
+        galFlyHost = document.createElement('div');
+        galFlyHost.style.cssText = 'all:initial;position:fixed;inset:0;pointer-events:none;z-index:2147483646';
+        galFlyRootEl = galFlyHost.attachShadow({ mode: 'open' });
+        galFlyRootEl.appendChild(st.cloneNode(true));
         // Outside the fading .set: an ancestor below opacity 1 is a backdrop root, so the blur would show nothing mid-fade.
         galBlur = document.createElement('div');
         galBlur.className = 'blur';
@@ -13823,6 +13846,7 @@
         galMenuHide();
         galEdit = { el: f.el, u: galUnitRect(), sm: Object.assign({}, galStripM) };
         f.el.classList.add('edit');
+        galFlyZ();
         galStripPlace();
         hideTip();
     }
@@ -13832,6 +13856,7 @@
         const ed = galEdit;
         if (!ed) return;
         galEdit = null;
+        galFlyZ();
         ed.el.classList.remove('edit');
         if (!keep || !galFly) {
             ed.el.classList.remove('asking');
@@ -14118,8 +14143,9 @@
 
     // From the card to the corner; a press on it closes the gallery.
     function galFlyOut(pic, hr, href) {
-        const root = galTopRoot();
+        galTopRoot();
         if (!galHost.isConnected) document.documentElement.appendChild(galHost);
+        const root = galFlyLayer();     // after galHost: same z at rest, so tree order keeps it over the cells
         const U = galHole, m = galStripM, sh = m.m === 'dock' ? galStripH() : 0, band = m.m === 'in' ? galStripH() : 0;
         const H = { x: U.x, y: m.side === 't' ? U.y + sh : U.y, w: U.w, h: U.h - sh };
         const P = { x: H.x, y: m.side === 't' ? H.y + band : H.y, w: H.w, h: H.h - band };
@@ -14180,8 +14206,8 @@
         void el.offsetWidth;
         el.classList.add('on');
         el.style.transform = 'none';
-        setTimeout(function () { if (!el.classList.contains('back')) el.classList.add('rest'); }, GAL_FLY_MS);
         galFly = { el: el, img: img, pic: pic, href: href, asp: hr.width && hr.height ? hr.width / hr.height : 1, pic0: pw, hds: hds };
+        galFlyZ();
         galStripBuild();
         if (!galCur || galCur.href !== href) galStripBlank();
         galStripPlace();
@@ -14206,11 +14232,12 @@
         const f = galFly;
         if (!f) return;
         galFly = null;
+        galFlyZ();
         hideTip();
         f.hds.forEach(function (hd) { hd.remove(); });
         const el = f.el, H = galHole || { x: 0, y: 0, w: 1, h: 1 };
         if (galSt) { galSt.el.hidden = true; if (galSt.el.parentNode === el) galTop.appendChild(galSt.el); }
-        el.classList.remove('joined', 'edit', 'asking', 'rest');
+        el.classList.remove('joined', 'edit', 'asking');
         el.style.pointerEvents = 'none';
         const r = f.pic.isConnected ? galHoleRect(f.pic) : null;
         const onScreen = r && r.width > 0 && r.bottom > 0 && r.top < vpH() && r.right > 0 && r.left < vpW();
@@ -14472,6 +14499,7 @@
         galPt.x = e.clientX;
         galPt.y = e.clientY;
         galMovedAt = performance.now();
+        if (galFly) galFlyZ();
         const st = galStill;
         galStill = null;
         if (st && galCur === st.set && st.cell.isConnected && holds(st.cell.getBoundingClientRect(), galPt.x, galPt.y)) st.go();
@@ -15139,7 +15167,7 @@
             }
             if (e.button !== 0 || (!galWant && !galCur)) return;     // middle and right presses (a tab, the menu) leave it up
             const H = galHole;
-            if (H && e.target !== galHost && e.target !== galTopHost && !pointInPreview(e.clientX, e.clientY) && e.clientX >= H.x && e.clientX <= H.x + H.w && e.clientY >= H.y && e.clientY <= H.y + H.h) {
+            if (H && e.target !== galHost && e.target !== galTopHost && e.target !== galFlyHost && !pointInPreview(e.clientX, e.clientY) && e.clientX >= H.x && e.clientX <= H.x + H.w && e.clientY >= H.y && e.clientY <= H.y + H.h) {
                 e.preventDefault();         // the original card: closes, and its link is not followed
                 e.stopImmediatePropagation();
                 galLeftAt = Date.now();
