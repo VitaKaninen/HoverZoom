@@ -224,6 +224,11 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   left the card — the document handler's middle branch only `preventDefault`s presses on our layer;
   the `.fly` listener closes and sets `galMidAt` so `galMidEat` eats the auxclick). Left closes on
   release without a 4 px move (`galEditDown`), since a drag moves it.
+- **No tooltips on the picture, its corners, its ⤓ ↗ or the strip** (user, v0.339.0: "constantly popping
+  up"). Their text is a "Using the gallery" section at the foot of the menu (`.lb.hp`). Don't add `setTip` back there.
+- **The menu stays over the raised picture**: `galFlyZ` gives `galFlyHost` the same z as `galTop`, so tree order
+  decides; `galMenuShow` moves `galTopHost` last in `<html>` before showing (v0.339.0: the menu was under the
+  picture and the strip while the pointer was on them).
 - **Right-click = our menu** (`galMenuShow`, `.menu` in the layer; also on the strip): ✓ toggles for
   `galleryChips`, `galleryTicks`,
   `gallerySavedMarks` (also in Settings → Galleries), `galleryMiddle`, then Close the gallery.
@@ -334,6 +339,13 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
     there. A reload, Back or a typed address cannot be told from a close, so those warn too. The text is the
     browser's own.
   - Downloads: `DLQ_WORKERS` 3, starts `DLQ_GAP_MIN..MAX` 400–1200 ms apart (Forum Stumbler's pacing). us-log `saveall`.
+  - **In the gallery's strip while a gallery is open** (user, v0.339.0: it moved round the page as the unit
+    resized): `dlStripHome` moves the `.dl` row (`dlStripEl.__row`) into `galSt.el` as its first row, above the
+    page row, and back on close; `galStripDl` adds `GAL_STRIP_DL` 26 to `galStripH()`, and the change goes through
+    `galStripReshape` (the unit keeps its height, the picture narrows). `galMiddle` sets `galStripDl = dlHere()`
+    before sizing the hole. The row has its own mousedown for its buttons; a press elsewhere on it drags the strip.
+    Its CSS is `.strip .dl …` in the gallery sheet (the row's own sheet does not reach another shadow root). Only
+    the failed list stays in `dlHost`, placed over the unit.
   - **Strip** (`dlStripPaint`/`dlStripPlace`, own host, in `ours()` and `galTopAt`; `dlStripEl` is the wrapper
     holding the failed list and the strip): above the widget (`tw.box`, not `tw.rect`, which is the dock's
     {x,y,w,h}), else above the gallery's strip/picture, else bottom-right. Text = this origin's first job with work

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.338.0
+// @version      0.339.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -11326,6 +11326,7 @@
     const GAL_MIN_H = 120;              // rows never shorter: a bigger gallery is laid out as pages (cfg.galleryRowMin)
     const GAL_STRIP_H = 54;             // the page and picture rows under the clicked picture
     const GAL_STRIP_H1 = 34;            // the picture row alone: a one-page gallery
+    const GAL_STRIP_DL = 26;            // the download row the strip gains while this site has downloads
     const GAL_UNIT_MIN_W = 120;         // a picture holding the strip: never narrower, or its numbers cannot fit
     const GAL_HD = 7;                   // a resize corner: the frame's 3 px border plus 2 px inside and out
     const GAL_STRIP_W = 190;            // their least width; wider under a wider picture
@@ -11345,7 +11346,7 @@
     const galGrowWhy = new Map();       // href -> why reading its page stopped short of the end, or 'html' when only its HTML could be read
     const galCache = new Map();         // href -> Promise of [{thumb, ss, cands, base}] | null | 'cancel'
     let galFrameStop = null;
-    let galHoverTimer = 0, galPt = { x: 0, y: 0 }, galMovedAt = 0, galLaidAt = 0, galStill = null, galStripOne = true;
+    let galHoverTimer = 0, galPt = { x: 0, y: 0 }, galMovedAt = 0, galLaidAt = 0, galStill = null, galStripOne = true, galStripDl = false;
     const GAL_SEEN_KEY = 'hoverZoomGallerySeen';   // linked pages whose gallery was shown, oldest first
     const GAL_SEEN_MAX = 10000;
     const GAL_SEEN_MS = 1000;           // a gallery counts as seen once it has been on screen this long
@@ -11942,6 +11943,12 @@
             '.strip input.ask{width:4.5em;box-sizing:border-box;margin:0 auto;padding:1px 4px;font:inherit;text-align:center;color:var(--text);' +
             'background:var(--btn);border:1px solid var(--accent);border-radius:4px;outline:none;cursor:text}' +
             '.strip .t{cursor:text;flex:1;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}' +
+            '.strip .dl{flex:none;display:flex;flex-direction:column;justify-content:center;gap:4px;height:' + (GAL_STRIP_DL - 4) + 'px;padding:0 2px;font:11px/14px system-ui,sans-serif}' +
+            '.strip .dl .top{display:flex;align-items:center;gap:6px}.strip .dl .txt{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}' +
+            '.strip .dl .x,.strip .dl .fb{flex:none;cursor:pointer;color:#f38ba8;padding:0 4px;border-radius:3px;white-space:nowrap}.strip .dl .x:hover,.strip .dl .fb:hover{background:var(--btnHover)}.strip .dl .fb[hidden]{display:none}' +
+            '.strip .dl .bar{display:flex;gap:1px;height:4px}.strip .dl .bar[hidden]{display:none}.strip .dl .bar i{flex:1 1 0;min-width:0;border-radius:1px;background:#45475a}' +
+            '.strip .dl .bar i.b{background:#f9e2af}.strip .dl .bar i.d{background:#89b4fa}.strip .dl .bar i.f{background:#f38ba8}' +
+            '.strip.out .dl{min-width:200px}' +
             '.strip.own{border:3px solid #89b4fa;box-shadow:0 0 14px 2px rgba(137,180,250,.55),0 8px 22px rgba(0,0,0,.6)}' +
             '.strip.edit:not(.in){outline:2px dashed #f9e2af;outline-offset:3px}' +
             '.fly .strip{position:relative;z-index:auto;flex:none;width:auto;border:0;border-radius:0;box-shadow:none}' +
@@ -11982,7 +11989,7 @@
             '.menu .it{display:flex;align-items:center;gap:6px;padding:5px 10px 5px 6px;border-radius:5px;cursor:pointer;white-space:nowrap}' +
             '.menu .it:hover{background:#313244}.menu .ck{width:16px;text-align:center;color:#89b4fa}' +
             '.menu .sep{height:1px;margin:4px 6px;background:#45475a}' +
-            '.menu .lb{padding:6px 10px 2px 28px;color:#6c7086;font-size:11px}' +
+            '.menu .lb{padding:6px 10px 2px 28px;color:#6c7086;font-size:11px}.menu .lb.hp{padding-top:2px;max-width:300px}' +
             '.pend[hidden]{display:none}.pend{position:fixed;box-sizing:border-box;border:3px solid #89b4fa;border-radius:8px;' +
             'box-shadow:0 0 0 200vmax rgba(0,0,0,.55),0 0 16px 3px rgba(137,180,250,.7);animation:hzpend .8s ease-in-out infinite alternate}' +
             '@keyframes hzpend{to{border-color:#cdd6f4;box-shadow:0 0 0 200vmax rgba(0,0,0,.55),0 0 4px 1px rgba(137,180,250,.4)}}' +
@@ -12323,7 +12330,7 @@
 
     // The strip's height: the page row shows only once there is more than one page.
     function galStripH() {
-        return galStripOne ? GAL_STRIP_H1 : GAL_STRIP_H;
+        return (galStripOne ? GAL_STRIP_H1 : GAL_STRIP_H) + (galStripDl ? GAL_STRIP_DL : 0);
     }
 
     // A second page appeared: the page row joins the strip for good, and an attached strip keeps the unit's height, so the picture narrows.
@@ -12331,14 +12338,26 @@
         const one = !set.two && (set.pages ? set.pages.length : 1) <= 1;
         if (!one) set.two = true;
         if (one === galStripOne || galEdit) return;
+        galStripReshape(function () { galStripOne = one; }, set);
+    }
+
+    // The download row joins or leaves the strip (dlStripHome).
+    function galStripSetDl(on) {
+        if (on === galStripDl) return;
+        if (galEdit || !galOn) { galStripDl = on; galStripPlace(); return; }
+        galStripReshape(function () { galStripDl = on; }, galCur);
+    }
+
+    // The strip's height changes: an attached strip keeps the unit's height, so the picture narrows.
+    function galStripReshape(change, set) {
         const u0 = galAttH() ? galUnitRect() : null;
-        galStripOne = one;
+        change();
         if (!u0) { galStripPlace(); return; }
         const W = vpW(), ph = Math.max(48, u0.h - galStripH()), w = Math.min(W - 8, ph * galFly.asp);
         const x = u0.x + u0.w / 2 > W / 2 ? u0.x + u0.w - w : u0.x;
         galHole = { x: Math.max(0, Math.min(W - w, x)), y: u0.y, w: w, h: u0.h };
         galUnitPut(galHole);
-        setTimeout(function () { if (galCur === set && !galEdit) galPageWork(set, galLayout(set, galHole)); }, 0);
+        setTimeout(function () { if (set && galCur === set && !galEdit) galPageWork(set, galLayout(set, galHole)); }, 0);
     }
 
     // The corners that resize the clicked picture: invisible, at the unit's corners.
@@ -12404,8 +12423,6 @@
         s.pgT.textContent = 'Page ' + pg;
         s.picT.textContent = (at >= 0 ? at + 1 : '–') + ' / ' + n + (reading ? '+' : '');
         galStripSqueeze(s, pg);
-        setTip(s.pgT, (reading ? 'Finding more pictures on the gallery\'s page…' : total + ' page' + (total === 1 ? '' : 's') + ' · ↑ ↓') + '\nClick to type a page');
-        setTip(s.picT, n + ' picture' + (n === 1 ? '' : 's') + (reading ? ', finding more' : '') + ' · wheel over the widget or ← → steps\nClick to type a picture');
         s.pgP.classList.toggle('faint', total < 2);
         s.pgN.classList.toggle('faint', total < 2);
         s.picP.classList.toggle('faint', !n);
@@ -12449,7 +12466,6 @@
                 const b = document.createElement('span');
                 b.className = 'b';
                 b.textContent = text;
-                setTip(b, tip);
                 b.addEventListener('mousedown', function (e) {
                     e.preventDefault();
                     e.stopPropagation();
@@ -12995,6 +13011,8 @@
         galVeil(false);
         galFlyBack();
         if (galSt) galSt.el.hidden = true;
+        galStripDl = false;
+        if (dlHost) dlStripPaint();
         galChipsSync();
         if (twGalOpen) { twGalOpen = false; twRefresh(); }
     }
@@ -13119,7 +13137,6 @@
         const tool = function (text, tip, act) {
             const b = document.createElement('span');
             b.textContent = text;
-            setTip(b, tip);
             b.addEventListener('mousedown', function (e) {
                 e.preventDefault();
                 e.stopPropagation();
@@ -13576,7 +13593,6 @@
         const fb = document.createElement('span');
         fb.className = 'fb';
         fb.hidden = true;
-        setTip(fb, 'The pictures that failed to download: try them again, or find them on their page');
         fb.__act = function () { dlFailOpen = !dlFailOpen; dlStripPaint(); };
         const x = document.createElement('span');
         x.className = 'x';
@@ -13595,6 +13611,13 @@
         bar.className = 'bar';
         strip.appendChild(top);
         strip.appendChild(bar);
+        strip.addEventListener('mousedown', function (e) {
+            const hitEl = e.composedPath().find(function (n) { return n && n.__act; });
+            if (!hitEl) return;         // in the gallery's strip a press elsewhere drags it, as on its other rows
+            e.preventDefault();
+            e.stopPropagation();
+            if (e.button === 0) hitEl.__act();
+        });
         dlStripEl.appendChild(fl);
         dlStripEl.appendChild(strip);
         root.appendChild(dlStripEl);
@@ -13612,6 +13635,24 @@
         dlStripEl.__fb = fb;
         dlStripEl.__x = x;
         dlStripEl.__fail = fl;
+        dlStripEl.__row = strip;
+    }
+
+    // The download row lives in the gallery's strip, over its page row, while a gallery is open; else over the widget.
+    function dlStripHome(show) {
+        const row = dlStripEl && dlStripEl.__row;
+        if (!row) return;
+        if (show && galOn) galStripBuild();
+        const inGal = !!show && galOn && !!galSt;
+        if (inGal) { if (galSt.el.firstChild !== row) galSt.el.insertBefore(row, galSt.el.firstChild); }
+        else if (row.parentNode !== dlStripEl) dlStripEl.appendChild(row);
+        galStripSetDl(inGal);
+        return inGal;
+    }
+
+    // Any download kept for this site: the strip then has its download row.
+    function dlHere() {
+        return dlqJobs().some(function (j) { return j.origin === location.origin; });
     }
 
     // The strip for this site's first gallery still downloading, else its first with failures; hidden with nothing queued here.
@@ -13619,7 +13660,7 @@
         if (!isTopFrame) return;
         jobs = jobs || dlqJobs();
         const here = jobs.filter(function (j) { return j.origin === location.origin; });
-        if (!here.length) { if (dlHost) dlHost.style.display = 'none'; dlFailOpen = false; return; }
+        if (!here.length) { if (dlHost) dlHost.style.display = 'none'; dlFailOpen = false; dlStripHome(false); return; }
         if (!dlHost) dlStripBuild();
         if (!dlHost.isConnected) document.documentElement.appendChild(dlHost);
         dlHost.style.display = '';
@@ -13635,14 +13676,15 @@
         dlStripEl.__txt.textContent = (left ? 'Saving ' + (n - left) : 'Saved ' + (n - dlqFailed(st).length)) + ' / ' + n + tail;
         dlStripEl.__fb.hidden = !listed;
         dlStripEl.__fb.textContent = failedAll + ' failed ' + (dlFailOpen ? '▾' : '▴');
-        setTip(dlStripEl.__x, left ? 'Stop this gallery\'s download' : 'Clear this gallery\'s list of failed pictures');
+        const inGal = dlStripHome(true);
+        setTip(dlStripEl.__x, inGal ? '' : left ? 'Stop this gallery\'s download' : 'Clear this gallery\'s list of failed pictures');
         let first = 0;
         while (first < n && st[first] !== '0' && st[first] !== '1') first++;
         const from = Math.floor(Math.min(first, n - 1) / DLQ_SEGS) * DLQ_SEGS, to = Math.min(n, from + DLQ_SEGS);
         while (bar.childNodes.length > to - from) bar.lastChild.remove();
         while (bar.childNodes.length < to - from) bar.appendChild(document.createElement('i'));
         for (let i = from; i < to; i++) bar.childNodes[i - from].className = st[i] === '2' ? 'd' : st[i] === '3' ? 'f' : st[i] === '1' ? 'b' : '';
-        setTip(dlStripEl.__txt, job.href + (job.note ? '\n' + job.note : ''));
+        setTip(dlStripEl.__txt, inGal ? '' : job.href + (job.note ? '\n' + job.note : ''));
         if (dlFailOpen && listed) dlFailPaint(here, sts);
         else { dlFailOpen = false; dlStripEl.__fail.hidden = true; }
         dlStripPlace();
@@ -13710,6 +13752,7 @@
         if (!isTopFrame || !dlHost || dlHost.style.display === 'none') return;
         const W = vpW(), H = vpH();
         let a = twShownRect() ? tw.box.getBoundingClientRect() : null;
+        if (galOn && galStripDl && galSt) a = (galStripM.m === 'in' && galFly ? galFly.el : galSt.el).getBoundingClientRect();
         if (!a && galOn) {
             const el = galSt && !galSt.el.hidden ? (galStripM.m === 'in' && galFly ? galFly.el : galSt.el) : galFly && galFly.el;
             if (el && el.isConnected) a = el.getBoundingClientRect();
@@ -13761,6 +13804,7 @@
         if (galOwns(active)) cancel();
         galOn = true;
         galStripOne = true;
+        galStripDl = dlHere();
         galStripM = pic ? galStripLoad(galAnchorRec(), galPagedRows(vpH())) : { m: 'in', side: 'b' };
         galHole = galCornerRect(hr.width && hr.height ? hr.width / hr.height : 1, pic && galStripM.m !== 'out' ? galStripH() : 0);
         galWant = href;
@@ -13768,6 +13812,7 @@
         galFlyBack();
         if (pic) galFlyOut(pic, hr, href);
         galVeil(true);
+        if (galStripDl) dlStripPaint();
         galPendStart(href, 'middle press');
         galChipsSync();
         galLoad(href).then(function (list) {
@@ -14130,6 +14175,20 @@
         sep();
         item('All settings…', null, function () { galMenuHide(); showPanel(); });
         if (galCur) item('Close the gallery', null, function () { galMenuHide(); galHide('menu'); });
+        if (galFly) {
+            sep();
+            label('Using the gallery');
+            ['Click the picture: close · drag it: move · drag a corner: resize (Ctrl: no snapping)',
+                'Drag the strip by its background to take it off the picture',
+                '◀ ▶ or ← →, or the wheel over the strip: picture · ↑ ↓: page · click a number to type one',
+                '⤓ saves every picture not saved yet, once the page is read (greyed until then) · ↗ opens the gallery\'s page'].forEach(function (t) {
+                const d = document.createElement('div');
+                d.className = 'lb hp';
+                d.textContent = t;
+                m.appendChild(d);
+            });
+        }
+        if (galTopHost.nextSibling) document.documentElement.appendChild(galTopHost);     // last in the tree: over the raised picture, which shares its z
         m.hidden = false;
         const b = m.getBoundingClientRect();
         m.style.left = Math.round(Math.max(4, Math.min(x, vpW() - 4 - b.width))) + 'px';
@@ -14161,7 +14220,6 @@
             const hd = document.createElement('div');
             hd.className = 'hd ' + c;
             hd.__hzCorner = c;
-            setTip(hd, 'Drag to resize — snaps to the edges of the gallery\'s rows and margins, the middle of the gaps between rows and the window\'s centre lines · hold Ctrl to size freely');
             hd.addEventListener('mousedown', galEditDown);
             hd.addEventListener('contextmenu', function (e) { e.preventDefault(); e.stopPropagation(); });
             return hd;
@@ -14200,7 +14258,6 @@
             e.stopPropagation();
             if (!galEdit) galMenuShow(e.clientX, e.clientY);
         });
-        setTip(el, 'Click to close this gallery · drag to move it, or a corner to resize it · right-click for options');
         root.appendChild(el);
         hds.forEach(function (hd) { root.appendChild(hd); });
         void el.offsetWidth;
