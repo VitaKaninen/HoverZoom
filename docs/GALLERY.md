@@ -20,6 +20,10 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   `galPeek` and call `galMiddle()`. A door whose `galKindOf()` is `results` gets neither. While `galPeek`, a Ctrl tap closes it (and `galPeekTapAt` keeps the previews hotkey from also
   toggling), `galScroll` runs. `onOver` returns while `galCur || (galOn && galWant)`: with previews
   on, the page under the set would otherwise preview through the gaps. `galHide` clears `galPeek`.
+- **Which group is the gallery** (`galGroup` → `galChoose`, pure, tested): the biggest group of like-placed
+  pictures, unless most of its links share the read page's first path segment (a "more like this" strip:
+  20 `/gallery/` cards at the foot of an eporner `/gallery/` page) and another group holds ≥ `GAL_OWN_MIN` 4 —
+  then that one. Without it a 16-picture gallery read as its strip → `results` → no chips (eporner /search-photos/spreading/).
 - **Door hover** (`doorHover(el, x, y)` → `galDoorHover`): the event's x, y go into `galPt` first —
   mouseover lands before the mousemove that sets it, and a cached `galKindOf()` would test a stale
   point and skip the chip. `galKindOf()` settles once per area per page, unknown included (nsfw.xxx

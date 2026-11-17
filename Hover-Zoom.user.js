@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.333.0
+// @version      0.334.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -6402,6 +6402,26 @@
         return out.sort(function (a, b) { return b.n - a.n; });
     }
 
+    const GAL_OWN_MIN = 4;          // pictures a page's own group needs to beat a bigger "more like this" strip
+
+    // Which of a fetched page's groups ([[link href or '']]) is its own: the biggest, unless that one links to pages like this one (/gallery/ cards on a /gallery/ page) and another holds GAL_OWN_MIN.
+    function galChoose(groups, pageHref) {
+        const seg = function (h) { try { return new URL(h).pathname.split('/')[1].toLowerCase(); } catch (e) { return null; } };
+        const mine = seg(pageHref);
+        const sib = function (g) {
+            if (!mine) return false;
+            let n = 0;
+            g.forEach(function (h) { if (h && seg(h) === mine) n++; });
+            return n * 2 > g.length;
+        };
+        let best = -1, own = -1;
+        groups.forEach(function (g, i) {
+            if (best < 0 || g.length > groups[best].length) best = i;
+            if (g.length >= GAL_OWN_MIN && !sib(g) && (own < 0 || g.length > groups[own].length)) own = i;
+        });
+        return best >= 0 && own >= 0 && own !== best && sib(groups[best]) ? own : best;
+    }
+
     // The entry for a host: its own, else the most specific user entry covering it.
     function vdEntryFor(host) {
         const all = cfg.videoDelays || {};
@@ -11409,8 +11429,14 @@
             const g = groups.get(k);
             if (!g.some(function (x) { return x.thumb === thumb; })) g.push({ el: n, thumb: thumb });
         });
-        let best = [];
-        groups.forEach(function (g) { if (g.length > best.length) best = g; });
+        const list = Array.from(groups.values());
+        const pick = galChoose(list.map(function (g) {
+            return g.map(function (x) {
+                const a = x.el.closest('a[href]');
+                try { return a ? new URL(a.getAttribute('href'), href).href : ''; } catch (e) { return ''; }
+            });
+        }), href);
+        const best = pick >= 0 ? list[pick] : [];
         if (!quiet) dbg('gallery picked from the HTML', { href: href, groups: groups.size, pictures: best.length,
             chain: best.length ? domChain(best[0].el) : '' });
         return best;

@@ -878,7 +878,7 @@ const vdStart = src.indexOf('    const VDELAY_SAMPLES');
 const vdEnd = src.indexOf('    // The entry for a host');
 if (vdStart < 0 || vdEnd < 0) { console.error('vdLearn markers not found'); process.exit(1); }
 const vd = new Function(src.slice(vdStart, vdEnd) +
-    NL + 'return {vdLearn, vdRound, vdRuleFor, chainPrefix, pathPrefix, chainMatches, pathMatches, sharedHead, vdWaitOf, vdForget, vdWorked, areaLearn, areaTouch, areaAge, areaDrop, doorVerdict, doorKindVerdict, doorScanPick, doorChainOf, VDELAY_SAMPLES, VDELAY_FORGET};')();
+    NL + 'return {vdLearn, vdRound, vdRuleFor, chainPrefix, pathPrefix, chainMatches, pathMatches, sharedHead, vdWaitOf, vdForget, vdWorked, areaLearn, areaTouch, areaAge, areaDrop, doorVerdict, doorKindVerdict, doorScanPick, doorChainOf, galChoose, VDELAY_SAMPLES, VDELAY_FORGET};')();
 
 eq('vdRound rounds up to 50 ms', vd.vdRound(1001), 1050);
 eq('vdRound never goes under one step', vd.vdRound(10), 250);
@@ -1033,6 +1033,14 @@ const EP = 'img>a>div.mbphoto#>div.photosgrid>main';
 eq('door chain: the link segment on the picture level', vd.doorChainOf(EP, 'https://e.com/gallery/abc/Name/'), 'img.to-gallery>a>div.mbphoto#>div.photosgrid>main');
 eq('door chain: a numbered segment is #', vd.doorChainOf('img>a', 'https://e.com/12345-title'), 'img.to-#>a');
 eq('door chain: the site root', vd.doorChainOf('img>a', 'https://e.com/?id=4'), 'img.to-root>a');
+const GP = 'https://e.com/gallery/abc/Name/';
+const gl = function (seg, n) { const o = []; for (let i = 0; i < n; i++) o.push('https://e.com/' + seg + '/x' + i + '/'); return o; };
+eq('gallery group: 16 own photos beat a 20-card related-galleries strip', vd.galChoose([gl('gallery', 20), gl('photo', 16)], GP), 1);
+eq('gallery group: the biggest when it is the page\'s own', vd.galChoose([gl('gallery', 20), gl('photo', 62)], GP), 1);
+eq('gallery group: a results page keeps its gallery cards', vd.galChoose([gl('gallery', 40), gl('photo', 5)], 'https://e.com/search-photos/x/'), 0);
+eq('gallery group: too few own pictures leaves the strip', vd.galChoose([gl('gallery', 20), gl('photo', 3)], GP), 0);
+eq('gallery group: unlinked pictures count as own', vd.galChoose([gl('gallery', 20), ['', '', '', '', '']], GP), 1);
+eq('gallery group: none', vd.galChoose([], GP), -1);
 let dmix = null;
 ['a', 'b', 'c'].forEach(function (x) { dmix = vd.areaLearn(dmix && dmix.entry, vd.doorChainOf(EP, 'https://e.com/gallery/' + x + '/'), '/pics', 7, 'https://e.com/gallery/' + x + '/'); });
 eq('door chain: three gallery cards make an area', dmix.change, 'learned');
