@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.340.0
+// @version      0.341.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -11361,6 +11361,9 @@
     const GAL_FADE_MS = 200;
     const GAL_UPGRADE = 1.3;            // drawn this much larger than the thumbnail's file -> fetch the next size
     const GAL_CACHE = 300;              // fetched pages kept by URL
+    const GAL_KEPT_KEY = 'hzGalLists';  // sessionStorage: {href: {items, html, at}}, galleries read to their end, for Back and Forward
+    const GAL_KEPT_MAX = 20;
+    const GAL_KEPT_MS = 3600000;
     const GAL_TRIES = 4;                // bigger sizes tried per thumbnail
     const GAL_LAZY = ['data-src', 'data-lazy-src', 'data-original', 'data-lazy', 'data-echo', 'data-defer-src', 'data-url'];
     const GAL_MAX = Infinity;           // every picture the page has
@@ -11894,6 +11897,14 @@
     // Both reads at once: the plain HTML as soon as it holds GAL_HTML_ENOUGH; else the frame's report; if that fails, whatever the HTML had (not cached).
     function galLoad(href, log) {
         if (galCache.has(href)) { galTrace(href, 'load: already started or cached'); return galCache.get(href); }
+        const kept = galKept(href);
+        if (kept) {
+            galTrace(href, 'load: kept from an earlier visit in this tab (' + kept.length + ' pictures)');
+            galLists.set(href, kept);
+            const pk = Promise.resolve(kept);
+            galCache.set(href, pk);
+            return pk;
+        }
         galTrace(href, 'load start' + (log ? ' (preload)' : ''));
         let weak = false;
         const frame = galRender(href);
@@ -12950,6 +12961,34 @@
         });
     }
 
+    function galKeptAll() {
+        try { return JSON.parse(sessionStorage.getItem(GAL_KEPT_KEY) || '{}') || {}; } catch (e) { return {}; }
+    }
+
+    // A gallery read to its end: its list kept in this tab, so coming back to it needs no second read.
+    function galKeep(href, html) {
+        const list = galLists.get(href);
+        if (!list || !list.length) return;
+        const all = galKeptAll(), now = Date.now();
+        all[href] = { items: list.map(function (it) { const x = Object.assign({}, it); delete x.hqTried; if (x.hit) x.hit = { url: x.hit.url, w: x.hit.w, h: x.hit.h, video: !!x.hit.video }; return x; }), html: !!html, at: now };
+        const keys = Object.keys(all).filter(function (k) { return now - all[k].at < GAL_KEPT_MS; }).sort(function (a, b) { return all[a].at - all[b].at; });
+        const out = {};
+        keys.slice(-GAL_KEPT_MAX).forEach(function (k) { out[k] = all[k]; });
+        for (let n = Object.keys(out).length; n > 0; n--) {
+            try { sessionStorage.setItem(GAL_KEPT_KEY, JSON.stringify(out)); return; }
+            catch (e) { delete out[Object.keys(out)[0]]; }      // full: drop the oldest and try again
+        }
+    }
+
+    // A kept list for href, still fresh: read already, nothing to read again.
+    function galKept(href) {
+        const k = galKeptAll()[href];
+        if (!k || !Array.isArray(k.items) || !k.items.length || Date.now() - k.at > GAL_KEPT_MS) return null;
+        galGrown.add(href);
+        if (k.html) galGrowWhy.set(href, 'html');
+        return k.items;
+    }
+
     // While a gallery is open its page is read on in a frame that scrolls it, so pictures it mounts late join the set.
     function galGrow(href) {
         if (galGrowing === href || galGrown.has(href)) return;
@@ -12960,7 +12999,7 @@
         galRender(href, function (items) { galMore(href, items); }, function (why) {
             if (galGrowing === href) galGrowing = null;
             const html = /refused to load in a frame|^no report/.test(why);     // the frame gave nothing: its HTML is all there will ever be
-            if (why === 'grown' || why === 'reported' || html) galGrown.add(href);
+            if (why === 'grown' || why === 'reported' || html) { galGrown.add(href); galKeep(href, html); }
             if (html) galGrowWhy.set(href, 'html');
             else if (!galGrown.has(href)) galGrowWhy.set(href, why);
             galTrace(href, 'reading on: ' + why);
@@ -13007,6 +13046,7 @@
             if (ended || sizing) return;
             ended = true;
             if (lg) lg.end(why, bytes);
+            if (galGrown.has(set.href)) galKeep(set.href, galGrowWhy.get(set.href) === 'html');     // with the originals found, a return skips the guessing
             nextWarmReport();
             dbg('gallery originals: ' + why, { href: set.href, pictures: imgs.length, found: got, bytes: humanBytes(bytes) });
         };
@@ -13528,14 +13568,17 @@
                 if (at > Date.now()) await new Promise(function (res) { setTimeout(res, at - Date.now()); });
                 if (tok.cancelled || !dlqMine(run.origin)) { d.stop(); return; }
                 const item = job.items[i], q = lg && lg.req();
-                let hit = null, why = '';
-                try { hit = await galBestOf(item, tok); } catch (e) { hit = null; why = String(e); }
-                if (!hit || !hit.url) why = why || 'no full-size file was found for it';
-                const ok = hit && hit.url && !tok.cancelled ? await new Promise(function (res) {
-                    const t = setTimeout(function () { why = 'no answer in ' + Math.round(SAVE_FETCH_MS / 1000) + ' s'; res(false); }, SAVE_FETCH_MS);
-                    saveOriginal(hit.url, true, function () { clearTimeout(t); res(true); }, job.href,
-                        function (w) { clearTimeout(t); why = 'the download failed: ' + w; dbg('download all: a picture failed', { url: hit.url, error: w }); res(false); });
-                }) : false;
+                let hit = null, why = '', ok = false;
+                try {       // a throw here would end this worker with its picture left in flight, and the queue would never restart
+                    try { hit = await galBestOf(item, tok); } catch (e) { hit = null; why = String(e); }
+                    if (!hit || !hit.url) why = why || 'no full-size file was found for it';
+                    ok = hit && hit.url && !tok.cancelled ? await new Promise(function (res) {
+                        const t = setTimeout(function () { why = 'no answer in ' + Math.round(SAVE_FETCH_MS / 1000) + ' s'; res(false); }, SAVE_FETCH_MS);
+                        Promise.resolve(saveOriginal(hit.url, true, function () { clearTimeout(t); res(true); }, job.href,
+                            function (w) { clearTimeout(t); why = 'the download failed: ' + w; dbg('download all: a picture failed', { url: hit.url, error: w }); res(false); }))
+                            .catch(function (e) { clearTimeout(t); why = 'saving threw: ' + e; res(false); });
+                    }) : false;
+                } catch (e) { ok = false; why = 'threw: ' + e; dbg('download all: a picture threw', String(e)); }
                 if (q) q.done({ status: ok ? 200 : 0 });
                 if (tok.cancelled) return;
                 if (ok) galSavedItem(job.href, item);
@@ -15219,7 +15262,7 @@
 
     if (isTopFrame) {
         document.addEventListener('scroll', galScroll, { capture: true, passive: true });
-        window.addEventListener('pagehide', function () { if (galPreLog) { galPreLog.end('cut'); galPreLog = null; } dlqRelease(); dlqPresence(false); });
+        window.addEventListener('pagehide', function () { if (galPreLog) { galPreLog.end('cut'); galPreLog = null; } dlqHalt(); dlqPresence(false); });     // a save in flight never calls back after a bfcache freeze: its picture is redone
         setTimeout(function () { dlqTick(); setInterval(dlqTick, DLQ_TICK_MS); dlqFindHere(); }, 800);
         window.addEventListener('beforeunload', function (e) {     // the site's last tab with downloads left: the browser asks whether to leave (they pause)
             if (Date.now() - dlqNavAt < 3000 || !dlqBusyHere() || dlqOtherTabs()) return;

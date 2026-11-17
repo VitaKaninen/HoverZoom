@@ -14,6 +14,10 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
 
 ## Peek, pages, reading on (v0.282.0; INTERACTION.md `G1`, `G6`, `G7`)
 
+- **Lists kept per tab** (user, v0.341.0: "it does not remember any of the links"): a gallery read to its end
+  (`galGrown`) is written to sessionStorage `hzGalLists` (`galKeep`; again when its originals are found, with each
+  item's `hit` minus `display`); `galLoad` takes it (`galKept`, 1 h, 20 galleries) before any fetch, and marks the
+  href grown, so ⤓ is ready at once and no frame reads it again.
 - **Peek**: a left press on a door's chip (`galChipClickable`, capture on the chip) peeks, or closes
   the open one; where `siteEnabled()`, a plain middle press on `doorAt()` does too, but only with `cfg.galleryMiddle` (default off, user
   2026-11-12). Both set
@@ -339,6 +343,21 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
     there. A reload, Back or a typed address cannot be told from a close, so those warn too. The text is the
     browser's own.
   - Downloads: `DLQ_WORKERS` 3, starts `DLQ_GAP_MIN..MAX` 400–1200 ms apart (Forum Stumbler's pacing). us-log `saveall`.
+  - **Progress is one bar** (user, v0.340.0): saved blue, failed red, rest grey (`.pd`/`.pf`). The old segments
+    used class `b` for in-flight, which the gallery sheet's `.strip .b` (button, 24 px) made tall: grep a class in
+    both sheets before reusing it.
+  - **Originals are fetched once, as bytes** (user, v0.340.0: "why download them a second time"): `galHqAll` and
+    `galBestOf` add the gallery's hosts to `bytesHosts`; `probeImage` there fetches with GM_xhr (`bytesFor(url, true)`)
+    and shows from the blob, kept in `heldBlobs` up to `HELD_MAX` 512 MB (oldest dropped with its `probeCache`/
+    `bytesCache` entries, so the next ask fetches again). `saveOriginal` saves a held blob (`saveHeld`; refused →
+    `saveAsServed`, which keeps the folder — `saveBlob`'s link fallback would not). A host whose bytes fail while its
+    `<img>` loads goes in `bytesNoHosts` for the page. Measured why not the HTTP cache: a page `fetch` after an `<img>`
+    load of the same file went to the network (Chrome, eporner), and an `<img>` in between broke even fetch→fetch reuse.
+    `galFlyUpgrade` and `plKeepImage` use `display` too, or they load the file a second time.
+  - **A worker never dies on a throw** (v0.341.0): its body is in try/catch, and `saveOriginal`'s promise is caught.
+    A throw left the picture at `1` and the run looking alive, so the queue never restarted.
+  - **`pagehide` halts this page's run** (`dlqHalt`, v0.341.0): a save in flight never calls back after a bfcache
+    freeze (user: "it stalls when I hit back"); on return the ticks claim it again and `1`s are redone.
   - **In the gallery's strip while a gallery is open** (user, v0.339.0: it moved round the page as the unit
     resized): `dlStripHome` moves the `.dl` row (`dlStripEl.__row`) into `galSt.el` as its first row, above the
     page row, and back on close; `galStripDl` adds `GAL_STRIP_DL` 26 to `galStripH()`, and the change goes through
@@ -349,7 +368,7 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   - **Strip** (`dlStripPaint`/`dlStripPlace`, own host, in `ours()` and `galTopAt`; `dlStripEl` is the wrapper
     holding the failed list and the strip): above the widget (`tw.box`, not `tw.rect`, which is the dock's
     {x,y,w,h}), else above the gallery's strip/picture, else bottom-right. Text = this origin's first job with work
-    left, else its first with failures; `DLQ_SEGS` 30 segments of the block holding the first unfinished item.
+    left, else its first with failures; One bar of the whole job.
     Shown only in tabs of a job's origin.
   - Fixtures: `test-pages/door-search.html` shims `GM_listValues`/`GM_download` (`window.__saved`; `window.__fail`
     a RegExp of URLs that fail); seed a `hzDlJob:` key in localStorage to drive it. ⤓ for real: set
