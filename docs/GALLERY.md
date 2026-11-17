@@ -212,6 +212,10 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   item that is this picture (same URL, `sameStem`, or `galSameFile` — one file name ends with the
   other, nsfw.xxx prefixes `amateur-`) → `galLinkedHit`, else the card's URL-rule candidates. The yellow
   ring and Close tab of v0.292.0 are gone (user: blue again).
+- **Faded while the pointer is off it** (user, v0.335.0: it is in `galTop`, above the preview, and
+  covered previews of cells near the corner): `.rest`, added once the flight lands, sets opacity
+  `GAL_FLY_REST` 0.3 unless `:hover`, `.edit` or `.asking`. An `in` strip fades with it (it is inside
+  `.fly`); a `dock`/`out` strip does not. `galFlyBack` removes `.rest`, so it flies back opaque.
 - **A left click or middle press on it closes** (v0.294.0: middle had stopped closing once the hole
   left the card — the document handler's middle branch only `preventDefault`s presses on our layer;
   the `.fly` listener closes and sets `galMidAt` so `galMidEat` eats the auxclick). Left closes on

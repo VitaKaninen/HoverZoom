@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.334.0
+// @version      0.335.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -11355,6 +11355,7 @@
     const GAL_SAVED_MARK = 'data-hz-saved';
     let galSeen = {}, galMarkTimer = 0;
     const GAL_FLY_MS = 320;             // the clicked picture's flight to the corner and back
+    const GAL_FLY_REST = 0.3;           // the clicked picture's opacity while the pointer is off it
     const GAL_FLY_FRAC = 0.2;           // its height there, of the window's (user)
     let galOn = false, galTap = false, galMidAt = 0;      // a peek is up and locked; Ctrl down with nothing else yet
     const GAL_PEND_MS = 3000;           // the pressed result lights up only if its gallery is not on screen by then
@@ -11943,6 +11944,7 @@
             '.fly .pic{position:relative;flex:1 1 0;min-height:0}' +
             '.fly img{width:100%;height:100%;object-fit:cover;border-radius:0;box-shadow:none;opacity:1}' +
             '.fly.edit{outline:2px dashed #f9e2af;outline-offset:3px}' +
+            '.fly.rest:not(:hover):not(.edit):not(.asking){opacity:' + GAL_FLY_REST + '}' +
             '.hd{position:fixed;z-index:6;width:' + GAL_HD + 'px;height:' + GAL_HD + 'px;pointer-events:auto}.hd.tl,.hd.br{cursor:nwse-resize}.hd.tr,.hd.bl{cursor:nesw-resize}' +
             '.fly .bt{display:none;gap:8px;position:absolute;left:50%;top:50%;transform:translate(-50%,-50%)}' +
             '.fly .bt.ask{display:none;flex-wrap:wrap;justify-content:center;width:max-content;max-width:90%}.fly.asking .bt{display:none}.fly.asking .bt.ask{display:flex}' +
@@ -14178,6 +14180,7 @@
         void el.offsetWidth;
         el.classList.add('on');
         el.style.transform = 'none';
+        setTimeout(function () { if (!el.classList.contains('back')) el.classList.add('rest'); }, GAL_FLY_MS);
         galFly = { el: el, img: img, pic: pic, href: href, asp: hr.width && hr.height ? hr.width / hr.height : 1, pic0: pw, hds: hds };
         galStripBuild();
         if (!galCur || galCur.href !== href) galStripBlank();
@@ -14207,7 +14210,7 @@
         f.hds.forEach(function (hd) { hd.remove(); });
         const el = f.el, H = galHole || { x: 0, y: 0, w: 1, h: 1 };
         if (galSt) { galSt.el.hidden = true; if (galSt.el.parentNode === el) galTop.appendChild(galSt.el); }
-        el.classList.remove('joined', 'edit', 'asking');
+        el.classList.remove('joined', 'edit', 'asking', 'rest');
         el.style.pointerEvents = 'none';
         const r = f.pic.isConnected ? galHoleRect(f.pic) : null;
         const onScreen = r && r.width > 0 && r.bottom > 0 && r.top < vpH() && r.right > 0 && r.left < vpW();
