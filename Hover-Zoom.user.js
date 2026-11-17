@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.336.0
+// @version      0.337.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -14211,6 +14211,7 @@
         galStripBuild();
         if (!galCur || galCur.href !== href) galStripBlank();
         galStripPlace();
+        galDlShow();        // galToolsBuild ran before el was in the page, so its own call skipped the button
     }
 
     // One file name ends with the other (a site prefixing a category to the same picture's name), 8+ characters.
