@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.339.0
+// @version      0.340.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -1532,6 +1532,11 @@
     const bytesMime = new Map();    // url -> the fetched file's type, for a saved file's extension
     const liveBlobs = [];           // object URLs held open, oldest first
     const BYTES_MAX = 12;           // enough for a tour's window; the oldest is revoked
+    const HELD_MAX = 512 * 1024 * 1024; // gallery originals kept as bytes for saving; the oldest go first
+    const heldBlobs = new Map();    // url -> {blob, objUrl}: a gallery's originals, fetched once for the preview and the save
+    let heldBytes = 0;
+    const bytesHosts = new Set();   // hosts of an opened gallery's pictures: fetched as bytes (this page only)
+    const bytesNoHosts = new Set(); // ...that would not serve the bytes but did serve the picture
 
     function keepBlob(url, objUrl) {
         liveBlobs.push({ url: url, objUrl: objUrl });
@@ -1543,27 +1548,49 @@
     }
 
     // blob: where the policy allows it, data: otherwise — every blocked engine measured takes one.
-    async function probeBytes(url) {
+    async function probeBytes(url, hold) {
         const blob = await fetchBlob(url);
         if (!blob) return null;
         bytesMime.set(url, blob.type || '');
         if (!blobRefused) {
             const objUrl = URL.createObjectURL(blob);
             const dim = await measureSrc(objUrl);
-            if (dim) { keepBlob(url, objUrl); return { w: dim.w, h: dim.h, display: objUrl }; }
+            if (dim) { if (hold) holdBlob(url, blob, objUrl); else keepBlob(url, objUrl); return { w: dim.w, h: dim.h, display: objUrl }; }
             URL.revokeObjectURL(objUrl);
         }
         const data = await blobToDataUrl(blob);
         if (!data) return null;
         const dim = await measureSrc(data);
+        if (dim && hold) holdBlob(url, blob, null);
         return dim ? { w: dim.w, h: dim.h, display: data } : null;
     }
 
-    function bytesFor(url) {
+    function bytesFor(url, hold) {
         if (bytesCache.has(url)) return bytesCache.get(url);
-        const p = probeBytes(url);
+        const p = probeBytes(url, hold);
         bytesCache.set(url, p);
         return p;
+    }
+
+    // A gallery original's bytes kept until HELD_MAX is passed; a dropped one is fetched again when next asked for.
+    function holdBlob(url, blob, objUrl) {
+        if (heldBlobs.has(url)) return;
+        heldBlobs.set(url, { blob: blob, objUrl: objUrl });
+        heldBytes += blob.size;
+        for (const [u, h] of heldBlobs) {
+            if (heldBytes <= HELD_MAX || heldBlobs.size <= 1) break;
+            heldBlobs.delete(u);
+            heldBytes -= h.blob.size;
+            bytesCache.delete(u);
+            probeCache.delete(u);
+            if (h.objUrl) URL.revokeObjectURL(h.objUrl);
+        }
+    }
+
+    // A gallery's pictures are fetched as bytes from here on: its thumbnails' hosts and its candidates'.
+    function galBytesHosts(item) {
+        if (!item || typeof GM_xmlhttpRequest !== 'function') return;
+        [item.thumb].concat(item.cands || []).forEach(function (u) { const h = u && hostOf(u); if (h) bytesHosts.add(h); });
     }
 
     // ---- how long to wait, and telling a dead host from a slow one. See TOUR.md §7.
@@ -1677,10 +1704,18 @@
     }
 
     async function probeImage(url) {
+        const host = hostOf(url);
+        let noBytes = false;
+        if (bytesHosts.has(host) && !bytesNoHosts.has(host) && /^https?:/i.test(url)) {
+            const b = await bytesFor(url, true);
+            if (b) return b;
+            bytesCache.delete(url);
+            noBytes = true;
+        }
         const deadlineAt = Date.now() + PROBE_TOTAL_MS;
         for (let i = 0; i < IMAGE_TRIES; i++) {
             const r = await imageAttempt(url, deadlineAt);
-            if (r.dim) return r.dim;
+            if (r.dim) { if (noBytes) { bytesNoHosts.add(host); dbg('bytes refused, the picture served: ' + host); } return r.dim; }
             // A refusal is not a failure: the bytes are still reachable. See E49.
             if (r.csp) { dbg('refused by the page CSP — fetching the bytes instead', url); return bytesFor(url); }
             if (r.stop) { dbg('gave up', { url: url, why: r.why || failureText(url) }); return null; }
@@ -5165,16 +5200,34 @@
     // Saving: converted when the setting covers the file's real format, else exactly as served.
     async function saveOriginal(url, quiet, done, page, fail) {
         if (quiet) saveFolderAsk();
-        if (cfg.saveConvert === 'off' || typeof GM_xmlhttpRequest !== 'function' || /^(data|blob):/.test(url)) { saveAsServed(url, quiet, done, page, fail); return; }
+        const held = heldBlobs.get(url);
+        const asServed = function () { if (held) saveHeld(held.blob, url, quiet, done, page, fail); else saveAsServed(url, quiet, done, page, fail); };
+        if (cfg.saveConvert === 'off' || (!held && typeof GM_xmlhttpRequest !== 'function') || /^(data|blob):/.test(url)) { asServed(); return; }
         if (!fail) toast('Saving…', 60000);
-        const buf = await fetchForSave(url);
+        const buf = held ? await held.blob.arrayBuffer().catch(function () { return null; }) : await fetchForSave(url);
         const fmt = buf ? sniffFormat(new Uint8Array(buf, 0, Math.min(4096, buf.byteLength))) : null;
-        if (!convertWanted(fmt)) { if (!fail) hideTip(); saveAsServed(url, quiet, done, page, fail); return; }
+        if (!convertWanted(fmt)) { if (!fail) hideTip(); asServed(); return; }
         if (!fail) toast('Converting ' + fmt.fmt.toUpperCase() + ' to ' + cfg.saveConvert.toUpperCase() + '…', 60000);
         const out = await convertBytes(buf, fmt);
         if (!out) { if (!fail) toast('Could not convert this ' + fmt.fmt.toUpperCase() + '; saved as it is', 3000); saveAsServed(url, quiet, done, page, fail); return; }
         if (!fail) hideTip();
         saveBlob(out, saveName(url, page, cfg.saveConvert), quiet, done, url, page, fail);
+    }
+
+    // Kept bytes saved into the folder; refused, the file is fetched and saved as usual.
+    function saveHeld(blob, url, quiet, done, page, fail) {
+        if (typeof GM_download !== 'function') { saveAsServed(url, quiet, done, page, fail); return; }
+        const obj = URL.createObjectURL(blob);
+        const back = function (why) {
+            URL.revokeObjectURL(obj);
+            dbg('saving the kept bytes was refused; fetching the file', { url: url, error: why });
+            saveAsServed(url, quiet, done, page, fail);
+        };
+        try {
+            GM_download({ url: obj, name: saveFolderFor(page) + saveName(url, page), saveAs: !quiet,
+                onload: function () { setTimeout(function () { URL.revokeObjectURL(obj); }, 60000); if (done) done(); },
+                onerror: function (r) { back(r && r.error); } });
+        } catch (e) { back(String(e)); }
     }
 
     function saveAsServed(url, quiet, done, page, fail) {
@@ -11143,7 +11196,7 @@
         if (plKeep.some(function (k) { return k.url === res.url; })) return;
         const im = new Image();
         if (noReferrerHere()) im.referrerPolicy = 'no-referrer';
-        im.src = res.url;
+        im.src = res.display || res.url;
         const bytes = Math.max(1, (res.w * res.h) || 0) * PL_BYTES_PER_PX;
         plKeep.push({ url: res.url, im: im, bytes: bytes });
         plKeepBytes += bytes;
@@ -11946,8 +11999,8 @@
             '.strip .dl{flex:none;display:flex;flex-direction:column;justify-content:center;gap:4px;height:' + (GAL_STRIP_DL - 4) + 'px;padding:0 2px;font:11px/14px system-ui,sans-serif}' +
             '.strip .dl .top{display:flex;align-items:center;gap:6px}.strip .dl .txt{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}' +
             '.strip .dl .x,.strip .dl .fb{flex:none;cursor:pointer;color:#f38ba8;padding:0 4px;border-radius:3px;white-space:nowrap}.strip .dl .x:hover,.strip .dl .fb:hover{background:var(--btnHover)}.strip .dl .fb[hidden]{display:none}' +
-            '.strip .dl .bar{display:flex;gap:1px;height:4px}.strip .dl .bar[hidden]{display:none}.strip .dl .bar i{flex:1 1 0;min-width:0;border-radius:1px;background:#45475a}' +
-            '.strip .dl .bar i.b{background:#f9e2af}.strip .dl .bar i.d{background:#89b4fa}.strip .dl .bar i.f{background:#f38ba8}' +
+            '.strip .dl .bar{display:flex;height:4px;border-radius:2px;overflow:hidden;background:#45475a}.strip .dl .bar[hidden]{display:none}.strip .dl .bar i{flex:none;height:100%}' +
+            '.strip .dl .bar i.pd{background:#89b4fa}.strip .dl .bar i.pf{background:#f38ba8}' +
             '.strip.out .dl{min-width:200px}' +
             '.strip.own{border:3px solid #89b4fa;box-shadow:0 0 14px 2px rgba(137,180,250,.55),0 8px 22px rgba(0,0,0,.6)}' +
             '.strip.edit:not(.in){outline:2px dashed #f9e2af;outline-offset:3px}' +
@@ -12945,6 +12998,7 @@
     function galHqAll(set, imgs) {
         imgs = imgs.filter(function (img) { return !(img.__hzItem && img.__hzItem.hqTried); });
         if (!imgs.length) return;
+        imgs.forEach(function (img) { galBytesHosts(img.__hzItem); });
         usLog.enable(cfg.logRequests !== false);
         const lg = usLog.start('origs', { host: pageHost(), pace: version().replace(/\?/g, '') + ' ' + GAL_HQ_PAR + ' at once', slowed: noRush(pageHost()) });
         const tok = set.hqTok = { cancelled: false, fresh: false };
@@ -12958,7 +13012,8 @@
         };
         const size = function (hit) {
             sizing++;
-            galBytes(hit.url).then(function (n) { bytes += n; })
+            const held = heldBlobs.get(hit.url);
+            (held ? Promise.resolve(held.blob.size) : galBytes(hit.url)).then(function (n) { bytes += n; })
                 .then(function () { sizing--; if (!running && (tok.cancelled || i >= imgs.length)) end(tok.cancelled ? 'cut' : 'done'); });
         };
         const next = function () {
@@ -13069,7 +13124,7 @@
         const hitOf = function (u, d) { return { url: u, w: d.w, h: d.h, video: !!d.video, duration: d.duration, display: d.display }; };
         if (item.hit) {             // found before: the misses ahead of it are not asked again
             const d = await probe(item.hit.url);
-            if (d) return item.hit;
+            if (d) return (item.hit = Object.assign({}, item.hit, { display: d.display }));
             item.hit = null;
         }
         const linked = await galLinkedHit(item, img, tok);
@@ -13174,6 +13229,7 @@
 
     // The best file for one listed picture, as the gallery's own preview finds it.
     function galBestOf(item, tok) {
+        galBytesHosts(item);
         return galResolve({ __hzItem: item, naturalWidth: 0, naturalHeight: 0, src: item.thumb, currentSrc: item.thumb }, tok);
     }
 
@@ -13249,7 +13305,6 @@
     const DLQ_GAP_MAX = 1200;
     const DLQ_LOCK_MS = 75000;          // a lock or tab not renewed this long is gone (a background tab's timers may run once a minute)
     const DLQ_TICK_MS = 2000;
-    const DLQ_SEGS = 30;                // segments the strip shows at once
     const dlqTab = Math.random().toString(36).slice(2, 10);
     let dlqRun = null;                  // this tab's work: {origin, owned, dl, nextAt}
     let dlqNavAt = 0;                   // a press on a link to another page of this site: leaving for it pauses nothing
@@ -13569,8 +13624,8 @@
             '.top{display:flex;align-items:center;gap:6px}.txt{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
             '.x{flex:none;cursor:pointer;color:#f38ba8;font-size:12px;line-height:12px;padding:1px 3px;border-radius:3px;user-select:none}.x:hover{background:#45475a}' +
             '.fb{flex:none;cursor:pointer;color:#f38ba8;padding:0 4px;border-radius:3px;user-select:none;white-space:nowrap}.fb:hover{background:#45475a}.fb[hidden]{display:none}' +
-            '.bar{display:flex;gap:1px;height:4px}.bar[hidden]{display:none}.bar i{flex:1 1 0;min-width:0;height:100%;border-radius:1px;background:#45475a}' +
-            '.bar i.b{background:#f9e2af}.bar i.d{background:#89b4fa}.bar i.f{background:#f38ba8}' +
+            '.bar{display:flex;height:4px;border-radius:2px;overflow:hidden;background:#45475a}.bar[hidden]{display:none}.bar i{flex:none;height:100%}' +
+            '.bar i.pd{background:#89b4fa}.bar i.pf{background:#f38ba8}' +
             '.fl{padding:4px 6px;max-height:min(50vh,360px);overflow:auto}.fl[hidden]{display:none}' +
             '.fh,.fg,.fr{display:flex;align-items:center;gap:6px}.fh{font-weight:600;margin-bottom:2px}' +
             '.fh .t,.fg .t,.fr .t{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
@@ -13678,12 +13733,10 @@
         dlStripEl.__fb.textContent = failedAll + ' failed ' + (dlFailOpen ? '▾' : '▴');
         const inGal = dlStripHome(true);
         setTip(dlStripEl.__x, inGal ? '' : left ? 'Stop this gallery\'s download' : 'Clear this gallery\'s list of failed pictures');
-        let first = 0;
-        while (first < n && st[first] !== '0' && st[first] !== '1') first++;
-        const from = Math.floor(Math.min(first, n - 1) / DLQ_SEGS) * DLQ_SEGS, to = Math.min(n, from + DLQ_SEGS);
-        while (bar.childNodes.length > to - from) bar.lastChild.remove();
-        while (bar.childNodes.length < to - from) bar.appendChild(document.createElement('i'));
-        for (let i = from; i < to; i++) bar.childNodes[i - from].className = st[i] === '2' ? 'd' : st[i] === '3' ? 'f' : st[i] === '1' ? 'b' : '';
+        if (bar.childNodes.length !== 2) { while (bar.firstChild) bar.firstChild.remove(); ['pd', 'pf'].forEach(function (c) { const i = document.createElement('i'); i.className = c; bar.appendChild(i); }); }
+        const pct = function (k) { return n ? (k / n * 100).toFixed(2) + '%' : '0'; };
+        bar.childNodes[0].style.width = pct(st.split('').filter(function (c) { return c === '2'; }).length);
+        bar.childNodes[1].style.width = pct(dlqFailed(st).length);
         setTip(dlStripEl.__txt, inGal ? '' : job.href + (job.note ? '\n' + job.note : ''));
         if (dlFailOpen && listed) dlFailPaint(here, sts);
         else { dlFailOpen = false; dlStripEl.__fail.hidden = true; }
@@ -14319,13 +14372,14 @@
             try { cands = collectCandidates(f.pic).map(function (c) { return c.url; }).filter(function (u) { return u !== src && !isVideoUrl(u); }).slice(0, GAL_TRIES); } catch (e) { /* none */ }
             for (const u of cands) {
                 const d = await probe(u, false);
-                if (d && !d.video && d.w > nat.w && sameShape(nat, d)) { hit = { url: u, w: d.w, h: d.h }; break; }
+                if (d && !d.video && d.w > nat.w && sameShape(nat, d)) { hit = { url: u, w: d.w, h: d.h, display: d.display }; break; }
             }
         }
         if (!hit || hit.video || galFly !== f) return;
         const big = new Image();
-        big.onload = function () { if (galFly === f || f.el.isConnected) f.img.src = hit.url; };
-        big.src = hit.url;
+        const src2 = hit.display || hit.url;
+        big.onload = function () { if (galFly === f || f.el.isConnected) f.img.src = src2; };
+        big.src = src2;
         dbg('gallery: the clicked picture at full size', { from: src, to: hit.url });
     }
 
