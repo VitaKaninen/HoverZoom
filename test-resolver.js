@@ -82,6 +82,8 @@ eq('query string does not defeat detection', looksLikeImage('https://example.com
 eq('fragment does not defeat detection', looksLikeImage('https://example.com/a.png#x'), true);
 eq('extensionless with format param', looksLikeImage('https://cdn.example.com/i/abc?format=webp'), true);
 eq('html page is not an image', looksLikeImage('https://example.com/photo/12345'), false);
+eq('trailing slash after the extension (porntrex get_image)', looksLikeImage('https://www.porntrex.com/get_image/14/d0d7/sources/0/768/34901.jpg/'), true);
+eq('extension mid-path is not an image', looksLikeImage('https://example.com/a.jpg/comments/'), false);
 
 // ---- upgrade rules
 has('strips resize query params',
