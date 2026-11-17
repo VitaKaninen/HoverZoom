@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.337.0
+// @version      0.338.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -12890,7 +12890,7 @@
         if (galCur && galCur.href === href) galPageNote(galCur);
         galRender(href, function (items) { galMore(href, items); }, function (why) {
             if (galGrowing === href) galGrowing = null;
-            const html = /refused to load in a frame/.test(why);     // its HTML is all there will ever be
+            const html = /refused to load in a frame|^no report/.test(why);     // the frame gave nothing: its HTML is all there will ever be
             if (why === 'grown' || why === 'reported' || html) galGrown.add(href);
             if (html) galGrowWhy.set(href, 'html');
             else if (!galGrown.has(href)) galGrowWhy.set(href, why);

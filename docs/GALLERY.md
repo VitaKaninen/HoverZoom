@@ -316,7 +316,7 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   - **⤓ only queues a gallery whose page was read to its end** (user v0.332.0: a page whose end we misjudge scrolls
     forever, and a background read would queue forever): `galGrown` has the href. Until then it is greyed with the
     count so far (`⤓ 123…`, `galDlShow` from `galMore`), and a press only says how many so far. Whole = the frame said
-    `grown`/`reported`, or it was refused (HTML is all there is: `galGrowWhy` `html`, a note on the job). Any other
+    `grown`/`reported`, or the frame gave nothing — refused, never loaded, or loaded without our script reporting (`no report …`; the user's browser, v0.338.0: eporner's frame never fired `load`) — so HTML is all there is: `galGrowWhy` `html`, a note on the job. Any other
     stop (`timed out` at `GAL_GROW_MAX_MS`, `froze`, `cancelled`) leaves it unavailable and says why; reopening
     reads again. Presses answer with `flash()` over the button (own popover, fades at 3 s, survives mouseleave —
     the tip box does not). Queueing drops this href's finished job: its failures are in the new one.
