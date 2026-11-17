@@ -28,6 +28,8 @@
   };
   var GM_setValue = function (key, val) { localStorage.setItem(key, val); };
   var GM_addValueChangeListener = function () {};
+  var GM_listValues = function () { return Object.keys(localStorage); };
+  var GM_deleteValue = function (key) { localStorage.removeItem(key); };
   var GM_registerMenuCommand = function () { return 'x'; };
   var GM_unregisterMenuCommand = function () {};
 </script>

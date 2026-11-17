@@ -289,30 +289,48 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   ⤓ `galDownloadAll` queues the gallery (`galBestOf` + `saveOriginal(…, fail)` per picture; `fail` skips the
   save path's toast and open-in-a-tab fallback, or a refused batch opens hundreds of tabs). A ⧉ copy-every-address
   button was removed at the user's word (v0.329.0).
-- **Download queue** (`dlq*`, user v0.331.0): lives in GM storage, so it survives navigation and tab closes.
-  - Keys: `hzDlJob:<id>` {href, origin, items, read: `reading`|`queued`, again, note}, `hzDlSt:<id>` one char per
-    item (0 to do, 1 in flight, 2 saved, 3 failed; written only by the working tab), `hzDlLock:<origin>` {tab, t}.
-    Needs `GM_listValues`/`GM_deleteValue`. Cancel (✕, or ⤓ again) deletes the job keys; workers check
-    `dlqAlive` before every write, or a late write resurrects the job.
+- **Download queue** (`dlq*`, user v0.331.0–v0.332.0): lives in GM storage, so it survives navigation and tab closes.
+  - Keys: `hzDlJob:<id>` {href, origin, items, read: `queued`, again, note}, `hzDlSt:<id>` one char per item (0 to
+    do, 1 in flight, 2 saved, 3 failed), `hzDlErr:<id>` {index: {why, n, url}} — both written only by the working
+    tab; `hzDlRetry:<id>` [index] any tab asks, the working tab takes (`dlqTakeRetries`) — never write `hzDlSt` from
+    another tab, the worker holds its own copy and overwrites it. `hzDlLock:<origin>` {tab, t}, `hzDlTab:<tab>`
+    {o, t} presence, `hzDlFind` the Page handoff. Needs `GM_listValues`/`GM_deleteValue`. Workers check `dlqAlive`
+    before every write, or a late write resurrects a cancelled job. A job with a `read` other than `queued` (v0.331.0's
+    background read) is dropped.
   - **One tab per origin works it** (`dlqTick` every 2 s claims the lock, works from the second tick). Jobs run only
-    in a tab of the gallery's own origin: `galLinkedHit` needs same-origin. `DLQ_LOCK_MS` is 75 s and the lock is
-    renewed before every download (`dlqMine`): a background tab's timers can run once a minute, and with 8 s the
-    other tab took over while the first was still downloading (pane, measured: both saved the same items).
-    `pagehide` releases the lock so the next page takes over at once. In-flight items (`1`) are redone by the next
-    owner: a download cut by navigation is not known to have landed, and a duplicate beats a lost picture.
-  - **Read whole before queueing** (user: an accurate count, 500 included): unless `galGrown` has the href, the
-    job is `reading` and the owner reads the page in its own frame (`galRender(…, solo)`: does not stop or get
-    stopped by hover reads; `DLQ_READ_MS` 15 min), merging by `galKeys`, saving every 1.5 s. An open gallery's
-    own read-on of the same href is waited for instead. Stopped short → again, `DLQ_READ_TRIES` 3, then it queues
-    what it has with `note` (shown in the toast). Frame refused → HTML. Each new page restarts the read (frames
-    die with their page); `beforeunload` asks before leaving while a read runs here. **⤓ greys out at
-    `DLQ_READ_MAX` 3 galleries reading** (user: never let reads pile up unseen; queued downloads do not count).
+    in a tab of the gallery's own origin: `galLinkedHit` needs same-origin. `DLQ_LOCK_MS` 75 s, renewed before every
+    download (`dlqMine`): a background tab's timers can run once a minute; with 8 s two tabs saved the same items.
+    `pagehide` releases the lock. In-flight items (`1`) are redone by the next owner: a duplicate beats a lost picture.
+  - **⤓ only queues a gallery whose page was read to its end** (user v0.332.0: a page whose end we misjudge scrolls
+    forever, and a background read would queue forever): `galGrown` has the href. Until then it is greyed with the
+    count so far (`⤓ 123…`, `galDlShow` from `galMore`), and a press only says how many so far. Whole = the frame said
+    `grown`/`reported`, or it was refused (HTML is all there is: `galGrowWhy` `html`, a note on the job). Any other
+    stop (`timed out` at `GAL_GROW_MAX_MS`, `froze`, `cancelled`) leaves it unavailable and says why; reopening
+    reads again. Presses answer with `flash()` over the button (own popover, fades at 3 s, survives mouseleave —
+    the tip box does not). Queueing drops this href's finished job: its failures are in the new one.
+  - **✕ and a second ⤓ ask** (`dlqAsk`, `confirm`). A finished job with failures is kept (strip "Saved n / N",
+    ✕ = clear); without failures it is dropped.
+  - **Failed list** (`dlFailPaint`, the strip's "n failed"): rows by gallery, `#i · why · n tries`, Retry; once a
+    retry failed too (`n ≥ 2`) **Page**: `dlqFindOpen` stores `hzDlFind` and opens the gallery page; `dlqFindHere`
+    on that page (same origin+path, within `DLQ_FIND_MS` 60 s) scrolls until an `img` whose any attribute or
+    srcset path matches `galItemKeys`, outlines it red and flashes the reason. `dlqFinding` blocks hovers and the
+    scroll-cancel while it scrolls (our scroll fires mouseover). Rows whose retry is in flight stay listed as
+    "Retrying…" (`dlqRetrying`), or the list closed itself mid-retry.
+  - **Leaving the site's last tab warns** (`beforeunload`, user v0.332.0: downloads pause with no tab of the site):
+    only with downloads left here and no other live `hzDlTab:` of the origin. Not for a left press on a same-origin
+    link, a same-origin form, or a Navigation API `navigate` to it within 3 s (`dlqNavAt`) — the queue carries on
+    there. A reload, Back or a typed address cannot be told from a close, so those warn too. The text is the
+    browser's own.
   - Downloads: `DLQ_WORKERS` 3, starts `DLQ_GAP_MIN..MAX` 400–1200 ms apart (Forum Stumbler's pacing). us-log `saveall`.
-  - **Strip** (`dlStripPaint`/`dlStripPlace`, own host after `<body>`, in `ours()` and `galTopAt`): above the widget
-    (`tw.box`, not `tw.rect`, which is the dock's {x,y,w,h}), else above the gallery's strip/picture, else bottom-right.
-    Text = this origin's first job, ✕ right; `DLQ_SEGS` 30 segments of the block holding the first unfinished item.
-    Shown only in tabs of a job's origin. Fixture: `test-pages/door-search.html` shims `GM_listValues`/`GM_download`
-    (`window.__saved`); seed a `hzDlJob:` key in localStorage to drive it.
+  - **Strip** (`dlStripPaint`/`dlStripPlace`, own host, in `ours()` and `galTopAt`; `dlStripEl` is the wrapper
+    holding the failed list and the strip): above the widget (`tw.box`, not `tw.rect`, which is the dock's
+    {x,y,w,h}), else above the gallery's strip/picture, else bottom-right. Text = this origin's first job with work
+    left, else its first with failures; `DLQ_SEGS` 30 segments of the block holding the first unfinished item.
+    Shown only in tabs of a job's origin.
+  - Fixtures: `test-pages/door-search.html` shims `GM_listValues`/`GM_download` (`window.__saved`; `window.__fail`
+    a RegExp of URLs that fail); seed a `hzDlJob:` key in localStorage to drive it. ⤓ for real: set
+    `galleryMiddle` in `hoverZoomSettings`, synthetic middle mousedown+mouseup on `#d7 img` (door-grow, 150).
+    The hidden pane fires no scroll events, so `door-grow.html` grows for the finder only when they are dispatched.
 - **Unopened galleries load at most `NEXT_VIDEOS` 3 clips ahead** (`nextRun`, user v0.331.0); opening one is the
   normal `galHqAll`. Closing a gallery drops the slideshow's buffered clips (`plVidsDrop`), which kept loading.
 - **A cell's preview asks the picture's own page first** (`galLinkedHit`, v0.292.0): its `og:image`

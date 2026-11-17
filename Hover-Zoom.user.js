@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.331.0
+// @version      0.332.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -7085,7 +7085,7 @@
         if (e.isTrusted) { twNear(e.clientX, e.clientY); if (placed) thruSync(e.clientX, e.clientY); }
         if (placed || priming || hotQuiet) return;
         if (galCur || (galOn && galWant)) return;      // an open gallery: its cells preview on their own
-        if (drag || twBusy()) return;
+        if (drag || twBusy() || dlqFinding) return;
         if (ours(e.target)) return;         // on our own overlay
         if (!siteEnabled() || CAPTCHA_HERE) return;
         if (mouseDown) return;
@@ -7379,7 +7379,7 @@
     }
 
     function onOut(e) {
-        if (placed || drag || twStarting) return;      // twStarting: tourFollow() scrolls the page out from under the pointer
+        if (placed || drag || twStarting || dlqFinding) return;      // twStarting: tourFollow() scrolls the page out from under the pointer
         const to = e.relatedTarget;
         if (suppressed) {
             const inside = (to && suppressed.contains && suppressed.contains(to)) ||
@@ -7527,7 +7527,7 @@
         releaseSliders();
     }, true);
     window.addEventListener('scroll', perfWrap(function onScrollCancel(e) {
-        if (!placed && !twStarting && !panelOwns(e)) cancel();     // twStarting: tourFollow() scrolls
+        if (!placed && !twStarting && !dlqFinding && !panelOwns(e)) cancel();     // twStarting: tourFollow() scrolls
     }, 'event'), true);
     // No keyup ever comes for a modifier held through Alt+Tab or Ctrl+Tab, so blur forgets it.
     window.addEventListener('blur', function () {
@@ -9086,6 +9086,7 @@
     const TW_PAGE_TOP = 8;          // px left above a page's first picture (boot runs twRefresh: keep above it)
     const TW_PAGE_MIN_PER = 4;      // the page row shows only when a page holds this many pictures on average
     let twStarting = null;      // the token of a tour being opened from the widget
+    let dlqFinding = false;     // a failed download's Page is scrolling this page to find it
     let twRecountTimer = 0;
     let twLoadTimer = 0;
     const TW_HELP_MS = 1000;    // the widget's help waits longer than a button's tip
@@ -11320,6 +11321,7 @@
     const GAL_PILL = 'data-hz-marks';          // one dark pill per picture holding chip, tick, disc
     let galPeek = false, galPeekTapAt = 0, galGrowing = null, galGrowEnd = null, galChipHot = null, galLeftAt = 0;
     const galGrown = new Set(), galLists = new Map();
+    const galGrowWhy = new Map();       // href -> why reading its page stopped short of the end, or 'html' when only its HTML could be read
     const galCache = new Map();         // href -> Promise of [{thumb, ss, cands, base}] | null | 'cancel'
     let galFrameStop = null;
     let galHoverTimer = 0, galPt = { x: 0, y: 0 }, galMovedAt = 0, galLaidAt = 0, galStill = null, galStripOne = true;
@@ -12832,13 +12834,18 @@
     function galGrow(href) {
         if (galGrowing === href || galGrown.has(href)) return;
         galGrowing = href;
+        galGrowWhy.delete(href);
         galTrace(href, 'reading on: start');
         if (galCur && galCur.href === href) galPageNote(galCur);
         galRender(href, function (items) { galMore(href, items); }, function (why) {
             if (galGrowing === href) galGrowing = null;
-            if (why === 'grown') galGrown.add(href);
+            const html = /refused to load in a frame/.test(why);     // its HTML is all there will ever be
+            if (why === 'grown' || why === 'reported' || html) galGrown.add(href);
+            if (html) galGrowWhy.set(href, 'html');
+            else if (!galGrown.has(href)) galGrowWhy.set(href, why);
             galTrace(href, 'reading on: ' + why);
             if (galCur && galCur.href === href) galPageNote(galCur);
+            galDlShow();
         }).then(function (v) { if (Array.isArray(v)) galMore(href, v); });
     }
 
@@ -12856,6 +12863,7 @@
         add.forEach(function (it) { base.push(it); });
         galTrace(href, 'reading on: +' + add.length + ' (' + base.length + ' known)');
         if (galCur && galCur.href === href) { galFeed(galCur); galPageNote(galCur); }
+        galDlShow();
     }
 
     const galHqLive = new Set();         // originals being fetched now, for the open diagnostics
@@ -13072,7 +13080,7 @@
             bar.appendChild(b);
             return b;
         };
-        const dl = tool('⤓', 'Download every picture of this gallery not saved yet, into the folder under Settings, Saving · click again to stop',
+        const dl = tool('⤓', 'Download every picture of this gallery not saved yet, into the folder under Settings, Saving · works once the whole page has been read · click again to stop',
             function () { galDownloadAll(href); });
         tool('↗', 'Open the gallery\'s page in a new tab', function () { openOriginal(href); });
         pw.appendChild(bar);
@@ -13080,19 +13088,19 @@
         galDlShow();
     }
 
-    // The ⤓ on screen: its gallery's progress, or greyed while too many galleries are still being read.
+    // The ⤓ on screen: its gallery's progress, or greyed with the count so far until its page has been read to the end.
     function galDlShow(jobs) {
         const g = galDlBtn, b = g && g.btn;
         if (!b || !b.isConnected) return;
         jobs = jobs || dlqJobs();
-        const job = jobs.find(function (j) { return j.href === g.href; });
-        const full = !job && !galGrown.has(g.href) && dlqReading(jobs) >= DLQ_READ_MAX;
-        if (job && job.read === 'queued') {
+        const job = jobs.find(function (j) { return j.href === g.href && dlqLeft(dlqStates(j)) > 0; });
+        const wait = !job && !galGrown.has(g.href);
+        if (job) {
             const st = dlqStates(job);
             b.textContent = '⤓ ' + (st.length - dlqLeft(st)) + ' / ' + st.length;
-        } else b.textContent = job ? '⤓ …' : '⤓';
-        b.style.opacity = full ? '0.35' : '';
-        b.style.cursor = full ? 'not-allowed' : '';
+        } else b.textContent = wait ? '⤓ ' + (galLists.get(g.href) || []).length + '…' : '⤓';
+        b.style.opacity = wait ? '0.45' : '';
+        b.style.cursor = wait ? 'not-allowed' : '';
         if (b.parentNode) b.parentNode.classList.toggle('busy', !!job);
     }
 
@@ -13101,49 +13109,84 @@
         return galResolve({ __hzItem: item, naturalWidth: 0, naturalHeight: 0, src: item.thumb, currentSrc: item.thumb }, tok);
     }
 
-    // ⤓: queue the whole gallery (read to its end first, in whichever tab of its site is open), or stop its queued download.
+    // A note over an element that fades by itself; no buttons, and leaving the element does not end it.
+    let flashEl = null;
+    function flash(el, text, ms) {
+        if (flashEl) flashEl.remove();
+        const h = flashEl = document.createElement('div');
+        h.setAttribute('popover', 'manual');
+        const t = document.createElement('div');
+        t.style.cssText = 'max-width:280px;padding:3px 6px;border-radius:4px;background:#1e1e2e;color:#cdd6f4;border:1px solid #45475a;' +
+            'font:11px/1.45 system-ui,sans-serif;white-space:pre-wrap;overflow-wrap:anywhere;box-shadow:0 2px 8px rgba(0,0,0,.45);transition:opacity .4s';
+        t.textContent = text;
+        h.attachShadow({ mode: 'open' }).appendChild(t);
+        h.style.cssText = 'all:initial;display:block;position:fixed;left:0;top:0;width:max-content;max-width:280px;margin:0;padding:0;border:0;' +
+            'background:none;overflow:visible;z-index:2147483647;pointer-events:none';
+        document.documentElement.appendChild(h);
+        try { h.showPopover(); } catch (e) { /* no popover API */ }
+        const r = el.getBoundingClientRect(), b = h.getBoundingClientRect();
+        let y = r.top - 6 - b.height;
+        if (y < 4) y = r.bottom + 6;
+        h.style.left = Math.max(4, Math.min(vpW() - 4 - b.width, Math.round(r.left + r.width / 2 - b.width / 2))) + 'px';
+        h.style.top = Math.max(4, Math.round(y)) + 'px';
+        setTimeout(function () {
+            t.style.opacity = '0';
+            setTimeout(function () { h.remove(); if (flashEl === h) flashEl = null; }, 450);
+        }, ms || 3000);
+    }
+
+    // ⤓: queue the whole gallery once its page has been read to the end, or (asked first) stop its download.
     function galDownloadAll(href) {
+        const btn = galDlBtn && galDlBtn.href === href && galDlBtn.btn.isConnected ? galDlBtn.btn : null;
+        const say = function (t) { if (btn) flash(btn, t, 3000); else toast(t, 3000); };
         const jobs = dlqJobs();
-        const mine = jobs.find(function (j) { return j.href === href; });
-        if (mine) { dlqCancel(mine.id); toast('Download of this gallery stopped', 2500); return; }
-        const whole = galGrown.has(href), list = galLists.get(href) || [];
-        if (!whole && dlqReading(jobs) >= DLQ_READ_MAX) {
-            toast(DLQ_READ_MAX + ' galleries are still being read to their end; ⤓ works again once one is done', 4000);
+        const mine = jobs.find(function (j) { return j.href === href && dlqLeft(dlqStates(j)) > 0; });
+        if (mine) { if (dlqAsk(mine)) { dlqCancel(mine.id); say('Download of this gallery stopped'); } return; }
+        const list = galLists.get(href) || [], why = galGrowWhy.get(href);
+        if (!galGrown.has(href)) {
+            say(why ? 'Found ' + list.length + ' pictures, but reading the page stopped before its end (' + why + '), so the full count is not known. Close and reopen the gallery to read it again.'
+                : 'Found ' + list.length + ' pictures so far. ⤓ works once the whole page has been read and the full count is known.');
             return;
         }
         let origin = '';
         try { origin = new URL(href).origin; } catch (e) { return; }
         let again = false;
-        if (whole && list.length) {
-            const saved = galList(GAL_SAVED_KEY);
-            if (list.every(function (it) { return saved.has(it.thumb); })) {
-                if (!window.confirm('All ' + list.length + ' pictures of this gallery are saved already. Save them again?')) return;
-                again = true;
-            }
+        const saved = galList(GAL_SAVED_KEY);
+        if (list.length && list.every(function (it) { return saved.has(it.thumb); })) {
+            if (!window.confirm('All ' + list.length + ' pictures of this gallery are saved already. Save them again?')) return;
+            again = true;
         }
         saveFolderAsk();
+        jobs.forEach(function (j) { if (j.href === href) dlqDrop(j.id); });     // one kept for its failures: they are in this one
         const job = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), href: href, origin: origin,
-            made: Date.now(), items: list.slice(), read: 'reading', again: again, note: '' };
-        if (whole) dlqQueued(job, 'grown');
-        else dlqPut(job);
+            made: Date.now(), items: list.slice(), read: 'queued', again: again,
+            note: why === 'html' ? 'read from the page\'s HTML; pictures it adds as it scrolls may be missing' : '' };
+        const n = dlqQueued(job);
+        say(n ? 'Added ' + n + ' to the queue' + (job.skipped ? ' · ' + job.skipped + ' saved already' : '') + (job.note ? ' · ' + job.note : '')
+            : list.length ? 'Every picture of this gallery is saved already' : 'No pictures found in this gallery');
         dlqTick();
     }
 
     // ---- the download queue: kept in the manager's storage so it outlives the page; one tab per site works it
-    const DLQ_JOB = 'hzDlJob:';         // + id: {id, href, origin, made, items, read: 'reading'|'queued', again, note, skipped}
+    const DLQ_JOB = 'hzDlJob:';         // + id: {id, href, origin, made, items, read: 'queued', again, note, skipped}
     const DLQ_ST = 'hzDlSt:';           // + id: one char per item, 0 to do, 1 in flight, 2 saved, 3 failed; only the working tab writes it
+    const DLQ_ERR = 'hzDlErr:';         // + id: {index: {why, n, url}}, a failed picture's last error and attempts; only the working tab writes it
+    const DLQ_RETRY = 'hzDlRetry:';     // + id: [index], failed pictures any tab asked to try again; the working tab takes them
     const DLQ_LOCK = 'hzDlLock:';       // + origin: {tab, t}, the tab working that site's queue
+    const DLQ_TABP = 'hzDlTab:';        // + tab: {o: origin, t}, a tab of a site with a queue, renewed each tick
+    const DLQ_FIND = 'hzDlFind';        // {href, item, i, n, why, at}: the page a failed picture's Page opened, to find it on
+    const DLQ_FIND_MS = 60000;          // a find older than this is not for this page; also the longest it scrolls
     const DLQ_WORKERS = 3;              // downloads at once, at most
     const DLQ_GAP_MIN = 400;            // ms between download starts, random in this range
     const DLQ_GAP_MAX = 1200;
-    const DLQ_READ_MAX = 3;             // galleries still being read before ⤓ waits
-    const DLQ_READ_MS = 900000;         // longest one reading of a gallery's page
-    const DLQ_READ_TRIES = 3;           // readings that stopped short before the queue takes what was found
-    const DLQ_LOCK_MS = 75000;          // a lock not renewed this long is free (a background tab's timers may run once a minute)
+    const DLQ_LOCK_MS = 75000;          // a lock or tab not renewed this long is gone (a background tab's timers may run once a minute)
     const DLQ_TICK_MS = 2000;
     const DLQ_SEGS = 30;                // segments the strip shows at once
     const dlqTab = Math.random().toString(36).slice(2, 10);
-    let dlqRun = null;                  // this tab's work: {origin, owned, read, dl, nextAt}
+    let dlqRun = null;                  // this tab's work: {origin, owned, dl, nextAt}
+    let dlqNavAt = 0;                   // a press on a link to another page of this site: leaving for it pauses nothing
+    let dlqPresent = false;
+    let dlFailOpen = false;             // the strip's failed list is open
 
     function dlqJobs() {
         if (typeof GM_listValues !== 'function') return [];
@@ -13165,34 +13208,58 @@
         return s.length === job.items.length ? s : s.slice(0, job.items.length) + '0'.repeat(Math.max(0, job.items.length - s.length));
     }
     function dlqLeft(st) { let n = 0; for (let i = 0; i < st.length; i++) if (st[i] === '0' || st[i] === '1') n++; return n; }
-    function dlqReading(jobs) { return jobs.filter(function (j) { return j.read === 'reading'; }).length; }
+    function dlqFailed(st) { const o = []; for (let i = 0; i < st.length; i++) if (st[i] === '3') o.push(i); return o; }
+    function dlqRetrying(job, st) { const e = dlqErrs(job.id); return Object.keys(e).map(Number).filter(function (i) { return st[i] === '0' || st[i] === '1'; }); }
+    function dlqErrs(id) { try { return JSON.parse(GM_getValue(DLQ_ERR + id, '{}')) || {}; } catch (e) { return {}; } }
+    function dlqRetries(id) { try { const r = JSON.parse(GM_getValue(DLQ_RETRY + id, '[]')); return Array.isArray(r) ? r : []; } catch (e) { return []; } }
 
     function dlqDrop(id) {
-        try { GM_deleteValue(DLQ_JOB + id); GM_deleteValue(DLQ_ST + id); } catch (e) { /* storage unavailable */ }
+        try { [DLQ_JOB, DLQ_ST, DLQ_ERR, DLQ_RETRY].forEach(function (p) { GM_deleteValue(p + id); }); } catch (e) { /* storage unavailable */ }
     }
 
     function dlqCancel(id) {
         dlqDrop(id);
-        if (dlqRun && dlqRun.read && dlqRun.read.id === id) dlqReadStop();
         if (dlqRun && dlqRun.dl && dlqRun.dl.id === id) dlqRun.dl.stop();
         dlqTick();
     }
 
-    // The gallery's list is whole (or as whole as it will get): drop the saved ones and queue the rest.
-    function dlqQueued(job, why) {
+    // ✕ or a second ⤓ asks first, so a misclick cannot throw a queue away.
+    function dlqAsk(job) {
+        const st = dlqStates(job), n = st.length, left = dlqLeft(st), failed = dlqFailed(st).length;
+        return window.confirm(left ? 'Stop downloading this gallery? ' + (n - left - failed) + ' of ' + n + ' are saved; the other ' + left + ' will not be.'
+            : 'Clear the list of ' + failed + ' pictures of this gallery that failed to download?');
+    }
+
+    // Try failed pictures again: asked from any tab, done by the one working the site's queue.
+    function dlqRetry(job, idx) {
+        const want = new Set(dlqRetries(job.id).concat(idx));
+        try { GM_setValue(DLQ_RETRY + job.id, JSON.stringify(Array.from(want))); } catch (e) { return; }
+        dlqTick();
+    }
+
+    // The working tab takes the retries asked for: back to 'to do'.
+    function dlqTakeRetries(job) {
+        const idx = dlqRetries(job.id);
+        if (!idx.length) return false;
+        try { GM_deleteValue(DLQ_RETRY + job.id); } catch (e) { return false; }
+        if (dlqRun.dl && dlqRun.dl.id === job.id) { dlqRun.dl.retry(idx); return true; }
+        let st = dlqStates(job);
+        idx.forEach(function (i) { if (st[i] === '3') st = st.slice(0, i) + '0' + st.slice(i + 1); });
+        try { GM_setValue(DLQ_ST + job.id, st); } catch (e) { /* storage unavailable */ }
+        return true;
+    }
+
+    // The gallery's whole list: drop the saved ones and queue the rest; how many were queued.
+    function dlqQueued(job) {
         const saved = galList(GAL_SAVED_KEY), n = job.items.length;
         if (!job.again) job.items = job.items.filter(function (it) { return !saved.has(it.thumb); });
         job.skipped = n - job.items.length;
         job.read = 'queued';
-        job.note = why === 'grown' || why === 'reported' ? '' : 'end of the gallery not reached (' + why + ')';
-        if (!job.items.length) {
-            dlqDrop(job.id);
-            toast(n ? 'Every picture of that gallery is saved already' : 'No pictures found in that gallery', 3500);
-            return;
-        }
+        if (!job.items.length) return 0;
         try { GM_setValue(DLQ_ST + job.id, '0'.repeat(job.items.length)); } catch (e) { /* storage unavailable */ }
         dlqPut(job);
         dbg('download queue: gallery queued', { href: job.href, pictures: job.items.length, saved: job.skipped, note: job.note });
+        return job.items.length;
     }
 
     function dlqLockHeld(origin) {
@@ -13218,119 +13285,111 @@
     // Another tab took the site's queue, or nothing is left: this tab stops its own part.
     function dlqHalt() {
         if (!dlqRun) return;
-        dlqReadStop();
         if (dlqRun.dl) dlqRun.dl.stop();
         dlqRelease();
         dlqRun = null;
     }
 
-    // Every DLQ_TICK_MS: claim this site's queue unless another tab holds it, then read and download.
+    // This tab counts as open for its site's queue while the site has one.
+    function dlqPresence(on) {
+        if (!on && !dlqPresent) return;
+        dlqPresent = on;
+        try {
+            if (on) GM_setValue(DLQ_TABP + dlqTab, JSON.stringify({ o: location.origin, t: Date.now() }));
+            else GM_deleteValue(DLQ_TABP + dlqTab);
+        } catch (e) { /* storage unavailable */ }
+    }
+
+    // Another tab of this site still open? Unknown counts as yes, so nothing warns on a guess.
+    function dlqOtherTabs() {
+        if (typeof GM_listValues !== 'function') return true;
+        let n = 0;
+        try {
+            GM_listValues().forEach(function (k) {
+                if (k.indexOf(DLQ_TABP) !== 0 || k === DLQ_TABP + dlqTab) return;
+                let p = null;
+                try { p = JSON.parse(GM_getValue(k, 'null')); } catch (e) { p = null; }
+                if (p && p.o === location.origin && Date.now() - p.t < DLQ_LOCK_MS) n++;
+                else if (!p || Date.now() - p.t > 3600000) GM_deleteValue(k);
+            });
+        } catch (e) { return true; }
+        return n > 0;
+    }
+
+    function dlqBusyHere() {
+        return dlqJobs().some(function (j) { return j.origin === location.origin && dlqLeft(dlqStates(j)) > 0; });
+    }
+
+    // A left press on a link to another page of this site: the queue carries on there, so leaving warns of nothing.
+    function dlqNavNote(e) {
+        if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+        const a = (e.composedPath ? e.composedPath() : []).find(function (n) { return n && n.tagName === 'A' && n.href; });
+        if (!a || (a.target && a.target !== '_self' && a.target !== '_top')) return;
+        try { if (new URL(a.href, location.href).origin === location.origin) dlqNavAt = Date.now(); } catch (x) { /* not a URL */ }
+    }
+
+    // Every DLQ_TICK_MS: claim this site's queue unless another tab holds it, then download.
     function dlqTick() {
         if (!isTopFrame) return;
-        const jobs = dlqJobs(), here = jobs.filter(function (j) { return j.origin === location.origin; });
+        let jobs = dlqJobs();
+        jobs.forEach(function (j) { if (j.read !== 'queued') { dbg('download queue: dropped a gallery an older version was still reading', { href: j.href }); dlqDrop(j.id); } });
+        jobs = jobs.filter(function (j) { return j.read === 'queued'; });
+        const here = jobs.filter(function (j) { return j.origin === location.origin; });
         dlqOrphans(jobs);
+        dlqPresence(here.length > 0);
         dlStripPaint(jobs);
         galDlShow(jobs);
         if (!here.length) { dlqHalt(); return; }
         if (dlqLockHeld(location.origin)) { if (dlqRun && dlqRun.owned) dbg('download queue: another tab took this site\'s queue'); dlqHalt(); return; }
         try { GM_setValue(DLQ_LOCK + location.origin, JSON.stringify({ tab: dlqTab, t: Date.now() })); } catch (e) { return; }
-        if (!dlqRun) { dlqRun = { origin: location.origin, owned: false, read: null, dl: null, nextAt: 0 }; return; }     // work from the next tick, once a tab claiming at the same moment has had its say
+        if (!dlqRun) { dlqRun = { origin: location.origin, owned: false, dl: null, nextAt: 0 }; return; }     // work from the next tick, once a tab claiming at the same moment has had its say
         dlqRun.owned = true;
+        let took = false;
+        here.forEach(function (j) { if (dlqTakeRetries(j)) took = true; });
         const ids = new Set(here.map(function (j) { return j.id; }));
-        if (dlqRun.read && !ids.has(dlqRun.read.id)) dlqReadStop();
         if (dlqRun.dl && !ids.has(dlqRun.dl.id)) dlqRun.dl.stop();
-        const r = here.find(function (j) { return j.read === 'reading'; });
-        if (r && !dlqRun.read) dlqRead(r);
-        const q = here.find(function (j) { return j.read === 'queued'; });
-        if (q && !dlqRun.dl) dlqDownload(q);
+        if (!dlqRun.dl) {
+            const q = here.find(function (j) { return dlqLeft(dlqStates(j)) > 0; });
+            if (q) dlqDownload(q);
+        }
+        if (took) dlStripPaint();
     }
 
-    // States left by a job that was cancelled while its tab was writing them.
+    // States, errors and retries left by a job that was cancelled while its tab was writing them.
     function dlqOrphans(jobs) {
         if (typeof GM_listValues !== 'function' || Math.random() > 0.1) return;
         const live = new Set(jobs.map(function (j) { return j.id; }));
-        try { GM_listValues().forEach(function (k) { if (k.indexOf(DLQ_ST) === 0 && !live.has(k.slice(DLQ_ST.length))) GM_deleteValue(k); }); } catch (e) { /* storage unavailable */ }
-    }
-
-    function dlqReadStop() {
-        const r = dlqRun && dlqRun.read;
-        if (!r) return;
-        dlqRun.read = null;
-        r.over = true;
-        if (r.solo.stop) r.solo.stop();
-    }
-
-    // Read a queued gallery's page to its end in a frame of its own: an open gallery reading the same page is waited for instead.
-    function dlqRead(job) {
-        const run = dlqRun, r = run.read = { id: job.id, tries: 0, over: false, solo: { maxMs: DLQ_READ_MS, stop: null } };
-        const keys = galKeys(job.items);
-        let dirty = false, flushT = 0;
-        const flush = function () {
-            clearTimeout(flushT);
-            flushT = 0;
-            if (!dirty || r.over || !dlqAlive(job.id)) return;
-            if (!dlqMine(run.origin)) { dlqReadStop(); return; }
-            dirty = false;
-            dlqPut(job);
-            dlStripPaint();
-        };
-        const add = function (items) {
-            (items || []).forEach(function (it) {
-                if (!it || !it.thumb || blocked(it.thumb) || galKeyHit(keys, it)) return;
-                galItemKeys(it).forEach(function (k) { keys.add(k); });
-                job.items.push(it);
-                dirty = true;
+        try {
+            GM_listValues().forEach(function (k) {
+                [DLQ_ST, DLQ_ERR, DLQ_RETRY].forEach(function (p) { if (k.indexOf(p) === 0 && !live.has(k.slice(p.length))) GM_deleteValue(k); });
             });
-            if (dirty && !flushT) flushT = setTimeout(flush, 1500);
-        };
-        const finish = function (why) {
-            if (r.over) return;
-            r.over = true;
-            dirty = false;
-            clearTimeout(flushT);
-            if (run.read === r) run.read = null;
-            if (!dlqAlive(job.id) || !dlqMine(run.origin)) return;
-            dlqQueued(job, why);
-            dlqTick();
-        };
-        const attempt = function () {
-            if (r.over) return;
-            if (galLists.has(job.href)) add(galLists.get(job.href));
-            if (galGrown.has(job.href)) { finish('grown'); return; }
-            if (galGrowing === job.href) { setTimeout(attempt, 1000); return; }
-            r.tries++;
-            r.solo.stop = null;
-            galRender(job.href, add, function (why) {
-                if (r.over) return;
-                flush();
-                if (why === 'grown' || why === 'reported') finish(why);
-                else if (r.tries < DLQ_READ_TRIES) { dbg('download queue: reading stopped short, again', { href: job.href, why: why, found: job.items.length }); setTimeout(attempt, 2000); }
-                else finish(why);
-            }, r.solo).then(function (v) {
-                if (r.over) return;
-                if (Array.isArray(v)) { add(v); return; }
-                if (v !== null) return;
-                fetchDoc(job.href).then(function (doc) {     // the page refused the frame: its HTML is all there is
-                    if (r.over) return;
-                    add(doc ? galPick(doc, job.href) : null);
-                    finish('the page would not load in a frame; read from its HTML');
-                });
-            });
-        };
-        attempt();
+        } catch (e) { /* storage unavailable */ }
     }
 
-    // Download a queued gallery's pictures: DLQ_WORKERS at once, starts DLQ_GAP_MIN..MAX ms apart.
+    // Download a queued gallery's pictures: DLQ_WORKERS at once, starts DLQ_GAP_MIN..MAX ms apart; failed ones stay listed.
     function dlqDownload(job) {
         const run = dlqRun, tok = { cancelled: false, fresh: false };
-        const d = run.dl = { id: job.id, stop: function () { tok.cancelled = true; if (run.dl === d) run.dl = null; } };
         let st = dlqStates(job).replace(/1/g, '0');        // in flight when its tab went: not known to have landed, so again
-        const mark = function (i, c) {
-            st = st.slice(0, i) + c + st.slice(i + 1);
+        const errs = dlqErrs(job.id);
+        const save = function (withErrs) {
             if (tok.cancelled || !dlqAlive(job.id)) return;
-            try { GM_setValue(DLQ_ST + job.id, st); } catch (e) { /* storage unavailable */ }
+            try {
+                GM_setValue(DLQ_ST + job.id, st);
+                if (withErrs) GM_setValue(DLQ_ERR + job.id, JSON.stringify(errs));
+            } catch (e) { /* storage unavailable */ }
             dlStripPaint();
             galDlShow();
+        };
+        const mark = function (i, c, why, url) {
+            st = st.slice(0, i) + c + st.slice(i + 1);
+            if (c === '3') errs[i] = { why: why || 'failed', n: ((errs[i] && errs[i].n) || 0) + 1, url: url || '' };
+            else if (c === '2') delete errs[i];
+            save(c !== '1');
+        };
+        const d = run.dl = {
+            id: job.id,
+            stop: function () { tok.cancelled = true; if (run.dl === d) run.dl = null; },
+            retry: function (idx) { idx.forEach(function (i) { if (st[i] === '3') st = st.slice(0, i) + '0' + st.slice(i + 1); }); save(false); },
         };
         usLog.enable(cfg.logRequests !== false);
         const lg = usLog.start('saveall', { host: pageHost(), pace: version().replace(/\?/g, '') + ' ' + DLQ_WORKERS + ' at once, ' + DLQ_GAP_MIN + '-' + DLQ_GAP_MAX + 'ms apart' });
@@ -13346,17 +13405,18 @@
                 if (at > Date.now()) await new Promise(function (res) { setTimeout(res, at - Date.now()); });
                 if (tok.cancelled || !dlqMine(run.origin)) { d.stop(); return; }
                 const item = job.items[i], q = lg && lg.req();
-                let hit = null;
-                try { hit = await galBestOf(item, tok); } catch (e) { hit = null; }
+                let hit = null, why = '';
+                try { hit = await galBestOf(item, tok); } catch (e) { hit = null; why = String(e); }
+                if (!hit || !hit.url) why = why || 'no full-size file was found for it';
                 const ok = hit && hit.url && !tok.cancelled ? await new Promise(function (res) {
-                    const t = setTimeout(function () { res(false); }, SAVE_FETCH_MS);
+                    const t = setTimeout(function () { why = 'no answer in ' + Math.round(SAVE_FETCH_MS / 1000) + ' s'; res(false); }, SAVE_FETCH_MS);
                     saveOriginal(hit.url, true, function () { clearTimeout(t); res(true); }, job.href,
-                        function (why) { clearTimeout(t); dbg('download all: a picture failed', { url: hit.url, error: why }); res(false); });
+                        function (w) { clearTimeout(t); why = 'the download failed: ' + w; dbg('download all: a picture failed', { url: hit.url, error: w }); res(false); });
                 }) : false;
                 if (q) q.done({ status: ok ? 200 : 0 });
                 if (tok.cancelled) return;
                 if (ok) galSavedItem(job.href, item);
-                mark(i, ok ? '2' : '3');
+                mark(i, ok ? '2' : '3', why, hit && hit.url);
             }
         };
         const pool = [];
@@ -13365,89 +13425,233 @@
             if (lg) lg.end(tok.cancelled ? 'cut' : 'done');
             if (tok.cancelled) return;
             if (run.dl === d) run.dl = null;
-            const saved = (st.match(/2/g) || []).length, failed = (st.match(/3/g) || []).length;
-            dlqDrop(job.id);
+            if (st.indexOf('0') >= 0) { dlqTick(); return; }      // retries asked for as it finished
+            const saved = (st.match(/2/g) || []).length, failed = dlqFailed(st).length;
+            if (!failed) dlqDrop(job.id);
             galMarkAll();
-            toast('Saved ' + saved + ' of ' + st.length + (failed ? ', ' + failed + ' failed' : '') + (job.note ? ' · ' + job.note : ''), 5000);
+            toast('Saved ' + saved + ' of ' + st.length + (failed ? ', ' + failed + ' failed: the download strip lists them' : '') + (job.note ? ' · ' + job.note : ''), 5000);
             dlqTick();
         });
     }
 
-    // ---- the download strip: over the widget (or the gallery's strip), the queue's progress, ✕ to stop
+    // A failed picture's Page: open its gallery's page, which scrolls to it there.
+    function dlqFindOpen(job, i, err) {
+        try { GM_setValue(DLQ_FIND, JSON.stringify({ href: job.href, item: job.items[i], i: i, n: job.items.length, why: err.why || '', at: Date.now() })); } catch (e) { return; }
+        openOriginal(job.href);
+    }
+
+    // This page was opened by a failed picture's Page: scroll until that picture shows, then mark it.
+    function dlqFindHere() {
+        let f = null;
+        try { f = JSON.parse(GM_getValue(DLQ_FIND, 'null')); } catch (e) { f = null; }
+        const same = function (a, b) { try { const x = new URL(a, location.href), y = new URL(b, location.href); return x.origin + x.pathname === y.origin + y.pathname; } catch (e) { return false; } };
+        if (!f || !f.item || Date.now() - f.at > DLQ_FIND_MS || !same(f.href, location.href)) return;
+        try { GM_deleteValue(DLQ_FIND); } catch (e) { /* storage unavailable */ }
+        const keys = new Set(galItemKeys(f.item));
+        const path = function (u) { try { const x = new URL(u, location.href); return x.host + x.pathname; } catch (e) { return ''; } };
+        const hit = function () {
+            const imgs = document.querySelectorAll('img');
+            for (let k = 0; k < imgs.length; k++) {
+                const im = imgs[k], vals = [im.currentSrc];
+                for (let a = 0; a < im.attributes.length; a++) vals.push(im.attributes[a].value);
+                for (let v = 0; v < vals.length; v++) {
+                    const s = vals[v];
+                    if (!s || s.length > 4000 || s.indexOf('/') < 0) continue;
+                    if (keys.has(path(s)) || parseSrcset(s).some(function (u) { return keys.has(path(u)); })) return im;
+                }
+            }
+            return null;
+        };
+        const label = 'Picture #' + (f.i + 1) + ' of ' + f.n + ' in the download queue';
+        const t0 = Date.now();
+        let lastH = -1, still = 0;
+        dlqFinding = true;
+        const step = function () {
+            const im = hit();
+            if (im) {
+                im.scrollIntoView({ block: 'center' });
+                im.style.outline = '4px solid #f38ba8';
+                im.style.outlineOffset = '2px';
+                setTimeout(function () { dlqFinding = false; flash(im, label + ' failed' + (f.why ? ': ' + f.why : ''), 8000); }, 400);
+                return;
+            }
+            const h = document.documentElement.scrollHeight;
+            if (window.scrollY + vpH() >= h - 4) { still = h === lastH ? still + 1 : 0; lastH = h; }
+            if (Date.now() - t0 > DLQ_FIND_MS || still >= 6) {
+                dlqFinding = false;
+                toast(label + ' was not found on this page' + (f.why ? ' (it failed: ' + f.why + ')' : ''), 6000);
+                return;
+            }
+            window.scrollBy(0, Math.max(200, Math.round(vpH() * 0.8)));
+            setTimeout(step, 600);
+        };
+        setTimeout(step, 1200);
+    }
+
+    // ---- the download strip: over the widget (or the gallery's strip), the queue's progress, ✕ to stop, the failed list above it
     function dlStripBuild() {
         dlHost = document.createElement('div');
         dlHost.style.cssText = 'all:initial;position:fixed;z-index:2147483647;left:0;top:0';
         const root = dlHost.attachShadow({ mode: 'open' });
         const css = document.createElement('style');
         css.textContent =
-            '.dl{box-sizing:border-box;background:#1e1e2e;color:#cdd6f4;border:1px solid #45475a;border-radius:6px;padding:4px 6px 5px;' +
-            'font:11px/14px system-ui,sans-serif;display:flex;flex-direction:column;gap:4px;box-shadow:0 2px 8px rgba(0,0,0,.4)}' +
+            '.w{display:flex;flex-direction:column;gap:4px}' +
+            '.dl,.fl{box-sizing:border-box;background:#1e1e2e;color:#cdd6f4;border:1px solid #45475a;border-radius:6px;font:11px/14px system-ui,sans-serif;box-shadow:0 2px 8px rgba(0,0,0,.4)}' +
+            '.dl{padding:4px 6px 5px;display:flex;flex-direction:column;gap:4px}' +
             '.top{display:flex;align-items:center;gap:6px}.txt{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
             '.x{flex:none;cursor:pointer;color:#f38ba8;font-size:12px;line-height:12px;padding:1px 3px;border-radius:3px;user-select:none}.x:hover{background:#45475a}' +
+            '.fb{flex:none;cursor:pointer;color:#f38ba8;padding:0 4px;border-radius:3px;user-select:none;white-space:nowrap}.fb:hover{background:#45475a}.fb[hidden]{display:none}' +
             '.bar{display:flex;gap:1px;height:4px}.bar[hidden]{display:none}.bar i{flex:1 1 0;min-width:0;height:100%;border-radius:1px;background:#45475a}' +
-            '.bar i.b{background:#f9e2af}.bar i.d{background:#89b4fa}.bar i.f{background:#f38ba8}';
+            '.bar i.b{background:#f9e2af}.bar i.d{background:#89b4fa}.bar i.f{background:#f38ba8}' +
+            '.fl{padding:4px 6px;max-height:min(50vh,360px);overflow:auto}.fl[hidden]{display:none}' +
+            '.fh,.fg,.fr{display:flex;align-items:center;gap:6px}.fh{font-weight:600;margin-bottom:2px}' +
+            '.fh .t,.fg .t,.fr .t{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
+            '.fg{color:#a6adc8;margin-top:4px}.fr{padding:2px 0}' +
+            '.fr img{width:28px;height:28px;object-fit:cover;border-radius:3px;flex:none;background:#313244}' +
+            '.bt{flex:none;cursor:pointer;color:#89b4fa;padding:1px 4px;border-radius:3px;user-select:none;white-space:nowrap}.bt:hover{background:#45475a}' +
+            '.bt.off{color:#6c7086;cursor:default}.bt.off:hover{background:none}';
         root.appendChild(css);
         dlStripEl = document.createElement('div');
-        dlStripEl.className = 'dl';
+        dlStripEl.className = 'w';
+        const fl = document.createElement('div');
+        fl.className = 'fl';
+        fl.hidden = true;
+        const strip = document.createElement('div');
+        strip.className = 'dl';
         const top = document.createElement('div');
         top.className = 'top';
         const txt = document.createElement('span');
         txt.className = 'txt';
+        const fb = document.createElement('span');
+        fb.className = 'fb';
+        fb.hidden = true;
+        setTip(fb, 'The pictures that failed to download: try them again, or find them on their page');
+        fb.__act = function () { dlFailOpen = !dlFailOpen; dlStripPaint(); };
         const x = document.createElement('span');
         x.className = 'x';
         x.textContent = '✕';
-        setTip(x, 'Stop this gallery\'s download');
+        x.__act = function () {
+            const job = dlqJobs().find(function (j) { return j.id === dlStripEl.__job; });
+            if (!job || !dlqAsk(job)) return;
+            const busy = dlqLeft(dlqStates(job)) > 0;
+            dlqCancel(job.id);
+            toast(busy ? 'Download stopped' : 'Cleared', 2000);
+        };
         top.appendChild(txt);
+        top.appendChild(fb);
         top.appendChild(x);
         const bar = document.createElement('div');
         bar.className = 'bar';
-        dlStripEl.appendChild(top);
-        dlStripEl.appendChild(bar);
+        strip.appendChild(top);
+        strip.appendChild(bar);
+        dlStripEl.appendChild(fl);
+        dlStripEl.appendChild(strip);
         root.appendChild(dlStripEl);
         ['mousedown', 'mouseup', 'click', 'auxclick', 'dblclick', 'contextmenu'].forEach(function (t) {
             dlStripEl.addEventListener(t, function (e) {
                 e.preventDefault();
                 e.stopPropagation();
-                if (t === 'mousedown' && e.button === 0 && e.composedPath().indexOf(x) >= 0 && dlStripEl.__job) {
-                    dlqCancel(dlStripEl.__job);
-                    toast('Download stopped', 2000);
-                }
+                if (t !== 'mousedown' || e.button !== 0) return;
+                const hitEl = e.composedPath().find(function (n) { return n && n.__act; });
+                if (hitEl) hitEl.__act();
             });
         });
         dlStripEl.__txt = txt;
         dlStripEl.__bar = bar;
+        dlStripEl.__fb = fb;
+        dlStripEl.__x = x;
+        dlStripEl.__fail = fl;
     }
 
-    // The strip for this site's first job; hidden with nothing queued here.
+    // The strip for this site's first gallery still downloading, else its first with failures; hidden with nothing queued here.
     function dlStripPaint(jobs) {
         if (!isTopFrame) return;
         jobs = jobs || dlqJobs();
         const here = jobs.filter(function (j) { return j.origin === location.origin; });
-        if (!here.length) { if (dlHost) dlHost.style.display = 'none'; return; }
+        if (!here.length) { if (dlHost) dlHost.style.display = 'none'; dlFailOpen = false; return; }
         if (!dlHost) dlStripBuild();
         if (!dlHost.isConnected) document.documentElement.appendChild(dlHost);
         dlHost.style.display = '';
-        const job = here.find(function (j) { return j.read === 'queued'; }) || here[0];
-        const more = here.length - 1, away = jobs.length - here.length;
+        const sts = new Map(here.map(function (j) { return [j.id, dlqStates(j)]; }));
+        const busy = here.filter(function (j) { return dlqLeft(sts.get(j.id)) > 0; });
+        const job = busy[0] || here[0], st = sts.get(job.id), n = st.length, left = dlqLeft(st);
+        const failedAll = here.reduce(function (a, j) { return a + dlqFailed(sts.get(j.id)).length; }, 0);
+        const listed = failedAll || (dlFailOpen && here.some(function (j) { return dlqRetrying(j, sts.get(j.id)).length; }));
+        const more = Math.max(0, busy.length - 1), away = jobs.length - here.length;
         const tail = (more ? ' · +' + more + ' queued' : '') + (away ? ' · ' + away + ' on other sites' : '');
         const bar = dlStripEl.__bar;
         dlStripEl.__job = job.id;
-        if (job.read !== 'queued') {
-            dlStripEl.__txt.textContent = 'Reading the gallery: ' + job.items.length + ' found' + tail;
-            bar.hidden = true;
-        } else {
-            const st = dlqStates(job), n = st.length, left = dlqLeft(st), failed = (st.match(/3/g) || []).length;
-            dlStripEl.__txt.textContent = 'Saving ' + (n - left) + ' / ' + n + (failed ? ' · ' + failed + ' failed' : '') + tail;
-            let first = 0;
-            while (first < n && st[first] !== '0' && st[first] !== '1') first++;
-            const from = Math.floor(Math.min(first, n - 1) / DLQ_SEGS) * DLQ_SEGS, to = Math.min(n, from + DLQ_SEGS);
-            while (bar.childNodes.length > to - from) bar.lastChild.remove();
-            while (bar.childNodes.length < to - from) bar.appendChild(document.createElement('i'));
-            for (let i = from; i < to; i++) bar.childNodes[i - from].className = st[i] === '2' ? 'd' : st[i] === '3' ? 'f' : st[i] === '1' ? 'b' : '';
-            bar.hidden = false;
-        }
+        dlStripEl.__txt.textContent = (left ? 'Saving ' + (n - left) : 'Saved ' + (n - dlqFailed(st).length)) + ' / ' + n + tail;
+        dlStripEl.__fb.hidden = !listed;
+        dlStripEl.__fb.textContent = failedAll + ' failed ' + (dlFailOpen ? '▾' : '▴');
+        setTip(dlStripEl.__x, left ? 'Stop this gallery\'s download' : 'Clear this gallery\'s list of failed pictures');
+        let first = 0;
+        while (first < n && st[first] !== '0' && st[first] !== '1') first++;
+        const from = Math.floor(Math.min(first, n - 1) / DLQ_SEGS) * DLQ_SEGS, to = Math.min(n, from + DLQ_SEGS);
+        while (bar.childNodes.length > to - from) bar.lastChild.remove();
+        while (bar.childNodes.length < to - from) bar.appendChild(document.createElement('i'));
+        for (let i = from; i < to; i++) bar.childNodes[i - from].className = st[i] === '2' ? 'd' : st[i] === '3' ? 'f' : st[i] === '1' ? 'b' : '';
         setTip(dlStripEl.__txt, job.href + (job.note ? '\n' + job.note : ''));
+        if (dlFailOpen && listed) dlFailPaint(here, sts);
+        else { dlFailOpen = false; dlStripEl.__fail.hidden = true; }
         dlStripPlace();
+    }
+
+    // The failed pictures of this site's queue, by gallery: Retry, and once a retry failed too, Page to find it where it lives.
+    function dlFailPaint(here, sts) {
+        const p = dlStripEl.__fail;
+        const data = here.map(function (j) { const st = sts.get(j.id); return { job: j, st: st, idx: dlqFailed(st).concat(dlqRetrying(j, st)).sort(function (a, b) { return a - b; }), errs: dlqErrs(j.id), retry: new Set(dlqRetries(j.id)) }; })
+            .filter(function (d) { return d.idx.length; });
+        const sig = JSON.stringify(data.map(function (d) { return [d.job.id, d.idx.map(function (i) { return i + d.st[i]; }), d.errs, Array.from(d.retry), dlqLeft(d.st) > 0]; }));
+        p.hidden = false;
+        if (p.__sig === sig) return;
+        p.__sig = sig;
+        while (p.firstChild) p.firstChild.remove();
+        const btn = function (parent, text, tip, act) {
+            const b = document.createElement('span');
+            b.className = 'bt' + (act ? '' : ' off');
+            b.textContent = text;
+            if (tip) setTip(b, tip);
+            if (act) b.__act = act;
+            parent.appendChild(b);
+            return b;
+        };
+        const span = function (parent, text, tip) {
+            const s = document.createElement('span');
+            s.className = 't';
+            s.textContent = text;
+            if (tip) setTip(s, tip);
+            parent.appendChild(s);
+            return s;
+        };
+        const head = document.createElement('div');
+        head.className = 'fh';
+        span(head, 'Failed downloads');
+        btn(head, 'Retry all', 'Try every failed picture again', function () { data.forEach(function (d) { dlqRetry(d.job, d.idx); }); });
+        btn(head, '✕', 'Close this list', function () { dlFailOpen = false; dlStripPaint(); });
+        p.appendChild(head);
+        data.forEach(function (d) {
+            const g = document.createElement('div');
+            g.className = 'fg';
+            let label = d.job.href;
+            try { const u = new URL(d.job.href); label = decodeURIComponent(u.pathname + u.search); } catch (e) { /* as it is */ }
+            span(g, label, d.job.href);
+            if (!dlqLeft(d.st)) btn(g, 'Clear', 'Forget this gallery\'s failed pictures', function () { if (dlqAsk(d.job)) dlqCancel(d.job.id); });
+            p.appendChild(g);
+            d.idx.forEach(function (i) {
+                const it = d.job.items[i] || {}, e = d.errs[i] || {}, r = document.createElement('div');
+                r.className = 'fr';
+                const im = document.createElement('img');
+                im.loading = 'lazy';
+                try { im.src = new URL(it.thumb, it.base || d.job.href).href; } catch (x) { /* no thumbnail */ }
+                r.appendChild(im);
+                span(r, '#' + (i + 1) + ' · ' + (e.why || 'failed') + (e.n > 1 ? ' · ' + e.n + ' tries' : ''), (e.url || it.thumb || '') + (e.why ? '\n' + e.why : ''));
+                if (d.retry.has(i) || d.st[i] !== '3') btn(r, 'Retrying…', '', null);
+                else btn(r, 'Retry', 'Try this picture again', function () { dlqRetry(d.job, [i]); });
+                if (e.n >= 2) btn(r, 'Page', 'Open the gallery\'s page and scroll to this picture, to see what is wrong with it', function () { dlqFindOpen(d.job, i, e); });
+                p.appendChild(r);
+            });
+        });
     }
 
     // Above the widget, else above the gallery's strip, else the bottom-right corner; as wide as what it sits on.
@@ -13459,7 +13663,7 @@
             const el = galSt && !galSt.el.hidden ? (galStripM.m === 'in' && galFly ? galFly.el : galSt.el) : galFly && galFly.el;
             if (el && el.isConnected) a = el.getBoundingClientRect();
         }
-        const w = Math.min(W - 8, Math.max(200, a ? a.width : 240));
+        const w = Math.min(W - 8, Math.max(dlFailOpen ? 300 : 200, a ? a.width : 240));
         dlStripEl.style.width = w + 'px';
         const h = dlStripEl.offsetHeight || 36;
         let left, top;
@@ -13468,7 +13672,7 @@
             top = a.top - h - 4 >= 4 ? a.top - h - 4 : Math.min(H - h - 4, a.bottom + 4);
         } else { left = W - w - 16; top = H - h - 16; }
         dlHost.style.left = Math.round(left) + 'px';
-        dlHost.style.top = Math.round(top) + 'px';
+        dlHost.style.top = Math.round(Math.max(4, top)) + 'px';
     }
 
     // The saved mark: a blue disc with a down arrow, no outline (user).
@@ -14846,13 +15050,22 @@
 
     if (isTopFrame) {
         document.addEventListener('scroll', galScroll, { capture: true, passive: true });
-        window.addEventListener('pagehide', function () { if (galPreLog) { galPreLog.end('cut'); galPreLog = null; } dlqRelease(); });
-        setTimeout(function () { dlqTick(); setInterval(dlqTick, DLQ_TICK_MS); }, 800);
-        window.addEventListener('beforeunload', function (e) {     // a gallery being read here for ⤓: the browser asks whether to leave
-            if (!dlqRun || !dlqRun.read) return;
+        window.addEventListener('pagehide', function () { if (galPreLog) { galPreLog.end('cut'); galPreLog = null; } dlqRelease(); dlqPresence(false); });
+        setTimeout(function () { dlqTick(); setInterval(dlqTick, DLQ_TICK_MS); dlqFindHere(); }, 800);
+        window.addEventListener('beforeunload', function (e) {     // the site's last tab with downloads left: the browser asks whether to leave (they pause)
+            if (Date.now() - dlqNavAt < 3000 || !dlqBusyHere() || dlqOtherTabs()) return;
             e.preventDefault();
             e.returnValue = '';
         });
+        document.addEventListener('click', dlqNavNote, true);
+        document.addEventListener('submit', function (e) {
+            try { if (new URL(e.target.action || location.href, location.href).origin === location.origin) dlqNavAt = Date.now(); } catch (x) { /* not a URL */ }
+        }, true);
+        try {
+            if (window.navigation) window.navigation.addEventListener('navigate', function (e) {
+                try { if (e.navigationType !== 'reload' && new URL(e.destination.url).origin === location.origin) dlqNavAt = Date.now(); } catch (x) { /* not a URL */ }
+            });
+        } catch (e) { /* no Navigation API */ }
         window.addEventListener('resize', function () { dlStripPlace(); });
         setTimeout(function () { galMarkAll(); galPreNext(); }, 1500);
         setTimeout(function () {

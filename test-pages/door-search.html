@@ -37,7 +37,10 @@
   var GM_listValues = function () { return Object.keys(localStorage); };
   var GM_deleteValue = function (key) { localStorage.removeItem(key); };
   window.__saved = [];      // the download queue's saves, instead of files
-  var GM_download = function (d) { setTimeout(function () { window.__saved.push(d.url); if (d.onload) d.onload(); }, 150); };
+  window.__fail = null;     // a RegExp: saves whose URL matches it fail
+  var GM_download = function (d) { setTimeout(function () {
+    if (window.__fail && window.__fail.test(d.url)) { if (d.onerror) d.onerror({ error: 'not_succeeded' }); return; }
+    window.__saved.push(d.url); if (d.onload) d.onload(); }, 150); };
   var GM_registerMenuCommand = function () { return 'x'; };
   var GM_unregisterMenuCommand = function () {};
 </script>
