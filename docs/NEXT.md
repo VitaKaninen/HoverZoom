@@ -1,4 +1,22 @@
-# Handoff 2026-11-17 #4 (~333k tokens, endless galleries) — read this first
+# Handoff 2026-11-18 (~370k tokens, fullscreen + endless polish) — read this first
+
+**Asked, in order (all built, pushed v0.365.0–v0.366.0; reasons in GALLERY.md "Endless", TOUR.md wheel bullet,
+VIEWER.md E76 and the status-bar section):** fullscreen middle-click on the black saves; no status bar in fullscreen;
+⛶ on the clicked picture = slideshow from picture 1 in fullscreen (now bottom-right; in fullscreen it leaves); the
+clicked picture's size changing after fullscreen and on gallery switches (`galBoxKeep`); saved mark on the preview
+(now pinned to the picture's top-left when pinned); ⓘ top-left, ✕ top-right, ↗ moved to the right-click menu; back
+into the previous gallery showed the old picture for seconds and closing then stuck the preview open
+(`galLandShow`, `galHide` `mine`); stepping back past the landing picture waited 6 s (`galFedAll`); wheel in a
+gallery/fullscreen flips, a click on the picture toggles zoom for it (v0.364.0's rule reverted); endless scrolls the
+page underneath so lazy/more galleries load (`galChainFollow`). Also fixed: v0.365.0's `galKept` name clash broke
+kept gallery lists; `test-resolver.js` now fails on duplicate function names.
+**Verified:** Browser pane fixture door-long only (synthetic events; stand-in fullscreen). **Not verified:** LibreWolf;
+the "about double" size after a real fullscreen exit; the middle-click-on-black failure (never reproduced in the pane —
+if it persists, read `middle press not taken as a save {full, inPreview, galTop…}`); the landing picture painting
+(the hidden pane never settles `img.decode()`); a real site's infinite scroll under `galChainFollow`.
+**Last asked:** nothing pending.
+
+# Handoff 2026-11-17 #4 (~333k tokens, endless galleries)
 
 **Asked, in order:** endless mode (☐ Endless on the clicked picture: at a gallery's end the next door on the page
 opens, back goes to the one before, slideshow across, P/G/T counters, ⓘ help, ⤓ stays per gallery; viewed doors
