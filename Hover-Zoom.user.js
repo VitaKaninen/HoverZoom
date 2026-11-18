@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.364.0
+// @version      0.365.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -2870,7 +2870,7 @@
     }
 
     // The status bar answers 'always' | 'hover' | 'off' for itself.
-    function barShown() { return cfg.barMode !== 'off'; }
+    function barShown() { return cfg.barMode !== 'off' && !fullActive(); }     // none in fullscreen (user)
     function barPinOnly() { return cfg.barMode === 'hover'; }
     function barFades() { return cfg.barMode === 'hover' && cfg.barStillFade !== false; }
 
@@ -4295,10 +4295,17 @@
         moveSpinner();
     }
 
+    // The picture shown was saved: by a middle press this visit, or a gallery picture its thumbnail marks saved (user).
+    function shownSaved() {
+        if (midSavedHref === location.href && midSaved.get(view.url) === Infinity) return true;
+        const it = active && active.__hzItem;
+        return !!it && galOwns(active) && galList(GAL_SAVED_KEY).has(it.thumb);
+    }
+
     // The saved mark follows the pointer, below-right, while a picture saved this visit is up; the spinner takes the spot first.
     function syncSavedMark() {
         if (!savedMarkEl) return;
-        const on = !!view && !!box && box.classList.contains('on') && midSavedHref === location.href && midSaved.get(view.url) === Infinity &&
+        const on = !!view && !!box && box.classList.contains('on') && shownSaved() &&
             !(spinEl && spinEl.classList.contains('on')) && (!placed || pointInPreview(pointer.x, pointer.y));
         savedMarkEl.classList.toggle('on', on);
         if (!on) return;
@@ -4883,7 +4890,7 @@
     }
 
     function enterFull() {
-        if (galFly && !fullPrev) galFullPrev = { u: galUnitRect(), href: galFly.href, W: vpW(), H: vpH() };     // before lockScroll moves vpW
+        if (galFly && !fullPrev) galKeepNow(null, galFly.asp);     // before lockScroll moves vpW
         // Captured before anything moves: this is the only moment the pre-fullscreen state exists.
         // The URL is for the tour: a step taken while fullscreen means the picture coming back
         // is not the one that went in. See E57.
@@ -7653,9 +7660,10 @@
     document.addEventListener('mouseout', perfWrap(onOut, 'event'), true);
     document.addEventListener('mouseout', function (e) { if (!e.relatedTarget) twLeave(); }, true);   // left the window (or into a frame)
 
-    // Middle-click on the window saves the original to the download folder. See E76.
+    // Middle-click on the window (in fullscreen: anywhere but the gallery's own pieces) saves the original to the download folder. See E76.
+    function midInFull(x, y) { return fullActive() && placed && !!box && box.classList.contains('on') && !galTopAt(x, y); }
     function midSave(e) {
-        if (e.button !== 1 || !view || !view.url || e.target === panelHost || !pointInPreview(e.clientX, e.clientY)) return false;
+        if (e.button !== 1 || !view || !view.url || e.target === panelHost || !(midInFull(e.clientX, e.clientY) || pointInPreview(e.clientX, e.clientY))) return false;
         midClaim(e);
         midSaveUrl(view.url);
         return true;
@@ -7704,7 +7712,7 @@
         if (midSave(e) || midSaveEarly(e)) return;
         if (e.button === 1 && debugOn()) {
             const t = e.composedPath ? e.composedPath()[0] : e.target;
-            dbg('middle press not taken as a save ' + JSON.stringify({ placed: placed, active: active ? active.tagName + ' ' + String(active.currentSrc || active.src || '').slice(-80) : null,
+            dbg('middle press not taken as a save ' + JSON.stringify({ placed: placed, full: fullActive(), inPreview: pointInPreview(e.clientX, e.clientY), galTop: galTopAt(e.clientX, e.clientY), active: active ? active.tagName + ' ' + String(active.currentSrc || active.src || '').slice(-80) : null,
                 onActive: !!active && (t === active || (t && t.nodeType === 1 && active.contains(t)) || holds(active.getBoundingClientRect(), e.clientX, e.clientY)),
                 resolving: !!(token && !token.cancelled), shown: !!view && !!box && box.classList.contains('on'), sinceHover: active ? Date.now() - hoverAt : null,
                 target: t && t.tagName, door: !!doorAt(e.target, e.clientX, e.clientY), mods: e.ctrlKey || e.shiftKey || e.altKey || e.metaKey }));
@@ -11623,7 +11631,7 @@
     const GAL_FLY_FRAC = 0.2;           // its height there, of the window's (user)
     const GAL_FULL_FRAC = 0.45;         // in fullscreen, at most this of the screen tall (a portrait is not cropped below that); its width is the strip's text
     let galFullLast = 0;                // the width galFullRect last gave
-    let galFullPrev = null;             // {u, href, W, H}: the clicked picture's box as fullscreen began, put back on leaving it
+    let galBoxKeep = null;                 // {u, W, H, asp}: the clicked picture's box outside fullscreen, reused while the window keeps that size
     let galOn = false, galTap = false, galMidAt = 0;      // a peek is up and locked; Ctrl down with nothing else yet
     const GAL_PEND_MS = 3000;           // the pressed result lights up only if its gallery is not on screen by then
     const GAL_DIAG_MS = 10000;          // an open that shows nothing this long after the press gets the diagnostics popup
@@ -12342,6 +12350,7 @@
             'background:rgba(30,30,46,.92);border:1px solid #45475a;color:#cdd6f4;font:13px/1 system-ui,sans-serif;white-space:nowrap;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.5)}' +
             '.fly .tools span:hover{background:#313244;color:#89b4fa}' +
             '.fly .endl{position:absolute;bottom:6px;left:' + (GAL_HD + 4) + 'px;display:flex;gap:6px;opacity:.6;transition:opacity .15s ease}' +
+            '.fly .endl.top{top:6px;bottom:auto}' +
             '.fly:hover .endl{opacity:1}.fly.edit .endl,.fly.asking .endl{display:none}' +
             '.fly .endl>*{display:flex;align-items:center;gap:5px;height:24px;padding:0 8px;box-sizing:border-box;border-radius:12px;' +
             'background:rgba(30,30,46,.92);border:1px solid #45475a;color:#cdd6f4;font:12px/1 system-ui,sans-serif;white-space:nowrap;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.5)}' +
@@ -13144,6 +13153,7 @@
         l.done = true;
         if (l.page) { set.want = l.page; set.far = Math.max(set.far || 0, Math.min(l.page, 1e6)); galPageWork(set, galLayout(set, set.open)); }
         if (l.tour && placed && view && tour) {
+            if (set.want != null) galLandShow(set, l, c);
             for (let t = 0; t < 30 && galCur && galCur.href === l.href && galCur.want != null; t++) await sleep(200);
         }
         if (galChain === c) c.land = null;
@@ -13157,6 +13167,19 @@
         tourTurnOn();
         seamDir = 0;
         tourGo(list, Math.min(k, list.length - 1), l.dir, false);
+    }
+
+    // While a switch waits for the gallery's thumbnails: the picture it will land on, from the gallery's list, instead of the old gallery's (user).
+    function galLandShow(set, l, c) {
+        const list = galLists.get(set.href) || [], n = list.length, per = Math.max(1, galPer(set));
+        const k = l.pic === 'last' ? n - 1 : l.page >= 1e9 ? Math.floor((n - 1) / per) * per : -1;
+        blankFrame();
+        const item = k >= 0 ? list[k] : null;
+        dbg('endless: the picture landed on, shown while its thumbnails load', { picture: k + 1, of: n });
+        if (!item) return;
+        galBestOf(item, { cancelled: false }).then(function (res) {
+            if (res && res.url && c.land === l && placed && view && tour) swapViewer(res, true);
+        }, function () { /* the landing shows it */ });
     }
 
     // Endless: a page number typed on the strip counts across the queue. The open gallery's own page, or -1 after a switch to the one holding it.
@@ -13193,7 +13216,22 @@
         if (ck) ck.checked = !!cfg.galleryEndless;
     }
 
-    // The clicked picture's bottom-left: ☐ Endless and ⓘ.
+    // ⛶ on the clicked picture: this gallery's slideshow from its first picture, fullscreen.
+    function galFullStart() {
+        if (!galCur) return;
+        const de = document.documentElement, req = de.requestFullscreen || de.webkitRequestFullscreen;
+        if (!fullActive() && !document.fullscreenElement && req && document.fullscreenEnabled) {
+            try { const p = req.call(de); if (p && p.catch) p.catch(function () { /* the maximise alone */ }); } catch (e) { /* the maximise alone */ }     // inside the press, or the browser refuses it
+        }
+        const full = function () {
+            if (view && placed && box && box.classList.contains('on')) { if (!fullActive()) enterFull(); return; }
+            if (!fullActive() && document.fullscreenElement === de) { const x = document.exitFullscreen || document.webkitExitFullscreen; if (x) try { x.call(document); } catch (e) { /* stays */ } }
+        };
+        if (placed && view && tour) { twGoTo(0); full(); return; }
+        tourFromStart(1, true, 0).then(full, full);
+    }
+
+    // The clicked picture's top-left ⓘ and bottom-left ☐ Endless.
     function galEndlessBuild(pw) {
         const bar = document.createElement('div');
         bar.className = 'endl';
@@ -13214,8 +13252,11 @@
             ['mouseup', 'click', 'auxclick', 'dblclick', 'contextmenu'].forEach(function (t) { b.addEventListener(t, eat); });
         });
         bar.appendChild(lb);
-        bar.appendChild(info);
         pw.appendChild(bar);
+        const top = document.createElement('div');
+        top.className = 'endl top';
+        top.appendChild(info);
+        pw.appendChild(top);
     }
 
     // ⓘ: every control of the open gallery and what its numbers mean, in the menu's box.
@@ -13223,7 +13264,8 @@
         const b = btn.getBoundingClientRect();
         galMenuShow(b.left, b.top, [
             ['The picture in the corner', 'click: close · drag: move · drag a corner: resize (Ctrl: no snapping) · right-click: settings'],
-            ['⤓ ↗', 'save every picture of this gallery not saved yet (once its page is read; never the rest of the endless queue) · open the gallery\'s page in a new tab'],
+            ['⤓ ⛶ ✕', 'save every picture of this gallery not saved yet (once its page is read; never the rest of the endless queue) · the slideshow from its first picture, fullscreen · close the gallery'],
+            ['Right-click', 'settings, and open the gallery\'s page in a new tab'],
             ['Strip', 'drag it by its background to take it off the picture'],
             ['Page row ◀ ▶', 'a page of thumbnails back or on · also ↑ ↓, PageUp / PageDown, the wheel away from the preview'],
             ['Picture row ◀ ▶', 'the slideshow, one picture back or on · also ← →, the wheel over the strip · hold to repeat'],
@@ -13736,10 +13778,11 @@
         galWant = null;
         galOn = false;
         galPeek = false;
-        galFullPrev = null;
-        if (galOwns(active)) cancel();
+        galBoxKeep = null;
+        const mine = galOwns(active) || !!(tour && tour.gal);       // a switch drops the old gallery's cells while its picture is still up
+        if (mine) cancel();
         if (galCur) { galDrop(galCur); galCur = null; plVidsDrop(); }
-        if (galOwns(active) && placed) { unplace(); cancel(); }
+        if (mine && placed) { unplace(); cancel(); }
         if (galBlur) galBlur.classList.remove('on');
         galVeil(false);
         const ch = galChain;
@@ -13891,7 +13934,8 @@
         };
         const dl = tool('⤓', 'Download every picture of this gallery not saved yet, into the folder under Settings, Saving · works once the whole page has been read · click again to stop',
             function () { galDownloadAll(href); });
-        tool('↗', 'Open the gallery\'s page in a new tab', function () { openOriginal(href); });
+        tool('⛶', 'Slideshow from the first picture, fullscreen', function () { galFullStart(); });
+        tool('✕', 'Close the gallery', function () { galHide('hole'); });
         pw.appendChild(bar);
         galDlBtn = { href: href, btn: dl };
         galDlShow();
@@ -14605,12 +14649,16 @@
         const a = t.closest('a[href]'), pic = t.tagName === 'IMG' ? t : a && a.querySelector('img');
         const hr = galHoleRect(pic || t);
         if (galOwns(active)) cancel();
-        if (!(galChain && galChain.land && galChain.land.href === href)) galChain = cfg.galleryEndless ? galChainFrom(href) : null;
+        const sw = !!(galChain && galChain.land && galChain.land.href === href && galFly);     // the queue switching gallery
+        if (!sw) galChain = cfg.galleryEndless ? galChainFrom(href) : null;
         galOn = true;
         galStripOne = !galEndless();
         galStripDl = dlHere();
+        const asp = hr.width && hr.height ? hr.width / hr.height : 1;
+        if (sw && !galKept()) galKeepNow(null, galFly.asp);      // the box on screen is this window size's
         galStripM = pic ? galStripLoad(galAnchorRec(), galPagedRows(vpH())) : { m: 'in', side: 'b' };
-        galHole = galCornerRect(hr.width && hr.height ? hr.width / hr.height : 1, pic && galStripM.m !== 'out' ? galStripH() : 0);
+        galHole = (sw && galKept(asp)) || galCornerRect(asp, pic && galStripM.m !== 'out' ? galStripH() : 0);
+        if (!sw) { galBoxKeep = null; galKeepNow(galHole, asp); }
         galWant = href;
         clearTimeout(galHoverTimer);
         galFlyBack();
@@ -14748,14 +14796,23 @@
         galAnchorSave(Object.assign({ x: galAnchorAx(u.x, u.w, W), y: galAnchorAx(u.y, u.h, H),
             hf: Math.round((u.h - (galAttH() ? GAL_STRIP_H : 0)) / H * 1000) / 1000, strip: galStripRec(rows) }, galEdges(u, W, H, rows)));
         galHole = u;
+        galKeepNow(u, galFly.asp);
         galStripPlace();
         if (galCur) galPageWork(galCur, galLayout(galCur, galHole));
     }
 
-    // The box fullscreen began with; a gallery switched meanwhile keeps its height and edge, its own shape.
-    function galFullBack(fp) {
-        if (fp.href === galFly.href) return fp.u;
-        const u = fp.u, W = vpW(), w = Math.min(W - 8, Math.max(GAL_UNIT_MIN_W, (u.h - galAttH()) * galFly.asp));
+    // Remember the clicked picture's box (outside fullscreen only) for this window size.
+    function galKeepNow(u, asp) {
+        if (!fullActive()) galBoxKeep = { u: Object.assign({}, u || galUnitRect()), W: vpW(), H: vpH(), asp: asp || 1 };
+    }
+
+    // The remembered box if the window still has its size; a picture of another shape keeps its height and outer edge.
+    function galKept(asp) {
+        const k = galBoxKeep, W = vpW();
+        if (!k || fullActive() || Math.abs(k.W - W) > 24 || Math.abs(k.H - vpH()) > 24) return null;     // a scrollbar's width either way
+        const u = k.u;
+        if (!asp || Math.abs(asp - k.asp) <= 0.02 * k.asp) return Object.assign({}, u);
+        const w = Math.min(W - 8, Math.max(GAL_UNIT_MIN_W, (u.h - galAttH()) * asp));
         const x = u.x + u.w / 2 > W / 2 ? u.x + u.w - w : u.x;
         return { x: Math.round(Math.max(0, Math.min(W - w, x))), y: u.y, w: Math.round(w), h: u.h };
     }
@@ -14770,13 +14827,12 @@
             galEditStop(false);
             galMenuHide();
             const set = galCur, H = vpH();
-            const fp = galFly && !fullActive() && galFullPrev && Math.abs(galFullPrev.W - vpW()) <= 24 && Math.abs(galFullPrev.H - H) <= 24 ? galFullPrev : null;     // a scrollbar's width either way
-            if (galFly) dbg('gallery refit', { full: fullActive(), W: vpW(), H: H, wentIn: galFullPrev ? galFullPrev.W + 'x' + galFullPrev.H + ' ' + galFullPrev.u.w + 'x' + galFullPrev.u.h : null, restored: !!fp });
+            const fp = galFly ? galKept(galFly.asp) : null;
+            if (galFly) dbg('gallery refit', { full: fullActive(), W: vpW(), H: H, kept: galBoxKeep ? galBoxKeep.W + 'x' + galBoxKeep.H + ' ' + galBoxKeep.u.w + 'x' + galBoxKeep.u.h : null, restored: !!fp });
             if (galFly) {
                 const sl = galStripLoad(galAnchorRec(), galAnchorRows(H));
                 if (sl.m === 'out' && galStripM.m === 'out') galStripM.r = sl.r;
-                if (fp) { galFullPrev = null; galHole = galFullBack(fp); }      // out of fullscreen: the size it went in with (user)
-                else galHole = galCornerRect(galFly.asp, galAttH());
+                galHole = fp || galCornerRect(galFly.asp, galAttH());      // same window size: the same box (user: out of fullscreen, switches)
                 galUnitPut(galHole);
             } else if (galHole) galHole = galCornerRect(galHole.w / galHole.h, 0);
             if (galVeilEl && galVeilEl.classList.contains('on')) galVeilEl.style.clipPath = galBlur.style.clipPath = galClip(galHole);
@@ -15053,6 +15109,7 @@
         }
         sep();
         item('All settings…', null, function () { galMenuHide(); showPanel(); });
+        if (galFly) { const gh = galFly.href; item('Open the gallery\'s page in a new tab', null, function () { galMenuHide(); openOriginal(gh); }); }
         if (galCur) item('Close the gallery', null, function () { galMenuHide(); galHide('menu'); });
         if (galFly) {
             sep();
@@ -15060,7 +15117,7 @@
             ['Click the picture: close · drag it: move · drag a corner: resize (Ctrl: no snapping)',
                 'Drag the strip by its background to take it off the picture',
                 '◀ ▶ or ← →, or the wheel over the strip: picture · ↑ ↓: page · click a number to type one',
-                '⤓ saves every picture not saved yet, once the page is read (greyed until then) · ↗ opens the gallery\'s page'].forEach(function (t) {
+                '⤓ saves every picture not saved yet, once the page is read (greyed until then) · ⛶ slideshow from the first picture, fullscreen · ✕ close'].forEach(function (t) {
                 const d = document.createElement('div');
                 d.className = 'lb hp';
                 d.textContent = t;

@@ -375,6 +375,10 @@ logs `retrying` ×3 — an artefact of the stub, not of the manager. The pane wo
   wrappers `tile`/`item`.
 - `photo-200x150.jpg` upgrades by URL rule to a 1600 px `photo.jpg`: a leaf. Doors use `mural.jpg`.
 - Synthetic middle presses need a `mouseup` too, or `mouseDown` stays set and no hover previews.
+- **A hidden pane never settles `img.decode()`**: every slideshow swap then sits on the spinner with the frame blank,
+  and the saved mark (hidden under the spinner) never shows. A blank frame there is not a bug; check the debug lines.
+- **`prompt()` throws in the pane** ("not supported"): the first save's `saveFolderAsk()` kills it silently. Set
+  `saveFolderAsked: true` in `hoverZoomSettings` first.
 
 
 ## Live sites in Claude in Chrome

@@ -285,7 +285,7 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   left the card — the document handler's middle branch only `preventDefault`s presses on our layer;
   the `.fly` listener closes and sets `galMidAt` so `galMidEat` eats the auxclick). Left closes on
   release without a 4 px move (`galEditDown`), since a drag moves it.
-- **No tooltips on the picture, its corners, its ⤓ ↗ or the strip** (user, v0.339.0: "constantly popping
+- **No tooltips on the picture, its corners, its ⤓ ⛶ ✕ or the strip** (user, v0.339.0: "constantly popping
   up"). Their text is a "Using the gallery" section at the foot of the menu (`.lb.hp`). Don't add `setTip` back there.
 - **The menu stays over the raised picture**: `galFlyZ` gives `galFlyHost` the same z as `galTop`, so tree order
   decides; `galMenuShow` moves `galTopHost` last in `<html>` before showing (v0.339.0: the menu was under the
@@ -361,7 +361,9 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   `?page=2`: the same 10 loaded in 2-5 ms, an unloaded control file 325 ms. The disk cache keeps them
   across pages there, so loading originals a page ahead is worth it in Chrome; other browsers' cache
   settings decide for themselves, and the `nextwarm` rows answer that per browser.
-- **Picture tools** (`galToolsBuild`, user v0.328.0, `G10`): ⤓ ↗ in `.tools` inside the clicked
+- **Picture tools** (`galToolsBuild`, user v0.328.0, `G10`): ⤓ ⛶ ✕ in `.tools` (v0.365.0: ↗ moved to the right-click menu;
+  ⛶ `galFullStart` asks `requestFullscreen` inside the press — a later call has no user activation — then
+  `twGoTo(0)` / `tourFromStart(1, true, 0)` and `enterFull` once the preview is up; ✕ = `galHide('hole')`) inside the clicked
   picture's `.pic`, inset `GAL_HD + 4` from the right so the invisible resize corner stays reachable.
   Each button eats its own mousedown, or the picture's handler closes the gallery or starts a drag.
   ⤓ `galDownloadAll` queues the gallery (`galBestOf` + `saveOriginal(…, fail)` per picture; `fail` skips the
@@ -580,7 +582,7 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
 
 ## Endless (v0.359.0, user; INTERACTION.md `G12`)
 
-`cfg.galleryEndless` (remembered; ☐ Endless at the clicked picture's bottom-left, `galEndlessBuild`; also the
+`cfg.galleryEndless` (remembered; ☐ Endless at the clicked picture's bottom-left, ⓘ top-left (`.endl.top`), `galEndlessBuild`; also the
 right-click menu and the panel). Code: `galEndless` … `galInfoShow`, after `galPageStep`.
 - **The queue** (`galChain` {hrefs, at, land, warm}, made in `galMiddle` by `galChainFrom` for a user's open, kept for
   a queued one: `land.href === href`): the opened door, then the doors after it in document order (`galDoorList`:
@@ -619,12 +621,15 @@ right-click menu and the panel). Code: `galEndless` … `galInfoShow`, after `ga
   (`galAnchorDefault`, never the remembered place), as wide as `galFullW()` (the strip's widest line with every `n/N`
   measured as `N/N+`, digits as 8, canvas `measureText`, + ◀ ▶, gaps, padding, border), the picture as tall as that
   width gives, ≤ `GAL_FULL_FRAC` 0.45 of the screen (v0.360.0 had 0.1: portraits were cropped, user).
-- **Leaving fullscreen puts back the box it went in with** (`galFullPrev`, taken at the top of `enterFull`, before
-  `lockScroll` widens `vpW`; used by the first `galRefit` whose window is within 24 px of it, then dropped; a gallery
-  switched meanwhile keeps its height and outer edge, `galFullBack`). Recomputing from the anchor came back another
-  size (pane: 213×214 → 209×211), since a one-page gallery's rows — which the anchor snaps to — were laid out for the
-  fullscreen box. Debug line `gallery refit {full, W, H, wentIn, restored}`. The pane's viewport emulation stops
-  sending `resize` after a few changes: dispatch one by hand when testing this.
+- **One box per window size** (`galBoxKeep` {u, W, H, asp}; `galKeepNow`, `galKept`; user v0.365.0): set at a user's open,
+  a drag/resize (`galSave`) and the top of `enterFull` (before `lockScroll` widens `vpW`); reused by every refit and
+  every queue switch (`galMiddle` with `land`) while the window is within 24 px of it, outside fullscreen. A picture of
+  another shape keeps the height and outer edge. Recomputing from the anchor gave another size each time: it snaps to
+  the current gallery's rows (a one-page gallery's own), so switches and leaving fullscreen changed it (pane: 213×214 →
+  209×211; user: about double on leaving fullscreen in LibreWolf). Never re-recorded by a refit: a refit mid-transition
+  (fullscreen exit, viewport not settled) would store a wrong box. A switch at a new window size records the box on
+  screen first. Debug line `gallery refit {full, W, H, kept, restored}`. The pane's viewport emulation stops sending
+  `resize` after a few changes: dispatch one by hand when testing this.
 - **Wheel in fullscreen** (user): on the drawn picture (`pointOnPicture`, the media element's rect, not the frame —
   the fullscreen frame spans the screen) it zooms; anywhere else `twWheel` steps the slideshow (`fullGal`), as over
   the widget. It used to fall to `galWheel`, which dismisses. Since v0.364.0 the same holds for a page's slideshow
@@ -640,6 +645,11 @@ right-click menu and the panel). Code: `galEndless` … `galInfoShow`, after `ga
 - **Measure the fly where it lands, never mid-flight** (`galFlyRect()`, not `getBoundingClientRect`): `galFlyZ` (the
   picture is under the preview unless the pointer is on it) and `galStripFade` ran at a switch while the new picture
   still sat at its card, so in fullscreen both stayed hidden until the pointer moved.
+- **Back into a gallery with the slideshow on** waits (≤ 6 s) for every thumbnail to be fed before it can step to
+  the last picture; meanwhile `tourEntries` is [] and the old gallery's picture stayed up (user v0.365.0).
+  `galLandShow` blanks the frame and swaps in the landing picture from `galLists` (`galBestOf`) at once.
+  Closing then left the preview open: the old set's cells are detached, so `galOwns(active)` is false — `galHide`
+  also closes when `tour.gal` is set.
 - Not done: the queue never crosses into the site's next page (`nextPageIn`).
 - Fixture door-long (150 doors, 40 each): 2 seen → queue 148, P:1/296; ▼ past page 2 → gallery long=3; ◀ back →
   long=1's last page; slideshow ▶ 40 → 41 seamless, ◀ 1 → previous 40; typed P 231 → gallery 116; close scrolled

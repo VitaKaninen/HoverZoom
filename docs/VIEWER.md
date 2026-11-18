@@ -748,6 +748,11 @@ in the download folder (unless the browser always asks). `preventDefault` stops 
 `stopImmediatePropagation` + `claimClick()` keep the page and OLINT off it. `midSaveClick()` eats the
 `mouseup`/`auxclick`/`click` within `MENU_CLAIM_MS` — without it the link under a hover preview
 opens a tab. Window state is untouched. Buttons inside the window save too (no `isBoxControl()`).
+In fullscreen (`midInFull`, user v0.365.0) anywhere counts but the gallery's own pieces (`galTopAt`: the
+corner picture's middle press closes the gallery), with no geometry check: the pane saved there already, the
+user's LibreWolf did not, cause not found — the `middle press not taken as a save` line now carries `full`,
+`inPreview`, `galTop`. The saved mark (`syncSavedMark`, `shownSaved`) also shows for a gallery picture whose
+thumbnail is in `GAL_SAVED_KEY` (saved by ⤓ or earlier), not only a middle press this visit.
 Same `saveName()` and fallback as `E9a`; Tampermonkey's Download Mode must be *Browser API* in
 LibreWolf.
 - **On the thumbnail too, before it opens** (`E79`, user, v0.343.0: "it opens too late, so my middle
@@ -1203,6 +1208,8 @@ after the pointer stops anywhere — `barWanted()` is `pointerOverChrome()` in a
 so a pointer parked on the bar keeps it. `barStillFade` off: shown for as long as it is pinned.
 Reversed: v0.73.0–v0.321.0 held the bar open while the pointer was anywhere on the preview, so it
 never faded from under a picture being looked at; the user now wants the picture clear when still.
+- **No bar in fullscreen** (user, v0.365.0): `barShown()` is false while `fullActive()`, so `barDock()` is 0
+  and `fitFull()` uses the whole height. Leaving is Esc or a double-click; the bar's ⛶ is not reachable there.
 
 **`onMove` calls `showBar()` once on the way OUT**, guarded by a `barOver` flag. Calling it on every
 move outside the window would push the fade back on any movement anywhere on screen — which is the
