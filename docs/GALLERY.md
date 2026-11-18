@@ -49,6 +49,14 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   (sessionStorage `hzNoFrame` {host: true}). From then `galLoad` starts no frame, `galCountLoad` uses `galLoad`, and a
   list read there is final: `galGrown` + why `html` + `galKeep` (so `N`, not `N+`, and ⤓ ready at once); `galGrow`
   returns at once. eporner refuses every frame (SecurityError), so before this its counts never lost the `+`.
+- **Frames that never report** (user v0.355.0, LibreWolf: one count per 10 s, chips `N+` for minutes): the frame
+  loads but our script does not run in it, so each read waited `GAL_FRAME_MS`/`GAL_REPORT_MS` and then took the HTML.
+  `galReportSeen` (from `galRender`'s `fin`): `GAL_NOREPORT_MAX` (2) `no report …` in a row for a host →
+  `galNoFrameNote`, which also marks every list already held for that host whole (`galGrown`, `html`, `galKeep`), so
+  all chips go final at once and no more frames load. A `reported` resets the run. Fixture door-long: 150 chips
+  final in 10 s (was 4.5 s each). **Risk:** a site whose frames do report but two are too slow in a row loses frame
+  reading for the tab (lazy galleries count only their HTML) — if seen, raise the count or require the frame's
+  `load` to have fired.
 - **Peek**: a left press on a door's chip (`galChipClickable`, capture on the chip) peeks, or closes
   the open one; where `siteEnabled()`, a plain middle press on `doorAt()` does too, but only with `cfg.galleryMiddle` (default off, user
   2026-11-12). Both set

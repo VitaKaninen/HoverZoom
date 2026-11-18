@@ -356,6 +356,9 @@ logs `retrying` ×3 — an artefact of the stub, not of the manager. The pane wo
 
 ## Gallery fixtures — traps (2026-11-12)
 
+- **Fixture galleries other than `door-grow.html` have no script inside**, so their frames never report, and two of
+  them teach the tab "no frames on localhost" (`hzNoFrame` in sessionStorage, v0.355.0). On `door-search.html` d7
+  (door-grow) then gets no count. To test frame reading, clear sessionStorage and open door-grow first, or alone.
 - `test-pages/door-long.html`: 150 doors to `gallery-a.html?long=N` (no script inside, so every frame ends
   `no report` in 4.5 s), same structure as door-search (its learned rule applies). For pace tests: a hidden pane
   fires no scroll events — send `WheelEvent('wheel')` on window, `scrollBy`, then `document.dispatchEvent(new

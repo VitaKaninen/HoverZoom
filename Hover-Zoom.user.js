@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.354.0
+// @version      0.355.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -11799,6 +11799,25 @@
             sessionStorage.setItem(GAL_NOFRAME_KEY, JSON.stringify(all));
             dbg('gallery: ' + h + ' refuses a frame; its galleries are read from their HTML from now on in this tab');
         } catch (e) { /* storage unavailable */ }
+        galLists.forEach(function (list, k) {      // what is known is all there will be: final counts, ⤓ jobs stop growing
+            if (galGrown.has(k) || !galNoFrame(k)) return;
+            galGrown.add(k);
+            galGrowWhy.set(k, 'html');
+            galKeep(k, true);
+            galChipsCount(k);
+        });
+    }
+    // Frames that load but never report: our script does not run in them in this browser, so after two in a row stop asking.
+    const GAL_NOREPORT_MAX = 2;
+    const galNoReport = new Map();      // host -> frames in a row that ended without a report
+    function galReportSeen(href, why) {
+        let h = '';
+        try { h = new URL(href).host; } catch (e) { return; }
+        if (why === 'reported') { galNoReport.delete(h); return; }
+        if (!/^no report/.test(why)) return;
+        const n = (galNoReport.get(h) || 0) + 1;
+        galNoReport.set(h, n);
+        if (n >= GAL_NOREPORT_MAX) { dbg('gallery: ' + n + ' frames in a row never reported (' + why + ')'); galNoFrameNote(href); }
     }
 
     function galRender(href, onMore, onEnd, solo) {
@@ -11824,6 +11843,7 @@
                 done = true;
                 galTrace(href, 'frame: ' + String(why).replace(/landed on .*/, 'landed on another page') + (v && v !== 'cancel' ? ' (' + v.length + ' pictures)' : ''));
                 dbg('gallery frame: ' + why, { href: href, pictures: v ? v.length : 0 });
+                galReportSeen(href, String(why));
                 resolve(v);
                 if (keep) { clearTimeout(t); t = setTimeout(function () { end('timed out'); }, (solo ? solo.maxMs : GAL_GROW_MAX_MS) + GAL_REPORT_MS); }
                 else end(why);
