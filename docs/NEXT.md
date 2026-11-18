@@ -1,4 +1,18 @@
-# Handoff 2026-11-17 #3 (~337k tokens) — read this first
+# Handoff 2026-11-17 #4 (~333k tokens, endless galleries) — read this first
+
+**Asked, in order:** endless mode (☐ Endless on the clicked picture: at a gallery's end the next door on the page
+opens, back goes to the one before, slideshow across, P/G/T counters, ⓘ help, ⤓ stays per gallery; viewed doors
+judged once when queued) → v0.359.0. Then fullscreen: corner picture small, sized by the strip's text; a switch hid
+it till the pointer moved; no seam stop or note in endless, dead stop at the queue's last picture → v0.360.0. Then
+the ⓘ box (never over its button, next press only closes it), the wheel off the picture in fullscreen steps, portraits
+not cropped, the size restored on leaving fullscreen → v0.361.0. All pushed; design and reasons in GALLERY.md "Endless".
+**Verified** on fixture door-long in the Browser pane only (stand-in fullscreen, no real `requestFullscreen`; resize
+dispatched by hand). Chrome's Tampermonkey shows no chips on localhost (no learned doors there), so not tested live.
+**Last asked:** nothing pending. Unverified in LibreWolf: the size restored after a REAL fullscreen exit — if it
+still changes, ask for the `gallery refit {full, W, H, wentIn, restored}` debug lines. Offered, not taken: the queue
+crossing into the site's next results page (`nextPageIn`).
+
+# Handoff 2026-11-17 #3 (~337k tokens)
 
 **Asked, in order:** run the open eporner download tests (done, below; bugs fixed v0.344.0 stall, v0.345.0 folder,
 v0.346.0 folder debug lines); check Downloads (done, misfiles moved, then the whole folder recycled at the user's
