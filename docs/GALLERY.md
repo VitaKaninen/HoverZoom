@@ -613,8 +613,21 @@ right-click menu and the panel). Code: `galEndless` … `galInfoShow`, after `ga
   faint (`picOn`/`picBack`). No note on a switch either (a "Gallery n of N" one was dropped: it read as the endstop).
 - **Fullscreen** (user, v0.360.0: the corner picture was blown up): `galCornerRect` → `galFullRect` — bottom-right
   (`galAnchorDefault`, never the remembered place), as wide as `galFullW()` (the strip's widest line with every `n/N`
-  measured as `N/N+`, digits as 8, canvas `measureText`, + ◀ ▶, gaps, padding, border), the picture ≤
-  `GAL_FULL_FRAC` 0.1 of the screen tall (`object-fit:cover` crops). `galStripText` refits when that width moves
+  measured as `N/N+`, digits as 8, canvas `measureText`, + ◀ ▶, gaps, padding, border), the picture as tall as that
+  width gives, ≤ `GAL_FULL_FRAC` 0.45 of the screen (v0.360.0 had 0.1: portraits were cropped, user).
+- **Leaving fullscreen puts back the box it went in with** (`galFullPrev`, taken at the top of `enterFull`, before
+  `lockScroll` widens `vpW`; used by the first `galRefit` whose window is within 24 px of it, then dropped; a gallery
+  switched meanwhile keeps its height and outer edge, `galFullBack`). Recomputing from the anchor came back another
+  size (pane: 213×214 → 209×211), since a one-page gallery's rows — which the anchor snaps to — were laid out for the
+  fullscreen box. Debug line `gallery refit {full, W, H, wentIn, restored}`. The pane's viewport emulation stops
+  sending `resize` after a few changes: dispatch one by hand when testing this.
+- **Wheel in fullscreen** (user): on the drawn picture (`pointOnPicture`, the media element's rect, not the frame —
+  the fullscreen frame spans the screen) it zooms; anywhere else `twWheel` steps the slideshow (`fullGal`), as over
+  the widget. It used to fall to `galWheel`, which dismisses.
+- **ⓘ box**: placed off its button (above, else below, else beside: `galMenuShow(…, avoid)`). While it is up the next
+  press anywhere, ⓘ included, only closes it: `galInfoPress` is the first window-capture `mousedown` (bound at boot
+  beside `midSaveClick`, so it runs before every other capture listener), and `galInfoAfter` eats that press's
+  mouseup / click / auxclick / contextmenu (≤ 1.5 s). `galStripText` refits when that width moves
   (`galFullLast`); `enterFull`/`restoreFull` call `galRefit` (a maximise fallback fires no `resize`). No drags or
   corner resizes while `fullActive()`, and a drag there is not a click (`held`), so nothing is saved to the anchor.
 - **Measure the fly where it lands, never mid-flight** (`galFlyRect()`, not `getBoundingClientRect`): `galFlyZ` (the

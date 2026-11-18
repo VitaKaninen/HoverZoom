@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.360.0
+// @version      0.361.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -4882,6 +4882,7 @@
     }
 
     function enterFull() {
+        if (galFly && !fullPrev) galFullPrev = { u: galUnitRect(), href: galFly.href, W: vpW(), H: vpH() };     // before lockScroll moves vpW
         // Captured before anything moves: this is the only moment the pre-fullscreen state exists.
         // The URL is for the tour: a step taken while fullscreen means the picture coming back
         // is not the one that went in. See E57.
@@ -5860,6 +5861,13 @@
         const w = outerW();
         const h = outerH();
         return x >= view.left && x <= view.left + w && y >= view.top && y <= view.top + h && !galTopAt(x, y);
+    }
+
+    // Is (x, y) on the drawn picture itself, inside the frame (not the black around it)?
+    function pointOnPicture(x, y) {
+        if (!pointInPreview(x, y) || !mediaEl) return false;
+        const r = mediaEl.getBoundingClientRect();
+        return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
     }
 
     // Is (x, y) on the gallery's top layer (the clicked picture, its strip, its menu)? That layer covers the preview.
@@ -7674,6 +7682,8 @@
         e.preventDefault();
         e.stopImmediatePropagation();
     }
+    CAP_TARGET.addEventListener('mousedown', function (e) { galInfoPress(e); }, true);      // first of all: a press that closes the ⓘ box reaches nothing else
+    ['mouseup', 'click', 'auxclick', 'contextmenu'].forEach(function (t) { CAP_TARGET.addEventListener(t, function (e) { galInfoAfter(e); }, true); });
     CAP_TARGET.addEventListener('auxclick', midSaveClick, true);
     CAP_TARGET.addEventListener('click', midSaveClick, true);
     CAP_TARGET.addEventListener('mouseup', midSaveClick, true);
@@ -9866,7 +9876,8 @@
         if (tw) twNear(e.clientX, e.clientY);
         if (e.ctrlKey || panelOwns(e)) return;
         const up = !!view && !!box && box.classList.contains('on');
-        if (!(tw && twWheelZone(e.clientX, e.clientY, TW_WHEEL_PAD)) && !galWidgetAt(e.clientX, e.clientY)) {
+        const fullGal = !!galCur && placed && fullActive() && !pointOnPicture(e.clientX, e.clientY);     // fullscreen gallery: the black around the picture steps, the picture zooms (user)
+        if (!(tw && twWheelZone(e.clientX, e.clientY, TW_WHEEL_PAD)) && !galWidgetAt(e.clientX, e.clientY) && !fullGal) {
             if (!up) return;
             if (pointInPreview(e.clientX, e.clientY) || (!placed && active && e.target instanceof Node && active.contains(e.target))) {
                 if (placed) return;     // onPinWheel zooms it
@@ -11592,8 +11603,9 @@
     let galSeen = {}, galMarkTimer = 0;
     const GAL_FLY_MS = 320;             // the clicked picture's flight to the corner and back
     const GAL_FLY_FRAC = 0.2;           // its height there, of the window's (user)
-    const GAL_FULL_FRAC = 0.1;          // in fullscreen, at most this of the screen tall; its width is the strip's text
+    const GAL_FULL_FRAC = 0.45;         // in fullscreen, at most this of the screen tall (a portrait is not cropped below that); its width is the strip's text
     let galFullLast = 0;                // the width galFullRect last gave
+    let galFullPrev = null;             // {u, href, W, H}: the clicked picture's box as fullscreen began, put back on leaving it
     let galOn = false, galTap = false, galMidAt = 0;      // a peek is up and locked; Ctrl down with nothing else yet
     const GAL_PEND_MS = 3000;           // the pressed result lights up only if its gallery is not on screen by then
     const GAL_DIAG_MS = 10000;          // an open that shows nothing this long after the press gets the diagnostics popup
@@ -13156,7 +13168,7 @@
         setTip(info, 'What the buttons and numbers mean');
         const eat = function (e) { e.preventDefault(); e.stopPropagation(); };
         lb.addEventListener('mousedown', function (e) { eat(e); if (e.button === 0) galEndlessSet(!cfg.galleryEndless); });
-        info.addEventListener('mousedown', function (e) { eat(e); if (e.button === 0) galInfoShow(e.clientX, e.clientY); });
+        info.addEventListener('mousedown', function (e) { eat(e); if (e.button === 0) galInfoShow(info); });
         [lb, info].forEach(function (b) {
             ['mouseup', 'click', 'auxclick', 'dblclick', 'contextmenu'].forEach(function (t) { b.addEventListener(t, eat); });
         });
@@ -13166,8 +13178,9 @@
     }
 
     // ⓘ: every control of the open gallery and what its numbers mean, in the menu's box.
-    function galInfoShow(x, y) {
-        galMenuShow(x, y, [
+    function galInfoShow(btn) {
+        const b = btn.getBoundingClientRect();
+        galMenuShow(b.left, b.top, [
             ['The picture in the corner', 'click: close · drag: move · drag a corner: resize (Ctrl: no snapping) · right-click: settings'],
             ['⤓ ↗', 'save every picture of this gallery not saved yet (once its page is read; never the rest of the endless queue) · open the gallery\'s page in a new tab'],
             ['Strip', 'drag it by its background to take it off the picture'],
@@ -13180,7 +13193,29 @@
             ['G:10/20', 'endless, picture row: picture 10 of this gallery\'s 20'],
             ['T:300/1,000', 'endless: picture 300 of every queued gallery\'s pictures known so far (+ = some not counted yet)'],
             ['Closing', 'the picture flies back to the current gallery\'s card on the page'],
-        ]);
+            ['', 'any click closes this box'],
+        ], b);
+        galInfoEat = true;
+    }
+
+    // While the ⓘ box is up, the next press anywhere (ⓘ included) only closes it; its mouseup, click and menu go nowhere either.
+    let galInfoEat = false, galInfoUntil = 0;
+    function galInfoPress(e) {
+        if (galInfoEat && galMenuEl && !galMenuEl.hidden && galMenuEl.classList.contains('info')) {
+            galInfoEat = false;
+            galInfoUntil = Date.now() + 1500;
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            galMenuHide();
+            return;
+        }
+        galInfoEat = false;
+    }
+    function galInfoAfter(e) {
+        if (Date.now() > galInfoUntil) return;
+        if (e.type !== 'mouseup') galInfoUntil = 0;
+        e.preventDefault();
+        e.stopImmediatePropagation();
     }
 
     // Is (x, y) over the gallery's widget: its strip or the clicked picture it sits in? The wheel flips pictures there (twWheel).
@@ -13659,6 +13694,7 @@
         galWant = null;
         galOn = false;
         galPeek = false;
+        galFullPrev = null;
         if (galOwns(active)) cancel();
         if (galCur) { galDrop(galCur); galCur = null; plVidsDrop(); }
         if (galOwns(active) && placed) { unplace(); cancel(); }
@@ -14674,6 +14710,14 @@
         if (galCur) galPageWork(galCur, galLayout(galCur, galHole));
     }
 
+    // The box fullscreen began with; a gallery switched meanwhile keeps its height and edge, its own shape.
+    function galFullBack(fp) {
+        if (fp.href === galFly.href) return fp.u;
+        const u = fp.u, W = vpW(), w = Math.min(W - 8, Math.max(GAL_UNIT_MIN_W, (u.h - galAttH()) * galFly.asp));
+        const x = u.x + u.w / 2 > W / 2 ? u.x + u.w - w : u.x;
+        return { x: Math.round(Math.max(0, Math.min(W - w, x))), y: u.y, w: Math.round(w), h: u.h };
+    }
+
     // The browser window resized: the clicked picture goes back to its remembered place for the new size (edges on a line follow it), and the gallery is laid out again on the page holding the same picture.
     function galRefit() {
         galResizeAt = performance.now();
@@ -14684,10 +14728,13 @@
             galEditStop(false);
             galMenuHide();
             const set = galCur, H = vpH();
+            const fp = galFly && !fullActive() && galFullPrev && Math.abs(galFullPrev.W - vpW()) <= 24 && Math.abs(galFullPrev.H - H) <= 24 ? galFullPrev : null;     // a scrollbar's width either way
+            if (galFly) dbg('gallery refit', { full: fullActive(), W: vpW(), H: H, wentIn: galFullPrev ? galFullPrev.W + 'x' + galFullPrev.H + ' ' + galFullPrev.u.w + 'x' + galFullPrev.u.h : null, restored: !!fp });
             if (galFly) {
                 const sl = galStripLoad(galAnchorRec(), galAnchorRows(H));
                 if (sl.m === 'out' && galStripM.m === 'out') galStripM.r = sl.r;
-                galHole = galCornerRect(galFly.asp, galAttH());
+                if (fp) { galFullPrev = null; galHole = galFullBack(fp); }      // out of fullscreen: the size it went in with (user)
+                else galHole = galCornerRect(galFly.asp, galAttH());
                 galUnitPut(galHole);
             } else if (galHole) galHole = galCornerRect(galHole.w / galHole.h, 0);
             if (galVeilEl && galVeilEl.classList.contains('on')) galVeilEl.style.clipPath = galBlur.style.clipPath = galClip(galHole);
@@ -14696,7 +14743,7 @@
             let L = galLayout(set, galHole);
             const pg = galPageOf(set, keep);
             if (pg !== set.page) { set.page = pg; L = galLayout(set, galHole); }
-            if (galFly && set.pages.length === 1) {         // a one-page gallery's rows move with the picture: place it once more on the new ones
+            if (galFly && !fp && set.pages.length === 1) {         // a one-page gallery's rows move with the picture: place it once more on the new ones
                 const u = galCornerRect(galFly.asp, galAttH());
                 if (u.x !== galHole.x || u.y !== galHole.y || u.w !== galHole.w || u.h !== galHole.h) { galHole = u; galUnitPut(u); L = galLayout(set, u); }
             }
@@ -14854,7 +14901,7 @@
     let galMenuEl = null;
 
     // Our menu on the corner picture: its place, and the gallery settings.
-    function galMenuShow(x, y, help) {
+    function galMenuShow(x, y, help, avoid) {
         const root = galTopRoot();
         if (!galMenuEl) {
             galMenuEl = document.createElement('div');
@@ -14875,9 +14922,18 @@
             });
             if (galTopHost.nextSibling) document.documentElement.appendChild(galTopHost);
             m.hidden = false;
-            const r = m.getBoundingClientRect();
-            m.style.left = Math.round(Math.max(4, Math.min(x, vpW() - 4 - r.width))) + 'px';
-            m.style.top = Math.round(Math.max(4, Math.min(y - r.height, vpH() - 4 - r.height))) + 'px';
+            const r = m.getBoundingClientRect(), W = vpW(), H = vpH(), a = avoid, g = 6;
+            let l = Math.max(4, Math.min(x, W - 4 - r.width)), t = Math.max(4, Math.min(y - r.height, H - 4 - r.height));
+            if (a) {        // never over the ⓘ, so it can close the box: above it, else below, else beside it
+                if (a.top - g - r.height >= 4) t = a.top - g - r.height;
+                else if (a.bottom + g + r.height <= H - 4) t = a.bottom + g;
+                else {
+                    t = Math.max(4, Math.min(a.top, H - 4 - r.height));
+                    l = a.left - g - r.width >= 4 ? a.left - g - r.width : Math.min(W - 4 - r.width, a.right + g);
+                }
+            }
+            m.style.left = Math.round(l) + 'px';
+            m.style.top = Math.round(t) + 'px';
             hideTip();
             return;
         }
