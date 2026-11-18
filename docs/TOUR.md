@@ -1043,7 +1043,6 @@ The keys in `DEFAULTS`. Remember the hoisting trap in `../CLAUDE.md`: every
 | `tourButtons` | `true` | show the widget |
 | `tourFade` | `false` | both widgets fade with the pointer's distance, gone at 75 px |
 | `tourKeyStart` | `true` | → / ← with nothing open start at the first / last picture |
-| `tourKeys` | `true` | arrows navigate when the picture cannot pan horizontally |
 | `tourMinDisplayed` | `128` | the tour's floor on the longer side as drawn, px (§1a) |
 | `tourLoadMore` | `true` | scrolling along ahead so a feed loads more (§9) |
 | `tourCrossPage` | `true` | harvest the next page in the background |
