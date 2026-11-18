@@ -1,4 +1,15 @@
-# Open test plan, 2026-11-17 (v0.343.0) — read this first
+# Handoff 2026-11-17 #2 (~326k tokens) — read this first
+
+**Asked:** (1) v0.342.0: save originals without a second download (bytes kept on disk in the site's IndexedDB
+while a queue runs) and a picture count on the ▦ chip — done, pushed. (2) Why counts take minutes, why a
+visited gallery's count stays unknown; test everything live on eporner (counts, ⤓ readiness, links remembered,
+Back mid-download, multiple tabs and sites); ticks missing after middle-click; pornpics middle-click opens a new
+tab — partly done, v0.343.0 (below). (3) Mid-turn: a middle press on a thumbnail before its preview opens should
+save the original, not cancel it — done, `E79`, v0.343.0.
+**Last asked the user:** answer the save-folder `prompt()` in Chrome's Claude tab group (tab 602234578), and send a
+`hover-zoom:gallery-state` trace from a pornpics page. Not answered yet.
+
+# Open test plan, 2026-11-17 (v0.343.0)
 
 User asked for a thorough live test on eporner (search https://www.eporner.com/search-photos/clit/). Done in
 Chrome on v0.343.0: counts (fresh tab 99 in 26 s; after Back all at once), ⤓ ready 0.34–1.05 s after opening,
