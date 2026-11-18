@@ -24,6 +24,10 @@ rest `N+` — send `gallery count from its page` / `gallery read to its end` deb
 behind the frame guard, 10 s per frame that never reports) fixed in v0.351.0, unverified there. (2) What a middle
 press on a results-page door should do: opens a tab now in both browsers (`galleryMiddle` off, the user's
 2026-11-12 default; on = peek its gallery). Options offered: turn the setting on, or make it save the gallery.
+**v0.353.0–v0.354.0:** ⤓ ready from the first known list, jobs grow with the read (GALLERY.md "⤓ is ready as soon as
+any list is known"; fixture-verified, not live); download bar bottom-right when no gallery is open (fixture-verified).
+Non-porn gallery sites were suggested to the user for testing (Flickr albums, Behance, ArtStation, DeviantArt,
+Imgur, wallhaven) — none tried with the script yet.
 
 # Handoff 2026-11-17 #2 (~326k tokens)
 
