@@ -1,4 +1,15 @@
-# Handoff 2026-11-17 #2 (~326k tokens) — read this first
+# Handoff 2026-11-17 #3 (~337k tokens) — read this first
+
+**Asked, in order:** run the open eporner download tests (done, below; bugs fixed v0.344.0 stall, v0.345.0 folder,
+v0.346.0 folder debug lines); check Downloads (done, misfiles moved, then the whole folder recycled at the user's
+request); summary of issues (given); then: pornpics look-ahead / categories previewing, middle press before the
+preview (`E79`), queue start delay, `saveRename` → always (v0.347.0), the user's one-read door signal + a Debug log
+toggle in the Tampermonkey menu (v0.348.0). All pushed. Details in the sections below.
+**Waiting on the user (asked in the last reply, not answered yet):** try pornpics home + `/lingerie/` on v0.348.0;
+if category tiles still preview, send `door scan` / `doorAreas` debug lines; and one failing early middle press with
+debug on (`middle press not taken as a save {…}`). Nothing else open.
+
+# Handoff 2026-11-17 #2 (~326k tokens)
 
 **Asked:** (1) v0.342.0: save originals without a second download (bytes kept on disk in the site's IndexedDB
 while a queue runs) and a picture count on the ▦ chip — done, pushed. (2) Why counts take minutes, why a
@@ -49,10 +60,8 @@ the gallery (suspect ruled out); the page-5 misfile was probably the user dismis
 **Open lead:** Downloads held 11 eporner thumbnails (`NN_small.jpg`, 3–5 KB, 4 as `(1)` copies) saved 19:35, before
 this session — likely the previous session's synthetic middle presses (`E79`) saving the thumbnail, not the original.
 Not reproduced. Downloads was emptied (to the Recycle Bin) at the user's request, 2026-11-17.
-Names inside one folder are mixed (`saveRename` 'meaningless' renames per file) — by design, not changed.
-Still unverified from before: a real middle press in Chrome (`E79`, synthetic only); pornpics middle-click opening a
-tab (needs the user's `hover-zoom:gallery-state` trace); a site's own scroll closing an open gallery
-(`galScroll` 'page scrolled by itself') as the cause of missing ticks — suspected, not confirmed.
+Still unverified: a real middle press in Chrome (`E79`, synthetic only); the missing ticks after middle-click (the
+self-scroll suspect is ruled out by the user; cause unknown).
 
 # Handoff 2026-11-17 (~305k tokens)
 
