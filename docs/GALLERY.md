@@ -361,7 +361,7 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   `?page=2`: the same 10 loaded in 2-5 ms, an unloaded control file 325 ms. The disk cache keeps them
   across pages there, so loading originals a page ahead is worth it in Chrome; other browsers' cache
   settings decide for themselves, and the `nextwarm` rows answer that per browser.
-- **Picture tools** (`galToolsBuild`, user v0.328.0, `G10`): ⤓ ⛶ ✕ in `.tools` (v0.365.0: ↗ moved to the right-click menu;
+- **Picture tools** (`galToolsBuild`, user v0.328.0, `G10`): ⤓ ✕ in `.tools`, ⛶ in `.tools.low` (bottom-right, v0.366.0; in fullscreen it leaves) (v0.365.0: ↗ moved to the right-click menu;
   ⛶ `galFullStart` asks `requestFullscreen` inside the press — a later call has no user activation — then
   `twGoTo(0)` / `tourFromStart(1, true, 0)` and `enterFull` once the preview is up; ✕ = `galHide('hole')`) inside the clicked
   picture's `.pic`, inset `GAL_HD + 4` from the right so the invisible resize corner stays reachable.
@@ -630,10 +630,7 @@ right-click menu and the panel). Code: `galEndless` … `galInfoShow`, after `ga
   (fullscreen exit, viewport not settled) would store a wrong box. A switch at a new window size records the box on
   screen first. Debug line `gallery refit {full, W, H, kept, restored}`. The pane's viewport emulation stops sending
   `resize` after a few changes: dispatch one by hand when testing this.
-- **Wheel in fullscreen** (user): on the drawn picture (`pointOnPicture`, the media element's rect, not the frame —
-  the fullscreen frame spans the screen) it zooms; anywhere else `twWheel` steps the slideshow (`fullGal`), as over
-  the widget. It used to fall to `galWheel`, which dismisses. Since v0.364.0 the same holds for a page's slideshow
-  in fullscreen (`tourActive()`), and down on the picture follows the slideshow wheel rule in `docs/TOUR.md`.
+- **Wheel in a gallery or fullscreen**: flips; a click on the picture makes it zoom (`docs/TOUR.md`, `wheelFlips`).
 - **ⓘ box and the right-click menu**: the ⓘ box is placed off its button (above, else below, else beside:
   `galMenuShow(…, avoid)`). While it is up the next press anywhere, ⓘ included, only closes it; while the menu is
   up a press off it does the same (user v0.363.0; a press on an item still acts). `galInfoPress` is the first
@@ -650,6 +647,15 @@ right-click menu and the panel). Code: `galEndless` … `galInfoShow`, after `ga
   `galLandShow` blanks the frame and swaps in the landing picture from `galLists` (`galBestOf`) at once.
   Closing then left the preview open: the old set's cells are detached, so `galOwns(active)` is false — `galHide`
   also closes when `tour.gal` is set.
+- **Stepping back from the landing picture waited ≤ 6 s too** (user v0.366.0): `galWhole` also waits for the page's
+  read to end (`galGrowing`), and the last thumbnails can land with no relayout. A `want` of the last page now clears on
+  `galFedAll` (every listed picture in and loaded), and the land wait relays out once that holds. Fixture: 6.3 s → 0.35 s.
+- **The page under the gallery follows the queue** (`galChainFollow`, user v0.366.0: fullscreen stopped half down the
+  page — lazy thumbnails below were never loaded, so never doors, and an endless feed never loaded more). Each switch
+  scrolls the current card to the centre; within 3 of the queue's end (and on a short queue at open, and at its end)
+  the last queued card goes to the top, nudging 1 px when already at the bottom so a scroll event fires, then
+  `galChainExtend` at 1.5 s and 4 s. `galSelfScrollAt` keeps `galScroll` from closing the gallery for it. A hidden pane
+  fires no scroll events: test with a fixture that appends doors from wrapped `scrollTo`/`scrollIntoView`.
 - Not done: the queue never crosses into the site's next page (`nextPageIn`).
 - Fixture door-long (150 doors, 40 each): 2 seen → queue 148, P:1/296; ▼ past page 2 → gallery long=3; ◀ back →
   long=1's last page; slideshow ▶ 40 → 41 seamless, ◀ 1 → previous 40; typed P 231 → gallery 116; close scrolled

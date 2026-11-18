@@ -751,7 +751,8 @@ opens a tab. Window state is untouched. Buttons inside the window save too (no `
 In fullscreen (`midInFull`, user v0.365.0) anywhere counts but the gallery's own pieces (`galTopAt`: the
 corner picture's middle press closes the gallery), with no geometry check: the pane saved there already, the
 user's LibreWolf did not, cause not found — the `middle press not taken as a save` line now carries `full`,
-`inPreview`, `galTop`. The saved mark (`syncSavedMark`, `shownSaved`) also shows for a gallery picture whose
+`inPreview`, `galTop`. On a pinned window the saved mark sits 6 px inside the drawn picture's top-left at 22 px, from `layout()` (v0.366.0: the
+pointer-following one was not seen in galleries or fullscreen); a hover preview keeps it by the pointer. It also shows for a gallery picture whose
 thumbnail is in `GAL_SAVED_KEY` (saved by ⤓ or earlier), not only a middle press this visit.
 Same `saveName()` and fallback as `E9a`; Tampermonkey's Download Mode must be *Browser API* in
 LibreWolf.

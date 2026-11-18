@@ -1397,5 +1397,10 @@ const galPH = function (min) {
     eq('pages: page of index', [P.pageOfIndex(gs, 0), P.pageOfIndex(gs, 13), P.pageOfIndex(gs, 35)], [0, 1, 2]);
     eq('pages: a single page is never worth a row', P.pagesWorth(30, 1), false);
 }
+{   // a second top-level function of one name silently replaces the first (v0.365.0's galKept broke kept gallery lists)
+    const seen = {}, dup = [];
+    for (const m of src.matchAll(/^    (?:async )?function (\w+)\(/gm)) { if (seen[m[1]]) dup.push(m[1]); seen[m[1]] = 1; }
+    eq('no two top-level functions share a name', dup, []);
+}
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

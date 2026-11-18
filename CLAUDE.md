@@ -124,10 +124,9 @@ the time you would look one up the symptom has already been misdiagnosed. (The s
   at boot** — anything it calls runs before every `let` declared below that point (TDZ throw, whole
   script dead: no previews, no settings). The test pages load the script while still `loading`, so
   that path is deferred there and passes. Defer new work out of boot paths (`setTimeout`). Cost v0.127.0.
-- **A scroll WE make fires `mouseout`/`mouseover` under a still pointer** (measured in Chrome), so
-  anything that scrolls while a resolve is pending must be guarded in `onOut`/`onOver` and the
-  page-scroll `cancel()`. `tourFollow()` scrolling during a ← start cancelled it: page moved, no
-  preview, intermittent by where the pointer rested (v0.135.0, `twStarting` guard).
+- **A scroll WE make fires `mouseout`/`mouseover` under a still pointer**, and `galScroll` closes an open
+  gallery on any page scroll: guard `onOut`/`onOver`/`cancel()` (`twStarting`) and `galScroll` (`galSelfScrollAt`).
+- **Grep a function name before declaring it**: a second `function x` silently replaces the first (`test-resolver.js` checks).
 - **Never pass `view: window` to an event constructor.** Under Tampermonkey `window` is a proxy, the
   constructor throws, and a `try` around it makes the dispatch silently never happen — the test
   pages (no sandbox) pass. Found on `primeLink`, v0.126.0.
@@ -173,10 +172,8 @@ the time you would look one up the symptom has already been misdiagnosed. (The s
 
 ```bash
 node --check Hover-Zoom.user.js     # syntax
-node test-resolver.js               # 605 assertions: the pure URL and video-link logic, the
-                                    # banner gate's shape test against every measured page in
-                                    # banner-test-sites.md, the tour's next-page detector, the
-                                    # learned wait's arithmetic and the captcha gate
+node test-resolver.js               # URL/video-link logic, banner gate vs banner-test-sites.md, next-page
+                                    # detector, learned wait, captcha gate, duplicate function names
 node dock/test-dock.js               # the shared widget dock's layout and drops
 node dock/sync-dock.js --check      # the dock copy in all three scripts matches (reads the siblings)
 node shared/test-log.js             # the shared request log, and HZ's wiring of it

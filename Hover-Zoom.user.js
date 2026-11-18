@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.365.0
+// @version      0.366.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -2606,7 +2606,7 @@
             'filter:drop-shadow(0 2px 6px rgba(0,0,0,.5))}',
             '.spin.on{display:block}',
             '.svmark{position:fixed;width:' + SAVED_MARK + 'px;height:' + SAVED_MARK + 'px;display:none;pointer-events:none}',
-            '.svmark.on{display:block}',
+            '.svmark.on{display:block}.svmark.pin{width:22px;height:22px}',
             '.svmark svg{display:block}',
             '.spin svg{display:block;width:100%;height:100%}',
             '.spin .disc{fill:var(--spin-bg);stroke:var(--spin-edge);stroke-width:1.5}',
@@ -4143,6 +4143,7 @@
         if (spinDocked) moveSpinner();      // the dock rides with the frame
         placePop();
         twOpacity();
+        syncSavedMark();    // pinned to the picture's corner, which this just moved
     }
 
     function clampScale(s) {
@@ -4302,13 +4303,20 @@
         return !!it && galOwns(active) && galList(GAL_SAVED_KEY).has(it.thumb);
     }
 
-    // The saved mark follows the pointer, below-right, while a picture saved this visit is up; the spinner takes the spot first.
+    // The saved mark: on a pinned window at the picture's top-left (as on its thumbnail); on a hover preview it follows the pointer, the spinner taking the spot first.
     function syncSavedMark() {
         if (!savedMarkEl) return;
-        const on = !!view && !!box && box.classList.contains('on') && shownSaved() &&
-            !(spinEl && spinEl.classList.contains('on')) && (!placed || pointInPreview(pointer.x, pointer.y));
+        const up = !!view && !!box && box.classList.contains('on') && shownSaved();
+        const pin = up && placed && !!mediaEl;
+        const on = pin || (up && !placed && !(spinEl && spinEl.classList.contains('on')));
         savedMarkEl.classList.toggle('on', on);
+        savedMarkEl.classList.toggle('pin', pin);
         if (!on) return;
+        if (pin) {
+            savedMarkEl.style.left = Math.round(view.left + insetX() + Math.max(0, view.ox) + 6) + 'px';
+            savedMarkEl.style.top = Math.round(view.top + insetY() + Math.max(0, view.oy) + 6) + 'px';
+            return;
+        }
         const m = viewportBox();
         savedMarkEl.style.left = Math.min(pointer.x + 14, m.vw - SAVED_MARK - EDGE_GAP) + 'px';
         savedMarkEl.style.top = Math.min(pointer.y + 14, m.vh - SAVED_MARK - bottomGap()) + 'px';
@@ -5595,11 +5603,14 @@
     function boxTap(e) {
         if (!tap || !tap.mid || !view || !placed) return;
         if (e.detail === 1) {
+            tapZoomed = false;
             if (mediaEl === vidEl && vidEl) { togglePlay(); tapPaused = true; }
+            else if (wheelFlipsHere() && pointOnPicture(e.clientX, e.clientY)) { picZoomToggle(); tapZoomed = true; }
             return;
         }
         if (e.detail !== 2) return;
         if (tapPaused) { togglePlay(); tapPaused = false; }
+        if (tapZoomed) { picZoomOn = picZoomOn === view.url ? '' : view.url; tapZoomed = false; }     // click 2 of a double-click undoes click 1's toggle
         toggleFull();
     }
 
@@ -5761,19 +5772,18 @@
         e.preventDefault();
         e.stopPropagation();
         const f = 1 + cfg.wheelZoomStep / 100;
-        if (e.deltaY > 0 && tourActive()) {     // a slideshow: down zooms out only to fit, holds there, then steps on (user)
-            if (view.scale > view.fitScale + 1e-6) {
-                zoomAt(Math.max(view.fitScale, view.scale / f), e.clientX, e.clientY);
-                if (view.scale <= view.fitScale + 1e-6) { picWheelHold = Date.now() + SEAM_HOLD_MS; dbg('wheel: back to fit, steps after ' + SEAM_HOLD_MS + ' ms'); }
-                return;
-            }
-            if (Date.now() < picWheelHold) { twWheelAcc = 0; return; }
-            twWheelStep(e);
-            return;
-        }
         zoomAt(view.scale * (e.deltaY < 0 ? f : 1 / f), e.clientX, e.clientY);
     }
-    let picWheelHold = 0;       // down on a slideshow picture just zoomed back to fit: steps wait till then
+
+    // In a gallery or fullscreen the wheel flips pictures; a click on the picture makes it zoom that one, a second click flips again (user).
+    let picZoomOn = '';         // the view.url the wheel zooms
+    function wheelFlipsHere() { return placed && !!view && (!!galCur || fullActive()); }
+    function wheelFlips() { return wheelFlipsHere() && picZoomOn !== view.url; }
+    function picZoomToggle() {
+        picZoomOn = picZoomOn === view.url ? '' : view.url;
+        toast(picZoomOn ? 'Wheel zooms this picture · click again to flip' : 'Wheel flips pictures', 1500);
+        dbg('wheel on the picture: ' + (picZoomOn ? 'zooms' : 'flips'));
+    }
 
     // ------------------------------------------------------------- interaction
 
@@ -5786,6 +5796,7 @@
     const TAP_SLOP = 4;     // px of pointer travel a click is allowed before it counts as a drag
     let tap = null;         // the last press, while it could still turn out to be a plain click
     let tapPaused = false;  // did click 1 of a double-click toggle playback, to be undone by click 2
+    let tapZoomed = false;  // did click 1 toggle the wheel's zoom, to be undone by click 2
     let swallowNextClick = false;
     let suppressed = null;  // element whose preview was dismissed; skipped until re-entered
     let activeCovered = false;
@@ -9897,8 +9908,8 @@
         if (tw) twNear(e.clientX, e.clientY);
         if (e.ctrlKey || panelOwns(e)) return;
         const up = !!view && !!box && box.classList.contains('on');
-        const fullGal = (!!galCur || tourActive()) && placed && fullActive() && !pointOnPicture(e.clientX, e.clientY);     // fullscreen gallery or slideshow: the black around the picture steps (user)
-        if (!(tw && twWheelZone(e.clientX, e.clientY, TW_WHEEL_PAD)) && !galWidgetAt(e.clientX, e.clientY) && !fullGal) {
+        const flip = up && wheelFlips() && pointInPreview(e.clientX, e.clientY);     // gallery or fullscreen: the window flips (user); fullscreen's spans the screen
+        if (!(tw && twWheelZone(e.clientX, e.clientY, TW_WHEEL_PAD)) && !galWidgetAt(e.clientX, e.clientY) && !flip) {
             if (!up) return;
             if (pointInPreview(e.clientX, e.clientY) || (!placed && active && e.target instanceof Node && active.contains(e.target))) {
                 if (placed) return;     // onPinWheel zooms it
@@ -12345,6 +12356,7 @@
             'background:#1e1e2e;border:1px solid #45475a;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.6)}' +
             '.fly .bt svg{width:18px;height:18px;fill:#a6e3a1}.fly .bt .no svg{fill:#f38ba8}' +
             '.fly .tools{position:absolute;top:6px;right:' + (GAL_HD + 4) + 'px;display:flex;gap:6px;opacity:0;transition:opacity .15s ease;pointer-events:none}' +
+            '.fly .tools.low{top:auto;bottom:6px}' +
             '.fly:hover .tools,.fly .tools.busy{opacity:1;pointer-events:auto}.fly.edit .tools,.fly.asking .tools{display:none}' +
             '.fly .tools span{display:flex;align-items:center;justify-content:center;min-width:26px;height:26px;padding:0 7px;box-sizing:border-box;border-radius:13px;' +
             'background:rgba(30,30,46,.92);border:1px solid #45475a;color:#cdd6f4;font:13px/1 system-ui,sans-serif;white-space:nowrap;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.5)}' +
@@ -12491,7 +12503,7 @@
         const R = galRows(set.asp, galBars(hole), set.want != null ? set.want : set.page || 0), L = R.out;
         set.pages = R.pages;
         set.page = R.page;
-        if (set.want != null && (R.page >= set.want || galWhole(set))) set.want = null;
+        if (set.want != null && (R.page >= set.want || galWhole(set) || (set.want >= 1e9 && galFedAll(set)))) set.want = null;     // the last page: every picture known so far, not the read's end (user: back into a gallery stalled)
         set.open = hole;
         galShade(set, hole);
         set.cells.forEach(function (cell, k) {
@@ -12539,6 +12551,12 @@
             if (!galKeyHit(keys, it)) add.push(it);
         }
         if (add.length) galAppend(set, add);
+    }
+
+    // Every picture listed so far is in the set and loaded (the page may still be read for more).
+    function galFedAll(set) {
+        const base = galLists.get(set.href);
+        return (!base || set.fed >= base.length) && !set.inflight;
     }
 
     // Every picture the gallery's page holds is in the set (none still to read or load).
@@ -13091,7 +13109,7 @@
         if (!c || !galCur) return false;
         if (c.land) return true;        // a switch under way: further presses wait for it
         if (c.hrefs[c.at] !== galCur.href) return false;
-        if (dir > 0 && c.at === c.hrefs.length - 1) galChainExtend(c);
+        if (dir > 0 && c.at === c.hrefs.length - 1) { galChainExtend(c); galChainFollow(c); }     // at the end: the page asked for more, for the next press
         return galChainOpen(c.at + dir, dir, dir > 0 ? 0 : 1e9, pic);
     }
 
@@ -13105,6 +13123,7 @@
         const stop = user && cfg.galleryEndlessStop;
         if (dir > 0 ? c.at >= c.hrefs.length - 1 : c.at <= 0) {
             seamDir = 0;
+            if (dir > 0) galChainFollow(c);
             if (stop) seamNote(dir > 0 ? 'Last picture of the last gallery' : 'First picture of the first gallery');
             return true;
         }
@@ -13132,9 +13151,36 @@
             dbg('endless: ' + (dir > 0 ? 'on to' : 'back to') + ' gallery ' + (to + 1) + ' of ' + c.hrefs.length, { href: h, page: page >= 1e9 ? 'last' : page + 1, slideshow: tourOn });
             galPeek = true;
             galMiddle(d.img, h);
+            galChainFollow(c);
             return true;
         }
         return false;
+    }
+
+    // Endless: the page under the gallery follows the queue so its lazy pictures and further results load, then the queue takes the new doors (user: fullscreen stopped half down the page).
+    let galSelfScrollAt = 0;            // a scroll endless made: galScroll leaves the gallery open
+    function galChainFollow(c) {
+        const doors = galDoorList(), find = function (h) { const d = doors.find(function (x) { return x.h === h; }); return d && d.img; };
+        const near = c.at >= c.hrefs.length - 3, img = find(c.hrefs[near ? c.hrefs.length - 1 : c.at]);
+        if (!img || !img.isConnected) return;
+        galSelfScrollAt = performance.now();
+        const y0 = window.scrollY;
+        img.scrollIntoView({ block: near ? 'start' : 'center', behavior: 'instant' });     // near the end the last queued card goes to the top: what follows it comes on screen
+        if (!near) return;
+        if (Math.abs(window.scrollY - y0) < 1) {        // already at the bottom: a page loads more on a scroll event, so make one
+            window.scrollBy({ top: -1, behavior: 'instant' });
+            setTimeout(function () { galSelfScrollAt = performance.now(); window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'instant' }); }, 50);
+        }
+        [1500, 4000].forEach(function (ms) {
+            setTimeout(function () {
+                if (galChain !== c) return;
+                const n = c.hrefs.length;
+                galChainExtend(c);
+                if (c.hrefs.length === n) return;
+                dbg('endless: the page loaded more galleries', { added: c.hrefs.length - n, galleries: c.hrefs.length });
+                if (galCur) galPageNote(galCur);
+            }, ms);
+        });
     }
 
     // A queued gallery that failed to open: the next one that way instead. False when there is none (the gallery then closes as before).
@@ -13154,7 +13200,10 @@
         if (l.page) { set.want = l.page; set.far = Math.max(set.far || 0, Math.min(l.page, 1e6)); galPageWork(set, galLayout(set, set.open)); }
         if (l.tour && placed && view && tour) {
             if (set.want != null) galLandShow(set, l, c);
-            for (let t = 0; t < 30 && galCur && galCur.href === l.href && galCur.want != null; t++) await sleep(200);
+            for (let t = 0; t < 30 && galCur && galCur.href === l.href && galCur.want != null; t++) {
+                if (set.want >= 1e9 && galFedAll(set)) { galPageWork(set, galLayout(set, set.open)); continue; }     // the last batch landed with no relayout of its own
+                await sleep(t ? 200 : 50);
+            }
         }
         if (galChain === c) c.land = null;
         const now = galCur;
@@ -13218,6 +13267,7 @@
 
     // ⛶ on the clicked picture: this gallery's slideshow from its first picture, fullscreen.
     function galFullStart() {
+        if (fullActive()) { leaveFull(); return; }      // in fullscreen it leaves (user)
         if (!galCur) return;
         const de = document.documentElement, req = de.requestFullscreen || de.webkitRequestFullscreen;
         if (!fullActive() && !document.fullscreenElement && req && document.fullscreenEnabled) {
@@ -13599,7 +13649,7 @@
             galImg(it).then(function (p) {
                 set.inflight--;
                 if (galCur !== set) return;
-                if (!p) { galFeed(set); return; }
+                if (!p) { galFeed(set); if (!set.inflight && set.want != null && !pending.length && !timer) galLayout(set, set.open); return; }     // the last one failed: a wanted page still settles
                 pending.push({ p: p, k: k });
                 if (!timer) timer = setTimeout(flush, GAL_APPEND_MS);
             });
@@ -13901,6 +13951,7 @@
     function galSavedItem(href, item, img) {
         galListAdd(GAL_SAVED_KEY, item.thumb);
         if (href) galListAdd(GAL_SAVEDFROM_KEY, href);
+        syncSavedMark();        // the picture on screen may be this one
         if (!img && galCur && galCur.href === href) {
             galCur.cells.some(function (c) {
                 const i = c.querySelector('img');
@@ -13918,7 +13969,9 @@
     function galToolsBuild(pw, href) {
         const bar = document.createElement('div');
         bar.className = 'tools';
-        const tool = function (text, tip, act) {
+        const low = document.createElement('div');
+        low.className = 'tools low';
+        const tool = function (text, tip, act, into) {
             const b = document.createElement('span');
             b.textContent = text;
             b.addEventListener('mousedown', function (e) {
@@ -13929,14 +13982,15 @@
             ['mouseup', 'click', 'auxclick', 'dblclick', 'contextmenu'].forEach(function (t) {
                 b.addEventListener(t, function (e) { e.preventDefault(); e.stopPropagation(); });
             });
-            bar.appendChild(b);
+            (into || bar).appendChild(b);
             return b;
         };
         const dl = tool('⤓', 'Download every picture of this gallery not saved yet, into the folder under Settings, Saving · works once the whole page has been read · click again to stop',
             function () { galDownloadAll(href); });
-        tool('⛶', 'Slideshow from the first picture, fullscreen', function () { galFullStart(); });
         tool('✕', 'Close the gallery', function () { galHide('hole'); });
+        tool('⛶', 'Slideshow from the first picture, fullscreen · in fullscreen: leave it', function () { galFullStart(); }, low);
         pw.appendChild(bar);
+        pw.appendChild(low);
         galDlBtn = { href: href, btn: dl };
         galDlShow();
     }
@@ -14651,13 +14705,14 @@
         if (galOwns(active)) cancel();
         const sw = !!(galChain && galChain.land && galChain.land.href === href && galFly);     // the queue switching gallery
         if (!sw) galChain = cfg.galleryEndless ? galChainFrom(href) : null;
+        if (!sw && galChain && galChain.hrefs.length <= 3) galChainFollow(galChain);     // a short queue: the page loads more under the gallery at once
         galOn = true;
         galStripOne = !galEndless();
         galStripDl = dlHere();
         const asp = hr.width && hr.height ? hr.width / hr.height : 1;
-        if (sw && !galKept()) galKeepNow(null, galFly.asp);      // the box on screen is this window size's
+        if (sw && !galBoxKept()) galKeepNow(null, galFly.asp);      // the box on screen is this window size's
         galStripM = pic ? galStripLoad(galAnchorRec(), galPagedRows(vpH())) : { m: 'in', side: 'b' };
-        galHole = (sw && galKept(asp)) || galCornerRect(asp, pic && galStripM.m !== 'out' ? galStripH() : 0);
+        galHole = (sw && galBoxKept(asp)) || galCornerRect(asp, pic && galStripM.m !== 'out' ? galStripH() : 0);
         if (!sw) { galBoxKeep = null; galKeepNow(galHole, asp); }
         galWant = href;
         clearTimeout(galHoverTimer);
@@ -14807,7 +14862,7 @@
     }
 
     // The remembered box if the window still has its size; a picture of another shape keeps its height and outer edge.
-    function galKept(asp) {
+    function galBoxKept(asp) {
         const k = galBoxKeep, W = vpW();
         if (!k || fullActive() || Math.abs(k.W - W) > 24 || Math.abs(k.H - vpH()) > 24) return null;     // a scrollbar's width either way
         const u = k.u;
@@ -14827,7 +14882,7 @@
             galEditStop(false);
             galMenuHide();
             const set = galCur, H = vpH();
-            const fp = galFly ? galKept(galFly.asp) : null;
+            const fp = galFly ? galBoxKept(galFly.asp) : null;
             if (galFly) dbg('gallery refit', { full: fullActive(), W: vpW(), H: H, kept: galBoxKeep ? galBoxKeep.W + 'x' + galBoxKeep.H + ' ' + galBoxKeep.u.w + 'x' + galBoxKeep.u.h : null, restored: !!fp });
             if (galFly) {
                 const sl = galStripLoad(galAnchorRec(), galAnchorRows(H));
@@ -15533,7 +15588,7 @@
         if (!galMarksHere() && !galWant && !galCur) return;
         const t = e.target;
         if (t !== document && !(t && t.nodeType === 1 && t.clientHeight >= vpH() / 2)) return;
-        if ((galWant || galCur) && performance.now() - galResizeAt > 1000)      // a window resize reflows the page, and its scroll is not the user's
+        if ((galWant || galCur) && performance.now() - galResizeAt > 1000 && performance.now() - galSelfScrollAt > 1000)      // a window resize reflows the page, and its scroll is not the user's; nor is endless's
             galHide(performance.now() - galInputAt < 600 ? 'scroll' : 'page scrolled by itself');
         galMarkSoon();
     }

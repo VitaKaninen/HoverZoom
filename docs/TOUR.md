@@ -81,11 +81,12 @@ fight that. They are deleted. Do not put nav controls back on the frame.
   **The opening spin is dropped** (`twWheelHush`, v0.172.0, user's call): after the tick that starts
   a slideshow, wheel events in reach are swallowed until the wheel rests 300 ms or 500 ms pass, so
   one flick opens at picture 1.
-- **Down on a slideshow's picture** (`onPinWheel` with `tourActive()`, v0.364.0, user; pages, galleries, fullscreen
-  alike): up zooms in; down zooms out only while above `fitScale` (zoomed by any means: wheel, keys, slider — every
-  step arrives at fit, `commitSwap`), clamped to fit, then `picWheelHold` ignores downs `SEAM_HOLD_MS`, then downs
-  step forward through `twWheelStep` (twWheel's stepping half). Up never steps back there (user: going back is rare;
-  move off the picture). Hover and pinned previews with no slideshow keep zooming both ways.
+- **The wheel on a pinned window in a gallery or fullscreen flips pictures** (`wheelFlips()`, user v0.366.0; reverses
+  v0.364.0's down-zooms-to-fit-then-steps and v0.361.0's zoom-on-the-picture, step-off-it): `twWheel` steps both ways
+  anywhere in the window (fullscreen's spans the screen). A click on the picture (`boxTap`, `pointOnPicture`) sets
+  `picZoomOn = view.url`: the wheel zooms that picture (`onPinWheel`) until a second click, or a step to another
+  picture (keyed by URL, nothing to reset). Click 2 of a double-click undoes click 1's toggle (`tapZoomed`), like
+  `tapPaused`. A hover preview, and a pinned one outside galleries and fullscreen, zoom as always.
 - **Typed numbers** (`twAsk(kind, holder)`, v0.317.0, user; Forum Stumbler's counter box; the gallery widget too):
   click the picture or page number; Enter, leaving the box or a press anywhere else goes (window-capture
   mousedown — widget presses are preventDefault'ed, so blur alone never came; v0.319.0), Esc cancels. A window-capture keydown registered before every
