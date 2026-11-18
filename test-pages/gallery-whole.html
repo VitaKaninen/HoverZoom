@@ -1,0 +1,36 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Whole static gallery</title>
+<!-- 16 pictures, all in the HTML, and the script runs in its frame: a read to its end finds nothing more (sexygirlspics-like). door-whole.html links it as ?w=N. -->
+<style>body{margin:0;background:#1e1e2e} .grid img{width:200px;height:150px;margin:6px}</style>
+<div class="grid">
+  <div class="tile"><a href="/many/whole-1.jpg"><img src="/many/whole-1.jpg"></a></div>
+  <div class="tile"><a href="/many/whole-2.jpg"><img src="/many/whole-2.jpg"></a></div>
+  <div class="tile"><a href="/many/whole-3.jpg"><img src="/many/whole-3.jpg"></a></div>
+  <div class="tile"><a href="/many/whole-4.jpg"><img src="/many/whole-4.jpg"></a></div>
+  <div class="tile"><a href="/many/whole-5.jpg"><img src="/many/whole-5.jpg"></a></div>
+  <div class="tile"><a href="/many/whole-6.jpg"><img src="/many/whole-6.jpg"></a></div>
+  <div class="tile"><a href="/many/whole-7.jpg"><img src="/many/whole-7.jpg"></a></div>
+  <div class="tile"><a href="/many/whole-8.jpg"><img src="/many/whole-8.jpg"></a></div>
+  <div class="tile"><a href="/many/whole-9.jpg"><img src="/many/whole-9.jpg"></a></div>
+  <div class="tile"><a href="/many/whole-10.jpg"><img src="/many/whole-10.jpg"></a></div>
+  <div class="tile"><a href="/many/whole-11.jpg"><img src="/many/whole-11.jpg"></a></div>
+  <div class="tile"><a href="/many/whole-12.jpg"><img src="/many/whole-12.jpg"></a></div>
+  <div class="tile"><a href="/many/whole-13.jpg"><img src="/many/whole-13.jpg"></a></div>
+  <div class="tile"><a href="/many/whole-14.jpg"><img src="/many/whole-14.jpg"></a></div>
+  <div class="tile"><a href="/many/whole-15.jpg"><img src="/many/whole-15.jpg"></a></div>
+  <div class="tile"><a href="/many/whole-16.jpg"><img src="/many/whole-16.jpg"></a></div>
+</div>
+<script>
+  var GM_getValue = function (key, dflt) {
+    var v = localStorage.getItem(key);
+    return v === null ? dflt : v;
+  };
+  var GM_setValue = function (key, val) { localStorage.setItem(key, val); };
+  var GM_addValueChangeListener = function () {};
+  var GM_listValues = function () { return Object.keys(localStorage); };
+  var GM_deleteValue = function (key) { localStorage.removeItem(key); };
+  var GM_registerMenuCommand = function () { return 'x'; };
+  var GM_unregisterMenuCommand = function () {};
+</script>
+<script src="../Hover-Zoom.user.js"></script>

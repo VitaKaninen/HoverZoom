@@ -40,6 +40,14 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   cannot be fed text).
 - **Debug lines** for counts: `gallery count from its page {pictures, why, shared}`, `gallery read to its end:
   <why> {from, pictures, final, ms}`, `gallery preload: reading N screens ahead`.
+- **Sites whose pages hold the whole gallery** (v0.358.0; user, sexygirlspics in LibreWolf: every chip `16+` for
+  hours, because each count waited on a ~9 s frame read, serial, that always ended `from: 16, pictures: 16`).
+  `galWholeSeen`: a read to its end that ends where the HTML did counts toward the host; `GAL_WHOLE_RUN` 3 in a row →
+  `hzHtmlWhole` (GM storage, `{host: {run, whole}}`, kept across tabs) and every HTML-read list there is final at once.
+  Only lists read by `galCountLoad` (`galFromHtml`) are taken: a frame's first report can be short (13 for 16).
+  `GAL_WHOLE_CHECK` 1 in 10 is still read to its end; one that finds more drops the host's entry. Fixture
+  `door-whole.html` → `gallery-whole.html?w=N` (static 16, script runs in the frame): 12 final in ~20 s, then a
+  fresh tab final in 2 s.
 - **A load whose frame is taken still answers from its HTML** (v0.356.0; LibreWolf trace: middle press, the open's
   frame was "replaced by a newer hover" 67 ms later and the gallery failed "the load was cancelled"). `galLoad`
   resolves `'cancel'` only when the HTML has nothing either.

@@ -1,0 +1,57 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Door areas, whole galleries</title>
+<!-- 12 doors to gallery-whole.html (frames report, nothing past the HTML), same structure as door-search.html (its learned door rule applies): the preload reads doors below the viewport at the user's scroll pace. -->
+<style>
+  body { font: 14px system-ui, sans-serif; background: #1e1e2e; color: #cdd6f4; padding: 20px; }
+  .results, .finals { display: flex; flex-wrap: wrap; gap: 40px; margin-bottom: 40px; }
+  img { width: 160px; height: 120px; display: block; }
+</style>
+<div class="results">
+  <div class="result"><a id="d1" href="gallery-whole.html?w=1"><img src="/test-images/mural.jpg?w1"></a></div>
+  <div class="result"><a id="d2" href="gallery-whole.html?w=2"><img src="/test-images/mural.jpg?w2"></a></div>
+  <div class="result"><a id="d3" href="gallery-whole.html?w=3"><img src="/test-images/mural.jpg?w3"></a></div>
+  <div class="result"><a id="d4" href="gallery-whole.html?w=4"><img src="/test-images/mural.jpg?w4"></a></div>
+  <div class="result"><a id="d5" href="gallery-whole.html?w=5"><img src="/test-images/mural.jpg?w5"></a></div>
+  <div class="result"><a id="d6" href="gallery-whole.html?w=6"><img src="/test-images/mural.jpg?w6"></a></div>
+  <div class="result"><a id="d7" href="gallery-whole.html?w=7"><img src="/test-images/mural.jpg?w7"></a></div>
+  <div class="result"><a id="d8" href="gallery-whole.html?w=8"><img src="/test-images/mural.jpg?w8"></a></div>
+  <div class="result"><a id="d9" href="gallery-whole.html?w=9"><img src="/test-images/mural.jpg?w9"></a></div>
+  <div class="result"><a id="d10" href="gallery-whole.html?w=10"><img src="/test-images/mural.jpg?w10"></a></div>
+  <div class="result"><a id="d11" href="gallery-whole.html?w=11"><img src="/test-images/mural.jpg?w11"></a></div>
+  <div class="result"><a id="d12" href="gallery-whole.html?w=12"><img src="/test-images/mural.jpg?w12"></a></div>
+</div>
+<script>
+  if (!localStorage.getItem('hoverZoomSettings'))
+    localStorage.setItem('hoverZoomSettings', JSON.stringify({ debug: true }));
+  var GM_getValue = function (key, dflt) {
+    var v = localStorage.getItem(key);
+    return v === null ? dflt : v;
+  };
+  var GM_setValue = function (key, val) { localStorage.setItem(key, val); };
+  var GM_addValueChangeListener = function () {};
+  var GM_listValues = function () { return Object.keys(localStorage); };
+  var GM_deleteValue = function (key) { localStorage.removeItem(key); };
+  window.__saved = [];      // the download queue's saves, instead of files
+  window.__fail = null;     // a RegExp: saves whose URL matches it fail
+  var GM_download = function (d) { setTimeout(function () {
+    if (window.__fail && window.__fail.test(d.url)) { if (d.onerror) d.onerror({ error: 'not_succeeded' }); return; }
+    window.__saved.push(d.url); if (d.onload) d.onload(); }, 150); };
+  window.__xhr = [];        // GM_xmlhttpRequest calls: {url, range}; whole-file GETs are what a second download would be
+  var GM_xmlhttpRequest = function (o) {
+    var h = o.headers || {}, range = h.Range || h.range || '';
+    window.__xhr.push({ url: o.url, range: range });
+    fetch(o.url, { method: o.method || 'GET', headers: h }).then(function (r) {
+      var hs = ''; r.headers.forEach(function (v, k) { hs += k + ': ' + v + '\r\n'; });
+      var body = o.responseType === 'blob' ? r.blob() : o.responseType === 'arraybuffer' ? r.arrayBuffer() : r.text();
+      return body.then(function (b) {
+        if (o.onload) o.onload({ status: r.status, statusText: r.statusText, responseHeaders: hs, finalUrl: r.url,
+          response: b, responseText: typeof b === 'string' ? b : '' });
+      });
+    }, function (e) { if (o.onerror) o.onerror({ error: String(e) }); });
+    return { abort: function () {} };
+  };
+  var GM_registerMenuCommand = function () { return 'x'; };
+  var GM_unregisterMenuCommand = function () {};
+</script>
+<script src="../Hover-Zoom.user.js"></script>

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.357.0
+// @version      0.358.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -11820,6 +11820,46 @@
         if (n >= GAL_NOREPORT_MAX) { dbg('gallery: ' + n + ' frames in a row never reported (' + why + ')'); galNoFrameNote(href); }
     }
 
+    // Sites whose gallery pages hold the whole gallery: after GAL_WHOLE_RUN reads to the end in a row found nothing past the HTML, its count is final. Kept across tabs.
+    const GAL_WHOLE_KEY = 'hzHtmlWhole', GAL_WHOLE_RUN = 3, GAL_WHOLE_CHECK = 0.1;
+    const galFromHtml = new Set();      // hrefs whose list is their page's HTML (a frame's first report can be short)
+    function galWholeAll() {
+        try { return JSON.parse(GM_getValue(GAL_WHOLE_KEY, '{}')) || {}; } catch (e) { return {}; }
+    }
+    function galWholeHost(href) { try { return new URL(href).host; } catch (e) { return ''; } }
+    function galHtmlWhole(href) { const s = galWholeAll()[galWholeHost(href)]; return !!(s && s.whole); }
+    function galWholePut(h, s) {
+        const all = galWholeAll();
+        if (s) all[h] = s; else delete all[h];
+        try { GM_setValue(GAL_WHOLE_KEY, JSON.stringify(all)); } catch (e) { /* storage unavailable */ }
+    }
+    // A read to its end finished: the same count as the HTML counts toward trusting it, more drops the trust.
+    function galWholeSeen(href, from, now) {
+        const h = galWholeHost(href);
+        if (!h) return;
+        const s = galWholeAll()[h] || { run: 0, whole: false };
+        if (now > from) {
+            if (s.whole) dbg('gallery: ' + h + ' pages are not whole after all; reading each to its end again', { href: href, from: from, pictures: now });
+            galWholePut(h, null);
+            return;
+        }
+        if (!from || now !== from || s.whole) return;
+        s.run = (s.run || 0) + 1;
+        s.whole = s.run >= GAL_WHOLE_RUN;
+        galWholePut(h, s);
+        if (!s.whole) return;
+        dbg('gallery: ' + h + ' pages hold their whole gallery (' + s.run + ' reads in a row found nothing more); counts from the HTML are final');
+        galLists.forEach(function (list, k) { if (!galGrown.has(k) && galGrowing !== k && galHtmlWhole(k)) galWholeTake(k, true); });
+    }
+    // A list read from the HTML of such a site: final, except a sample left for the read to its end to check.
+    function galWholeTake(href, all) {
+        if (galGrown.has(href) || !galFromHtml.has(href) || !galLists.has(href) || !galHtmlWhole(href) || (!all && Math.random() < GAL_WHOLE_CHECK)) return;
+        galGrown.add(href);
+        galGrowWhy.delete(href);
+        galKeep(href, false);
+        galChipsCount(href);
+    }
+
     function galRender(href, onMore, onEnd, solo) {
         if (galFrameStop && !solo) galFrameStop();
         return new Promise(function (resolve) {
@@ -13246,6 +13286,7 @@
             if (why === 'grown' || why === 'reported' || html) { galGrown.add(href); galKeep(href, html); }
             if (html) galGrowWhy.set(href, 'html');
             else if (!galGrown.has(href)) galGrowWhy.set(href, why);
+            if (!html && galGrown.has(href)) galWholeSeen(href, from, (galLists.get(href) || []).length);
             galTrace(href, 'reading on: ' + why);
             dlqGrowEnd(href, why, galGrown.has(href));
             dbg('gallery read to its end: ' + why, { href: href, from: from, pictures: (galLists.get(href) || []).length, final: galGrown.has(href), ms: Math.round(performance.now() - t0), open: !!galCur && galCur.href === href });
@@ -15454,7 +15495,7 @@
             if (doc) keepDocInfo(href, doc);
             const got = doc ? galPick(doc, href) : null;
             dbg('gallery count from its page', { href: href, pictures: got ? got.length : null, why: refused ? 'status ' + refused.status : !doc ? 'no page' : got && got.length < GAL_HTML_ENOUGH ? 'too few, the frame decides' : null, shared: pageTextHits });
-            if (got && got.length >= GAL_HTML_ENOUGH && !galLists.has(href)) { galLists.set(href, got); galChipsCount(href); }
+            if (got && got.length >= GAL_HTML_ENOUGH && !galLists.has(href)) { galLists.set(href, got); galFromHtml.add(href); galChipsCount(href); galWholeTake(href); }
         });
     }
 
