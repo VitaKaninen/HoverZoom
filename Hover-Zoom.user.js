@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.356.0
+// @version      0.357.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -14160,11 +14160,11 @@
             left = Math.min(Math.max(4, a.left), W - w - 4);
             top = a.top - h - 4 >= 4 ? a.top - h - 4 : Math.min(H - h - 4, a.bottom + 4);
         } else {
-            left = W - w - 16; top = H - h - 16;
-            t = twShownRect() ? tw.box.getBoundingClientRect() : null;     // the widget in that corner: just above it
-            if (t && t.width && t.left < left + w && t.right > left && t.top < top + h && t.bottom > top) { top = t.top - h - 4; at = 'above the widget'; }
+            left = W - w; top = H - h;      // flush in the corner, like the widget (user)
+            t = twShownRect() ? tw.box.getBoundingClientRect() : null;     // the widget in that corner: on top of it
+            if (t && t.width && t.left < left + w && t.right > left && t.top < top + h && t.bottom > top) { top = t.top - h; at = 'above the widget'; }
         }
-        left = Math.round(left); top = Math.round(Math.max(4, top));
+        left = Math.round(left); top = Math.round(Math.max(0, top));
         dlHost.style.left = left + 'px';
         dlHost.style.top = top + 'px';
         const sig = at + ' ' + left + ',' + top + ' ' + W + 'x' + H;

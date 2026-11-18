@@ -440,7 +440,7 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
     Its CSS is `.strip .dl …` in the gallery sheet (the row's own sheet does not reach another shadow root). Only
     the failed list stays in `dlHost`, placed over the unit.
   - **Strip** (`dlStripPaint`/`dlStripPlace`, own host, in `ours()` and `galTopAt`; `dlStripEl` is the wrapper
-    holding the failed list and the strip): above the gallery's strip/picture while one is open, else bottom-right
+    holding the failed list and the strip): above the gallery's strip/picture while one is open, else flush in the bottom-right corner (no gap, user v0.357.0)
     (user v0.354.0: it was anchored over the widget wherever that was docked, so it floated mid-screen after a
     close); just above the widget (`tw.box`, not `tw.rect`) only when the widget is in that corner. Text = this origin's first job with work
     left, else its first with failures; One bar of the whole job.
