@@ -379,6 +379,9 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
     Not avoidable: a `bytesNoHosts` host (picture via `<img>`, bytes unreadable) is fetched again by the save.
   - **A worker never dies on a throw** (v0.341.0): its body is in try/catch, and `saveOriginal`'s promise is caught.
     A throw left the picture at `1` and the run looking alive, so the queue never restarted.
+  - **`galBestOf` races a `SAVE_FETCH_MS` (120 s) deadline** (v0.344.0): a lookup that never settles (bare `fetch` in
+    `fetchDoc`/`linkedMedia` has no timeout) held one worker forever, so `Promise.all` never ended — live on eporner,
+    146/147, 0 failed, frozen 3+ min. Now it fails (`3`, retryable). A reload already recovered it (`1` → `0`).
   - **`pagehide` halts this page's run** (`dlqHalt`, v0.341.0): a save in flight never calls back after a bfcache
     freeze (user: "it stalls when I hit back"); on return the ticks claim it again and `1`s are redone.
   - **In the gallery's strip while a gallery is open** (user, v0.339.0: it moved round the page as the unit

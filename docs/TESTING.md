@@ -374,7 +374,13 @@ logs `retrying` ×3 — an artefact of the stub, not of the manager. The pane wo
 - **pornpics.com is refused by both browsers' safety lists** — do not route around it; ask the user for a
   `hover-zoom:gallery-state` trace from their browser instead.
 - **⤓ in Chrome opens `prompt()` (save folder) the first time** (`saveFolderAsk`) and the tab's renderer then
-  times out every `javascript_tool` call; Escape via `computer` does not reach it. The user must answer it.
+  times out every `javascript_tool` call; Escape via `computer` does not reach it. Avoid it: open a gallery, dispatch
+  `contextmenu` on `#hover-zoom-tour`, `mousedown` the menu's `.it` "All settings…", set the input whose placeholder
+  is `The download folder itself` and fire `change` (sets `saveFolderAsked`). Set 2026-11-17 to the default, user's pick.
+- Driving the gallery from `javascript_tool`: chips are `[data-hz-door]` inside each `[data-hz-marks]` shadow root
+  (`mousedown` button 0 opens); ⤓ is a leaf `span` starting `⤓` (plain `⤓` = ready); queue progress is `span.txt`
+  ("Saving N / M"), site-wide, in any tab of that site. A ⤓ on a fully saved gallery calls `confirm()`.
+- Do not `Escape` after opening the settings panel with a gallery open: it closes the gallery too.
 - Each `javascript_tool` call dies at 45 s: poll in calls of ≤ 30 s.
 
 The user's Chrome HAS Tampermonkey with Hover Zoom tracking the file on disk, and it runs in Claude in

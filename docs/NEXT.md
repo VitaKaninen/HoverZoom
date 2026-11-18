@@ -6,22 +6,25 @@ visited gallery's count stays unknown; test everything live on eporner (counts, 
 Back mid-download, multiple tabs and sites); ticks missing after middle-click; pornpics middle-click opens a new
 tab — partly done, v0.343.0 (below). (3) Mid-turn: a middle press on a thumbnail before its preview opens should
 save the original, not cancel it — done, `E79`, v0.343.0.
-**Last asked the user:** answer the save-folder `prompt()` in Chrome's Claude tab group (tab 602234578), and send a
-`hover-zoom:gallery-state` trace from a pornpics page. Not answered yet.
+**Last asked the user:** the save folder (answered 2026-11-17 #3: the default); a `hover-zoom:gallery-state` trace
+from a pornpics page — not answered yet.
 
-# Open test plan, 2026-11-17 (v0.343.0)
+# Download tests, 2026-11-17 #3 (v0.343.0 → v0.344.0) — done
 
-User asked for a thorough live test on eporner (search https://www.eporner.com/search-photos/clit/). Done in
-Chrome on v0.343.0: counts (fresh tab 99 in 26 s; after Back all at once), ⤓ ready 0.34–1.05 s after opening,
-ticks on chip opens. Fixed this round: see the v0.343.0 commit. **Still to run** (blocked: ⤓ opened the
-save-folder `prompt()` in Chrome tab 602234578 and the user must answer it): start ⤓ on results page 2, Back to
-page 1 (same site) and Forward — does the queue continue and finish; leave and return mid-queue; two eporner tabs
-queueing at once (one tab works the site's queue); two sites at once (pornpics is refused by both browsers —
-need another gallery site the tools allow). Unverified: a real middle press in Chrome (galleryMiddle is off
-there; synthetic presses tested in the pane, `E79`); pornpics middle-click opening a tab (needs the user's
-`hover-zoom:gallery-state` trace from that page). A page scroll the site makes itself still closes an open
-gallery (`galScroll` 'page scrolled by itself') — suspected cause of the missing ticks (the test's own
-`scrollIntoView` may have been the scroll), not confirmed, not changed.
+Save folder set to `Hover Zoom/[site]/[page_title]` (user's pick) through the settings panel; the old Chrome tab
+602234578 may still show the first `prompt()` — answering Cancel there would blank the folder again.
+Chrome, eporner, synthetic presses (recipe in TESTING.md "Live sites in Claude in Chrome"), ~1.2 pictures/s:
+- ⤓ on page 2 (100), Back to page 1 mid-queue: carried on, **Saved 100/100**.
+- ⤓ on page 1 (153), Forward to page 2: carried on, no gap. Start took 10–15 s before the first count (not looked into).
+- Left for example.com ~15 s mid-queue, Back: resumed (103 → 121 in 28 s).
+- Second eporner tab queued 147: one site-wide queue, jobs one after the other, same rate — no doubling.
+- girlstop.info (⤓ ready in 14 s) saved 19/19 while eporner's queue ran: two sites at once work.
+- **Bug found, fixed v0.344.0:** eporner froze at 146/147, 0 failed, 3+ min — `galBestOf` had no deadline (GALLERY.md).
+  A reload under v0.344.0 finished it (⤓ again then found all 147 saved). The deadline itself has not fired live.
+Not checked: the files on disk (Downloads is outside the project — needs the user's yes to look).
+Still unverified from before: a real middle press in Chrome (`E79`, synthetic only); pornpics middle-click opening a
+tab (needs the user's `hover-zoom:gallery-state` trace); a site's own scroll closing an open gallery
+(`galScroll` 'page scrolled by itself') as the cause of missing ticks — suspected, not confirmed.
 
 # Handoff 2026-11-17 (~305k tokens)
 
