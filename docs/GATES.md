@@ -945,6 +945,16 @@ the widget count too. Refused hover → `doorHover()`: `areaTouch`, and on `LINK
 Settings → Per-site fixes: `doorRow()` says what is learned for this site, Forget clears it.
 Fixture: `test-pages/door-search.html` (d1-d3 preview and teach, d4-d5 then refused; leaf row
 always previews). Peek at a door's gallery: v0.282.0, `GALLERY.md` (middle-click, any site).
+**One-word links are one area (v0.348.0):** `doorChainOf` tags a single plain-word path (`/maid/`, `/strapon/`) `to-slug`.
+Tagging by the word made every pornpics category tile its own area, so 3 samples never shared one and `doorScan`
+(needs `DOOR_SCAN_MIN` 6 per chain) never read the grid: every hover previewed the `/460/` thumbnail (user trace,
+2026-11-17; those hovers were also `linkAreas`-skipped). A word with a digit is still `#`, one with a `.` keeps its
+name (girlstop `psto.php` rules still match).
+**Proven in one read (v0.348.0, user's signal):** no `trusted`, and the linked page shows this very file
+(`shownUrl` or its `src`/`data-src`/`data-original`/`data-lazy-src`, exact URL) inside a link to another page of its
+site (`onwardMedia` → `linksOnward`) → `areaLearnSure` makes the rule now (pure, tested); `doorScan` stops reading that
+grid. A URL seen 3+ times there is a placeholder (pornpics' lazy `1px.png`) and never counts. Home → category →
+gallery: the category's copy links to a gallery page, the gallery's copy to the `/1280/` file (an image link: not onward).
 **Fixture trap:** `photo-200x150.jpg` is upgraded to a 1600 px `photo.jpg` by a URL rule — a leaf;
 door fixtures use `mural.jpg`.
 

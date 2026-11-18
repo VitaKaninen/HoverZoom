@@ -193,6 +193,8 @@ second click on the other entry finally hit the top frame. The tell was both lab
 once — two frames disagreeing about whether the site was listed.
 
 - **Menu commands are registered only when `window.top === window.self`.**
+- **The menu, in order** (`refreshSiteMenu`, then `Hover Zoom settings`): Enable/Disable for this site; ☑ Draw where the
+  slideshow stops (`autoClose: false`); ☑ Debug log in the console (`cfg.debug`, user 2026-11-17, closes the menu, 3 s toast).
 - **`pageHost()` is what the site list matches**, not `location.hostname`: the top frame's host
   where it can be read (`ancestorOrigins`, then a same-origin `window.top.location`, then
   `document.referrer`), so a disabled site is disabled inside its frames too.

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.347.0
+// @version      0.348.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -533,6 +533,7 @@
 
     let siteMenuId = null;
     let linesMenuId = null;         // the debug lines' toggle, beside the site one
+    let debugMenuId = null;
 
     function siteMenuLabel() {
         const on = siteEnabled();
@@ -553,10 +554,25 @@
             try { GM_unregisterMenuCommand(linesMenuId); } catch (e) { return; }
             linesMenuId = null;
         }
+        if (debugMenuId != null) {
+            try { GM_unregisterMenuCommand(debugMenuId); } catch (e) { return; }
+            debugMenuId = null;
+        }
         try {
             siteMenuId = GM_registerMenuCommand(siteMenuLabel(), toggleSite);
             linesMenuId = GM_registerMenuCommand((cfg.showPostEnd ? '☑' : '☐') + ' Draw where the slideshow stops', toggleLines, { autoClose: false });
+            debugMenuId = GM_registerMenuCommand((cfg.debug ? '☑' : '☐') + ' Debug log in the console', toggleDebug);
         } catch (e) { /* nothing to fall back to; the panel still has the list */ }
+    }
+
+    // The menu's copy of the panel's debug checkbox (user, 2026-11-17).
+    function toggleDebug() {
+        reloadSettings();
+        cfg.debug = !cfg.debug;
+        saveSettings();
+        refreshSiteMenu();
+        refreshPanel();
+        toast('Debug log: ' + (cfg.debug ? 'on' : 'off'), 3000);
     }
 
     // The menu's copy of the panel's Diagnostics checkbox.
@@ -1940,7 +1956,36 @@
             }
         }
         const grid = gridMedia(doc, pageUrl.href);
-        return { declared: og, body: pageBodyMedia(doc, pageUrl).filter(function (u) { return !grid.has(u); }) };
+        return { declared: og, body: pageBodyMedia(doc, pageUrl).filter(function (u) { return !grid.has(u); }), onward: onwardMedia(doc, pageUrl) };
+    }
+
+    const ONWARD_ATTRS = ['src', 'data-src', 'data-original', 'data-lazy-src'];
+
+    // Pictures a fetched page shows as links to yet another of its site's pages: url -> how many times (a placeholder repeats).
+    function onwardMedia(doc, pageUrl) {
+        const out = new Map(), here = pageUrl.href.split('#')[0];
+        doc.querySelectorAll('a[href] img').forEach(function (img) {
+            const a = img.closest('a[href]');
+            let u;
+            try { u = new URL(a.getAttribute('href'), here); } catch (e) { return; }
+            u.hash = '';
+            if (u.origin !== pageUrl.origin || u.href === here || looksLikeImage(u.href) || isVideoUrl(u.href)) return;
+            ONWARD_ATTRS.forEach(function (k) {
+                const v = img.getAttribute(k);
+                if (!v || /^(data|blob):/.test(v)) return;
+                try { const x = new URL(v, here).href; out.set(x, (out.get(x) || 0) + 1); } catch (e) { /* not a URL */ }
+            });
+        });
+        return out;
+    }
+
+    // The linked page shows this very file again, as a link onward: the thumbnail is a door, proven in one read.
+    function linksOnward(el, page) {
+        if (!page || !page.onward || !page.onward.size) return false;
+        const b = baseOf(el), urls = new Set([shownUrl(el)]);
+        ONWARD_ATTRS.forEach(function (k) { const v = el.getAttribute && el.getAttribute(k); if (v) { try { urls.add(new URL(v, b).href); } catch (e) { /* not a URL */ } } });
+        for (const u of urls) { const n = u && page.onward.get(u); if (n && n < 3) return true; }
+        return false;
     }
 
     // The URLs of a fetched page's grid cells (thumbnail and link): a copy there is one of many, not the page's picture. See P17.
@@ -2063,12 +2108,13 @@
         const ownLink = !skipLinkedPage(el) && el.ownerDocument === document ? linkTarget(el) : null;
         const lt = ownLink || (!skipLinkedPage(el) && el.ownerDocument === document && !closestAcross(el, 'a[href]') ? cardLink(el) : null);
         const lchain = lt ? domChain(el) : '', lpath = pagePath();
-        let lfetched = false;
-        const lskip = lt && !token.recheck && areaRule('linkAreas', lchain, lpath) && Math.random() >= LINK_RECHECK;
+        let lfetched = false, lpage = null;
+        const lskip =lt && !token.recheck && areaRule('linkAreas', lchain, lpath) && Math.random() >= LINK_RECHECK;
         if (lskip) dbg('linked page skipped — pages linked from here have never held the original', { link: lt.href });
         const linked = !lt || lskip ? Promise.resolve(null) : linkedMedia(lt).then(async function (page) {
             if (!page || token.cancelled) return null;
             lfetched = true;
+            lpage = page;
             const tries = [];
             // og:image is the share card on some sites, and that is the thumbnail itself.
             // A matching filename proves identity, so it outranks the shape test here too — the
@@ -2163,7 +2209,7 @@
         }
         if (ownLink && full && token.door && !token.cancelled) doorLearn(doorVerdict({
             linked: lfetched ? 'fetched' : lskip ? 'skipped' : null, trusted: trusted,
-            displayed: displayed, failed: lfailed }), doorChainOf(lchain, lt.href), lpath, lt.href);
+            displayed: displayed, failed: lfailed }), doorChainOf(lchain, lt.href), lpath, lt.href, !trusted && linksOnward(el, lpage));
         if (trusted) {
             // The linked page names the picture, but the page's own copy of it may be bigger.
             const own = shown && !trusted.video && !token.cancelled && !unstable.has(shown) ? await probe(shown, false) : null;
@@ -6050,10 +6096,10 @@
     }
 
     // A hover's door verdict into doorAreas; a rule appearing or going recounts the widget.
-    function doorLearn(verdict, chain, path, id) {
+    function doorLearn(verdict, chain, path, id, sure) {
         if (!verdict) return;
         const c = verdict === 'leaf' ? areaApply('doorAreas', areaDrop, chain, path)
-            : areaApply('doorAreas', areaLearn, chain, path, id);
+            : areaApply('doorAreas', sure ? areaLearnSure : areaLearn, chain, path, id);
         if (c && c !== 'sampled' && c !== 'used' && c !== 'confirmed') { setTimeout(twRecount, 0); if (isTopFrame) setTimeout(galMarkSoon, 0); }
     }
 
@@ -6133,11 +6179,11 @@
                     const el = els.get(href);
                     if (!el || !el.isConnected || pagePath() !== path) break;
                     const r = lg && lg.req();
-                    const v = await doorProbe(el, new URL(href));
+                    const got = await doorProbe(el, new URL(href)), v = got && got.v, sure = !!(got && got.sure);
                     if (r) r.done({ status: v ? 200 : 0 });
-                    dbg('door scan', { link: href, verdict: v });
-                    if (v) { last = v; doorLearn(v, g.chain, path, href); }
-                    if (v === 'leaf') break;
+                    dbg('door scan', { link: href, verdict: v, sure: sure });
+                    if (v) { last = v; doorLearn(v, g.chain, path, href, sure); }
+                    if (v === 'leaf' || sure) break;
                     await sleep(DOOR_SCAN_GAP_MS);
                 }
                 if (!doorReason(els.get(g.hrefs[0]) || document.body)) doorScanNote(host, k, last, today);
@@ -6177,7 +6223,8 @@
             if (!bigEnough(dim, displayed)) continue;
             if (!trusted || dim.w * dim.h > trusted.w * trusted.h) trusted = { w: dim.w, h: dim.h };
         }
-        return doorVerdict({ linked: 'fetched', trusted: trusted, displayed: displayed, failed: failed });
+        const v = doorVerdict({ linked: 'fetched', trusted: trusted, displayed: displayed, failed: failed });
+        return { v: v, sure: v === 'door' && !trusted && linksOnward(el, page) };
     }
 
     const OP_WATCH_MS = 3000;       // how long a refused video-link hover watches for the site's player
@@ -6423,6 +6470,16 @@
         return { entry: e, change: e.rules.length === 1 ? 'learned' : 'another area' };
     }
 
+    // A verdict proven by one read: the area becomes a rule now instead of after three samples.
+    function areaLearnSure(entry, chain, path, today, id) {
+        const e0 = entry || {}, dom = chainPrefix([chain]);
+        if (!dom || vdRuleFor(e0, chain, path) || vdNearRule(e0, chain, path)) return areaLearn(entry, chain, path, today, id);
+        const e = entry ? JSON.parse(JSON.stringify(entry)) : {};
+        if (e.samples) { e.samples = e.samples.filter(function (x) { return !chainMatches(x.chain, dom); }); if (!e.samples.length) delete e.samples; }
+        e.rules = (e.rules || []).concat([{ dom: dom, path: pathPrefix([path]), seen: today }]);
+        return { entry: e, change: e.rules.length === 1 ? 'learned in one read' : 'another area, in one read' };
+    }
+
     // Counter-evidence that must not wait for strikes: the covering rule goes, and samples sharing its area.
     function areaDrop(entry, chain, path) {
         if (!entry) return { entry: null, change: null };
@@ -6495,9 +6552,9 @@
 
     // A door's area chain: the picture's chain with where its link goes as a class on its own level (img.to-gallery), so /gallery/ and /photo/ cards in one grid are two areas.
     function doorChainOf(chain, href) {
-        let seg = '';
-        try { seg = (new URL(href).pathname.split('/')[1] || '').toLowerCase(); } catch (e) { seg = ''; }
-        seg = /\d/.test(seg) ? '#' : seg.replace(/[^a-z_-]/g, '') || 'root';
+        let seg = '', one = false;
+        try { const p = new URL(href).pathname; seg = (p.split('/')[1] || '').toLowerCase(); one = p.split('/').filter(Boolean).length === 1; } catch (e) { seg = ''; }
+        seg = /\d/.test(seg) ? '#' : one && /^[a-z_-]+$/.test(seg) ? 'slug' : seg.replace(/[^a-z_-]/g, '') || 'root';     // /maid/, /strapon/: one area, not one each
         return String(chain).replace(/^[^>]*/, function (l) { return l + '.to-' + seg; });
     }
 

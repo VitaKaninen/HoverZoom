@@ -30,6 +30,9 @@ names {…}` (JSON) — if a misfile recurs, read those first. **Cleanup owed:**
 (The freeze on page 4 was the "all saved already, save again?" `confirm()`; the user answered yes.)
 **User, 2026-11-17 #4:** pornpics middle-click no longer opens a tab (fixed); a background tab's scroll does NOT close
 the gallery (suspect ruled out); the page-5 misfile was probably the user dismissing a dialog. Asked for, open:
+- **pornpics categories previewed (user trace): root cause found and fixed v0.348.0** — one-word category links were one area each
+  (GATES.md P17 "One-word links"), plus the one-read door test. Not verified live (pornpics refused): user to check the home page and
+  `/lingerie/` with the menu's new ☑ Debug log.
 - **pornpics look-ahead:** scrolling onto new thumbnails, a hover previews first, then the gallery opens under the
   pointer and shrinks it. Scan path: scroll → `twRecount` (waits for the scroll to settle) → `twRefresh` →
   `doorScanSoon` (1.5 s) → `doorScan` (unruled chains, 3 linked pages 400 ms apart). Suspected: that latency, or new

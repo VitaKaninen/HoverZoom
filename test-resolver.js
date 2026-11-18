@@ -878,7 +878,7 @@ const vdStart = src.indexOf('    const VDELAY_SAMPLES');
 const vdEnd = src.indexOf('    // The entry for a host');
 if (vdStart < 0 || vdEnd < 0) { console.error('vdLearn markers not found'); process.exit(1); }
 const vd = new Function(src.slice(vdStart, vdEnd) +
-    NL + 'return {vdLearn, vdRound, vdRuleFor, chainPrefix, pathPrefix, chainMatches, pathMatches, sharedHead, vdWaitOf, vdForget, vdWorked, areaLearn, areaTouch, areaAge, areaDrop, doorVerdict, doorKindVerdict, doorScanPick, doorChainOf, galChoose, VDELAY_SAMPLES, VDELAY_FORGET};')();
+    NL + 'return {vdLearn, vdRound, vdRuleFor, chainPrefix, pathPrefix, chainMatches, pathMatches, sharedHead, vdWaitOf, vdForget, vdWorked, areaLearn, areaLearnSure, areaTouch, areaAge, areaDrop, doorVerdict, doorKindVerdict, doorScanPick, doorChainOf, galChoose, VDELAY_SAMPLES, VDELAY_FORGET};')();
 
 eq('vdRound rounds up to 50 ms', vd.vdRound(1001), 1050);
 eq('vdRound never goes under one step', vd.vdRound(10), 250);
@@ -1033,6 +1033,19 @@ const EP = 'img>a>div.mbphoto#>div.photosgrid>main';
 eq('door chain: the link segment on the picture level', vd.doorChainOf(EP, 'https://e.com/gallery/abc/Name/'), 'img.to-gallery>a>div.mbphoto#>div.photosgrid>main');
 eq('door chain: a numbered segment is #', vd.doorChainOf('img>a', 'https://e.com/12345-title'), 'img.to-#>a');
 eq('door chain: the site root', vd.doorChainOf('img>a', 'https://e.com/?id=4'), 'img.to-root>a');
+eq('door chain: one-word category links share an area', vd.doorChainOf('img>a', 'https://e.com/maid/') === vd.doorChainOf('img>a', 'https://e.com/strapon/'), true);
+eq('door chain: a one-word link is a slug', vd.doorChainOf('img>a', 'https://e.com/lingerie'), 'img.to-slug>a');
+eq('door chain: a one-part script keeps its name', vd.doorChainOf('img>a', 'https://e.com/psto.php?id=4'), 'img.to-pstophp>a');
+eq('door chain: a two-part path keeps its first part', vd.doorChainOf('img>a', 'https://e.com/galleries/name-49941678/'), 'img.to-galleries>a');
+const CAT = vd.doorChainOf('img>a.cat>div.item>div.grid>main', 'https://e.com/maid/');
+let sure = vd.areaLearnSure(null, CAT, '/', 9, 'https://e.com/maid/');
+eq('one-read door: a rule at once', sure.change, 'learned in one read');
+eq('one-read door: it covers the next category', !!vd.vdRuleFor(sure.entry, vd.doorChainOf('img>a.cat>div.item>div.grid>main', 'https://e.com/anal-gape/'), '/'), true);
+eq('one-read door: under a rule it only confirms', vd.areaLearnSure(sure.entry, CAT, '/', 9, 'x').change, null);
+let sure2 = vd.areaLearn(null, CAT, '/', 9, 'https://e.com/a/');
+sure2 = vd.areaLearnSure(sure2.entry, CAT, '/', 9, 'https://e.com/b/');
+eq('one-read door: samples it covers are spent', !!(sure2.entry.samples && sure2.entry.samples.length), false);
+eq('one-read door: a chain too short for a rule falls back to sampling', vd.areaLearnSure(null, 'img', '/', 9, 'x').change, 'sampled');
 const GP = 'https://e.com/gallery/abc/Name/';
 const gl = function (seg, n) { const o = []; for (let i = 0; i < n; i++) o.push('https://e.com/' + seg + '/x' + i + '/'); return o; };
 eq('gallery group: 16 own photos beat a 20-card related-galleries strip', vd.galChoose([gl('gallery', 20), gl('photo', 16)], GP), 1);
