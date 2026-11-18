@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.343.0
+// @version      0.344.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -13706,7 +13706,13 @@
                 const item = job.items[i], q = lg && lg.req();
                 let hit = null, why = '', ok = false;
                 try {       // a throw here would end this worker with its picture left in flight, and the queue would never restart
-                    try { hit = await galBestOf(item, tok); } catch (e) { hit = null; why = String(e); }
+                    try {       // a deadline, or one lookup that never answers holds the gallery at N-1 forever
+                        let tm = 0;
+                        hit = await Promise.race([galBestOf(item, tok), new Promise(function (res) {
+                            tm = setTimeout(function () { why = 'finding its full-size file took over ' + Math.round(SAVE_FETCH_MS / 1000) + ' s'; res(null); }, SAVE_FETCH_MS);
+                        })]);
+                        clearTimeout(tm);
+                    } catch (e) { hit = null; why = String(e); }
                     if (!hit || !hit.url) why = why || 'no full-size file was found for it';
                     ok = hit && hit.url && !tok.cancelled ? await new Promise(function (res) {
                         const t = setTimeout(function () { why = 'no answer in ' + Math.round(SAVE_FETCH_MS / 1000) + ' s'; res(false); }, SAVE_FETCH_MS);
