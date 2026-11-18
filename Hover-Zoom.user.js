@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.358.0
+// @version      0.359.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -251,6 +251,8 @@
         hotkeyToggle: false,        // 'hover': a lone tap turns previews off in this tab until the next
         hoverDelay: 120,            // ms before resolving
         galleryMiddle: false,       // a middle-click on a result opens its gallery (else the ▦ chip's click does)
+        galleryEndless: false,      // at a gallery's end the next one on the page opens (☐ Endless on the clicked picture)
+        galleryEndlessViewed: false,    // endless also queues galleries already seen or visited
         galleryChips: true,         // the ▦ chip on every gallery thumbnail; off: only on the one under the pointer
         galleryTicks: true,         // seen / visited ticks on results
         gallerySavedMarks: true,    // saved discs on results and in galleries
@@ -8726,6 +8728,7 @@
     // Gallery layers and the open set: declared here, above the boot-time twRefresh(), which reaches galOwns().
     let galHost = null, galRoot = null, galBlur = null, galCur = null, galWant = null, galTopHost = null, galTop = null, galFlyHost = null, galFlyRootEl = null;
     let galHole = null, galFly = null;
+    let galChain = null;    // endless: {hrefs, at, land, warm} — the queue of galleries, fixed when each joins it
     let dlHost = null, dlStripEl = null;   // the download strip
 
     const TOUR_ROW = 0.5;       // share of the shorter item's height that puts two in one row
@@ -9986,6 +9989,8 @@
     function twGoPage(k) {
         const g = galCur;
         if (g) {
+            if (galEndless() && galChain.hrefs[galChain.at] === g.href) { k = galChainPageAt(k); if (k < 0) return; }
+            g.want = null;
             const last = (g.pages ? g.pages.length : 1) - 1, to = Math.max(0, Math.min(last, k));
             if (k > last && !galWhole(g)) { g.far = Math.max(g.far || 0, k); galFeed(g); }
             if (placed && view && tour && tour.gal === g) {
@@ -10575,6 +10580,7 @@
             tour.index = tourAt(list);
             twSync();
             if (wallBusy) return;
+            if (dir < 0 && tour.gal && galChainGo(-1, 'last')) return;
             // A press past either end wraps; forward asks the page for more first.
             if (dir < 0 || seamDir === dir) tourSeam(dir, user);
             else tourWall(user);
@@ -11136,6 +11142,7 @@
             tourNav(1, false);
             return;
         }
+        if (tour.gal && galChainGo(1, 'first')) return;
         if (tourExhausted()) tourSeam(1, user);
     }
 
@@ -12299,6 +12306,13 @@
             '.fly .tools span{display:flex;align-items:center;justify-content:center;min-width:26px;height:26px;padding:0 7px;box-sizing:border-box;border-radius:13px;' +
             'background:rgba(30,30,46,.92);border:1px solid #45475a;color:#cdd6f4;font:13px/1 system-ui,sans-serif;white-space:nowrap;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.5)}' +
             '.fly .tools span:hover{background:#313244;color:#89b4fa}' +
+            '.fly .endl{position:absolute;bottom:6px;left:' + (GAL_HD + 4) + 'px;display:flex;gap:6px;opacity:.6;transition:opacity .15s ease}' +
+            '.fly:hover .endl{opacity:1}.fly.edit .endl,.fly.asking .endl{display:none}' +
+            '.fly .endl>*{display:flex;align-items:center;gap:5px;height:24px;padding:0 8px;box-sizing:border-box;border-radius:12px;' +
+            'background:rgba(30,30,46,.92);border:1px solid #45475a;color:#cdd6f4;font:12px/1 system-ui,sans-serif;white-space:nowrap;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.5)}' +
+            '.fly .endl>*:hover{background:#313244;color:#89b4fa}' +
+            '.fly .endl input{margin:0;width:13px;height:13px;accent-color:#89b4fa;cursor:pointer}' +
+            '.menu.info{padding:6px 2px}.menu.info .lb.hp{max-width:440px;padding:3px 10px;color:#cdd6f4;font-size:12px}.menu .lb.hp b{color:#89b4fa;font-weight:600}' +
             '.menu[hidden]{display:none}' +
             '.menu{position:fixed;z-index:5;min-width:240px;padding:4px;box-sizing:border-box;background:#1e1e2e;border:1px solid #45475a;border-radius:8px;' +
             'box-shadow:0 8px 28px rgba(0,0,0,.6);color:#cdd6f4;font:13px/1.3 system-ui,sans-serif;pointer-events:auto}' +
@@ -12430,9 +12444,10 @@
     // Lay the set out around one hole; returns the slots.
     function galLayout(set, hole) {
         galLaidAt = performance.now();
-        const R = galRows(set.asp, galBars(hole), set.page || 0), L = R.out;
+        const R = galRows(set.asp, galBars(hole), set.want != null ? set.want : set.page || 0), L = R.out;
         set.pages = R.pages;
         set.page = R.page;
+        if (set.want != null && (R.page >= set.want || galWhole(set))) set.want = null;
         set.open = hole;
         galShade(set, hole);
         set.cells.forEach(function (cell, k) {
@@ -12651,7 +12666,7 @@
 
     // A second page appeared: the page row joins the strip for good, and an attached strip keeps the unit's height, so the picture narrows.
     function galStripRows(set) {
-        const one = !set.two && (set.pages ? set.pages.length : 1) <= 1;
+        const one = !galEndless() && !set.two && (set.pages ? set.pages.length : 1) <= 1;
         if (!one) set.two = true;
         if (one === galStripOne || galEdit) return;
         galStripReshape(function () { galStripOne = one; }, set);
@@ -12733,16 +12748,23 @@
         if (!s || !set) return;
         const reading = galGrowing === set.href, base = galLists.get(set.href), n = Math.max(set.cells.length, base ? base.length : 0);
         galStripRows(set);
-        const more = n - set.cells.length, page = set.page || 0, at = set.pics.length ? galStartAt(set) : -1;
-        const total = (set.pages ? set.pages.length : 1) + (more > 0 ? Math.ceil(more / galPer(set)) : 0);
-        const pg = (page + 1) + ' / ' + total + (reading ? '+' : '');
-        s.pgT.textContent = 'Page ' + pg;
-        s.picT.textContent = (at >= 0 ? at + 1 : '–') + ' / ' + n + (reading ? '+' : '');
+        const page = set.page || 0, at = set.pics.length ? galStartAt(set) : -1;
+        const total = galPagesOf(set);
+        const ch = galChainText(set, page, total, at, n, reading);
+        const pg = ch ? ch.pg : (page + 1) + ' / ' + total + (reading ? '+' : '');
+        s.pgT.textContent = ch ? pg : 'Page ' + pg;
+        s.picT.textContent = ch ? ch.pic : (at >= 0 ? at + 1 : '–') + ' / ' + n + (reading ? '+' : '');
         galStripSqueeze(s, pg);
-        s.pgP.classList.toggle('faint', total < 2);
-        s.pgN.classList.toggle('faint', total < 2);
+        s.pgP.classList.toggle('faint', ch ? !ch.back : total < 2);
+        s.pgN.classList.toggle('faint', ch ? !ch.on : total < 2);
         s.picP.classList.toggle('faint', !n);
         s.picN.classList.toggle('faint', !n);
+    }
+
+    // The set's pages: laid out, plus the pictures known but not loaded yet.
+    function galPagesOf(set) {
+        const base = galLists.get(set.href), n = Math.max(set.cells.length, base ? base.length : 0), more = n - set.cells.length;
+        return (set.pages ? set.pages.length : 1) + (more > 0 ? Math.ceil(more / galPer(set)) : 0);
     }
 
     // Numbers that do not fit: "Page" goes first, then the type shrinks.
@@ -12850,6 +12872,7 @@
         const k = set.pics.findIndex(function (q) { return q.img === el; });
         if (k < 0) return;
         set.at = k;
+        set.want = null;
         const pg = galPageOf(set, k);
         if (pg !== set.page) { set.page = pg; galPageWork(set, galLayout(set, set.open)); }
         else galPageNote(set);
@@ -12892,6 +12915,7 @@
         const to = Math.min(Math.max(0, set.page + dir), set.pages.length - 1);
         if (to === set.page) return false;
         if (galOwns(active) && !placed) cancel();
+        set.want = null;
         set.page = to;
         galPageWork(set, galLayout(set, set.open));
         return true;
@@ -12902,9 +12926,10 @@
         const set = galCur;
         if (!set) return;
         const last = (set.pages ? set.pages.length : 1) - 1, to = (set.page || 0) + dir;
-        if (to < 0) return;
+        if (to < 0) { galChainGo(-1, 'page'); return; }
         if (to > last) {
-            if (!galWhole(set)) galTourMore(set).then(function (grew) { if (grew && galCur === set) galPageStep(dir); });
+            if (!galWhole(set)) galTourMore(set).then(function (grew) { if (galCur !== set) return; if (grew) galPageStep(dir); else galChainGo(1, 'page'); });
+            else galChainGo(1, 'page');
             return;
         }
         if (placed && view && tour && tour.gal === set) {
@@ -12913,6 +12938,242 @@
             return;
         }
         galFlip(dir);
+    }
+
+    // ---- endless: the galleries after this one, opened in turn
+
+    function galEndless() { return !!cfg.galleryEndless && !!galChain; }
+
+    // The page's doors in document order, one per link (its biggest picture), where a chip shows.
+    function galDoorList() {
+        const out = [], at = new Map();
+        document.querySelectorAll('a[href] img').forEach(function (img) {
+            const h = galLinkOf(img);
+            if (!h) return;
+            const key = domChain(img);
+            if (!galKindDone.has(key) || galKindDone.get(key) === 'results' || !doorReason(img)) return;
+            const r = img.getBoundingClientRect(), a = r.width * r.height, k = at.get(h);
+            if (k == null) { at.set(h, out.length); out.push({ h: h, img: img, a: a }); }
+            else if (a > out[k].a) { out[k].img = img; out[k].a = a; }
+        });
+        return out;
+    }
+
+    // May a door join the queue? Asked once, when it joins, never again (a gallery seen on the way must not drop out).
+    function galChainOk() {
+        if (cfg.galleryEndlessViewed) return function () { return true; };
+        const s = galList(GAL_SEEN_KEY), v = galList(GAL_VISITED_KEY);
+        return function (h) { return !s.has(h) && !v.has(h); };
+    }
+
+    // The queue from href: it, then the doors after it on the page that may join.
+    function galChainFrom(href) {
+        const c = { hrefs: [href], at: 0, land: null, warm: new Set() };
+        galChainExtend(c);
+        dbg('endless: queue', { from: href, galleries: c.hrefs.length });
+        return c;
+    }
+
+    // Doors after the queue's last one that are not in it yet join its end; nothing in it is ever re-judged.
+    function galChainExtend(c) {
+        const doors = galDoorList().map(function (d) { return d.h; }), i = doors.indexOf(c.hrefs[c.hrefs.length - 1]);
+        if (i < 0) return;
+        const have = new Set(c.hrefs), ok = galChainOk();
+        doors.slice(i + 1).forEach(function (h) { if (!have.has(h) && ok(h)) { have.add(h); c.hrefs.push(h); } });
+    }
+
+    // "Include viewed" turned on: viewed doors after the open one join the queue in page order; turned off, the queue is kept as it is.
+    function galChainWiden(c) {
+        const doors = galDoorList().map(function (d) { return d.h; }), cur = c.hrefs[c.at], i = doors.indexOf(cur);
+        if (i < 0) return;
+        const have = new Set(c.hrefs), rest = c.hrefs.slice(c.at + 1), after = [];
+        doors.slice(i + 1).forEach(function (h) { if (!have.has(h) || rest.indexOf(h) >= 0) after.push(h); });
+        rest.forEach(function (h) { if (after.indexOf(h) < 0) after.push(h); });    // queued doors gone from the page keep their place at the end
+        c.hrefs = c.hrefs.slice(0, c.at + 1).concat(after);
+    }
+
+    // A queued gallery's pictures known so far: [count, final].
+    function galChainN(h) {
+        const l = galLists.get(h);
+        if (l) return [l.length, galGrown.has(h)];
+        const c = galCountsAll()[h];
+        return c && Date.now() - c[1] <= GAL_KEPT_MS ? [c[0], true] : [0, false];
+    }
+
+    // A queued gallery's pages: the open one's own, another's from its count at this page size, 1 when unknown.
+    function galChainPages(c, i, per) {
+        if (i === c.at && galCur && galCur.href === c.hrefs[i]) return galPagesOf(galCur);
+        const n = galChainN(c.hrefs[i])[0];
+        return n ? Math.max(1, Math.ceil(n / per)) : 1;
+    }
+
+    // The strip's two lines in endless mode: P:page/pages · G:gallery/galleries, G:picture/pictures · T:picture/pictures across the queue.
+    function galChainText(set, page, total, at, n, reading) {
+        const c = galEndless() ? galChain : null;
+        if (!c || c.hrefs[c.at] !== set.href) return null;
+        const per = Math.max(1, galPer(set)), fmt = function (v) { return v.toLocaleString(); };
+        let pb = 0, pall = 0, tb = 0, tall = 0, open = reading;
+        c.hrefs.forEach(function (h, i) {
+            const k = i === c.at ? [n, galGrown.has(h)] : galChainN(h), p = i === c.at ? total : galChainPages(c, i, per);
+            if (i < c.at) { pb += p; tb += k[0]; }
+            pall += p;
+            tall += k[0];
+            if (!k[1]) open = true;
+        });
+        const lastPage = page + 1 >= total, whole = galWhole(set);
+        if (lastPage && whole) galChainWarm(c);
+        return {
+            pg: 'P:' + (pb + page + 1) + '/' + pall + ' · G:' + (c.at + 1) + '/' + c.hrefs.length,
+            pic: 'G:' + (at >= 0 ? at + 1 : '–') + '/' + n + (reading ? '+' : '') + ' · T:' + (at >= 0 ? fmt(tb + at + 1) : '–') + '/' + fmt(tall) + (open ? '+' : ''),
+            back: c.at > 0 || page > 0,
+            on: c.at < c.hrefs.length - 1 || !lastPage || !whole,
+        };
+    }
+
+    // On the open gallery's last page: the next one's list and first thumbnails are read ahead, once.
+    function galChainWarm(c) {
+        const h = c.hrefs[c.at + 1];
+        if (!h || c.warm.has(h)) return;
+        c.warm.add(h);
+        galLoad(h).then(function (list) { if (Array.isArray(list) && list.length) galWarm(list.slice(0, 2 * galPer(null))); });
+    }
+
+    // Endless: on to the next gallery (+1, its first page) or back to the one before (-1, its last page). pic: where a slideshow lands ('page' = that page's first). False with endless off or at the queue's end.
+    function galChainGo(dir, pic) {
+        const c = galEndless() ? galChain : null;
+        if (!c || !galCur) return false;
+        if (c.land) return true;        // a switch under way: further presses wait for it
+        if (c.hrefs[c.at] !== galCur.href) return false;
+        if (dir > 0 && c.at === c.hrefs.length - 1) galChainExtend(c);
+        return galChainOpen(c.at + dir, dir, dir > 0 ? 0 : 1e9, pic);
+    }
+
+    // Open queued gallery `to` at page `page` (1e9 = its last); a door no longer on the page is passed over in direction dir.
+    function galChainOpen(to, dir, page, pic) {
+        const c = galChain, set = galCur;
+        if (!c || !set) return false;
+        if (c.land) return true;
+        const tourOn = !!(placed && view && tour && tour.gal === set), doors = galDoorList();
+        for (; to >= 0 && to < c.hrefs.length; to += dir) {
+            const h = c.hrefs[to], d = doors.find(function (x) { return x.h === h; });
+            if (!d) { dbg('endless: a queued gallery is no longer on the page, passed over', { href: h }); continue; }
+            c.at = to;
+            c.land = { href: h, dir: dir, page: page, pic: pic, tour: tourOn };
+            dbg('endless: ' + (dir > 0 ? 'on to' : 'back to') + ' gallery ' + (to + 1) + ' of ' + c.hrefs.length, { href: h, page: page >= 1e9 ? 'last' : page + 1, slideshow: tourOn });
+            galPeek = true;
+            galMiddle(d.img, h);
+            return true;
+        }
+        return false;
+    }
+
+    // A queued gallery that failed to open: the next one that way instead. False when there is none (the gallery then closes as before).
+    function galChainSkip(href, why) {
+        const c = galChain, l = c && c.land;
+        if (!l || l.href !== href || !galCur) return false;
+        c.land = null;
+        dbg('endless: gallery passed over: ' + why, { href: href });
+        return galChainOpen(c.at + l.dir, l.dir, l.page, l.pic);
+    }
+
+    // A queued gallery is on screen: its page, then the slideshow carries on there.
+    async function galChainLanded(set) {
+        const c = galChain, l = c && c.land;
+        if (!l || l.href !== set.href || l.done) return;
+        l.done = true;
+        if (l.page) { set.want = l.page; set.far = Math.max(set.far || 0, Math.min(l.page, 1e6)); galPageWork(set, galLayout(set, set.open)); }
+        if (l.tour && placed && view && tour) {
+            for (let t = 0; t < 30 && galCur && galCur.href === l.href && galCur.want != null; t++) await sleep(200);
+        }
+        if (galChain === c) c.land = null;
+        const now = galCur;
+        if (!l.tour || !now || now.href !== l.href || !placed || !view || !tour) return;
+        tour.gal = now;
+        const list = tourEntries();
+        if (!list.length) return;
+        const p = now.pages && now.pages[now.page];
+        const k = l.pic === 'last' ? list.length - 1 : l.pic === 'first' ? 0 : p ? p[0] : 0;
+        tourTurnOn();
+        seamDir = 0;
+        tourGo(list, Math.min(k, list.length - 1), l.dir, false);
+        seamNote('Gallery ' + (c.at + 1) + ' of ' + c.hrefs.length);
+    }
+
+    // Endless: a page number typed on the strip counts across the queue. The open gallery's own page, or -1 after a switch to the one holding it.
+    function galChainPageAt(k) {
+        const c = galChain, per = Math.max(1, galPer(galCur));
+        let b = 0;
+        for (let i = 0; i < c.hrefs.length; i++) {
+            const p = galChainPages(c, i, per);
+            if (k < b + p || i === c.hrefs.length - 1) {
+                const local = Math.max(0, k - b);
+                if (i === c.at) return local;
+                galChainOpen(i, i > c.at ? 1 : -1, local, 'page');
+                return -1;
+            }
+            b += p;
+        }
+        return k;
+    }
+
+    // The ☐ Endless box was pressed.
+    function galEndlessSet(on) {
+        reloadSettings();
+        cfg.galleryEndless = on;
+        saveSettings();
+        refreshPanel();
+        if (on && galCur && (!galChain || galChain.hrefs[galChain.at] !== galCur.href)) galChain = galChainFrom(galCur.href);
+        dbg('endless ' + (on ? 'on' : 'off'), { galleries: galChain ? galChain.hrefs.length : 0 });
+        galEndlessPaint();
+        if (galCur) galPageNote(galCur);
+    }
+
+    function galEndlessPaint() {
+        const ck = galFly && galFly.el.querySelector('.endl input');
+        if (ck) ck.checked = !!cfg.galleryEndless;
+    }
+
+    // The clicked picture's bottom-left: ☐ Endless and ⓘ.
+    function galEndlessBuild(pw) {
+        const bar = document.createElement('div');
+        bar.className = 'endl';
+        const lb = document.createElement('label'), ck = document.createElement('input'), tx = document.createElement('span');
+        ck.type = 'checkbox';
+        ck.checked = !!cfg.galleryEndless;
+        tx.textContent = 'Endless';
+        lb.appendChild(ck);
+        lb.appendChild(tx);
+        setTip(lb, 'Endless: at the end of this gallery the next one on the page opens; back from its first page goes to the one before');
+        const info = document.createElement('span');
+        info.textContent = 'ⓘ';
+        setTip(info, 'What the buttons and numbers mean');
+        const eat = function (e) { e.preventDefault(); e.stopPropagation(); };
+        lb.addEventListener('mousedown', function (e) { eat(e); if (e.button === 0) galEndlessSet(!cfg.galleryEndless); });
+        info.addEventListener('mousedown', function (e) { eat(e); if (e.button === 0) galInfoShow(e.clientX, e.clientY); });
+        [lb, info].forEach(function (b) {
+            ['mouseup', 'click', 'auxclick', 'dblclick', 'contextmenu'].forEach(function (t) { b.addEventListener(t, eat); });
+        });
+        bar.appendChild(lb);
+        bar.appendChild(info);
+        pw.appendChild(bar);
+    }
+
+    // ⓘ: every control of the open gallery and what its numbers mean, in the menu's box.
+    function galInfoShow(x, y) {
+        galMenuShow(x, y, [
+            ['The picture in the corner', 'click: close · drag: move · drag a corner: resize (Ctrl: no snapping) · right-click: settings'],
+            ['⤓ ↗', 'save every picture of this gallery not saved yet (once its page is read; never the rest of the endless queue) · open the gallery\'s page in a new tab'],
+            ['Strip', 'drag it by its background to take it off the picture'],
+            ['Page row ◀ ▶', 'a page of thumbnails back or on · also ↑ ↓, PageUp / PageDown, the wheel away from the preview'],
+            ['Picture row ◀ ▶', 'the slideshow, one picture back or on · also ← →, the wheel over the strip · hold to repeat'],
+            ['Numbers', 'click one to type where to go · + = still being read'],
+            ['☐ Endless', 'at the end of this gallery the next one on the page opens, and back from its first page goes to the one before · galleries already seen or visited are left out (right-click to include them), judged once when queued'],
+            ['P:11/18', 'endless: page 11 of 18, counting every queued gallery — one not read yet counts as one page'],
+            ['G:10/16', 'endless, page row: gallery 10 of the 16 queued'],
+            ['G:10/20', 'endless, picture row: picture 10 of this gallery\'s 20'],
+            ['T:300/1,000', 'endless: picture 300 of every queued gallery\'s pictures known so far (+ = some not counted yet)'],
+            ['Closing', 'the picture flies back to the current gallery\'s card on the page'],
+        ]);
     }
 
     // Is (x, y) over the gallery's widget: its strip or the clicked picture it sits in? The wheel flips pictures there (twWheel).
@@ -13005,9 +13266,10 @@
     function galShow(href, list) {
         if (galWant !== href) { galTrace(href, 'show: skipped, another link is wanted now'); return; }
         if (galCur && galCur.href === href) { galTrace(href, 'show: already on screen'); galPendClear(); return; }
-        if (list === 'cancel') { galHide('fail: the load was cancelled'); return; }
+        if (list === 'cancel') { if (!galChainSkip(href, 'its load was cancelled')) galHide('fail: the load was cancelled'); return; }
         if (!list || !list.length) {
             dbg('gallery: no pictures on the linked page', { href: href });
+            if (galChainSkip(href, 'no pictures on its page')) return;
             galHide('fail: no pictures found on the linked page');
             return;
         }
@@ -13158,6 +13420,7 @@
         galPageWork(set, L);
         galCatchUp(set);
         galGrow(href);
+        galChainLanded(set);
     }
 
     // Pictures of this gallery already known but not in the set (read after it was built): add them.
@@ -13394,6 +13657,12 @@
         if (galOwns(active) && placed) { unplace(); cancel(); }
         if (galBlur) galBlur.classList.remove('on');
         galVeil(false);
+        const ch = galChain;
+        galChain = null;
+        if (ch && ch.at > 0 && galFly && galFly.pic.isConnected) {      // endless moved on: the current gallery's card comes into view to fly back to
+            const r = galHoleRect(galFly.pic);
+            if (r.bottom < 0 || r.top > vpH()) galFly.pic.scrollIntoView({ block: 'center', behavior: 'instant' });
+        }
         galFlyBack();
         if (galSt) galSt.el.hidden = true;
         galStripDl = false;
@@ -14251,8 +14520,9 @@
         const a = t.closest('a[href]'), pic = t.tagName === 'IMG' ? t : a && a.querySelector('img');
         const hr = galHoleRect(pic || t);
         if (galOwns(active)) cancel();
+        if (!(galChain && galChain.land && galChain.land.href === href)) galChain = cfg.galleryEndless ? galChainFrom(href) : null;
         galOn = true;
-        galStripOne = true;
+        galStripOne = !galEndless();
         galStripDl = dlHere();
         galStripM = pic ? galStripLoad(galAnchorRec(), galPagedRows(vpH())) : { m: 'in', side: 'b' };
         galHole = galCornerRect(hr.width && hr.height ? hr.width / hr.height : 1, pic && galStripM.m !== 'out' ? galStripH() : 0);
@@ -14551,7 +14821,7 @@
     let galMenuEl = null;
 
     // Our menu on the corner picture: its place, and the gallery settings.
-    function galMenuShow(x, y) {
+    function galMenuShow(x, y, help) {
         const root = galTopRoot();
         if (!galMenuEl) {
             galMenuEl = document.createElement('div');
@@ -14560,6 +14830,24 @@
         }
         const m = galMenuEl;
         while (m.firstChild) m.firstChild.remove();
+        m.classList.toggle('info', !!help);
+        if (help) {     // ⓘ: lines only
+            help.forEach(function (h) {
+                const d = document.createElement('div'), b = document.createElement('b');
+                d.className = 'lb hp';
+                b.textContent = h[0] + '  ';
+                d.appendChild(b);
+                d.appendChild(document.createTextNode(h[1]));
+                m.appendChild(d);
+            });
+            if (galTopHost.nextSibling) document.documentElement.appendChild(galTopHost);
+            m.hidden = false;
+            const r = m.getBoundingClientRect();
+            m.style.left = Math.round(Math.max(4, Math.min(x, vpW() - 4 - r.width))) + 'px';
+            m.style.top = Math.round(Math.max(4, Math.min(y - r.height, vpH() - 4 - r.height))) + 'px';
+            hideTip();
+            return;
+        }
         const item = function (text, on, act) {
             const it = document.createElement('div');
             it.className = 'it';
@@ -14620,6 +14908,16 @@
             item('Tick results whose gallery was seen', !!cfg.galleryTicks, flip('galleryTicks'));
             item('Mark results something was saved from', !!cfg.gallerySavedMarks, flip('gallerySavedMarks'));
             item('Middle-click opens a gallery', !!cfg.galleryMiddle, flip('galleryMiddle'));
+            item('Endless: next gallery at the end of this one', !!cfg.galleryEndless, function () { galEndlessSet(!cfg.galleryEndless); galMenuShow(x, y); });
+            item('Endless: include galleries already viewed', !!cfg.galleryEndlessViewed, function () {
+                reloadSettings();
+                cfg.galleryEndlessViewed = !cfg.galleryEndlessViewed;
+                saveSettings();
+                refreshPanel();
+                if (cfg.galleryEndlessViewed && galChain) galChainWiden(galChain);
+                if (galCur) galPageNote(galCur);
+                galMenuShow(x, y);
+            });
         }
         sep();
         item('All settings…', null, function () { galMenuHide(); showPanel(); });
@@ -14694,6 +14992,7 @@
         };
         pair('bt ask', 'Join the strip to the picture?', 'Join them: the strip goes inside the picture\'s frame', 'Keep them apart', galJoin);
         galToolsBuild(pw, href);
+        galEndlessBuild(pw);
         el.addEventListener('mousedown', function (e) {
             if (e.button !== 0 && e.button !== 1) return;
             e.preventDefault();         // middle too: no autoscroll, and galMidEat eats its click
@@ -17317,6 +17616,10 @@
         section('Galleries');
         check('galleryMiddle', 'Middle-click opens a gallery',
             'Off: middle-click opens the link in a new tab as usual, and clicking the ▦ chip on a result opens its gallery.');
+        check('galleryEndless', 'Endless galleries',
+            'At the end of a gallery the next one on the page opens, and back from its first page goes to the one before. Also the ☐ Endless box on the clicked picture.');
+        check('galleryEndlessViewed', 'Endless: include galleries already viewed',
+            'Off: galleries already seen or visited are left out of the queue, judged once when each joins it.');
         check('doorScan', 'Find galleries without a hover',
             'Reads up to 3 linked pages of each grid of linked thumbnails, one at a time, so gallery links are known before you hover one. Off: three hovers teach it.');
         check('galleryChips', 'Show the ▦ chip on every gallery',

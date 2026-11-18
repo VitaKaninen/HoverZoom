@@ -578,6 +578,41 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   with opacity < 1 is a backdrop root, so inside the fading set the blur would show nothing
   mid-fade. It transitions `backdrop-filter`, goes on in `galShow`, off wherever `galCur` is cleared.
 
+## Endless (v0.359.0, user; INTERACTION.md `G12`)
+
+`cfg.galleryEndless` (remembered; ☐ Endless at the clicked picture's bottom-left, `galEndlessBuild`; also the
+right-click menu and the panel). Code: `galEndless` … `galInfoShow`, after `galPageStep`.
+- **The queue** (`galChain` {hrefs, at, land, warm}, made in `galMiddle` by `galChainFrom` for a user's open, kept for
+  a queued one: `land.href === href`): the opened door, then the doors after it in document order (`galDoorList`:
+  where a chip shows, one per link, its biggest picture). **Viewed (seen ∪ visited) is judged once, when a door
+  joins** (user: "if we recheck, we will skip it half way through, or on the back button") — `galChainExtend` only
+  appends doors not in the queue, at the queue's end; `galChainWiden` (menu "include viewed" turned on) only adds;
+  turning it off removes nothing. Every gallery the queue opens is marked seen at once (`galPeek`).
+- **Moving**: `galChainGo(dir, pic)` from `galPageStep` (past the last page: after `galTourMore` brings nothing, or
+  whole; before page 1), `tourWall` (before the seam) and `tourNav` (◀ at the first picture). It opens through
+  `galMiddle` — the same read as a middle press, so the corner picture switches to that door's card. `land` = where
+  to arrive: `page` (0, or 1e9 = last) and the slideshow's `pic` ('first' / 'last' / 'page' = that page's first).
+  `c.land` set = a switch under way: every further press is swallowed (else a second press skips a gallery).
+  `galChainLanded` (end of `galBuild`): `set.want` = the page wanted; `galLayout` lays out at `want` until reached or
+  `galWhole` (backward needs every thumbnail fed: `far` raised), a user's flip clears it. A slideshow waits ≤ 6 s for
+  that, then `tour.gal` = the new set and `tourGo`; seamNote "Gallery n of N". Until then `tourEntries` is [] for
+  the old set, so `land` must stay set through the wait.
+- A queued door gone from the page is passed over; a queued gallery that fails (`galShow`: cancel / no pictures)
+  → `galChainSkip`, the next one that way, else closes as before.
+- **Strip** (`galChainText`): `P:page/pages · G:gallery/galleries`, `G:picture/pictures · T:picture/pictures`
+  (`+` = some count not final). A gallery not open counts `galChainN` (its list or `hzGalCounts`) ÷ this `galPer`,
+  1 page when unknown. P and G are plain numbers: `twAsk` reads the first `\d+/`; a typed page maps across the queue
+  (`galChainPageAt`). The page row always shows in endless (`galStripRows`).
+- On the open gallery's last page, once whole, the next one's list and first thumbnails are read ahead
+  (`galChainWarm`, once per href).
+- **Closing** (`galHide`) after the queue moved on scrolls the current card into view (`behavior: 'instant'` — a
+  smooth scroll would still be moving when `galFlyBack` measures) so the picture flies back to it.
+- ⤓ stays per gallery (user): each switch builds a new corner picture with its own `galToolsBuild(href)`.
+- Not done: the queue never crosses into the site's next page (`nextPageIn`).
+- Fixture door-long (150 doors, 40 each): 2 seen → queue 148, P:1/296; ▼ past page 2 → gallery long=3; ◀ back →
+  long=1's last page; slideshow ▶ 40 → 41 seamless, ◀ 1 → previous 40; typed P 231 → gallery 116; close scrolled
+  to its card.
+
 ## Reading the gallery: the hidden frame first (v0.231.0)
 
 The user's site builds its gallery by script: the plain HTML held 5 groups, the biggest the
