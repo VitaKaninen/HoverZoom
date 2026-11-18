@@ -193,7 +193,11 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   the gallery's own shapes: the commonest one and every shape up to its last card. A shape seen
   later is judged once: **another gallery** when most of its cards are learned doors
   (`doorReason`) or link to a page shaped like this one (`galPathShape`: first segment kept,
-  others `#`/`w` — /user/PogiOne vs /user/x); **anything else is the gallery's own** (no evidence
+  others `#`/`w` — /user/PogiOne vs /user/x); **elsewhere** when most link to another site's page, not a
+  picture or clip (`offSite`; v0.352.0, sexygirlspics: 9 cam spots `li.faye-live-spot` → `go.sexygirlspics.live`,
+  mounted by script so the HTML path never saw them, made a 15-picture gallery read 24 in Chrome) — never the
+  commonest shape (`domSig`), so a forum's pictures linking to an image host's pages stay own;
+  **anything else is the gallery's own** (no evidence
   = keep reading, as before). `GAL_FOREIGN_END` 4 such pictures in a row end the reading.
   **The first list is judged too** (v0.305.0, verified in Chrome on nsfw.xxx /post/351243: 1 own
   picture, then 16 feed cards linking `/post/#`): when its shapes split into own and other

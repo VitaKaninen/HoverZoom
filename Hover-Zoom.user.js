@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.351.0
+// @version      0.352.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -11936,15 +11936,20 @@
                     .filter(function (x) { return x.thumb && !/^(data|blob):/.test(x.thumb); }).slice(0, GAL_MAX);
             } catch (err) { dbg('gallery frame could not list the page', String(err)); return []; }
         };
-        let shapes = null, foreign = 0;
+        let shapes = null, foreign = 0, domSig = null;
         const linkOf = function (x) {
             try { const u = new URL(x.link || x.links[0], location.href); return u.origin === location.origin ? u : null; } catch (e) { return null; }
+        };
+        // A card linking to another site's page, not to a picture or clip (an ad or a cam spot among the gallery's cards).
+        const offSite = function (x) {
+            try { const u = new URL(x.link || x.links[0], location.href); return u.origin !== location.origin && /^https?:$/.test(u.protocol) && !looksLikeImage(u.href) && !isVideoUrl(u.href) ? u : null; } catch (e) { return null; }
         };
         // A card shape seen after the gallery's own leads to other galleries when most of its cards are learned doors or link to pages shaped like this one; else it is the gallery's.
         const judge = function (sig, items) {
             const half = items.length / 2, here = galPathShape(location.pathname);
             if (items.filter(function (x) { return doorReason(x.el); }).length > half) return 'other galleries (learned doors)';
             if (items.filter(function (x) { const u = linkOf(x); return u && galPathShape(u.pathname) === here; }).length > half) return 'other galleries (links shaped like this page, ' + here + ')';
+            if (sig !== domSig && items.filter(function (x) { return !!offSite(x); }).length > half) return 'elsewhere (links to another site’s pages)';
             return 'own';
         };
         // The gallery's own pictures: the commonest card shape and every shape up to its last card, from the first list holding any, less a shape there that leads to other galleries while another does not (a post page's own pictures, then the site's feed); a shape after it is judged once.
@@ -11956,6 +11961,7 @@
                 items.forEach(function (x) { n[x.sig] = (n[x.sig] || 0) + 1; });
                 let dom = null, last = -1;
                 Object.keys(n).forEach(function (k) { if (!dom || n[k] > n[dom]) dom = k; });
+                domSig = dom;
                 items.forEach(function (x, i) { if (x.sig === dom) last = i; });
                 items.forEach(function (x, i) { if (i <= last) { if (!by.has(x.sig)) by.set(x.sig, []); by.get(x.sig).push(x); } });
                 const v = new Map();
