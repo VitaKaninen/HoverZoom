@@ -28,6 +28,21 @@ gallery. Fixed v0.345.0. Live: page 6 (25) and page 7 (21+1 redone), ⤓ then Ba
 `Eporner/`, before the debug lines existed. v0.346.0 logs `download queue: title at press {…}` and `download queue:
 names {…}` (JSON) — if a misfile recurs, read those first. **Cleanup owed:** drop both lines once it has not recurred.
 (The freeze on page 4 was the "all saved already, save again?" `confirm()`; the user answered yes.)
+**User, 2026-11-17 #4:** pornpics middle-click no longer opens a tab (fixed); a background tab's scroll does NOT close
+the gallery (suspect ruled out); the page-5 misfile was probably the user dismissing a dialog. Asked for, open:
+- **pornpics look-ahead:** scrolling onto new thumbnails, a hover previews first, then the gallery opens under the
+  pointer and shrinks it. Scan path: scroll → `twRecount` (waits for the scroll to settle) → `twRefresh` →
+  `doorScanSoon` (1.5 s) → `doorScan` (unruled chains, 3 linked pages 400 ms apart). Suspected: that latency, or new
+  rows with a chain/path no rule covers. Not reproducible here (pornpics refused). Needs the user's debug `hover {…}`
+  and `door scan` lines from such a hover before changing anything.
+- **Middle press before the preview (`E79`) does not save in LibreWolf;** synthetic presses work. v0.347.0 logs
+  `middle press not taken as a save {…}` (active, onActive, resolving, door…) — one real press settles it. Known gap:
+  on a door (results thumbnail) `active` is null, so a middle press there never saves.
+- **Queue start 10–15 s:** not a stall. Count moves only when a file finishes. Press → first tick claims, work starts
+  the next tick (≤ `DLQ_TICK_MS` 2 s, deliberate: two tabs claiming at once) → per picture, if not preloaded, its own
+  page + the whole original as bytes, then the save. Measured: Brunette (preloaded) first file 3 s; Sophy (not) 8 s.
+  Not changed; option: show in-flight pictures in the bar.
+- `saveRename` default → `always` (v0.347.0), stored `meaningless` migrated once (`saveRenameV2`). Verified live.
 **Open lead:** Downloads held 11 eporner thumbnails (`NN_small.jpg`, 3–5 KB, 4 as `(1)` copies) saved 19:35, before
 this session — likely the previous session's synthetic middle presses (`E79`) saving the thumbnail, not the original.
 Not reproduced. Downloads was emptied (to the Recycle Bin) at the user's request, 2026-11-17.

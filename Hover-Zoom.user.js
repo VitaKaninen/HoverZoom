@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.346.0
+// @version      0.347.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -302,7 +302,8 @@
         saveConvert: 'off',         // saving converts to: 'off' | 'png' | 'jpg' | 'webp'
         saveConvertFrom: 'avif',    // ...which files: 'avif' | 'modern' (AVIF, WebP, JPEG XL)
         saveJpegQuality: 92,        // %, for 'jpg' and 'webp'
-        saveRename: 'meaningless',  // 'off' | 'meaningless' (0001.jpg, image.jpg) | 'always'
+        saveRename: 'always',       // 'off' | 'meaningless' (0001.jpg, image.jpg) | 'always'
+        saveRenameV2: true,         // migrated: a stored 'meaningless' (the old default) became 'always' once
         saveNameTemplate: '[site] - [page_title] - [orig_name]',
         saveFolder: '',             // subfolder of the browser's download folder, same terms as the name, / between parts
         saveFolderAsked: false,     // the first save without a dialog asks for saveFolder
@@ -370,6 +371,8 @@
             o.blockOffered = offered.concat(DEFAULT_BLOCKS.filter(function (e) { return offered.indexOf(e) === -1; }));
         }
         if (o.saveNameTemplate === '[site] - ([page_title]) - [date]_[time]-###') o.saveNameTemplate = '[site] - [page_title] - [orig_name]';
+        // The default became 'always' (one gallery, one naming); a stored old default follows it, once.
+        if (!o.saveRenameV2) { if (o.saveRename === 'meaningless') o.saveRename = 'always'; o.saveRenameV2 = true; }
         return o;
     }
 
@@ -7599,6 +7602,13 @@
 
     CAP_TARGET.addEventListener('mousedown', function (e) {
         if (midSave(e) || midSaveEarly(e)) return;
+        if (e.button === 1 && debugOn()) {
+            const t = e.composedPath ? e.composedPath()[0] : e.target;
+            dbg('middle press not taken as a save ' + JSON.stringify({ placed: placed, active: active ? active.tagName + ' ' + String(active.currentSrc || active.src || '').slice(-80) : null,
+                onActive: !!active && (t === active || (t && t.nodeType === 1 && active.contains(t)) || holds(active.getBoundingClientRect(), e.clientX, e.clientY)),
+                resolving: !!(token && !token.cancelled), shown: !!view && !!box && box.classList.contains('on'), sinceHover: active ? Date.now() - hoverAt : null,
+                target: t && t.tagName, door: !!doorAt(e.target, e.clientX, e.clientY), mods: e.ctrlKey || e.shiftKey || e.altKey || e.metaKey }));
+        }
         swallowNextClick = false;
         lastUserAct = Date.now();
         hotTap = false;
@@ -16900,7 +16910,7 @@
         syncConvert();
         const ren = pick('saveRename', 'Rename saved pictures',
             'Meaningless names are ones like 0001.jpg, 12.png or image.jpg, which pile up as 0001 (1).jpg, 0001 (2).jpg.', [
-                ['meaningless', 'Only meaningless names'], ['always', 'Always'], ['off', 'Never']]);
+                ['always', 'Always'], ['meaningless', 'Only meaningless names'], ['off', 'Never']]);
         const dirWrap = document.createElement('div');
         dirWrap.className = 'listwrap';
         const dirHead = document.createElement('div');
