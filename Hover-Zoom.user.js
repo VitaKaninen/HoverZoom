@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.362.0
+// @version      0.363.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -7684,7 +7684,7 @@
         e.stopImmediatePropagation();
     }
     CAP_TARGET.addEventListener('mousedown', function (e) { galInfoPress(e); }, true);      // first of all: a press that closes the ⓘ box reaches nothing else
-    ['mouseup', 'click', 'auxclick', 'contextmenu'].forEach(function (t) { CAP_TARGET.addEventListener(t, function (e) { galInfoAfter(e); }, true); });
+    ['mouseup', 'click', 'auxclick', 'dblclick', 'contextmenu'].forEach(function (t) { CAP_TARGET.addEventListener(t, function (e) { galInfoAfter(e); }, true); });
     CAP_TARGET.addEventListener('auxclick', midSaveClick, true);
     CAP_TARGET.addEventListener('click', midSaveClick, true);
     CAP_TARGET.addEventListener('mouseup', midSaveClick, true);
@@ -9756,14 +9756,15 @@
         if (tw.host.style.display !== 'none') tw.dock.sizeChanged();     // the counter's width
     }
 
-    // With the fade setting, in fullscreen or over a picture: full over the widget, nothing TW_FADE_PX from its edges, in between by the distance. Else faint under a window that covers it until the pointer is near.
+    // Only in fullscreen (user: on a page, scroll to see under it): with the fade setting full over the widget, nothing TW_FADE_PX from its edges; else faint under a covering window until the pointer is near.
     const TW_COVER_OPACITY = 0.25;
     const TW_FADE_PX = 75;
     function twOpacity() {
         if (!tw) return;
+        if (!fullActive()) { tw.box.style.opacity = '1'; return; }
         const r = tw.rect;
         const under = !!(r && tw.host.style.display !== 'none' && twCovers(r));
-        if (cfg.tourFade) { tw.box.style.opacity = r && (fullActive() || under) ? String(twFadeAt(r)) : '1'; return; }
+        if (cfg.tourFade) { tw.box.style.opacity = r ? String(twFadeAt(r)) : '1'; return; }
         tw.box.style.opacity = !tw.near && under ? String(TW_COVER_OPACITY) : '1';
     }
 
@@ -13222,12 +13223,14 @@
         galInfoEat = true;
     }
 
-    // While the ⓘ box is up, the next press anywhere (ⓘ included) only closes it; its mouseup, click and menu go nowhere either.
+    // While the ⓘ box (any press, ⓘ included) or the right-click menu (a press off it) is up, that press only closes it; its mouseup, click and menu go nowhere either.
     let galInfoEat = false, galInfoUntil = 0;
     function galInfoPress(e) {
-        if (galInfoEat && galMenuEl && !galMenuEl.hidden && galMenuEl.classList.contains('info')) {
+        const m = galMenuEl, info = m && m.classList.contains('info');
+        galInfoUntil = 0;
+        if (m && !m.hidden && (info ? galInfoEat : e.composedPath().indexOf(m) < 0)) {
             galInfoEat = false;
-            galInfoUntil = Date.now() + 1500;
+            galInfoUntil = Date.now() + 5000;     // the next press ends it sooner
             e.preventDefault();
             e.stopImmediatePropagation();
             galMenuHide();
@@ -13237,7 +13240,6 @@
     }
     function galInfoAfter(e) {
         if (Date.now() > galInfoUntil) return;
-        if (e.type !== 'mouseup') galInfoUntil = 0;
         e.preventDefault();
         e.stopImmediatePropagation();
     }
@@ -15013,7 +15015,7 @@
         sep();
         label('The widget');
         item('→ or ← with nothing open starts the slideshow', !!cfg.tourKeyStart, flip('tourKeyStart'));
-        item('Fade out away from the pointer', !!cfg.tourFade, flip('tourFade'));
+        item('Fade out away from the pointer (fullscreen and galleries)', !!cfg.tourFade, flip('tourFade'));
         if (galCur || galMarksHere()) {
             sep();
             label('Galleries');
@@ -17523,7 +17525,7 @@
         section('The slideshow');
         check('tourButtons', 'Show the ◀ ▶ widget',
             '▶ starts at the first picture. Drag to move; Ctrl skips snapping.');
-        check('tourFade', 'Fade the widgets', 'Both widgets fade as the pointer moves away and are gone 75 px from their edges.');
+        check('tourFade', 'Fade the widgets', 'In fullscreen and in a gallery, both widgets fade as the pointer moves away and are gone 75 px from their edges. On a page they never fade.');
         check('tourKeyStart', '→ or ← with nothing open starts the slideshow',
             'Like ▶ and ◀ on the widget, unless the page uses the arrows.');
         num('tourMinDisplayed', 'Leave out pictures smaller than',

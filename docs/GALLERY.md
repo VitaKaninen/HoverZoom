@@ -628,10 +628,12 @@ right-click menu and the panel). Code: `galEndless` … `galInfoShow`, after `ga
 - **Wheel in fullscreen** (user): on the drawn picture (`pointOnPicture`, the media element's rect, not the frame —
   the fullscreen frame spans the screen) it zooms; anywhere else `twWheel` steps the slideshow (`fullGal`), as over
   the widget. It used to fall to `galWheel`, which dismisses.
-- **ⓘ box**: placed off its button (above, else below, else beside: `galMenuShow(…, avoid)`). While it is up the next
-  press anywhere, ⓘ included, only closes it: `galInfoPress` is the first window-capture `mousedown` (bound at boot
-  beside `midSaveClick`, so it runs before every other capture listener), and `galInfoAfter` eats that press's
-  mouseup / click / auxclick / contextmenu (≤ 1.5 s). `galStripText` refits when that width moves
+- **ⓘ box and the right-click menu**: the ⓘ box is placed off its button (above, else below, else beside:
+  `galMenuShow(…, avoid)`). While it is up the next press anywhere, ⓘ included, only closes it; while the menu is
+  up a press off it does the same (user v0.363.0; a press on an item still acts). `galInfoPress` is the first
+  window-capture `mousedown` (bound at boot beside `midSaveClick`, so it runs before every other capture listener),
+  and `galInfoAfter` eats that press's mouseup / click / auxclick / dblclick / contextmenu until the next press
+  (≤ 5 s; 1.5 s let a slow click through). `galStripText` refits when that width moves
   (`galFullLast`); `enterFull`/`restoreFull` call `galRefit` (a maximise fallback fires no `resize`). No drags or
   corner resizes while `fullActive()`, and a drag there is not a click (`held`), so nothing is saved to the anchor.
 - **Measure the fly where it lands, never mid-flight** (`galFlyRect()`, not `getBoundingClientRect`): `galFlyZ` (the

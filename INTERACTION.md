@@ -399,7 +399,7 @@ the current picture on screen (`T35`).
 - **The widget** (`E63`) is a page row `◀ Page n / N ▶` (a screen of whole pictures from the counter's list;
   shown only at 4+ pictures a page on average; with a window open it opens that page's first picture — `docs/TOUR.md`) above `◀ n / N ▶`
   and the ⇅ button, in a box of its own, placed by the shared dock that Forum Stumbler and RNFP also
-  use. Hidden while a gallery is open: the gallery's strip is its widget (`G6`). With `tourFade` it fades by the pointer's distance, gone at 75 px (as the gallery's); shown on pages with two pictures at the slideshow's floor, or while a slideshow runs. A pinned picture shows its own number. Click either number to type where
+  use. Hidden while a gallery is open: the gallery's strip is its widget (`G6`). With `tourFade` it fades by the pointer's distance, gone at 75 px, only in fullscreen (never on a page); shown on pages with two pictures at the slideshow's floor, or while a slideshow runs. A pinned picture shows its own number. Click either number to type where
   to go (`twAsk`): past what is loaded it goes to the last loaded and asks for more, so the next try
   reaches further. Right-click: a menu of where the preview opens, the widget's options and the
   gallery options (`galMenuShow`). After the count: a yellow `(N)` for skipped duplicates, then an
