@@ -17,6 +17,13 @@ Whether the file was written was not logged; v0.349.0 adds `middle press: saving
 `galPv` never consumed `saveOnShow` (nor `pinOnShow`); fixed v0.350.0. Same version: chip counts read to the end in the
 background (GALLERY.md "The preload reads each on-screen door to its end"). Both unverified on pornpics.
 The press on a results-page door (`active: null, door: true`) is still not a save — the known gap.
+**v0.351.0–v0.352.0 (user, same day):** off-screen doors read at the user's pace, one request per page, counts no
+longer wait on a frame (GALLERY.md); frame counted sexygirlspics cam spots (24 for 15), fixed and verified in Chrome
+(15/16/16/16 = the pages). **Asked the user, unanswered:** (1) LibreWolf on v0.351.0+: half the chips blank, the
+rest `N+` — send `gallery count from its page` / `gallery read to its end` debug lines; suspected cause (counts
+behind the frame guard, 10 s per frame that never reports) fixed in v0.351.0, unverified there. (2) What a middle
+press on a results-page door should do: opens a tab now in both browsers (`galleryMiddle` off, the user's
+2026-11-12 default; on = peek its gallery). Options offered: turn the setting on, or make it save the gallery.
 
 # Handoff 2026-11-17 #2 (~326k tokens)
 
