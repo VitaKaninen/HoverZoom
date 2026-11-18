@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.363.0
+// @version      0.364.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -5754,8 +5754,19 @@
         e.preventDefault();
         e.stopPropagation();
         const f = 1 + cfg.wheelZoomStep / 100;
+        if (e.deltaY > 0 && tourActive()) {     // a slideshow: down zooms out only to fit, holds there, then steps on (user)
+            if (view.scale > view.fitScale + 1e-6) {
+                zoomAt(Math.max(view.fitScale, view.scale / f), e.clientX, e.clientY);
+                if (view.scale <= view.fitScale + 1e-6) { picWheelHold = Date.now() + SEAM_HOLD_MS; dbg('wheel: back to fit, steps after ' + SEAM_HOLD_MS + ' ms'); }
+                return;
+            }
+            if (Date.now() < picWheelHold) { twWheelAcc = 0; return; }
+            twWheelStep(e);
+            return;
+        }
         zoomAt(view.scale * (e.deltaY < 0 ? f : 1 / f), e.clientX, e.clientY);
     }
+    let picWheelHold = 0;       // down on a slideshow picture just zoomed back to fit: steps wait till then
 
     // ------------------------------------------------------------- interaction
 
@@ -9878,7 +9889,7 @@
         if (tw) twNear(e.clientX, e.clientY);
         if (e.ctrlKey || panelOwns(e)) return;
         const up = !!view && !!box && box.classList.contains('on');
-        const fullGal = !!galCur && placed && fullActive() && !pointOnPicture(e.clientX, e.clientY);     // fullscreen gallery: the black around the picture steps, the picture zooms (user)
+        const fullGal = (!!galCur || tourActive()) && placed && fullActive() && !pointOnPicture(e.clientX, e.clientY);     // fullscreen gallery or slideshow: the black around the picture steps (user)
         if (!(tw && twWheelZone(e.clientX, e.clientY, TW_WHEEL_PAD)) && !galWidgetAt(e.clientX, e.clientY) && !fullGal) {
             if (!up) return;
             if (pointInPreview(e.clientX, e.clientY) || (!placed && active && e.target instanceof Node && active.contains(e.target))) {
@@ -9895,6 +9906,11 @@
         }
         e.preventDefault();
         e.stopImmediatePropagation();       // the tip's own wheel listener never sees this one
+        twWheelStep(e);
+    }
+
+    // One wheel event that steps: travel adds up to a step, the opening spin is hushed, fast runs lift the gap.
+    function twWheelStep(e) {
         hideTip();
         const now = Date.now();
         if (twWheelHush) {

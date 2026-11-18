@@ -627,7 +627,8 @@ right-click menu and the panel). Code: `galEndless` … `galInfoShow`, after `ga
   sending `resize` after a few changes: dispatch one by hand when testing this.
 - **Wheel in fullscreen** (user): on the drawn picture (`pointOnPicture`, the media element's rect, not the frame —
   the fullscreen frame spans the screen) it zooms; anywhere else `twWheel` steps the slideshow (`fullGal`), as over
-  the widget. It used to fall to `galWheel`, which dismisses.
+  the widget. It used to fall to `galWheel`, which dismisses. Since v0.364.0 the same holds for a page's slideshow
+  in fullscreen (`tourActive()`), and down on the picture follows the slideshow wheel rule in `docs/TOUR.md`.
 - **ⓘ box and the right-click menu**: the ⓘ box is placed off its button (above, else below, else beside:
   `galMenuShow(…, avoid)`). While it is up the next press anywhere, ⓘ included, only closes it; while the menu is
   up a press off it does the same (user v0.363.0; a press on an item still acts). `galInfoPress` is the first
