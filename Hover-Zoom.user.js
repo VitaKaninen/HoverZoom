@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.359.0
+// @version      0.360.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -4908,6 +4908,7 @@
             } catch (e) { fullApi = false; fullReq = null; }
         }
         fitFull();
+        if (galCur || galWant) galRefit();      // the gallery's picture goes small in the corner
     }
 
     function leaveFull() {
@@ -4960,6 +4961,7 @@
         applyLook();                // fullPrev is already null, so the border comes back first
         setIcon(fsEl, ICON_FULL);
         setTip(fsEl, 'Fullscreen');
+        if (galCur || galWant) galRefit();
         if (!view) return;
         view.fixedW = null;
         view.fixedH = null;
@@ -9776,7 +9778,7 @@
         const el = galSt && galSt.el;
         if (!el || el.hidden) return;
         if (!cfg.tourFade) { el.style.opacity = ''; return; }
-        const b = el.getBoundingClientRect(), r = { x: b.left, y: b.top, w: b.width, h: b.height };
+        const b = el.getBoundingClientRect(), r = galFly && el.parentNode === galFly.el ? galUnitRect() : { x: b.left, y: b.top, w: b.width, h: b.height };     // in the flying picture: where it lands
         el.style.opacity = fullActive() || twCovers(r) ? String(twFadeAt(r)) : '';
     }
 
@@ -11149,6 +11151,7 @@
     // Past an end: user input stops there once (note, SEAM_HOLD_MS deaf that way only); the next step wraps.
     function tourSeam(dir, user) {
         if (!tour || !placed) return;
+        if (tour.gal && galEndless()) { seamDir = 0; galChainGo(dir, dir > 0 ? 'first' : 'last'); return; }     // endless: on to the next gallery; at the queue's end it stops, no note, no wrap
         if (user && seamDir !== dir) {
             seamDir = dir;
             seamHoldUntil = Date.now() + SEAM_HOLD_MS;
@@ -11589,6 +11592,8 @@
     let galSeen = {}, galMarkTimer = 0;
     const GAL_FLY_MS = 320;             // the clicked picture's flight to the corner and back
     const GAL_FLY_FRAC = 0.2;           // its height there, of the window's (user)
+    const GAL_FULL_FRAC = 0.1;          // in fullscreen, at most this of the screen tall; its width is the strip's text
+    let galFullLast = 0;                // the width galFullRect last gave
     let galOn = false, galTap = false, galMidAt = 0;      // a peek is up and locked; Ctrl down with nothing else yet
     const GAL_PEND_MS = 3000;           // the pressed result lights up only if its gallery is not on screen by then
     const GAL_DIAG_MS = 10000;          // an open that shows nothing this long after the press gets the diagnostics popup
@@ -12232,8 +12237,8 @@
         const f = galFly, m = GAL_HD / 2;
         let up = !!galEdit;
         if (!up && f) {
-            const r = f.el.getBoundingClientRect();
-            up = galPt.x >= r.left - m && galPt.x <= r.right + m && galPt.y >= r.top - m && galPt.y <= r.bottom + m;
+            const r = galFlyRect();     // where it lands, not where its flight is now (a switch measured it at the card: hidden till the pointer moved)
+            up = galPt.x >= r.x - m && galPt.x <= r.x + r.w + m && galPt.y >= r.y - m && galPt.y <= r.y + r.h + m;
         }
         const z = up ? '2147483647' : '2147483646';
         if (galFlyHost.style.zIndex !== z) galFlyHost.style.zIndex = z;
@@ -12757,8 +12762,9 @@
         galStripSqueeze(s, pg);
         s.pgP.classList.toggle('faint', ch ? !ch.back : total < 2);
         s.pgN.classList.toggle('faint', ch ? !ch.on : total < 2);
-        s.picP.classList.toggle('faint', !n);
-        s.picN.classList.toggle('faint', !n);
+        s.picP.classList.toggle('faint', !n || (!!ch && !ch.picBack));
+        s.picN.classList.toggle('faint', !n || (!!ch && !ch.picOn));
+        if (galFly && fullActive() && !galEdit && Math.abs(Math.min(vpW() * 0.4, galFullW()) - galFullLast) > 1) galRefit();     // the text needs another width
     }
 
     // The set's pages: laid out, plus the pictures known but not loaded yet.
@@ -13027,6 +13033,8 @@
             pic: 'G:' + (at >= 0 ? at + 1 : '–') + '/' + n + (reading ? '+' : '') + ' · T:' + (at >= 0 ? fmt(tb + at + 1) : '–') + '/' + fmt(tall) + (open ? '+' : ''),
             back: c.at > 0 || page > 0,
             on: c.at < c.hrefs.length - 1 || !lastPage || !whole,
+            picBack: c.at > 0 || at > 0,
+            picOn: c.at < c.hrefs.length - 1 || !whole || at < n - 1,     // the queue's last picture: the slideshow stops there (user)
         };
     }
 
@@ -13096,7 +13104,6 @@
         tourTurnOn();
         seamDir = 0;
         tourGo(list, Math.min(k, list.length - 1), l.dir, false);
-        seamNote('Gallery ' + (c.at + 1) + ' of ' + c.hrefs.length);
     }
 
     // Endless: a page number typed on the strip counts across the queue. The open gallery's own page, or -1 after a switch to the one holding it.
@@ -14542,7 +14549,32 @@
 
     // Where the clicked picture waits while its gallery is open, with sh px of attached strip: its remembered place, else bottom-right, a fifth of the window tall; its own shape (user).
     function galCornerRect(asp, sh) {
+        if (fullActive()) return galFullRect(asp, sh);
         return galPlace(galAnchorRec(), asp || 1, sh, vpW(), vpH(), galAnchorRows(vpH()));
+    }
+
+    // Fullscreen: bottom-right, as wide as the strip's text will need, the picture short (user: small, its size set by the text).
+    function galFullRect(asp, sh) {
+        const W = vpW(), H = vpH(), w = Math.min(W * 0.4, galFullW()), ph = Math.min(w / (asp || 1), H * GAL_FULL_FRAC);
+        galFullLast = w;
+        return galPlace(galAnchorDefault(), asp || 1, sh, W, H, galPagedRows(H), { w: w, h: Math.round(ph + sh) });
+    }
+
+    // The strip's width for its widest line as it will grow: every "n/N" counted as "N/N+", digits as 8.
+    function galFullW() {
+        const s = galSt;
+        if (!s || !galCur) return GAL_STRIP_W;
+        const ahead = function (t) {
+            return t.replace(/([\d,–]+)(\s*\/\s*)([\d,]+)\+?/g, function (m, a, sl, b) { return b + sl + b + '+'; }).replace(/\d/g, '8');
+        };
+        const cv = galFullW.cv || (galFullW.cv = document.createElement('canvas').getContext('2d'));
+        let need = 0;
+        [s.pgT, s.picT].forEach(function (t) {
+            const cs = getComputedStyle(t), size = t === s.pgT ? 11 : parseFloat(getComputedStyle(s.el).fontSize) || 12;
+            cv.font = (cs.fontWeight || '400') + ' ' + size + 'px ' + (cs.fontFamily || 'system-ui, sans-serif');
+            need = Math.max(need, cv.measureText(ahead(t.textContent)).width);
+        });
+        return Math.ceil(need + 2 * 20 + 2 * 4 + 8 + 6 + 16);      // ◀ ▶, their gaps, the strip's padding, the frame's border, room
     }
 
     // The row lines a place is remembered against: a one-page gallery's own, else the paged grid's, which only the window's height decides.
@@ -14736,7 +14768,7 @@
         if (e.button !== 0 || !galFly) return;
         if (galFly.el.classList.contains('asking')) galJoin(false);
         const t0 = e.composedPath()[0], corner = t0 && t0.__hzCorner;
-        let on = false;
+        let on = false, held = false;
         const u0 = galUnitRect(), sh = galAttH(), st = { x: e.clientX, y: e.clientY, l: u0.x, t: u0.y, w: u0.w, h: u0.h };
         const ph0 = st.h - sh, asp = st.w / ph0, W = vpW(), H = vpH(), rows = galAnchorRows(H);
         const ys = galLines(H, rows).map(function (x) { return x.v; }), xs = galLines(W).map(function (x) { return x.v; });
@@ -14744,6 +14776,7 @@
         const move = function (ev) {
             if (!on) {
                 if (Math.hypot(ev.clientX - st.x, ev.clientY - st.y) < 4) return;
+                if (fullActive()) { held = true; return; }      // fullscreen: size and place are fixed, and a drag is not a click
                 on = true;
                 galEditStart();
             }
@@ -14776,7 +14809,7 @@
         const up = function () {
             window.removeEventListener('mousemove', move, true);
             window.removeEventListener('mouseup', up, true);
-            if (!on) { if (!corner) galHide('hole'); return; }
+            if (!on) { if (!corner && !held) galHide('hole'); return; }
             if (!galEdit) return;
             galEditStop(true);
             if (dock) galDock(dock);
@@ -14794,7 +14827,7 @@
         let on = false, dock = null;
         const move = function (ev) {
             if (!on) {
-                if (Math.hypot(ev.clientX - st.x, ev.clientY - st.y) < 4) return;
+                if (Math.hypot(ev.clientX - st.x, ev.clientY - st.y) < 4 || fullActive()) return;
                 on = true;
                 galEditStart();
                 galDetach();

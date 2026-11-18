@@ -608,6 +608,18 @@ right-click menu and the panel). Code: `galEndless` … `galInfoShow`, after `ga
 - **Closing** (`galHide`) after the queue moved on scrolls the current card into view (`behavior: 'instant'` — a
   smooth scroll would still be moving when `galFlyBack` measures) so the picture flies back to it.
 - ⤓ stays per gallery (user): each switch builds a new corner picture with its own `galToolsBuild(href)`.
+- **No seam in endless** (user, v0.360.0): `tourSeam` with `galEndless()` goes on through `galChainGo` — no "Last
+  picture" hold or note, no wrap; at the queue's last picture it stops dead, and the strip's ▶ (◀ at its first) is
+  faint (`picOn`/`picBack`). No note on a switch either (a "Gallery n of N" one was dropped: it read as the endstop).
+- **Fullscreen** (user, v0.360.0: the corner picture was blown up): `galCornerRect` → `galFullRect` — bottom-right
+  (`galAnchorDefault`, never the remembered place), as wide as `galFullW()` (the strip's widest line with every `n/N`
+  measured as `N/N+`, digits as 8, canvas `measureText`, + ◀ ▶, gaps, padding, border), the picture ≤
+  `GAL_FULL_FRAC` 0.1 of the screen tall (`object-fit:cover` crops). `galStripText` refits when that width moves
+  (`galFullLast`); `enterFull`/`restoreFull` call `galRefit` (a maximise fallback fires no `resize`). No drags or
+  corner resizes while `fullActive()`, and a drag there is not a click (`held`), so nothing is saved to the anchor.
+- **Measure the fly where it lands, never mid-flight** (`galFlyRect()`, not `getBoundingClientRect`): `galFlyZ` (the
+  picture is under the preview unless the pointer is on it) and `galStripFade` ran at a switch while the new picture
+  still sat at its card, so in fullscreen both stayed hidden until the pointer moved.
 - Not done: the queue never crosses into the site's next page (`nextPageIn`).
 - Fixture door-long (150 doors, 40 each): 2 seen → queue 148, P:1/296; ▼ past page 2 → gallery long=3; ◀ back →
   long=1's last page; slideshow ▶ 40 → 41 seamless, ◀ 1 → previous 40; typed P 231 → gallery 116; close scrolled
