@@ -1,4 +1,17 @@
-# Handoff 2026-11-17 (~305k tokens) — read this first
+# Open test plan, 2026-11-17 (v0.343.0) — read this first
+
+User asked for a thorough live test on eporner (search https://www.eporner.com/search-photos/clit/). Done in
+Chrome on v0.343.0: counts (fresh tab 99 in 26 s; after Back all at once), ⤓ ready 0.34–1.05 s after opening,
+ticks on chip opens. Fixed this round: see the v0.343.0 commit. **Still to run** (blocked: ⤓ opened the
+save-folder `prompt()` in Chrome tab 602234578 and the user must answer it): start ⤓ on results page 2, Back to
+page 1 (same site) and Forward — does the queue continue and finish; leave and return mid-queue; two eporner tabs
+queueing at once (one tab works the site's queue); two sites at once (pornpics is refused by both browsers —
+need another gallery site the tools allow). Unverified: a real middle press in Chrome (galleryMiddle is off
+there; synthetic presses tested in the pane, `E79`); pornpics middle-click opening a tab (needs the user's
+`hover-zoom:gallery-state` trace from that page). A page scroll the site makes itself still closes an open
+gallery (`galScroll` 'page scrolled by itself') — seen in Chrome, not changed.
+
+# Handoff 2026-11-17 (~305k tokens)
 
 **Asked, in order (all built, pushed v0.335.0–v0.341.0):** (1) clicked gallery picture: fade rejected →
 preview on top unless the pointer is on the picture (v0.336.0, `galFlyHost`/`galFlyZ`); (2) eporner ⤓

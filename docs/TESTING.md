@@ -369,6 +369,14 @@ logs `retrying` ×3 — an artefact of the stub, not of the manager. The pane wo
 
 ## Live sites in Claude in Chrome
 
+- **The Browser pane cannot run the script on an https site**: a `<script src="http://localhost:8899/…">` there
+  fails to load (`test-pages/live-harness.js` is the GM stand-in harness that tried). Use Chrome.
+- **pornpics.com is refused by both browsers' safety lists** — do not route around it; ask the user for a
+  `hover-zoom:gallery-state` trace from their browser instead.
+- **⤓ in Chrome opens `prompt()` (save folder) the first time** (`saveFolderAsk`) and the tab's renderer then
+  times out every `javascript_tool` call; Escape via `computer` does not reach it. The user must answer it.
+- Each `javascript_tool` call dies at 45 s: poll in calls of ≤ 30 s.
+
 The user's Chrome HAS Tampermonkey with Hover Zoom tracking the file on disk, and it runs in Claude in
 Chrome's tabs. Never tell the user it is not installed; "no widget" is not "not running". Prove it alive
 from the page: dispatch `hover-zoom:perf` with detail `'report'` and count `hover-zoom:perf-report`
