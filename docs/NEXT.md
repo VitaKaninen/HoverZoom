@@ -9,7 +9,8 @@ queueing at once (one tab works the site's queue); two sites at once (pornpics i
 need another gallery site the tools allow). Unverified: a real middle press in Chrome (galleryMiddle is off
 there; synthetic presses tested in the pane, `E79`); pornpics middle-click opening a tab (needs the user's
 `hover-zoom:gallery-state` trace from that page). A page scroll the site makes itself still closes an open
-gallery (`galScroll` 'page scrolled by itself') — seen in Chrome, not changed.
+gallery (`galScroll` 'page scrolled by itself') — suspected cause of the missing ticks (the test's own
+`scrollIntoView` may have been the scroll), not confirmed, not changed.
 
 # Handoff 2026-11-17 (~305k tokens)
 
