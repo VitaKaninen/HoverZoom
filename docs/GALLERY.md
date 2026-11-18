@@ -382,6 +382,10 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   - **`galBestOf` races a `SAVE_FETCH_MS` (120 s) deadline** (v0.344.0): a lookup that never settles (bare `fetch` in
     `fetchDoc`/`linkedMedia` has no timeout) held one worker forever, so `Promise.all` never ended — live on eporner,
     146/147, 0 failed, frozen 3+ min. Now it fails (`3`, retryable). A reload already recovered it (`1` → `0`).
+  - **The job carries the gallery's `title`/`site`** (v0.345.0), and the kept list (`hzGalLists`) its `info`: folder and
+    name come from `pageInfos`, which is in memory and filled only by the page that fetched the gallery. Any other
+    saving page (bfcache after Back/Forward, another tab) fell back to the host label — live: 134 of 400 files in
+    `Hover Zoom/Eporner/` named `Eporner - …` instead of `Hover Zoom/EPORNER.COM/<gallery>/`.
   - **`pagehide` halts this page's run** (`dlqHalt`, v0.341.0): a save in flight never calls back after a bfcache
     freeze (user: "it stalls when I hit back"); on return the ticks claim it again and `1`s are redone.
   - **In the gallery's strip while a gallery is open** (user, v0.339.0: it moved round the page as the unit
