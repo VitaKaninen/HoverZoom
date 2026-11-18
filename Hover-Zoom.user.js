@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.348.0
+// @version      0.349.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -7632,7 +7632,8 @@
         if (at && Date.now() - at < MID_RETRY_MS) { toast('Already saved', 2000); return; }
         midSaved.set(url, Date.now());
         const gImg = galOwns(active) ? active : null, gHref = gImg && galCur ? galCur.href : null;
-        saveOriginal(url, true, function () { midSaved.set(url, Infinity); syncSavedMark(); if (gImg) galSaved(gImg, gHref); }, savePage(active));
+        dbg('middle press: saving', url);
+        saveOriginal(url, true, function () { dbg('middle press: saved', url); midSaved.set(url, Infinity); syncSavedMark(); if (gImg) galSaved(gImg, gHref); }, savePage(active));
     }
     // A middle press on the picture being previewed: saves what it shows, or (still loading) what it will show. See E79.
     function midSaveEarly(e) {

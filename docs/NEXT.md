@@ -8,6 +8,11 @@ toggle in the Tampermonkey menu (v0.348.0). All pushed. Details in the sections 
 **Waiting on the user (asked in the last reply, not answered yet):** try pornpics home + `/lingerie/` on v0.348.0;
 if category tiles still preview, send `door scan` / `doorAreas` debug lines; and one failing early middle press with
 debug on (`middle press not taken as a save {…}`). Nothing else open.
+**User trace, 2026-11-17 #5 (v0.348.0, LibreWolf, a pornpics gallery page):** `middle press before the preview opened:
+saved once it shows` then the preview painted 733 ms later — the early press IS taken in LibreWolf (no `not taken` line).
+Whether the file was written was not logged; v0.349.0 adds `middle press: saving <url>` / `middle press: saved <url>`
+(a failure already logs `saving the original failed`). Still owed by the user: home + `/lingerie/` category check
+(`door scan` / `doorAreas` lines), and whether that press's file landed in Downloads.
 
 # Handoff 2026-11-17 #2 (~326k tokens)
 
