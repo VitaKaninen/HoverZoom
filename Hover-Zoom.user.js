@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.350.0
+// @version      0.351.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -2000,17 +2000,33 @@
         return out;
     }
 
+    // One request per page for every reader (count, preload, hover, door test): {text} | {refused: res} | {}; only successes are kept.
+    var pageTexts = null, pageTextHits = 0;   // var: read before this line runs at boot
+    const PAGE_TEXT_KEEP = 120;
+    function pageTextHeld(href) { return !!pageTexts && pageTexts.has(String(href).split('#')[0]); }
+    function pageText(href) {
+        if (!pageTexts) pageTexts = new Map();
+        const key = String(href).split('#')[0];
+        let p = pageTexts.get(key);
+        if (p) { pageTextHits++; return { p: p, mine: false }; }
+        p = (async function () {
+            try {
+                const res = await fetch(key, { credentials: 'same-origin', redirect: 'follow' });
+                if (!res.ok) return { refused: res };
+                if (!/text\/html|application\/xhtml/i.test(res.headers.get('content-type') || '')) return {};
+                return { text: await res.text() };
+            } catch (e) { return {}; }                   // offline, blocked, CSP, aborted
+        })();
+        pageTexts.set(key, p);
+        if (pageTexts.size > PAGE_TEXT_KEEP) pageTexts.delete(pageTexts.keys().next().value);
+        p.then(function (r) { if (!r.text && pageTexts.get(key) === p) pageTexts.delete(key); });   // a miss is asked again
+        return { p: p, mine: true };
+    }
+
     async function fetchPageMedia(pageUrl) {
-        let doc;
-        try {
-            const res = await fetch(pageUrl.href, { credentials: 'same-origin', redirect: 'follow' });
-            if (!res.ok) return null;
-            if (!/text\/html|application\/xhtml/i.test(res.headers.get('content-type') || '')) return null;
-            doc = new DOMParser().parseFromString(await res.text(), 'text/html');
-        } catch (e) {
-            return null;                                  // offline, blocked, CSP, aborted
-        }
-        return pageMediaFrom(doc, pageUrl);
+        const r = await pageText(pageUrl.href).p;
+        if (!r.text) return null;
+        return pageMediaFrom(new DOMParser().parseFromString(r.text, 'text/html'), pageUrl);
     }
 
     // The same-origin page this picture links to, worth fetching for its media; null when none.
@@ -10980,15 +10996,15 @@
     }
 
     async function fetchDoc(href, onRefused) {
+        const got = pageText(href), r = await got.p;
+        if (r.refused) { if (onRefused && got.mine) onRefused(r.refused); return null; }
+        if (!r.text) return null;
         try {
-            const res = await fetch(href, { credentials: 'same-origin', redirect: 'follow' });
-            if (!res.ok) { if (onRefused) onRefused(res); return null; }
-            if (!/text\/html|application\/xhtml/i.test(res.headers.get('content-type') || '')) return null;
-            const doc = new DOMParser().parseFromString(await res.text(), 'text/html');
+            const doc = new DOMParser().parseFromString(r.text, 'text/html');
             rebase(doc, href);
             return doc;
         } catch (e) {
-            return null;                        // offline, blocked, CSP, aborted
+            return null;
         }
     }
 
@@ -12077,7 +12093,7 @@
         const noFrame = galNoFrame(href);
         const frame = noFrame ? Promise.resolve(null) : galRender(href);
         const stopFrame = noFrame ? null : galFrameStop;
-        const req = log && log.req();
+        const req = log && !pageTextHeld(href) && log.req();     // a page already asked for is not a second request
         let refused = null;
         const html = fetchDoc(href, function (res) {
             refused = res;
@@ -13196,6 +13212,7 @@
         galGrowing = href;
         galGrowWhy.delete(href);
         galTrace(href, 'reading on: start');
+        const t0 = performance.now(), from = (galLists.get(href) || []).length;
         if (galCur && galCur.href === href) galPageNote(galCur);
         galRender(href, function (items) { galMore(href, items); }, function (why) {
             if (galGrowing === href) galGrowing = null;
@@ -13204,6 +13221,7 @@
             if (html) galGrowWhy.set(href, 'html');
             else if (!galGrown.has(href)) galGrowWhy.set(href, why);
             galTrace(href, 'reading on: ' + why);
+            dbg('gallery read to its end: ' + why, { href: href, from: from, pictures: (galLists.get(href) || []).length, final: galGrown.has(href), ms: Math.round(performance.now() - t0), open: !!galCur && galCur.href === href });
             if (galCur && galCur.href === href) galPageNote(galCur);
             galChipsCount(href);
             galDlShow();
@@ -14904,6 +14922,8 @@
     // A page scroll hides the set; nothing shows again until the pointer itself moves.
     function galScroll(e) {
         galChipCool();
+        const st = e.target;
+        if (st === document || (st && st.nodeType === 1 && st.clientHeight >= vpH() / 2)) galPaceNote(st === document ? window.scrollY || 0 : st.scrollTop);
         if (!galMarksHere() && !galWant && !galCur) return;
         const t = e.target;
         if (t !== document && !(t && t.nodeType === 1 && t.clientHeight >= vpH() / 2)) return;
@@ -15297,7 +15317,30 @@
     const galCountTried = new Set();    // counted off screen: the list, without its thumbnails
     const GAL_COUNT_PAR = 4;            // counts in flight at once, beside the serial thumbnail preload
 
-    // The nearest door whose area leads to galleries and whose pictures are not read yet: on screen, or (any) anywhere, for its count.
+    // How far down the page doors are read to their end, set at scroll time: 2 screens past the viewport slow, more as the user scrolls faster, all when fast; never shrinks.
+    const GAL_PACE_MS = 8000, GAL_PACE_FAST = 4;
+    const galPaceLog = [];              // [ms, scroll position] of the user's own scrolls in the last GAL_PACE_MS
+    let galPaceY = 0, galReach = 0, galReachLast = null;
+    function galPaceNote(y) {
+        galPaceY = y;
+        if (performance.now() - galInputAt > 600) return;
+        const now = performance.now(), H = vpH() || 1;
+        galPaceLog.push([now, y]);
+        while (galPaceLog.length && now - galPaceLog[0][0] > GAL_PACE_MS) galPaceLog.shift();
+        let down = 0;
+        for (let i = 1; i < galPaceLog.length; i++) down += Math.max(0, galPaceLog[i][1] - galPaceLog[i - 1][1]);
+        const screens = down / H, ahead = screens >= GAL_PACE_FAST ? Infinity : Math.max(2, Math.ceil(screens * 2));
+        galReach = Math.max(galReach, y + H * (1 + ahead));
+        const say = galReach === Infinity ? 'every door below' : ahead + ' screens ahead';
+        if (say !== galReachLast) { galReachLast = say; dbg('gallery preload: reading ' + say, { screensIn8s: Math.round(screens * 10) / 10 }); }
+    }
+    // A door at this viewport top is within the reach (3 screens down at least).
+    function galInReach(top) {
+        const H = vpH() || 1;
+        return top + galPaceY <= Math.max(galReach, galPaceY + H * 3);
+    }
+
+    // The nearest door whose area leads to galleries and whose pictures are not read yet: on screen, then below it at the user's pace, or (any) anywhere, for its count.
     function galPrePick(any) {
         const seen = new Set(), W = vpW(), H = vpH();
         let best = null, bestD = Infinity;
@@ -15312,8 +15355,9 @@
             try { if (new URL(h).origin !== location.origin) return; } catch (e) { return; }
             const r = galHoleRect(img);
             if (!r.width || !r.height) return;
-            if (!any && (r.bottom < 0 || r.top > H || r.right < 0 || r.left > W)) return;
-            const d = Math.hypot(r.left + r.width / 2 - (any ? W / 2 : galPt.x), r.top + r.height / 2 - (any ? H / 2 : galPt.y));
+            const onScreen = !(r.bottom < 0 || r.top > H || r.right < 0 || r.left > W);
+            if (!any && !onScreen && (r.bottom < 0 || !galInReach(r.top))) return;
+            const d = !any && !onScreen ? 1e7 + r.top : Math.hypot(r.left + r.width / 2 - (any ? W / 2 : galPt.x), r.top + r.height / 2 - (any ? H / 2 : galPt.y));
             if (d < bestD) { bestD = d; best = h; }
         });
         return best;
@@ -15322,7 +15366,7 @@
     // A door's list from its HTML alone, for its chip's count; where frames are refused that is the whole read.
     function galCountLoad(href) {
         if (galNoFrame(href)) return galLoad(href, galPreLog);
-        const req = galPreLog && galPreLog.req();
+        const req = galPreLog && !pageTextHeld(href) && galPreLog.req();
         let refused = null;
         return fetchDoc(href, function (res) {
             refused = res;
@@ -15332,8 +15376,17 @@
             if (req) req.done(refused ? { status: refused.status, limited: busy, signal: 'hard', retryAfter: busy ? usLog.retryAfterOf(refused.headers) : null } : { status: doc ? 200 : 0 });
             if (doc) keepDocInfo(href, doc);
             const got = doc ? galPick(doc, href) : null;
+            dbg('gallery count from its page', { href: href, pictures: got ? got.length : null, why: refused ? 'status ' + refused.status : !doc ? 'no page' : got && got.length < GAL_HTML_ENOUGH ? 'too few, the frame decides' : null, shared: pageTextHits });
             if (got && got.length >= GAL_HTML_ENOUGH && !galLists.has(href)) { galLists.set(href, got); galChipsCount(href); }
         });
+    }
+
+    // The preload's read of one door: its page once (shared with the count), the frame only when that page holds too few.
+    async function galPreRead(href) {
+        if (!galLists.has(href) && !galCache.has(href)) await galCountLoad(href);
+        const list = galLists.get(href);
+        if (list) { if (!galCache.has(href)) galCache.set(href, Promise.resolve(list)); return list; }
+        return galLoad(href, galPreLog);
     }
 
     // Off-screen doors' counts, GAL_COUNT_PAR at a time, once every door on screen is read.
@@ -15353,10 +15406,9 @@
 
     // One more gallery, unless one is in flight, a frame is busy (a hover, or an open gallery read on), or a refusal stopped it.
     function galPreNext() {
-        if (!isTopFrame || !cfg.galleryPreload || galPreStop || galFrameStop || galGrowing || galWant || galCur ||
-            document.visibilityState === 'hidden' || !siteEnabled() || CAPTCHA_HERE) return;
-        galCountNext();
-        if (galPre) return;
+        if (!isTopFrame || !cfg.galleryPreload || galPreStop || document.visibilityState === 'hidden' || !siteEnabled() || CAPTCHA_HERE) return;
+        galCountNext();             // counts read only the page, never a frame: they never wait for one
+        if (galPre || galFrameStop || galGrowing || galWant || galCur) return;
         const href = galPrePick();
         if (!href) { if (!galCnt && galPreLog) { galPreLog.end('done'); galPreLog = null; } if (!galCnt) nextCheck(); return; }
         if (!galPreLog) {
@@ -15365,7 +15417,7 @@
         }
         galPre = href;
         galPreTried.add(href);
-        galLoad(href, galPreLog).then(function (list) {
+        galPreRead(href).then(function (list) {
             if (list === 'cancel') galPreTried.delete(href);
             return Array.isArray(list) ? galWarm(list).then(function () { return list; }) : null;
         }).then(function (list) {

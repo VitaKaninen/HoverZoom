@@ -356,6 +356,11 @@ logs `retrying` ×3 — an artefact of the stub, not of the manager. The pane wo
 
 ## Gallery fixtures — traps (2026-11-12)
 
+- `test-pages/door-long.html`: 150 doors to `gallery-a.html?long=N` (no script inside, so every frame ends
+  `no report` in 4.5 s), same structure as door-search (its learned rule applies). For pace tests: a hidden pane
+  fires no scroll events — send `WheelEvent('wheel')` on window, `scrollBy`, then `document.dispatchEvent(new
+  Event('scroll'))`. `read_console_messages` `pattern` is a plain substring (`a|b` matches nothing). Resource
+  timing stops at 250 entries, so count requests from the debug lines instead.
 - `test-pages/door-search.html`: doors d1-d7 (d6 → `door-big.html`, 240 static; d7 → `door-grow.html`,
   150 mounted 10 per scroll), leaves l1-l2. Seed a door rule in `hoverZoomSettings.doorAreas` to skip learning.
 - **Gallery pictures must be distinct files.** The slideshow's duplicate check compares bytes, so

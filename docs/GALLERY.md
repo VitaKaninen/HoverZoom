@@ -22,11 +22,24 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   end (`galGrown`, or sessionStorage `hzGalCounts` {href: [n, at]}, 3000, written by `galKeep` — the kept lists
   hold only 20, too few for a 99-gallery page), `N+` from the HTML only, nothing when unknown. `galChipsCount(href)`
   restyles after `galLoad`, `galMore` and `galGrow`'s end.
-- **The preload reads each on-screen door to its end** (user, v0.350.0: pornpics chips sat at `19+` until opened).
-  `galLoad` stops the frame once the HTML has `GAL_HTML_ENOUGH`, so the count stayed `N+`. `galPreNext` now calls
-  `galGrow(href)` after `galWarm` (frames allowed, nothing open, no grow busy); `galRender`'s end resumes the preload,
-  so it stays one frame at a time, and a hover's frame replaces it. Fixture `door-search.html`: all 6 chips final in
-  ~60 s (`10+`→`10`, door-grow `150`). Counted-only (off-screen) doors still show `N+` until they come on screen.
+- **The preload reads doors to their end, at the user's pace** (user, v0.350.0–v0.351.0: pornpics chips sat at `19+`
+  until opened; "fast → as far ahead as you can, slow → a page or 2 ahead"). `galPreRead`: the door's page via the
+  count's read (shared, see "One request per page"), `galLoad` only when it holds < `GAL_HTML_ENOUGH`; then `galGrow`
+  (one frame); `galRender`'s end resumes the preload, one frame at a time, and a hover's frame replaces it.
+  Order: on screen nearest the pointer, then below by position up to `galReach` (`galPaceNote`, set in `galScroll`
+  at scroll time — measured at pick time it had already decayed: the user's own scrolls (`galInputAt`) in the last
+  8 s, ≥ 4 screens → everything below, else max(2, 2 × screens) screens past the viewport; it never shrinks).
+  Doors above the viewport are not read. Counts (`galCountNext`, HTML only) run before the frame guards — v0.350.0
+  had them behind `galGrowing`, so in a browser whose frame never reports (10 s each) half the chips had no number.
+  The open gallery's own page ramp is `galAhead` — a name clash once replaced it silently (v0.351.0 dev).
+- **One request per page** (user, v0.351.0: "we are not asking each page for multiple things?" — we were: count,
+  preload, hover read-ahead and the resolver's linked-page read each fetched it, plus two frames). `pageText` keeps
+  each page's text (successes only, `PAGE_TEXT_KEEP` 120, misses asked again); `fetchDoc` and `fetchPageMedia`
+  parse from it; `onRefused` goes to the first asker only; `pageTextHeld` keeps a shared read out of us-log.
+  Fixture `door-long.html` (150 doors): one `fetch` per gallery page. Frames still load the page again (a frame
+  cannot be fed text).
+- **Debug lines** for counts: `gallery count from its page {pictures, why, shared}`, `gallery read to its end:
+  <why> {from, pictures, final, ms}`, `gallery preload: reading N screens ahead`.
 - **Counts for every door on the page** (user, v0.343.0: "why does it take several minutes"): the preload read only
   doors on screen, serially, each waiting for its thumbnails (`galWarm`). `galCountNext` now runs beside it:
   `galPrePick(true)` (anywhere, nearest the viewport's centre), `GAL_COUNT_PAR` 4 in flight, `galCountLoad` = the

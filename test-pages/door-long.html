@@ -1,0 +1,195 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Door areas, long</title>
+<!-- 150 doors over ~8 screens, same structure as door-search.html (its learned door rule applies): the preload reads doors below the viewport at the user's scroll pace. -->
+<style>
+  body { font: 14px system-ui, sans-serif; background: #1e1e2e; color: #cdd6f4; padding: 20px; }
+  .results, .finals { display: flex; flex-wrap: wrap; gap: 40px; margin-bottom: 40px; }
+  img { width: 160px; height: 120px; display: block; }
+</style>
+<div class="results">
+  <div class="result"><a id="d1" href="gallery-a.html?long=1"><img src="/test-images/mural.jpg?long1"></a></div>
+  <div class="result"><a id="d2" href="gallery-a.html?long=2"><img src="/test-images/mural.jpg?long2"></a></div>
+  <div class="result"><a id="d3" href="gallery-a.html?long=3"><img src="/test-images/mural.jpg?long3"></a></div>
+  <div class="result"><a id="d4" href="gallery-a.html?long=4"><img src="/test-images/mural.jpg?long4"></a></div>
+  <div class="result"><a id="d5" href="gallery-a.html?long=5"><img src="/test-images/mural.jpg?long5"></a></div>
+  <div class="result"><a id="d6" href="gallery-a.html?long=6"><img src="/test-images/mural.jpg?long6"></a></div>
+  <div class="result"><a id="d7" href="gallery-a.html?long=7"><img src="/test-images/mural.jpg?long7"></a></div>
+  <div class="result"><a id="d8" href="gallery-a.html?long=8"><img src="/test-images/mural.jpg?long8"></a></div>
+  <div class="result"><a id="d9" href="gallery-a.html?long=9"><img src="/test-images/mural.jpg?long9"></a></div>
+  <div class="result"><a id="d10" href="gallery-a.html?long=10"><img src="/test-images/mural.jpg?long10"></a></div>
+  <div class="result"><a id="d11" href="gallery-a.html?long=11"><img src="/test-images/mural.jpg?long11"></a></div>
+  <div class="result"><a id="d12" href="gallery-a.html?long=12"><img src="/test-images/mural.jpg?long12"></a></div>
+  <div class="result"><a id="d13" href="gallery-a.html?long=13"><img src="/test-images/mural.jpg?long13"></a></div>
+  <div class="result"><a id="d14" href="gallery-a.html?long=14"><img src="/test-images/mural.jpg?long14"></a></div>
+  <div class="result"><a id="d15" href="gallery-a.html?long=15"><img src="/test-images/mural.jpg?long15"></a></div>
+  <div class="result"><a id="d16" href="gallery-a.html?long=16"><img src="/test-images/mural.jpg?long16"></a></div>
+  <div class="result"><a id="d17" href="gallery-a.html?long=17"><img src="/test-images/mural.jpg?long17"></a></div>
+  <div class="result"><a id="d18" href="gallery-a.html?long=18"><img src="/test-images/mural.jpg?long18"></a></div>
+  <div class="result"><a id="d19" href="gallery-a.html?long=19"><img src="/test-images/mural.jpg?long19"></a></div>
+  <div class="result"><a id="d20" href="gallery-a.html?long=20"><img src="/test-images/mural.jpg?long20"></a></div>
+  <div class="result"><a id="d21" href="gallery-a.html?long=21"><img src="/test-images/mural.jpg?long21"></a></div>
+  <div class="result"><a id="d22" href="gallery-a.html?long=22"><img src="/test-images/mural.jpg?long22"></a></div>
+  <div class="result"><a id="d23" href="gallery-a.html?long=23"><img src="/test-images/mural.jpg?long23"></a></div>
+  <div class="result"><a id="d24" href="gallery-a.html?long=24"><img src="/test-images/mural.jpg?long24"></a></div>
+  <div class="result"><a id="d25" href="gallery-a.html?long=25"><img src="/test-images/mural.jpg?long25"></a></div>
+  <div class="result"><a id="d26" href="gallery-a.html?long=26"><img src="/test-images/mural.jpg?long26"></a></div>
+  <div class="result"><a id="d27" href="gallery-a.html?long=27"><img src="/test-images/mural.jpg?long27"></a></div>
+  <div class="result"><a id="d28" href="gallery-a.html?long=28"><img src="/test-images/mural.jpg?long28"></a></div>
+  <div class="result"><a id="d29" href="gallery-a.html?long=29"><img src="/test-images/mural.jpg?long29"></a></div>
+  <div class="result"><a id="d30" href="gallery-a.html?long=30"><img src="/test-images/mural.jpg?long30"></a></div>
+  <div class="result"><a id="d31" href="gallery-a.html?long=31"><img src="/test-images/mural.jpg?long31"></a></div>
+  <div class="result"><a id="d32" href="gallery-a.html?long=32"><img src="/test-images/mural.jpg?long32"></a></div>
+  <div class="result"><a id="d33" href="gallery-a.html?long=33"><img src="/test-images/mural.jpg?long33"></a></div>
+  <div class="result"><a id="d34" href="gallery-a.html?long=34"><img src="/test-images/mural.jpg?long34"></a></div>
+  <div class="result"><a id="d35" href="gallery-a.html?long=35"><img src="/test-images/mural.jpg?long35"></a></div>
+  <div class="result"><a id="d36" href="gallery-a.html?long=36"><img src="/test-images/mural.jpg?long36"></a></div>
+  <div class="result"><a id="d37" href="gallery-a.html?long=37"><img src="/test-images/mural.jpg?long37"></a></div>
+  <div class="result"><a id="d38" href="gallery-a.html?long=38"><img src="/test-images/mural.jpg?long38"></a></div>
+  <div class="result"><a id="d39" href="gallery-a.html?long=39"><img src="/test-images/mural.jpg?long39"></a></div>
+  <div class="result"><a id="d40" href="gallery-a.html?long=40"><img src="/test-images/mural.jpg?long40"></a></div>
+  <div class="result"><a id="d41" href="gallery-a.html?long=41"><img src="/test-images/mural.jpg?long41"></a></div>
+  <div class="result"><a id="d42" href="gallery-a.html?long=42"><img src="/test-images/mural.jpg?long42"></a></div>
+  <div class="result"><a id="d43" href="gallery-a.html?long=43"><img src="/test-images/mural.jpg?long43"></a></div>
+  <div class="result"><a id="d44" href="gallery-a.html?long=44"><img src="/test-images/mural.jpg?long44"></a></div>
+  <div class="result"><a id="d45" href="gallery-a.html?long=45"><img src="/test-images/mural.jpg?long45"></a></div>
+  <div class="result"><a id="d46" href="gallery-a.html?long=46"><img src="/test-images/mural.jpg?long46"></a></div>
+  <div class="result"><a id="d47" href="gallery-a.html?long=47"><img src="/test-images/mural.jpg?long47"></a></div>
+  <div class="result"><a id="d48" href="gallery-a.html?long=48"><img src="/test-images/mural.jpg?long48"></a></div>
+  <div class="result"><a id="d49" href="gallery-a.html?long=49"><img src="/test-images/mural.jpg?long49"></a></div>
+  <div class="result"><a id="d50" href="gallery-a.html?long=50"><img src="/test-images/mural.jpg?long50"></a></div>
+  <div class="result"><a id="d51" href="gallery-a.html?long=51"><img src="/test-images/mural.jpg?long51"></a></div>
+  <div class="result"><a id="d52" href="gallery-a.html?long=52"><img src="/test-images/mural.jpg?long52"></a></div>
+  <div class="result"><a id="d53" href="gallery-a.html?long=53"><img src="/test-images/mural.jpg?long53"></a></div>
+  <div class="result"><a id="d54" href="gallery-a.html?long=54"><img src="/test-images/mural.jpg?long54"></a></div>
+  <div class="result"><a id="d55" href="gallery-a.html?long=55"><img src="/test-images/mural.jpg?long55"></a></div>
+  <div class="result"><a id="d56" href="gallery-a.html?long=56"><img src="/test-images/mural.jpg?long56"></a></div>
+  <div class="result"><a id="d57" href="gallery-a.html?long=57"><img src="/test-images/mural.jpg?long57"></a></div>
+  <div class="result"><a id="d58" href="gallery-a.html?long=58"><img src="/test-images/mural.jpg?long58"></a></div>
+  <div class="result"><a id="d59" href="gallery-a.html?long=59"><img src="/test-images/mural.jpg?long59"></a></div>
+  <div class="result"><a id="d60" href="gallery-a.html?long=60"><img src="/test-images/mural.jpg?long60"></a></div>
+  <div class="result"><a id="d61" href="gallery-a.html?long=61"><img src="/test-images/mural.jpg?long61"></a></div>
+  <div class="result"><a id="d62" href="gallery-a.html?long=62"><img src="/test-images/mural.jpg?long62"></a></div>
+  <div class="result"><a id="d63" href="gallery-a.html?long=63"><img src="/test-images/mural.jpg?long63"></a></div>
+  <div class="result"><a id="d64" href="gallery-a.html?long=64"><img src="/test-images/mural.jpg?long64"></a></div>
+  <div class="result"><a id="d65" href="gallery-a.html?long=65"><img src="/test-images/mural.jpg?long65"></a></div>
+  <div class="result"><a id="d66" href="gallery-a.html?long=66"><img src="/test-images/mural.jpg?long66"></a></div>
+  <div class="result"><a id="d67" href="gallery-a.html?long=67"><img src="/test-images/mural.jpg?long67"></a></div>
+  <div class="result"><a id="d68" href="gallery-a.html?long=68"><img src="/test-images/mural.jpg?long68"></a></div>
+  <div class="result"><a id="d69" href="gallery-a.html?long=69"><img src="/test-images/mural.jpg?long69"></a></div>
+  <div class="result"><a id="d70" href="gallery-a.html?long=70"><img src="/test-images/mural.jpg?long70"></a></div>
+  <div class="result"><a id="d71" href="gallery-a.html?long=71"><img src="/test-images/mural.jpg?long71"></a></div>
+  <div class="result"><a id="d72" href="gallery-a.html?long=72"><img src="/test-images/mural.jpg?long72"></a></div>
+  <div class="result"><a id="d73" href="gallery-a.html?long=73"><img src="/test-images/mural.jpg?long73"></a></div>
+  <div class="result"><a id="d74" href="gallery-a.html?long=74"><img src="/test-images/mural.jpg?long74"></a></div>
+  <div class="result"><a id="d75" href="gallery-a.html?long=75"><img src="/test-images/mural.jpg?long75"></a></div>
+  <div class="result"><a id="d76" href="gallery-a.html?long=76"><img src="/test-images/mural.jpg?long76"></a></div>
+  <div class="result"><a id="d77" href="gallery-a.html?long=77"><img src="/test-images/mural.jpg?long77"></a></div>
+  <div class="result"><a id="d78" href="gallery-a.html?long=78"><img src="/test-images/mural.jpg?long78"></a></div>
+  <div class="result"><a id="d79" href="gallery-a.html?long=79"><img src="/test-images/mural.jpg?long79"></a></div>
+  <div class="result"><a id="d80" href="gallery-a.html?long=80"><img src="/test-images/mural.jpg?long80"></a></div>
+  <div class="result"><a id="d81" href="gallery-a.html?long=81"><img src="/test-images/mural.jpg?long81"></a></div>
+  <div class="result"><a id="d82" href="gallery-a.html?long=82"><img src="/test-images/mural.jpg?long82"></a></div>
+  <div class="result"><a id="d83" href="gallery-a.html?long=83"><img src="/test-images/mural.jpg?long83"></a></div>
+  <div class="result"><a id="d84" href="gallery-a.html?long=84"><img src="/test-images/mural.jpg?long84"></a></div>
+  <div class="result"><a id="d85" href="gallery-a.html?long=85"><img src="/test-images/mural.jpg?long85"></a></div>
+  <div class="result"><a id="d86" href="gallery-a.html?long=86"><img src="/test-images/mural.jpg?long86"></a></div>
+  <div class="result"><a id="d87" href="gallery-a.html?long=87"><img src="/test-images/mural.jpg?long87"></a></div>
+  <div class="result"><a id="d88" href="gallery-a.html?long=88"><img src="/test-images/mural.jpg?long88"></a></div>
+  <div class="result"><a id="d89" href="gallery-a.html?long=89"><img src="/test-images/mural.jpg?long89"></a></div>
+  <div class="result"><a id="d90" href="gallery-a.html?long=90"><img src="/test-images/mural.jpg?long90"></a></div>
+  <div class="result"><a id="d91" href="gallery-a.html?long=91"><img src="/test-images/mural.jpg?long91"></a></div>
+  <div class="result"><a id="d92" href="gallery-a.html?long=92"><img src="/test-images/mural.jpg?long92"></a></div>
+  <div class="result"><a id="d93" href="gallery-a.html?long=93"><img src="/test-images/mural.jpg?long93"></a></div>
+  <div class="result"><a id="d94" href="gallery-a.html?long=94"><img src="/test-images/mural.jpg?long94"></a></div>
+  <div class="result"><a id="d95" href="gallery-a.html?long=95"><img src="/test-images/mural.jpg?long95"></a></div>
+  <div class="result"><a id="d96" href="gallery-a.html?long=96"><img src="/test-images/mural.jpg?long96"></a></div>
+  <div class="result"><a id="d97" href="gallery-a.html?long=97"><img src="/test-images/mural.jpg?long97"></a></div>
+  <div class="result"><a id="d98" href="gallery-a.html?long=98"><img src="/test-images/mural.jpg?long98"></a></div>
+  <div class="result"><a id="d99" href="gallery-a.html?long=99"><img src="/test-images/mural.jpg?long99"></a></div>
+  <div class="result"><a id="d100" href="gallery-a.html?long=100"><img src="/test-images/mural.jpg?long100"></a></div>
+  <div class="result"><a id="d101" href="gallery-a.html?long=101"><img src="/test-images/mural.jpg?long101"></a></div>
+  <div class="result"><a id="d102" href="gallery-a.html?long=102"><img src="/test-images/mural.jpg?long102"></a></div>
+  <div class="result"><a id="d103" href="gallery-a.html?long=103"><img src="/test-images/mural.jpg?long103"></a></div>
+  <div class="result"><a id="d104" href="gallery-a.html?long=104"><img src="/test-images/mural.jpg?long104"></a></div>
+  <div class="result"><a id="d105" href="gallery-a.html?long=105"><img src="/test-images/mural.jpg?long105"></a></div>
+  <div class="result"><a id="d106" href="gallery-a.html?long=106"><img src="/test-images/mural.jpg?long106"></a></div>
+  <div class="result"><a id="d107" href="gallery-a.html?long=107"><img src="/test-images/mural.jpg?long107"></a></div>
+  <div class="result"><a id="d108" href="gallery-a.html?long=108"><img src="/test-images/mural.jpg?long108"></a></div>
+  <div class="result"><a id="d109" href="gallery-a.html?long=109"><img src="/test-images/mural.jpg?long109"></a></div>
+  <div class="result"><a id="d110" href="gallery-a.html?long=110"><img src="/test-images/mural.jpg?long110"></a></div>
+  <div class="result"><a id="d111" href="gallery-a.html?long=111"><img src="/test-images/mural.jpg?long111"></a></div>
+  <div class="result"><a id="d112" href="gallery-a.html?long=112"><img src="/test-images/mural.jpg?long112"></a></div>
+  <div class="result"><a id="d113" href="gallery-a.html?long=113"><img src="/test-images/mural.jpg?long113"></a></div>
+  <div class="result"><a id="d114" href="gallery-a.html?long=114"><img src="/test-images/mural.jpg?long114"></a></div>
+  <div class="result"><a id="d115" href="gallery-a.html?long=115"><img src="/test-images/mural.jpg?long115"></a></div>
+  <div class="result"><a id="d116" href="gallery-a.html?long=116"><img src="/test-images/mural.jpg?long116"></a></div>
+  <div class="result"><a id="d117" href="gallery-a.html?long=117"><img src="/test-images/mural.jpg?long117"></a></div>
+  <div class="result"><a id="d118" href="gallery-a.html?long=118"><img src="/test-images/mural.jpg?long118"></a></div>
+  <div class="result"><a id="d119" href="gallery-a.html?long=119"><img src="/test-images/mural.jpg?long119"></a></div>
+  <div class="result"><a id="d120" href="gallery-a.html?long=120"><img src="/test-images/mural.jpg?long120"></a></div>
+  <div class="result"><a id="d121" href="gallery-a.html?long=121"><img src="/test-images/mural.jpg?long121"></a></div>
+  <div class="result"><a id="d122" href="gallery-a.html?long=122"><img src="/test-images/mural.jpg?long122"></a></div>
+  <div class="result"><a id="d123" href="gallery-a.html?long=123"><img src="/test-images/mural.jpg?long123"></a></div>
+  <div class="result"><a id="d124" href="gallery-a.html?long=124"><img src="/test-images/mural.jpg?long124"></a></div>
+  <div class="result"><a id="d125" href="gallery-a.html?long=125"><img src="/test-images/mural.jpg?long125"></a></div>
+  <div class="result"><a id="d126" href="gallery-a.html?long=126"><img src="/test-images/mural.jpg?long126"></a></div>
+  <div class="result"><a id="d127" href="gallery-a.html?long=127"><img src="/test-images/mural.jpg?long127"></a></div>
+  <div class="result"><a id="d128" href="gallery-a.html?long=128"><img src="/test-images/mural.jpg?long128"></a></div>
+  <div class="result"><a id="d129" href="gallery-a.html?long=129"><img src="/test-images/mural.jpg?long129"></a></div>
+  <div class="result"><a id="d130" href="gallery-a.html?long=130"><img src="/test-images/mural.jpg?long130"></a></div>
+  <div class="result"><a id="d131" href="gallery-a.html?long=131"><img src="/test-images/mural.jpg?long131"></a></div>
+  <div class="result"><a id="d132" href="gallery-a.html?long=132"><img src="/test-images/mural.jpg?long132"></a></div>
+  <div class="result"><a id="d133" href="gallery-a.html?long=133"><img src="/test-images/mural.jpg?long133"></a></div>
+  <div class="result"><a id="d134" href="gallery-a.html?long=134"><img src="/test-images/mural.jpg?long134"></a></div>
+  <div class="result"><a id="d135" href="gallery-a.html?long=135"><img src="/test-images/mural.jpg?long135"></a></div>
+  <div class="result"><a id="d136" href="gallery-a.html?long=136"><img src="/test-images/mural.jpg?long136"></a></div>
+  <div class="result"><a id="d137" href="gallery-a.html?long=137"><img src="/test-images/mural.jpg?long137"></a></div>
+  <div class="result"><a id="d138" href="gallery-a.html?long=138"><img src="/test-images/mural.jpg?long138"></a></div>
+  <div class="result"><a id="d139" href="gallery-a.html?long=139"><img src="/test-images/mural.jpg?long139"></a></div>
+  <div class="result"><a id="d140" href="gallery-a.html?long=140"><img src="/test-images/mural.jpg?long140"></a></div>
+  <div class="result"><a id="d141" href="gallery-a.html?long=141"><img src="/test-images/mural.jpg?long141"></a></div>
+  <div class="result"><a id="d142" href="gallery-a.html?long=142"><img src="/test-images/mural.jpg?long142"></a></div>
+  <div class="result"><a id="d143" href="gallery-a.html?long=143"><img src="/test-images/mural.jpg?long143"></a></div>
+  <div class="result"><a id="d144" href="gallery-a.html?long=144"><img src="/test-images/mural.jpg?long144"></a></div>
+  <div class="result"><a id="d145" href="gallery-a.html?long=145"><img src="/test-images/mural.jpg?long145"></a></div>
+  <div class="result"><a id="d146" href="gallery-a.html?long=146"><img src="/test-images/mural.jpg?long146"></a></div>
+  <div class="result"><a id="d147" href="gallery-a.html?long=147"><img src="/test-images/mural.jpg?long147"></a></div>
+  <div class="result"><a id="d148" href="gallery-a.html?long=148"><img src="/test-images/mural.jpg?long148"></a></div>
+  <div class="result"><a id="d149" href="gallery-a.html?long=149"><img src="/test-images/mural.jpg?long149"></a></div>
+  <div class="result"><a id="d150" href="gallery-a.html?long=150"><img src="/test-images/mural.jpg?long150"></a></div>
+</div>
+<script>
+  if (!localStorage.getItem('hoverZoomSettings'))
+    localStorage.setItem('hoverZoomSettings', JSON.stringify({ debug: true }));
+  var GM_getValue = function (key, dflt) {
+    var v = localStorage.getItem(key);
+    return v === null ? dflt : v;
+  };
+  var GM_setValue = function (key, val) { localStorage.setItem(key, val); };
+  var GM_addValueChangeListener = function () {};
+  var GM_listValues = function () { return Object.keys(localStorage); };
+  var GM_deleteValue = function (key) { localStorage.removeItem(key); };
+  window.__saved = [];      // the download queue's saves, instead of files
+  window.__fail = null;     // a RegExp: saves whose URL matches it fail
+  var GM_download = function (d) { setTimeout(function () {
+    if (window.__fail && window.__fail.test(d.url)) { if (d.onerror) d.onerror({ error: 'not_succeeded' }); return; }
+    window.__saved.push(d.url); if (d.onload) d.onload(); }, 150); };
+  window.__xhr = [];        // GM_xmlhttpRequest calls: {url, range}; whole-file GETs are what a second download would be
+  var GM_xmlhttpRequest = function (o) {
+    var h = o.headers || {}, range = h.Range || h.range || '';
+    window.__xhr.push({ url: o.url, range: range });
+    fetch(o.url, { method: o.method || 'GET', headers: h }).then(function (r) {
+      var hs = ''; r.headers.forEach(function (v, k) { hs += k + ': ' + v + '\r\n'; });
+      var body = o.responseType === 'blob' ? r.blob() : o.responseType === 'arraybuffer' ? r.arrayBuffer() : r.text();
+      return body.then(function (b) {
+        if (o.onload) o.onload({ status: r.status, statusText: r.statusText, responseHeaders: hs, finalUrl: r.url,
+          response: b, responseText: typeof b === 'string' ? b : '' });
+      });
+    }, function (e) { if (o.onerror) o.onerror({ error: String(e) }); });
+    return { abort: function () {} };
+  };
+  var GM_registerMenuCommand = function () { return 'x'; };
+  var GM_unregisterMenuCommand = function () {};
+</script>
+<script src="../Hover-Zoom.user.js"></script>
