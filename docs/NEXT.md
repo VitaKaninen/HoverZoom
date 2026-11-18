@@ -28,6 +28,9 @@ gallery. Fixed v0.345.0. Live: page 6 (25) and page 7 (21+1 redone), ⤓ then Ba
 `Eporner/`, before the debug lines existed. v0.346.0 logs `download queue: title at press {…}` and `download queue:
 names {…}` (JSON) — if a misfile recurs, read those first. **Cleanup owed:** drop both lines once it has not recurred.
 (The freeze on page 4 was the "all saved already, save again?" `confirm()`; the user answered yes.)
+**Open lead:** Downloads held 11 eporner thumbnails (`NN_small.jpg`, 3–5 KB, 4 as `(1)` copies) saved 19:35, before
+this session — likely the previous session's synthetic middle presses (`E79`) saving the thumbnail, not the original.
+Not reproduced. Downloads was emptied (to the Recycle Bin) at the user's request, 2026-11-17.
 Names inside one folder are mixed (`saveRename` 'meaningless' renames per file) — by design, not changed.
 Still unverified from before: a real middle press in Chrome (`E79`, synthetic only); pornpics middle-click opening a
 tab (needs the user's `hover-zoom:gallery-state` trace); a site's own scroll closing an open gallery
