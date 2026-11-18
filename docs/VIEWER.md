@@ -1030,6 +1030,12 @@ v0.74.0:
   otherwise reach) and wrong here, where the frame IS the screen. The window came off the edge and
   stayed there — nothing puts it back until fullscreen ends, since `fitFull()` only re-centres on a
   viewport change. Arrow-key panning took the same route. Found v0.74.0.
+- **`commitSwap()` refits with `fitFull()` while `fullActive()`** instead of clearing
+  `fixedW/H`. Cleared, the frame shrank to the next picture after a step, the black beside it fell
+  outside `pointInPreview()`, and `galWheel`/`twWheel` read a wheel there as "off the window":
+  dismiss → `unplace()` → out of fullscreen. Only swaps that commit through `swapViewer` hit it
+  (preloaded steps, so it came and went). Fixed v0.367.0; reproduced and verified in the pane at
+  1400×700 with `decode` stubbed (a hidden pane never settles it).
 
 ### The scrollbar's reserved strip · `E42`
 
