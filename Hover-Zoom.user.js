@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.353.0
+// @version      0.354.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -14121,11 +14121,11 @@
         });
     }
 
-    // Above the widget, else above the gallery's strip, else the bottom-right corner; as wide as what it sits on.
+    // Above the gallery's strip while one is open, else the bottom-right corner (above the widget if it is there); as wide as what it sits on.
     function dlStripPlace() {
         if (!isTopFrame || !dlHost || dlHost.style.display === 'none') return;
         const W = vpW(), H = vpH();
-        let a = twShownRect() ? tw.box.getBoundingClientRect() : null;
+        let a = null;
         if (galOn && galStripDl && galSt) a = (galStripM.m === 'in' && galFly ? galFly.el : galSt.el).getBoundingClientRect();
         if (!a && galOn) {
             const el = galSt && !galSt.el.hidden ? (galStripM.m === 'in' && galFly ? galFly.el : galSt.el) : galFly && galFly.el;
@@ -14138,7 +14138,11 @@
         if (a && a.width) {
             left = Math.min(Math.max(4, a.left), W - w - 4);
             top = a.top - h - 4 >= 4 ? a.top - h - 4 : Math.min(H - h - 4, a.bottom + 4);
-        } else { left = W - w - 16; top = H - h - 16; }
+        } else {
+            left = W - w - 16; top = H - h - 16;
+            const t = twShownRect() ? tw.box.getBoundingClientRect() : null;     // the widget in that corner: just above it
+            if (t && t.width && t.left < left + w && t.right > left && t.top < top + h && t.bottom > top) top = t.top - h - 4;
+        }
         dlHost.style.left = Math.round(left) + 'px';
         dlHost.style.top = Math.round(Math.max(4, top)) + 'px';
     }

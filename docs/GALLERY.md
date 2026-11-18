@@ -426,8 +426,9 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
     Its CSS is `.strip .dl …` in the gallery sheet (the row's own sheet does not reach another shadow root). Only
     the failed list stays in `dlHost`, placed over the unit.
   - **Strip** (`dlStripPaint`/`dlStripPlace`, own host, in `ours()` and `galTopAt`; `dlStripEl` is the wrapper
-    holding the failed list and the strip): above the widget (`tw.box`, not `tw.rect`, which is the dock's
-    {x,y,w,h}), else above the gallery's strip/picture, else bottom-right. Text = this origin's first job with work
+    holding the failed list and the strip): above the gallery's strip/picture while one is open, else bottom-right
+    (user v0.354.0: it was anchored over the widget wherever that was docked, so it floated mid-screen after a
+    close); just above the widget (`tw.box`, not `tw.rect`) only when the widget is in that corner. Text = this origin's first job with work
     left, else its first with failures; One bar of the whole job.
     Shown only in tabs of a job's origin.
   - Fixtures: `test-pages/door-search.html` shims `GM_listValues`/`GM_download` (`window.__saved`; `window.__fail`
