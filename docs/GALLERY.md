@@ -357,11 +357,19 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
     in a tab of the gallery's own origin: `galLinkedHit` needs same-origin. `DLQ_LOCK_MS` 75 s, renewed before every
     download (`dlqMine`): a background tab's timers can run once a minute; with 8 s two tabs saved the same items.
     `pagehide` releases the lock. In-flight items (`1`) are redone by the next owner: a duplicate beats a lost picture.
-  - **⤓ only queues a gallery whose page was read to its end** (user v0.332.0: a page whose end we misjudge scrolls
-    forever, and a background read would queue forever): `galGrown` has the href. Until then it is greyed with the
-    count so far (`⤓ 123…`, `galDlShow` from `galMore`), and a press only says how many so far. Whole = the frame said
+  - **⤓ is ready as soon as any list is known** (user v0.353.0: "just read the page and give me the button, then
+    preload"; reverses v0.332.0's "only once read to its end"). v0.332.0's reason — a misjudged end scrolls forever, so
+    the queue never ends — is answered by the read's own cap (`GAL_GROW_MAX_MS`) bounding the job: a press while
+    the read runs queues the known list with `job.growing`; `galMore` → `dlqExtend` appends what the read finds
+    (`dlqStates` pads new items as `0`, so the working tab's state string is untouched); the worker's end does not
+    close a job that grew or is `dlqGrowing` (stateless: `growing` and younger than the cap + slack, so a tab that
+    left cannot strand it); `galGrow`'s end → `dlqGrowEnd` clears `growing`, notes an early stop, and closes a job
+    that finished meanwhile. Button: `⤓ n / N+` while growing. A press on a list never read on starts `galGrow`.
+    Fixture `door-search` d7 (`door-grow`, 150 mounted on scroll), preload off: ⤓ ready in 1.8 s, job 100 → 150+ →
+    150, 150 unique saves, job closed.
+  - Whole (`galGrown`) still decides the chip's `N` vs `N+`. Whole = the frame said
     `grown`/`reported`, or the frame gave nothing — refused, never loaded, or loaded without our script reporting (`no report …`; the user's browser, v0.338.0: eporner's frame never fired `load`) — so HTML is all there is: `galGrowWhy` `html`, a note on the job. Any other
-    stop (`timed out` at `GAL_GROW_MAX_MS`, `froze`, `cancelled`) leaves it unavailable and says why; reopening
+    stop (`timed out` at `GAL_GROW_MAX_MS`, `froze`, `cancelled`) leaves it not whole: ⤓ still queues, with a note; reopening
     reads again. Presses answer with `flash()` over the button (own popover, fades at 3 s, survives mouseleave —
     the tip box does not). Queueing drops this href's finished job: its failures are in the new one.
   - **✕ and a second ⤓ ask** (`dlqAsk`, `confirm`). A finished job with failures is kept (strip "Saved n / N",

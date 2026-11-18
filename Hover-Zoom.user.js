@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.352.0
+// @version      0.353.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -13227,6 +13227,7 @@
             if (html) galGrowWhy.set(href, 'html');
             else if (!galGrown.has(href)) galGrowWhy.set(href, why);
             galTrace(href, 'reading on: ' + why);
+            dlqGrowEnd(href, why, galGrown.has(href));
             dbg('gallery read to its end: ' + why, { href: href, from: from, pictures: (galLists.get(href) || []).length, final: galGrown.has(href), ms: Math.round(performance.now() - t0), open: !!galCur && galCur.href === href });
             if (galCur && galCur.href === href) galPageNote(galCur);
             galChipsCount(href);
@@ -13249,6 +13250,7 @@
         galTrace(href, 'reading on: +' + add.length + ' (' + base.length + ' known)');
         if (galCur && galCur.href === href) { galFeed(galCur); galPageNote(galCur); }
         galChipsCount(href);
+        dlqExtend(href, add);
         galDlShow();
     }
 
@@ -13486,10 +13488,10 @@
         if (!b || !b.isConnected) return;
         jobs = jobs || dlqJobs();
         const job = jobs.find(function (j) { return j.href === g.href && dlqLeft(dlqStates(j)) > 0; });
-        const wait = !job && !galGrown.has(g.href);
+        const wait = !job && !(galLists.get(g.href) || []).length;
         if (job) {
             const st = dlqStates(job);
-            b.textContent = '⤓ ' + (st.length - dlqLeft(st)) + ' / ' + st.length;
+            b.textContent = '⤓ ' + (st.length - dlqLeft(st)) + ' / ' + st.length + (dlqGrowing(job) ? '+' : '');
         } else b.textContent = wait ? '⤓ ' + (galLists.get(g.href) || []).length + '…' : '⤓';
         b.style.opacity = wait ? '0.45' : '';
         b.style.cursor = wait ? 'not-allowed' : '';
@@ -13535,12 +13537,10 @@
         const jobs = dlqJobs();
         const mine = jobs.find(function (j) { return j.href === href && dlqLeft(dlqStates(j)) > 0; });
         if (mine) { if (dlqAsk(mine)) { dlqCancel(mine.id); say('Download of this gallery stopped'); } return; }
-        const list = galLists.get(href) || [], why = galGrowWhy.get(href);
-        if (!galGrown.has(href)) {
-            say(why ? 'Found ' + list.length + ' pictures, but reading the page stopped before its end (' + why + '), so the full count is not known. Close and reopen the gallery to read it again.'
-                : 'Found ' + list.length + ' pictures so far. ⤓ works once the whole page has been read and the full count is known.');
-            return;
-        }
+        const list = galLists.get(href) || [];
+        if (!list.length) { say('No pictures found in this gallery yet'); return; }
+        if (!galGrown.has(href)) galGrow(href);       // no-op while it reads; where frames are refused it ends at once
+        const why = galGrowWhy.get(href), growing = galGrowing === href && !galGrown.has(href);
         let origin = '';
         try { origin = new URL(href).origin; } catch (e) { return; }
         let again = false;
@@ -13554,11 +13554,12 @@
         const info = pageInfos.get(href.split('#')[0]) || {};
         dbg('download queue: title at press ' + JSON.stringify({ href: href, info: info, n: pageInfos.size }));
         const job = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), href: href, origin: origin,
-            made: Date.now(), items: list.slice(), read: 'queued', again: again, title: info.title || '', site: info.site || '',
-            note: why === 'html' ? 'read from the page\'s HTML; pictures it adds as it scrolls may be missing' : '' };
+            made: Date.now(), items: list.slice(), read: 'queued', again: again, title: info.title || '', site: info.site || '', growing: growing,
+            note: why === 'html' ? 'read from the page\'s HTML; pictures it adds as it scrolls may be missing'
+                : !growing && !galGrown.has(href) && why ? 'reading the page stopped before its end (' + why + '); later pictures may be missing' : '' };
         const n = dlqQueued(job);
         if (n) heldQueue(job);
-        say(n ? 'Added ' + n + ' to the queue' + (job.skipped ? ' · ' + job.skipped + ' saved already' : '') + (job.note ? ' · ' + job.note : '')
+        say(n ? 'Added ' + n + ' to the queue' + (growing ? ', more as the page is read' : '') + (job.skipped ? ' · ' + job.skipped + ' saved already' : '') + (job.note ? ' · ' + job.note : '')
             : list.length ? 'Every picture of this gallery is saved already' : 'No pictures found in this gallery');
         dlqTick();
     }
@@ -13593,6 +13594,40 @@
             });
         } catch (e) { return []; }
         return out.sort(function (a, b) { return a.made - b.made; });
+    }
+
+    // A job still taking pictures: until its read ends, or the read's own cap has passed (a tab that left never says).
+    function dlqGrowing(job) { return !!job.growing && Date.now() - job.made < GAL_GROW_MAX_MS + GAL_REPORT_MS + 30000; }
+    // Pictures the read to the end found after ⤓ was pressed join that gallery's job.
+    function dlqExtend(href, add) {
+        const saved = galList(GAL_SAVED_KEY);
+        let grew = false;
+        dlqJobs().forEach(function (j) {
+            if (j.href !== href || !dlqGrowing(j)) return;
+            const have = new Set(j.items.map(function (it) { return it.thumb; }));
+            const more = add.filter(function (it) { return !have.has(it.thumb) && (j.again || !saved.has(it.thumb)); });
+            if (!more.length) return;
+            j.items = j.items.concat(more);
+            dlqPut(j);
+            dbg('download queue: the read found more for a queued gallery', { href: href, added: more.length, pictures: j.items.length });
+            grew = true;
+        });
+        if (grew) dlqTick();
+    }
+    // The read ended: the job stops growing, and one that finished meanwhile is closed here.
+    function dlqGrowEnd(href, why, whole) {
+        dlqJobs().forEach(function (j) {
+            if (j.href !== href || !j.growing) return;
+            j.growing = false;
+            if (!whole) j.note = 'reading the page stopped before its end (' + why + '); later pictures may be missing';
+            dlqPut(j);
+            const st = dlqStates(j);
+            if (dlqLeft(st)) return;
+            const failed = dlqFailed(st).length;
+            if (!failed) dlqDrop(j.id);
+            toast('Saved ' + (st.match(/2/g) || []).length + ' of ' + st.length + (failed ? ', ' + failed + ' failed: the download strip lists them' : '') + (j.note ? ' · ' + j.note : ''), 5000);
+        });
+        dlqTick();
     }
 
     function dlqAlive(id) { try { return !!GM_getValue(DLQ_JOB + id, ''); } catch (e) { return false; } }
@@ -13833,6 +13868,8 @@
             if (tok.cancelled) return;
             if (run.dl === d) run.dl = null;
             if (st.indexOf('0') >= 0) { dlqTick(); return; }      // retries asked for as it finished
+            const now = dlqJobs().find(function (j) { return j.id === job.id; });
+            if (now && (now.items.length > st.length || dlqGrowing(now))) { dlqTick(); return; }     // more found, or still reading: dlqGrowEnd closes it
             const saved = (st.match(/2/g) || []).length, failed = dlqFailed(st).length;
             if (!failed) dlqDrop(job.id);
             galMarkAll();
