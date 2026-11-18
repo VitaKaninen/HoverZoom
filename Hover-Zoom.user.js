@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.341.0
+// @version      0.342.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -1549,19 +1549,20 @@
 
     // blob: where the policy allows it, data: otherwise — every blocked engine measured takes one.
     async function probeBytes(url, hold) {
-        const blob = await fetchBlob(url);
+        const disk = hold ? await heldGet(url) : null;
+        const blob = disk || await fetchBlob(url);
         if (!blob) return null;
         bytesMime.set(url, blob.type || '');
         if (!blobRefused) {
             const objUrl = URL.createObjectURL(blob);
             const dim = await measureSrc(objUrl);
-            if (dim) { if (hold) holdBlob(url, blob, objUrl); else keepBlob(url, objUrl); return { w: dim.w, h: dim.h, display: objUrl }; }
+            if (dim) { if (hold) holdBlob(url, blob, objUrl, !!disk); else keepBlob(url, objUrl); return { w: dim.w, h: dim.h, display: objUrl }; }
             URL.revokeObjectURL(objUrl);
         }
         const data = await blobToDataUrl(blob);
         if (!data) return null;
         const dim = await measureSrc(data);
-        if (dim && hold) holdBlob(url, blob, null);
+        if (dim && hold) holdBlob(url, blob, null, !!disk);
         return dim ? { w: dim.w, h: dim.h, display: data } : null;
     }
 
@@ -1573,10 +1574,11 @@
     }
 
     // A gallery original's bytes kept until HELD_MAX is passed; a dropped one is fetched again when next asked for.
-    function holdBlob(url, blob, objUrl) {
+    function holdBlob(url, blob, objUrl, onDisk) {
         if (heldBlobs.has(url)) return;
         heldBlobs.set(url, { blob: blob, objUrl: objUrl });
         heldBytes += blob.size;
+        if (!onDisk) heldPut(url, blob);
         for (const [u, h] of heldBlobs) {
             if (heldBytes <= HELD_MAX || heldBlobs.size <= 1) break;
             heldBlobs.delete(u);
@@ -1590,7 +1592,66 @@
     // A gallery's pictures are fetched as bytes from here on: its thumbnails' hosts and its candidates'.
     function galBytesHosts(item) {
         if (!item || typeof GM_xmlhttpRequest !== 'function') return;
-        [item.thumb].concat(item.cands || []).forEach(function (u) { const h = u && hostOf(u); if (h) bytesHosts.add(h); });
+        [item.thumb, item.hit && item.hit.url].concat(item.cands || []).forEach(function (u) { const h = u && hostOf(u); if (h) bytesHosts.add(h); });
+    }
+
+    // ---- a queued gallery's kept bytes on disk (the site's IndexedDB), so the page that carries the queue on saves them unfetched
+    const HELD_DB = 'hz-held-originals';
+    const HELD_FLAG = 'hzHeldDisk:';    // + origin: this site's store may hold bytes, cleared once its queue is gone
+    let heldDbP = null;
+    let heldDisk = false;               // this site has a download queue: kept bytes go to disk too
+
+    function heldDb() {
+        if (heldDbP) return heldDbP;
+        heldDbP = new Promise(function (res) {
+            try {
+                const rq = indexedDB.open(HELD_DB, 1);
+                rq.onupgradeneeded = function () { rq.result.createObjectStore('b'); };
+                rq.onsuccess = function () { res(rq.result); };
+                rq.onerror = rq.onblocked = function () { dbg('kept originals on disk: no store', String(rq.error)); res(null); };
+            } catch (e) { dbg('kept originals on disk: no store', String(e)); res(null); }
+        });
+        return heldDbP;
+    }
+
+    // One request on the store: its result, or null on any failure.
+    async function heldDo(mode, fn) {
+        const db = await heldDb();
+        if (!db) return null;
+        return new Promise(function (res) {
+            try {
+                const tx = db.transaction('b', mode), rq = fn(tx.objectStore('b'));
+                tx.oncomplete = function () { res(rq.result === undefined ? true : rq.result); };
+                tx.onerror = tx.onabort = function () { dbg('kept originals on disk: ' + mode + ' failed', String(tx.error)); res(null); };
+            } catch (e) { dbg('kept originals on disk: ' + mode + ' threw', String(e)); res(null); }
+        });
+    }
+    function heldPut(url, blob) { if (heldDisk) heldDo('readwrite', function (s) { return s.put({ blob: blob, at: Date.now() }, url); }); }
+    async function heldGet(url) {
+        if (!heldDisk) return null;
+        const v = await heldDo('readonly', function (s) { return s.get(url); });
+        return v && v.blob instanceof Blob ? v.blob : null;
+    }
+    function heldDel(url) { if (heldDisk) heldDo('readwrite', function (s) { return s.delete(url); }); }
+
+    // Each queue tick: on while this site has a queue; off, the store is emptied once.
+    function heldDiskSync(on) {
+        heldDisk = on;
+        let was = 0;
+        try { was = GM_getValue(HELD_FLAG + location.origin, 0); } catch (e) { return; }
+        if (on && !was) { try { GM_setValue(HELD_FLAG + location.origin, Date.now()); } catch (e) { /* storage unavailable */ } }
+        if (!on && was) {
+            try { GM_deleteValue(HELD_FLAG + location.origin); } catch (e) { /* storage unavailable */ }
+            heldDo('readwrite', function (s) { return s.clear(); }).then(function (r) { dbg('kept originals on disk: cleared', { ok: !!r }); });
+        }
+    }
+
+    // A gallery just queued: the bytes already kept for its pictures go to disk.
+    function heldQueue(job) {
+        heldDiskSync(true);
+        let n = 0;
+        job.items.forEach(function (it) { const u = it && it.hit && it.hit.url, h = u && heldBlobs.get(u); if (h) { heldPut(u, h.blob); n++; } });
+        dbg('kept originals on disk: ' + n + ' of ' + job.items.length + ' from memory');
     }
 
     // ---- how long to wait, and telling a dead host from a slow one. See TOUR.md §7.
@@ -5200,7 +5261,8 @@
     // Saving: converted when the setting covers the file's real format, else exactly as served.
     async function saveOriginal(url, quiet, done, page, fail) {
         if (quiet) saveFolderAsk();
-        const held = heldBlobs.get(url);
+        let held = heldBlobs.get(url);
+        if (!held && quiet && !/^(data|blob):/.test(url)) { const b = await heldGet(url); if (b) { held = { blob: b }; dbg('saving kept bytes from disk', url); } }
         const asServed = function () { if (held) saveHeld(held.blob, url, quiet, done, page, fail); else saveAsServed(url, quiet, done, page, fail); };
         if (cfg.saveConvert === 'off' || (!held && typeof GM_xmlhttpRequest !== 'function') || /^(data|blob):/.test(url)) { asServed(); return; }
         if (!fail) toast('Saving…', 60000);
@@ -11901,6 +11963,7 @@
         if (kept) {
             galTrace(href, 'load: kept from an earlier visit in this tab (' + kept.length + ' pictures)');
             galLists.set(href, kept);
+            galChipsCount(href);
             const pk = Promise.resolve(kept);
             galCache.set(href, pk);
             return pk;
@@ -11945,6 +12008,7 @@
             if (Array.isArray(v)) {
                 galLists.set(href, v);
                 if (galLists.size > GAL_CACHE) galLists.delete(galLists.keys().next().value);
+                galChipsCount(href);
             }
             return v;
         });
@@ -12961,15 +13025,19 @@
         });
     }
 
+    let galKeptMemo = null;
     function galKeptAll() {
-        try { return JSON.parse(sessionStorage.getItem(GAL_KEPT_KEY) || '{}') || {}; } catch (e) { return {}; }
+        if (galKeptMemo) return galKeptMemo;
+        try { galKeptMemo = JSON.parse(sessionStorage.getItem(GAL_KEPT_KEY) || '{}') || {}; } catch (e) { galKeptMemo = {}; }
+        return galKeptMemo;
     }
 
     // A gallery read to its end: its list kept in this tab, so coming back to it needs no second read.
     function galKeep(href, html) {
         const list = galLists.get(href);
         if (!list || !list.length) return;
-        const all = galKeptAll(), now = Date.now();
+        const all = Object.assign({}, galKeptAll()), now = Date.now();
+        galKeptMemo = null;
         all[href] = { items: list.map(function (it) { const x = Object.assign({}, it); delete x.hqTried; if (x.hit) x.hit = { url: x.hit.url, w: x.hit.w, h: x.hit.h, video: !!x.hit.video }; return x; }), html: !!html, at: now };
         const keys = Object.keys(all).filter(function (k) { return now - all[k].at < GAL_KEPT_MS; }).sort(function (a, b) { return all[a].at - all[b].at; });
         const out = {};
@@ -13004,6 +13072,7 @@
             else if (!galGrown.has(href)) galGrowWhy.set(href, why);
             galTrace(href, 'reading on: ' + why);
             if (galCur && galCur.href === href) galPageNote(galCur);
+            galChipsCount(href);
             galDlShow();
         }).then(function (v) { if (Array.isArray(v)) galMore(href, v); });
     }
@@ -13022,6 +13091,7 @@
         add.forEach(function (it) { base.push(it); });
         galTrace(href, 'reading on: +' + add.length + ' (' + base.length + ' known)');
         if (galCur && galCur.href === href) { galFeed(galCur); galPageNote(galCur); }
+        galChipsCount(href);
         galDlShow();
     }
 
@@ -13326,6 +13396,7 @@
             made: Date.now(), items: list.slice(), read: 'queued', again: again,
             note: why === 'html' ? 'read from the page\'s HTML; pictures it adds as it scrolls may be missing' : '' };
         const n = dlqQueued(job);
+        if (n) heldQueue(job);
         say(n ? 'Added ' + n + ' to the queue' + (job.skipped ? ' · ' + job.skipped + ' saved already' : '') + (job.note ? ' · ' + job.note : '')
             : list.length ? 'Every picture of this gallery is saved already' : 'No pictures found in this gallery');
         dlqTick();
@@ -13500,6 +13571,7 @@
         const here = jobs.filter(function (j) { return j.origin === location.origin; });
         dlqOrphans(jobs);
         dlqPresence(here.length > 0);
+        heldDiskSync(here.some(function (j) { return dlqLeft(dlqStates(j)) > 0; }));
         dlStripPaint(jobs);
         galDlShow(jobs);
         if (!here.length) { dlqHalt(); return; }
@@ -13581,7 +13653,7 @@
                 } catch (e) { ok = false; why = 'threw: ' + e; dbg('download all: a picture threw', String(e)); }
                 if (q) q.done({ status: ok ? 200 : 0 });
                 if (tok.cancelled) return;
-                if (ok) galSavedItem(job.href, item);
+                if (ok) { galSavedItem(job.href, item); heldDel(hit.url); }
                 mark(i, ok ? '2' : '3', why, hit && hit.url);
             }
         };
@@ -14471,14 +14543,17 @@
     // Closed: the ▦ chip; open: a yellow ✕. Left out of the pill when chips show only under the pointer and this one is not.
     function galChipStyle(m) {
         const open = galChipOpen(m.__hzHref), shown = open || cfg.galleryChips || galChipHot === m.__hzImg;
-        if (m.__hzOpen !== open || !m.firstChild) {
+        const n = open ? '' : galCountText(m.__hzHref);
+        if (m.__hzOpen !== open || m.__hzN !== n || !m.firstChild) {
             m.__hzOpen = open;
+            m.__hzN = n;
             while (m.firstChild) m.firstChild.remove();
             const svg = mkIcon(open ? ICON_CLOSE : ICON_GALLERY);
             m.appendChild(svg);
-            setTip(m, open ? 'Close this gallery' : 'Show this gallery’s pictures');
+            if (n) { const b = document.createElement('b'); b.textContent = n; m.appendChild(b); }
+            setTip(m, open ? 'Close this gallery' : 'Show this gallery’s pictures' + (n ? ' (' + (n.slice(-1) === '+' ? 'at least ' + n.slice(0, -1) : n) + ')' : ''));
         }
-        m.className = open ? 'open' : shown ? '' : 'off';
+        m.className = (open ? 'open' : shown ? '' : 'off') + (n ? ' n' : '');
     }
 
     function galChipRefresh(img) {
@@ -14488,6 +14563,20 @@
 
     function galChipsSync() {
         galPillMarks(GAL_DOOR_MARK).forEach(function (m) { galChipStyle(m); if (m.__hzImg) galMarkPlace(m.__hzImg); });
+    }
+
+    // A door's picture count for its chip: '' unknown, 'N+' read from its HTML only, 'N' read to its end.
+    function galCountText(href) {
+        if (!href) return '';
+        const list = galLists.get(href);
+        let n = list ? list.length : 0;
+        if (!n) { const k = galKeptAll()[href]; if (k && Array.isArray(k.items) && Date.now() - k.at <= GAL_KEPT_MS) return String(k.items.length); }
+        return n ? n + (galGrown.has(href) ? '' : '+') : '';
+    }
+
+    // The chips of one door, after its count changed.
+    function galChipsCount(href) {
+        galPillMarks(GAL_DOOR_MARK).forEach(function (m) { if (m.__hzHref === href) { galChipStyle(m); if (m.__hzImg) galMarkPlace(m.__hzImg); } });
     }
 
     // A press on the chip opens its door's gallery, or closes it when open; the page never sees it.
@@ -14792,6 +14881,8 @@
         '[data-hz-door]{order:1;display:flex;align-items:center;justify-content:center;width:20px;height:20px}' +
         '[data-hz-door].off{display:none}[data-hz-door] svg{width:13px;height:13px;fill:#89b4fa}' +
         '[data-hz-door].open svg{width:15px;height:15px;fill:#f9e2af}' +
+        '[data-hz-door].n{width:auto;min-width:20px;gap:3px;padding:0 2px;box-sizing:border-box}' +
+        '[data-hz-door] b{font:600 11px/1 system-ui,sans-serif;color:#cdd6f4;font-variant-numeric:tabular-nums}' +
         '[data-hz-seen]{order:2;width:20px;height:20px}[data-hz-seen="2"]{width:28px}[data-hz-saved]{order:3;width:18px;height:18px}';
 
     // Every mark of one kind on the page, inside the pills.

@@ -18,6 +18,10 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   (`galGrown`) is written to sessionStorage `hzGalLists` (`galKeep`; again when its originals are found, with each
   item's `hit` minus `display`); `galLoad` takes it (`galKept`, 1 h, 20 galleries) before any fetch, and marks the
   href grown, so ⤓ is ready at once and no frame reads it again.
+- **The chip shows the count** (user, v0.342.0): `galCountText` — `N` when read to its end (`galGrown` or a kept
+  list), `N+` from the HTML only (the frame may add more), nothing when unknown. Known from the preload or the hover's
+  `galLoad`; no fetch of its own. `galChipsCount(href)` restyles after `galLoad`, `galMore` and `galGrow`'s end.
+  `galKeptAll` is memoised (`galKeptMemo`, reset by `galKeep`), as every chip asks it.
 - **Peek**: a left press on a door's chip (`galChipClickable`, capture on the chip) peeks, or closes
   the open one; where `siteEnabled()`, a plain middle press on `doorAt()` does too, but only with `cfg.galleryMiddle` (default off, user
   2026-11-12). Both set
@@ -354,6 +358,16 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
     `<img>` loads goes in `bytesNoHosts` for the page. Measured why not the HTTP cache: a page `fetch` after an `<img>`
     load of the same file went to the network (Chrome, eporner), and an `<img>` in between broke even fetch→fetch reuse.
     `galFlyUpgrade` and `plKeepImage` use `display` too, or they load the file a second time.
+  - **A queued gallery's bytes go to disk** (user, v0.342.0: "they don't need to download them twice"; memory dies
+    with the page): the site's IndexedDB `hz-held-originals`, store `b`, key = original URL. On while this origin has
+    a job with work left (`heldDiskSync`, each `dlqTick`; GM flag `hzHeldDisk:<origin>` so a site that never queued
+    never opens a DB); ⤓ copies the job's held blobs in (`heldQueue`, matched by `item.hit.url`), and `holdBlob`
+    writes each new one. `probeBytes(url, hold)` and `saveOriginal(quiet)` read disk before fetching; a saved picture
+    is deleted, and the store is cleared once no job here has work left. `galBytesHosts` includes `item.hit.url`'s
+    host, or the remembered hit is probed by `<img>` and the disk copy never asked. Site scripts can read the DB (same
+    origin); it only ever holds that site's own pictures. Measured on `door-search.html` (GM_xhr stand-in counts
+    requests): 40 originals fetched once; ⤓ saved 6 from memory, reload mid-queue, 28 saved from disk, 0 fetches.
+    Not avoidable: a `bytesNoHosts` host (picture via `<img>`, bytes unreadable) is fetched again by the save.
   - **A worker never dies on a throw** (v0.341.0): its body is in try/catch, and `saveOriginal`'s promise is caught.
     A throw left the picture at `1` and the run looking alive, so the queue never restarted.
   - **`pagehide` halts this page's run** (`dlqHalt`, v0.341.0): a save in flight never calls back after a bfcache

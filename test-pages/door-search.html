@@ -41,6 +41,20 @@
   var GM_download = function (d) { setTimeout(function () {
     if (window.__fail && window.__fail.test(d.url)) { if (d.onerror) d.onerror({ error: 'not_succeeded' }); return; }
     window.__saved.push(d.url); if (d.onload) d.onload(); }, 150); };
+  window.__xhr = [];        // GM_xmlhttpRequest calls: {url, range}; whole-file GETs are what a second download would be
+  var GM_xmlhttpRequest = function (o) {
+    var h = o.headers || {}, range = h.Range || h.range || '';
+    window.__xhr.push({ url: o.url, range: range });
+    fetch(o.url, { method: o.method || 'GET', headers: h }).then(function (r) {
+      var hs = ''; r.headers.forEach(function (v, k) { hs += k + ': ' + v + '\r\n'; });
+      var body = o.responseType === 'blob' ? r.blob() : o.responseType === 'arraybuffer' ? r.arrayBuffer() : r.text();
+      return body.then(function (b) {
+        if (o.onload) o.onload({ status: r.status, statusText: r.statusText, responseHeaders: hs, finalUrl: r.url,
+          response: b, responseText: typeof b === 'string' ? b : '' });
+      });
+    }, function (e) { if (o.onerror) o.onerror({ error: String(e) }); });
+    return { abort: function () {} };
+  };
   var GM_registerMenuCommand = function () { return 'x'; };
   var GM_unregisterMenuCommand = function () {};
 </script>
