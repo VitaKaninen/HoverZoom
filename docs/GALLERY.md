@@ -589,13 +589,14 @@ right-click menu and the panel). Code: `galEndless` … `galInfoShow`, after `ga
   appends doors not in the queue, at the queue's end; `galChainWiden` (menu "include viewed" turned on) only adds;
   turning it off removes nothing. Every gallery the queue opens is marked seen at once (`galPeek`).
 - **Moving**: `galChainGo(dir, pic)` from `galPageStep` (past the last page: after `galTourMore` brings nothing, or
-  whole; before page 1), `tourWall` (before the seam) and `tourNav` (◀ at the first picture). It opens through
+  whole; before page 1), and the slideshow's three ends — `tourWall`, `tourNav` (◀ at the first picture),
+  `tourSeam` — all through `galSeam` (below). It opens through
   `galMiddle` — the same read as a middle press, so the corner picture switches to that door's card. `land` = where
   to arrive: `page` (0, or 1e9 = last) and the slideshow's `pic` ('first' / 'last' / 'page' = that page's first).
   `c.land` set = a switch under way: every further press is swallowed (else a second press skips a gallery).
   `galChainLanded` (end of `galBuild`): `set.want` = the page wanted; `galLayout` lays out at `want` until reached or
   `galWhole` (backward needs every thumbnail fed: `far` raised), a user's flip clears it. A slideshow waits ≤ 6 s for
-  that, then `tour.gal` = the new set and `tourGo`; seamNote "Gallery n of N". Until then `tourEntries` is [] for
+  that, then `tour.gal` = the new set and `tourGo`. Until then `tourEntries` is [] for
   the old set, so `land` must stay set through the wait.
 - A queued door gone from the page is passed over; a queued gallery that fails (`galShow`: cancel / no pictures)
   → `galChainSkip`, the next one that way, else closes as before.
@@ -608,9 +609,12 @@ right-click menu and the panel). Code: `galEndless` … `galInfoShow`, after `ga
 - **Closing** (`galHide`) after the queue moved on scrolls the current card into view (`behavior: 'instant'` — a
   smooth scroll would still be moving when `galFlyBack` measures) so the picture flies back to it.
 - ⤓ stays per gallery (user): each switch builds a new corner picture with its own `galToolsBuild(href)`.
-- **No seam in endless** (user, v0.360.0): `tourSeam` with `galEndless()` goes on through `galChainGo` — no "Last
-  picture" hold or note, no wrap; at the queue's last picture it stops dead, and the strip's ▶ (◀ at its first) is
-  faint (`picOn`/`picBack`). No note on a switch either (a "Gallery n of N" one was dropped: it read as the endstop).
+- **The seam in endless** (`galSeam`; user, v0.362.0 put it back after v0.360.0 took it out): a user step past a
+  gallery's end holds once (`seamDir`/`SEAM_HOLD_MS`, note "Last/First picture of this gallery"); the next crosses.
+  `galleryEndlessStop` (default on, menu + panel) off = crosses at once. The slideshow playing by itself
+  (`user` false) never holds. Endless never wraps: at the queue's ends it stops for good, note "… of the last/first
+  gallery" (none with the stop off), and the strip's ▶ (◀) is faint (`picOn`/`picBack`). No note on a switch (a
+  "Gallery n of N" one was dropped: it read as the endstop).
 - **Fullscreen** (user, v0.360.0: the corner picture was blown up): `galCornerRect` → `galFullRect` — bottom-right
   (`galAnchorDefault`, never the remembered place), as wide as `galFullW()` (the strip's widest line with every `n/N`
   measured as `N/N+`, digits as 8, canvas `measureText`, + ◀ ▶, gaps, padding, border), the picture as tall as that

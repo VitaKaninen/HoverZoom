@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.361.0
+// @version      0.362.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -253,6 +253,7 @@
         galleryMiddle: false,       // a middle-click on a result opens its gallery (else the ▦ chip's click does)
         galleryEndless: false,      // at a gallery's end the next one on the page opens (☐ Endless on the clicked picture)
         galleryEndlessViewed: false,    // endless also queues galleries already seen or visited
+        galleryEndlessStop: true,       // endless: a step past a gallery's end stops there once with a note; the next crosses
         galleryChips: true,         // the ▦ chip on every gallery thumbnail; off: only on the one under the pointer
         galleryTicks: true,         // seen / visited ticks on results
         gallerySavedMarks: true,    // saved discs on results and in galleries
@@ -10593,7 +10594,7 @@
             tour.index = tourAt(list);
             twSync();
             if (wallBusy) return;
-            if (dir < 0 && tour.gal && galChainGo(-1, 'last')) return;
+            if (dir < 0 && tour.gal && galSeam(-1, user, 'last')) return;
             // A press past either end wraps; forward asks the page for more first.
             if (dir < 0 || seamDir === dir) tourSeam(dir, user);
             else tourWall(user);
@@ -11155,14 +11156,14 @@
             tourNav(1, false);
             return;
         }
-        if (tour.gal && galChainGo(1, 'first')) return;
+        if (tour.gal && galSeam(1, user, 'first')) return;
         if (tourExhausted()) tourSeam(1, user);
     }
 
     // Past an end: user input stops there once (note, SEAM_HOLD_MS deaf that way only); the next step wraps.
     function tourSeam(dir, user) {
         if (!tour || !placed) return;
-        if (tour.gal && galEndless()) { seamDir = 0; galChainGo(dir, dir > 0 ? 'first' : 'last'); return; }     // endless: on to the next gallery; at the queue's end it stops, no note, no wrap
+        if (tour.gal && galEndless()) { galSeam(dir, user, dir > 0 ? 'first' : 'last'); return; }     // endless never wraps
         if (user && seamDir !== dir) {
             seamDir = dir;
             seamHoldUntil = Date.now() + SEAM_HOLD_MS;
@@ -13068,6 +13069,29 @@
         return galChainOpen(c.at + dir, dir, dir > 0 ? 0 : 1e9, pic);
     }
 
+    // Slideshow past a gallery's end: a user step stops once with a note (galleryEndlessStop), the next crosses; the queue's ends stop for good. False: not endless here.
+    function galSeam(dir, user, pic) {
+        const c = galEndless() ? galChain : null;
+        if (!c || !galCur || !tour || !tour.gal) return false;
+        if (c.land) return true;
+        if (c.hrefs[c.at] !== galCur.href) return false;
+        if (dir > 0 && c.at === c.hrefs.length - 1) galChainExtend(c);
+        const stop = user && cfg.galleryEndlessStop;
+        if (dir > 0 ? c.at >= c.hrefs.length - 1 : c.at <= 0) {
+            seamDir = 0;
+            if (stop) seamNote(dir > 0 ? 'Last picture of the last gallery' : 'First picture of the first gallery');
+            return true;
+        }
+        if (stop && seamDir !== dir) {
+            seamDir = dir;
+            seamHoldUntil = Date.now() + SEAM_HOLD_MS;
+            seamNote(dir > 0 ? 'Last picture of this gallery' : 'First picture of this gallery');
+            return true;
+        }
+        seamDir = 0;
+        return galChainGo(dir, pic);
+    }
+
     // Open queued gallery `to` at page `page` (1e9 = its last); a door no longer on the page is passed over in direction dir.
     function galChainOpen(to, dir, page, pic) {
         const c = galChain, set = galCur;
@@ -13187,7 +13211,7 @@
             ['Page row ◀ ▶', 'a page of thumbnails back or on · also ↑ ↓, PageUp / PageDown, the wheel away from the preview'],
             ['Picture row ◀ ▶', 'the slideshow, one picture back or on · also ← →, the wheel over the strip · hold to repeat'],
             ['Numbers', 'click one to type where to go · + = still being read'],
-            ['☐ Endless', 'at the end of this gallery the next one on the page opens, and back from its first page goes to the one before · galleries already seen or visited are left out (right-click to include them), judged once when queued'],
+            ['☐ Endless', 'at the end of this gallery the next one on the page opens, and back from its first page goes to the one before · galleries already seen or visited are left out (right-click to include them), judged once when queued · a step past a gallery\'s end stops there once, the next goes on (right-click to turn that off) · the last gallery\'s last picture stops for good'],
             ['P:11/18', 'endless: page 11 of 18, counting every queued gallery — one not read yet counts as one page'],
             ['G:10/16', 'endless, page row: gallery 10 of the 16 queued'],
             ['G:10/20', 'endless, picture row: picture 10 of this gallery\'s 20'],
@@ -15007,6 +15031,7 @@
                 if (galCur) galPageNote(galCur);
                 galMenuShow(x, y);
             });
+            item('Endless: stop once at each gallery\'s end', !!cfg.galleryEndlessStop, flip('galleryEndlessStop'));
         }
         sep();
         item('All settings…', null, function () { galMenuHide(); showPanel(); });
@@ -17709,6 +17734,8 @@
             'At the end of a gallery the next one on the page opens, and back from its first page goes to the one before. Also the ☐ Endless box on the clicked picture.');
         check('galleryEndlessViewed', 'Endless: include galleries already viewed',
             'Off: galleries already seen or visited are left out of the queue, judged once when each joins it.');
+        check('galleryEndlessStop', 'Endless: stop once at each gallery\'s end',
+            'A slideshow step past a gallery\'s last picture stops there with a note; the next step opens the next gallery. Off: it crosses straight on. The slideshow playing by itself never stops.');
         check('doorScan', 'Find galleries without a hover',
             'Reads up to 3 linked pages of each grid of linked thumbnails, one at a time, so gallery links are known before you hover one. Off: three hovers teach it.');
         check('galleryChips', 'Show the ▦ chip on every gallery',
