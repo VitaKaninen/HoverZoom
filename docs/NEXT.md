@@ -23,8 +23,11 @@ Chrome, eporner, synthetic presses (recipe in TESTING.md "Live sites in Claude i
   A reload under v0.344.0 finished it (⤓ again then found all 147 saved). The deadline itself has not fired live.
 On disk (user said yes to checking Downloads): all 100+153+147+19 present (one Sophy picture twice — redone after a
 navigation, by design), but 67 in `Hover Zoom/Eporner/` named `Eporner - …`: saved by a page that never read that
-gallery. **Fixed v0.345.0, not verified live** — the verify tab (eporner page 4, ⤓ then Back) froze, likely a page
-dialog the tools cannot see; repeat: queue a gallery, Back at once, check its files land in its own folder.
+gallery. Fixed v0.345.0. Live: page 6 (25) and page 7 (21+1 redone), ⤓ then Back at once → all in
+`EPORNER.COM/<gallery> Photo Gallery/`. **Unexplained:** the first run on v0.345.0 (page 5, 13 pictures) still went to
+`Eporner/`, before the debug lines existed. v0.346.0 logs `download queue: title at press {…}` and `download queue:
+names {…}` (JSON) — if a misfile recurs, read those first. **Cleanup owed:** drop both lines once it has not recurred.
+(The freeze on page 4 was the "all saved already, save again?" `confirm()`; the user answered yes.)
 Names inside one folder are mixed (`saveRename` 'meaningless' renames per file) — by design, not changed.
 Still unverified from before: a real middle press in Chrome (`E79`, synthetic only); pornpics middle-click opening a
 tab (needs the user's `hover-zoom:gallery-state` trace); a site's own scroll closing an open gallery
