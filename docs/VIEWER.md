@@ -750,6 +750,13 @@ in the download folder (unless the browser always asks). `preventDefault` stops 
 opens a tab. Window state is untouched. Buttons inside the window save too (no `isBoxControl()`).
 Same `saveName()` and fallback as `E9a`; Tampermonkey's Download Mode must be *Browser API* in
 LibreWolf.
+- **On the thumbnail too, before it opens** (`E79`, user, v0.343.0: "it opens too late, so my middle
+  click tells it to close the preview"): `midSaveEarly()`, right after `midSave()`. A middle press on
+  `active` (target, a descendant, or its rect: covers) with a resolve in flight (`token` live) sets
+  `saveOnShow = active`, claims the press (no tab, no `cancel()`), and `paint()` saves `view.url`
+  when it shows; `cancel()` clears it. Preview already up but the press is off it on the thumbnail:
+  saved at once. Not taken: modifiers, a placed window, nothing hovered (a door's middle press is the
+  gallery's, and doors never become `active`).
 - **Once per picture per page address** (user, v0.271.0): `midSaved` (url → press time, `Infinity`
   once `done` fires) is cleared when `location.href` changes, so a reload, leaving and coming back,
   or an SPA navigation saves again. A repeat press shows "Already saved" and still claims the

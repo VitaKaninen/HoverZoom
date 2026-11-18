@@ -18,10 +18,19 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   (`galGrown`) is written to sessionStorage `hzGalLists` (`galKeep`; again when its originals are found, with each
   item's `hit` minus `display`); `galLoad` takes it (`galKept`, 1 h, 20 galleries) before any fetch, and marks the
   href grown, so ⤓ is ready at once and no frame reads it again.
-- **The chip shows the count** (user, v0.342.0): `galCountText` — `N` when read to its end (`galGrown` or a kept
-  list), `N+` from the HTML only (the frame may add more), nothing when unknown. Known from the preload or the hover's
-  `galLoad`; no fetch of its own. `galChipsCount(href)` restyles after `galLoad`, `galMore` and `galGrow`'s end.
-  `galKeptAll` is memoised (`galKeptMemo`, reset by `galKeep`), as every chip asks it.
+- **The chip shows the count** (user, v0.342.0; open chip too, v0.343.0): `galCountText` — `N` when read to its
+  end (`galGrown`, or sessionStorage `hzGalCounts` {href: [n, at]}, 3000, written by `galKeep` — the kept lists
+  hold only 20, too few for a 99-gallery page), `N+` from the HTML only, nothing when unknown. `galChipsCount(href)`
+  restyles after `galLoad`, `galMore` and `galGrow`'s end.
+- **Counts for every door on the page** (user, v0.343.0: "why does it take several minutes"): the preload read only
+  doors on screen, serially, each waiting for its thumbnails (`galWarm`). `galCountNext` now runs beside it:
+  `galPrePick(true)` (anywhere, nearest the viewport's centre), `GAL_COUNT_PAR` 4 in flight, `galCountLoad` = the
+  HTML alone (`galPick`; no frame, no thumbnails), skipping hrefs already counted. eporner, fresh tab: 99 counts in
+  26 s (was 11 on screen, none below); after Back, all at once from `hzGalCounts`.
+- **Sites that refuse a frame** (v0.343.0): `galRender` landing on an unreadable/blank page calls `galNoFrameNote`
+  (sessionStorage `hzNoFrame` {host: true}). From then `galLoad` starts no frame, `galCountLoad` uses `galLoad`, and a
+  list read there is final: `galGrown` + why `html` + `galKeep` (so `N`, not `N+`, and ⤓ ready at once); `galGrow`
+  returns at once. eporner refuses every frame (SecurityError), so before this its counts never lost the `+`.
 - **Peek**: a left press on a door's chip (`galChipClickable`, capture on the chip) peeks, or closes
   the open one; where `siteEnabled()`, a plain middle press on `doorAt()` does too, but only with `cfg.galleryMiddle` (default off, user
   2026-11-12). Both set
@@ -455,8 +464,11 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   (`galMarkFind`), since a picture can now have two.
 - **Scroll hides it** (`galScroll`: the document or a container ≥ half the viewport tall — a carousel
   must not count).
-- **Seen check** (user): a gallery that stays on screen `GAL_SEEN_MS` (1 s) as the current set has its
-  link stored (user, v0.249.0: a shorter look never counts) (`hoverZoomGallerySeen`, an ordered list,
+- **Seen check** (user): a gallery opened by a press (`galPeek`: chip or middle) is seen at once (user,
+  v0.343.0: ticks missing until reload — a scroll the page made in its first second hid the set, `galScroll`
+  'page scrolled by itself', so the timer found it gone). The 1 s rule below now covers only a non-press show.
+  Otherwise: a gallery that stays on screen `GAL_SEEN_MS` (1 s) as the current set has its
+  link stored (user, v0.249.0, when galleries opened on hover: a shorter look never counts) (`hoverZoomGallerySeen`, an ordered list,
   last `GAL_SEEN_MAX` 10,000, re-read before each write so tabs don't erase each other) and every
   page `<img>` linking there gets a 24 px bare green tick (inline SVG, dark outline, no box) in a span (`data-hz-seen`) appended to the result's link (`galMarkHost`; found again by `__hzAt`),
   absolutely positioned by measuring its own containing block (`galMarkImg`; size = the larger of img and `<picture>`, `galMarkRect`, as an inline picture measures as a line box) — so no ancestor's
