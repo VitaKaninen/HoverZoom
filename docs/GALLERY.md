@@ -22,6 +22,11 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   end (`galGrown`, or sessionStorage `hzGalCounts` {href: [n, at]}, 3000, written by `galKeep` — the kept lists
   hold only 20, too few for a 99-gallery page), `N+` from the HTML only, nothing when unknown. `galChipsCount(href)`
   restyles after `galLoad`, `galMore` and `galGrow`'s end.
+- **The preload reads each on-screen door to its end** (user, v0.350.0: pornpics chips sat at `19+` until opened).
+  `galLoad` stops the frame once the HTML has `GAL_HTML_ENOUGH`, so the count stayed `N+`. `galPreNext` now calls
+  `galGrow(href)` after `galWarm` (frames allowed, nothing open, no grow busy); `galRender`'s end resumes the preload,
+  so it stays one frame at a time, and a hover's frame replaces it. Fixture `door-search.html`: all 6 chips final in
+  ~60 s (`10+`→`10`, door-grow `150`). Counted-only (off-screen) doors still show `N+` until they come on screen.
 - **Counts for every door on the page** (user, v0.343.0: "why does it take several minutes"): the preload read only
   doors on screen, serially, each waiting for its thumbnails (`galWarm`). `galCountNext` now runs beside it:
   `galPrePick(true)` (anywhere, nearest the viewport's centre), `GAL_COUNT_PAR` 4 in flight, `galCountLoad` = the

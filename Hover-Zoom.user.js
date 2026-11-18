@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.349.0
+// @version      0.350.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -13354,6 +13354,8 @@
             dbg('gallery preview found', { ms: Math.round(performance.now() - t1), remembered: known, size: hit ? hit.w + 'x' + hit.h : null });
             if (!hit) return;
             showViewer(hit, pointer);
+            if (pinOnShow === img) { pinOnShow = null; place(); }
+            if (saveOnShow === img && view && view.url) { saveOnShow = null; midSaveUrl(view.url); }
         }, cfg.hoverDelay);
     }
 
@@ -15365,9 +15367,10 @@
         galPreTried.add(href);
         galLoad(href, galPreLog).then(function (list) {
             if (list === 'cancel') galPreTried.delete(href);
-            return Array.isArray(list) ? galWarm(list) : null;
-        }).then(function () {
+            return Array.isArray(list) ? galWarm(list).then(function () { return list; }) : null;
+        }).then(function (list) {
             galPre = null;
+            if (Array.isArray(list) && !galGrown.has(href) && !galNoFrame(href) && !galGrowing && !galCur && !galPreStop) { galGrow(href); return; }   // its count, read to the end; galRender's end resumes the preload
             setTimeout(galPreNext, 0);
         });
     }

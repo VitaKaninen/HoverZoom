@@ -13,6 +13,10 @@ saved once it shows` then the preview painted 733 ms later — the early press I
 Whether the file was written was not logged; v0.349.0 adds `middle press: saving <url>` / `middle press: saved <url>`
 (a failure already logs `saving the original failed`). Still owed by the user: home + `/lingerie/` category check
 (`door scan` / `doorAreas` lines), and whether that press's file landed in Downloads.
+**Second trace (v0.349.0):** no file, no `middle press: saving` — the early press on a *gallery* thumbnail was held but
+`galPv` never consumed `saveOnShow` (nor `pinOnShow`); fixed v0.350.0. Same version: chip counts read to the end in the
+background (GALLERY.md "The preload reads each on-screen door to its end"). Both unverified on pornpics.
+The press on a results-page door (`active: null, door: true`) is still not a save — the known gap.
 
 # Handoff 2026-11-17 #2 (~326k tokens)
 
