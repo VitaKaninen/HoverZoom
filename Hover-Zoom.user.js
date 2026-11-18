@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.355.0
+// @version      0.356.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -12140,7 +12140,7 @@
             const finish = function (v) { if (!done) { done = true; resolve(v); } };
             frame.then(function (v) {
                 frameOver = true;
-                if (v === 'cancel' && !done) return finish('cancel');
+                if (v === 'cancel' && !done) return html.then(function (h) { weak = !!h && h.length < GAL_HTML_ENOUGH && !galNoFrame(href); finish(h && h.length ? h : 'cancel'); });     // frame taken by another read: the HTML still answers
                 if (v && v.length) return finish(v);
                 html.then(function (h) { weak = !h || (h.length < GAL_HTML_ENOUGH && !galNoFrame(href)); finish(h); });
             });
@@ -14154,18 +14154,28 @@
         const w = Math.min(W - 8, Math.max(dlFailOpen ? 300 : 200, a ? a.width : 240));
         dlStripEl.style.width = w + 'px';
         const h = dlStripEl.offsetHeight || 36;
-        let left, top;
+        let left, top, at = 'corner', t = null;
         if (a && a.width) {
+            at = 'gallery';
             left = Math.min(Math.max(4, a.left), W - w - 4);
             top = a.top - h - 4 >= 4 ? a.top - h - 4 : Math.min(H - h - 4, a.bottom + 4);
         } else {
             left = W - w - 16; top = H - h - 16;
-            const t = twShownRect() ? tw.box.getBoundingClientRect() : null;     // the widget in that corner: just above it
-            if (t && t.width && t.left < left + w && t.right > left && t.top < top + h && t.bottom > top) top = t.top - h - 4;
+            t = twShownRect() ? tw.box.getBoundingClientRect() : null;     // the widget in that corner: just above it
+            if (t && t.width && t.left < left + w && t.right > left && t.top < top + h && t.bottom > top) { top = t.top - h - 4; at = 'above the widget'; }
         }
-        dlHost.style.left = Math.round(left) + 'px';
-        dlHost.style.top = Math.round(Math.max(4, top)) + 'px';
+        left = Math.round(left); top = Math.round(Math.max(4, top));
+        dlHost.style.left = left + 'px';
+        dlHost.style.top = top + 'px';
+        const sig = at + ' ' + left + ',' + top + ' ' + W + 'x' + H;
+        if (sig !== dlPlacedSig && debugOn()) {
+            const box = function (r) { return r ? [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)] : null; };
+            dbg('download bar: ' + sig, { galOn: galOn, galleryDl: galStripDl, strip: galSt ? (galSt.el.hidden ? 'hidden' : 'shown') : 'none', fly: !!galFly,
+                anchor: box(a), widget: box(t || (twShownRect() ? tw.box.getBoundingClientRect() : null)), bar: [w, h] });
+        }
+        dlPlacedSig = sig;
     }
+    var dlPlacedSig = '';
 
     // The saved mark: a blue disc with a down arrow, no outline (user).
     function galSavedIcon(cls) {

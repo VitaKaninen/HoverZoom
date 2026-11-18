@@ -28,6 +28,9 @@ press on a results-page door should do: opens a tab now in both browsers (`galle
 any list is known"; fixture-verified, not live); download bar bottom-right when no gallery is open (fixture-verified).
 Non-porn gallery sites were suggested to the user for testing (Flickr albums, Behance, ArtStation, DeviantArt,
 Imgur, wallhaven) — none tried with the script yet.
+**v0.356.0:** middle-press "load was cancelled" fixed (GALLERY.md, not reproduced); the download bar still sat
+mid-page after closing a gallery for the user (LibreWolf, v0.355.0) — not reproduced; asked for the `download bar:`
+debug lines.
 
 # Handoff 2026-11-17 #2 (~326k tokens)
 

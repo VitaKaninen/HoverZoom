@@ -40,6 +40,12 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   cannot be fed text).
 - **Debug lines** for counts: `gallery count from its page {pictures, why, shared}`, `gallery read to its end:
   <why> {from, pictures, final, ms}`, `gallery preload: reading N screens ahead`.
+- **A load whose frame is taken still answers from its HTML** (v0.356.0; LibreWolf trace: middle press, the open's
+  frame was "replaced by a newer hover" 67 ms later and the gallery failed "the load was cancelled"). `galLoad`
+  resolves `'cancel'` only when the HTML has nothing either.
+- `download bar: <corner|gallery|above the widget> left,top WxH {galOn, strip, fly, anchor, widget, bar}` — logged on
+  each change of spot (v0.356.0, for the user's "bar stays mid-page after close", not reproduced on fixtures or in
+  Chrome's geometry).
 - **Counts for every door on the page** (user, v0.343.0: "why does it take several minutes"): the preload read only
   doors on screen, serially, each waiting for its thumbnails (`galWarm`). `galCountNext` now runs beside it:
   `galPrePick(true)` (anywhere, nearest the viewport's centre), `GAL_COUNT_PAR` 4 in flight, `galCountLoad` = the
