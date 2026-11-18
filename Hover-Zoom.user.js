@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.344.0
+// @version      0.345.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -13098,10 +13098,10 @@
     function galKeep(href, html) {
         const list = galLists.get(href);
         if (!list || !list.length) return;
-        const all = Object.assign({}, galKeptAll()), now = Date.now();
+        const all = Object.assign({}, galKeptAll()), now = Date.now(), info = pageInfos.get(href.split('#')[0]) || (all[href] && all[href].info) || null;
         galKeptMemo = null;
         galCountKeep(href, list.length);
-        all[href] = { items: list.map(function (it) { const x = Object.assign({}, it); delete x.hqTried; if (x.hit) x.hit = { url: x.hit.url, w: x.hit.w, h: x.hit.h, video: !!x.hit.video }; return x; }), html: !!html, at: now };
+        all[href] = { items: list.map(function (it) { const x = Object.assign({}, it); delete x.hqTried; if (x.hit) x.hit = { url: x.hit.url, w: x.hit.w, h: x.hit.h, video: !!x.hit.video }; return x; }), html: !!html, at: now, info: info };
         const keys = Object.keys(all).filter(function (k) { return now - all[k].at < GAL_KEPT_MS; }).sort(function (a, b) { return all[a].at - all[b].at; });
         const out = {};
         keys.slice(-GAL_KEPT_MAX).forEach(function (k) { out[k] = all[k]; });
@@ -13117,6 +13117,7 @@
         if (!k || !Array.isArray(k.items) || !k.items.length || Date.now() - k.at > GAL_KEPT_MS) return null;
         galGrown.add(href);
         if (k.html) galGrowWhy.set(href, 'html');
+        if (k.info && k.info.title && !pageInfos.has(href.split('#')[0])) keepPageInfo(href, k.info.title, k.info.site);
         return k.items;
     }
 
@@ -13456,8 +13457,9 @@
         }
         saveFolderAsk();
         jobs.forEach(function (j) { if (j.href === href) dlqDrop(j.id); });     // one kept for its failures: they are in this one
+        const info = pageInfos.get(href.split('#')[0]) || {};
         const job = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), href: href, origin: origin,
-            made: Date.now(), items: list.slice(), read: 'queued', again: again,
+            made: Date.now(), items: list.slice(), read: 'queued', again: again, title: info.title || '', site: info.site || '',
             note: why === 'html' ? 'read from the page\'s HTML; pictures it adds as it scrolls may be missing' : '' };
         const n = dlqQueued(job);
         if (n) heldQueue(job);
@@ -13668,6 +13670,7 @@
     // Download a queued gallery's pictures: DLQ_WORKERS at once, starts DLQ_GAP_MIN..MAX ms apart; failed ones stay listed.
     function dlqDownload(job) {
         const run = dlqRun, tok = { cancelled: false, fresh: false };
+        if (job.title && !pageInfos.has(job.href.split('#')[0])) keepPageInfo(job.href, job.title, job.site);     // or a page that never read it names it by host
         let st = dlqStates(job).replace(/1/g, '0');        // in flight when its tab went: not known to have landed, so again
         const errs = dlqErrs(job.id);
         const save = function (withErrs) {
