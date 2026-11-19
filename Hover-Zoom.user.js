@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.375.0
+// @version      0.376.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -2153,19 +2153,31 @@
     }
 
     // sxypix: thumbnails carry signed URLs; one POST to the gallery's viewer returns every picture's original and medium copy.
-    function siteLookup(el, shown) {
+    // pageHref: the gallery page a gallery-mode cell came from, read for its ids; else this document's.
+    function siteLookup(el, shown, pageHref) {
         if (!/(^|\.)sxypix\.com$/.test(pageHost()) || !/\/\/x\.sxypix\.com\/pixiw?\/[^/]+\/\d+\/s\//.test(shown || '')) return null;
-        const g = el.ownerDocument.querySelector('.gallgrid[data-aid][data-ghash]');
-        if (!g) return null;
+        const sel = '.gallgrid[data-aid][data-ghash]';
+        if (!pageHref) {
+            const g = el.ownerDocument.querySelector(sel);
+            return g ? sxyGall(g, (el.closest('[data-photoid]') || g).getAttribute('data-photoid') || '') : null;
+        }
+        return pageText(pageHref).p.then(function (r) {
+            if (!r || !r.text) return null;
+            const d = new DOMParser().parseFromString(r.text, 'text/html'), g = d.querySelector(sel), c = d.querySelector('[data-photoid]');
+            return g ? sxyGall(g, c ? c.getAttribute('data-photoid') : '') : null;
+        });
+    }
+
+    // One sxypix gallery's viewer list, asked once per gallery: {body: every original and medium URL}.
+    function sxyGall(g, pid) {
         const f = { x: g.getAttribute('data-x') || '', aid: g.getAttribute('data-aid'), ghash: g.getAttribute('data-ghash') };
         const key = 'sxypix|' + f.aid + '|' + f.ghash + '|' + f.x;
         if (pageCache.has(key)) return pageCache.get(key);
         const p = (async function () {
             try {
-                const pid = (el.closest('[data-photoid]') || g).getAttribute('data-photoid') || '';
                 const res = await fetch('/php/gall.php', { method: 'POST', credentials: 'same-origin',
                     headers: { 'X-Requested-With': 'XMLHttpRequest' },
-                    body: new URLSearchParams({ x: f.x, pid: pid, aid: f.aid, ghash: f.ghash, width: String(vpW()) }) });
+                    body: new URLSearchParams({ x: f.x, pid: pid || '', aid: f.aid, ghash: f.ghash, width: String(vpW()) }) });
                 if (!res.ok) return null;
                 const j = JSON.parse(await res.text()), body = [];
                 (Array.isArray(j.r) ? j.r : []).join('').replace(/data-src\s*=\s*['"]([^'"]+)['"]/g, function (m, u) {
@@ -14059,6 +14071,9 @@
         }
         const linked = await galLinkedHit(item, img, tok);
         if (linked) return (item.hit = linked);
+        const look = siteLookup(img, item.thumb, item.base);
+        const viewer = look ? await galBestOf(await look, item, img, tok) : null;
+        if (viewer) return (item.hit = viewer);
         for (let i = 0; i < list.length; i++) {
             if (tok.cancelled) return null;
             const d = await probe(list[i], tok.fresh);
@@ -14075,6 +14090,13 @@
         try { u = item.link ? new URL(item.link) : null; } catch (e) { u = null; }
         if (!u || u.origin !== location.origin || looksLikeImage(u.href) || isVideoUrl(u.href)) return null;
         const page = await linkedMedia(u);
+        const best = await galBestOf(page, item, img, tok);
+        dbg('gallery preview: the picture\'s own page', { link: u.href, declared: page && page.declared && page.declared.url, hit: best && best.url });
+        return best;
+    }
+
+    // The biggest copy a page names for a gallery picture (its pair, its declared one, one of the same name), larger than the thumbnail.
+    async function galBestOf(page, item, img, tok) {
         if (!page || tok.cancelled) return null;
         const nat = { w: img.naturalWidth || 0, h: img.naturalHeight || 0 };
         const tries = [];
@@ -14090,7 +14112,6 @@
             if (best && d.w * d.h <= best.w * best.h) continue;
             best = { url: t.url, w: d.w, h: d.h, video: !!d.video, duration: d.duration, display: d.display };
         }
-        dbg('gallery preview: the picture\'s own page', { link: u.href, declared: page.declared && page.declared.url, hit: best && best.url });
         return best;
     }
 
