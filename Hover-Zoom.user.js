@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.373.0
+// @version      0.374.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -2140,8 +2140,13 @@
             if (r.width < 24 || r.height < 24) return;
             const u = cardLink(img);
             if (!u) return;
+            let c = r;      // a slider's hidden slides are full size beside its clipping box: count only what the box shows
+            for (let e = img.parentElement, i = 0; e && i < 4; e = e.parentElement, i++) {
+                if (getComputedStyle(e).overflowX !== 'visible') { c = e.getBoundingClientRect(); break; }
+            }
+            const a = Math.max(0, Math.min(r.right, c.right) - Math.max(r.left, c.left)) * r.height;
             const k = cards.get(u.href);
-            if (!k || r.width * r.height > k.a) cards.set(u.href, { img: img, a: r.width * r.height });
+            if (!k || a > k.a) cards.set(u.href, { img: img, a: a });
         });
         cards.forEach(function (k) { out.push(k.img); });
         return out;
