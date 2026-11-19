@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.372.0
+// @version      0.373.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -11812,12 +11812,28 @@
 
     const galKinds = new Map();     // door chain -> Promise<'gallery'|'results'|null>, this page only
     const galKindDone = new Map();  // door chain -> its settled kind
+    const galDoorKinds = new Map(); // href -> that one door's kind, read when it is hovered ('reading' meanwhile)
+
+    // Does this door lead to more results, by its area or by its own read?
+    function galResultsAt(img, h) { return galKindDone.get(domChain(img)) === 'results' || galDoorKinds.get(h) === 'results'; }
+
+    // One hovered door judged on its own: an area of creators can hold both picture pages and pages of galleries.
+    function galDoorKindRead(el, href) {
+        if (galDoorKinds.has(href)) return;
+        galDoorKinds.set(href, 'reading');
+        galKindRead(href).then(function (k) {
+            galDoorKinds.set(href, k || 'unknown');
+            dbg('door kind of this one door', { href: href, kind: k, area: galKindDone.get(domChain(el)) });
+            if (k === 'results') { if (galChipHot === el) { galChipHot = null; galChipRefresh(el); } galMarkSoon(); }
+        }, function () { galDoorKinds.delete(href); });
+    }
 
     // Whether a door leads to a gallery or to more results, read once per area on this page.
     function galKindOf(el, href) {
         const key = domChain(el);
         if (galKinds.has(key)) return galKinds.get(key);
         const p = galKindRead(href).then(async function (k) {
+            if (k) galDoorKinds.set(href, k);
             if (k === 'results') {          // one gallery with odd file names must not decide the area: a second door has to agree
                 const other = galKindOther(key, href);
                 const k2 = other ? await galKindRead(other) : null;
@@ -13114,7 +13130,7 @@
             const h = galLinkOf(img);
             if (!h) return;
             const key = domChain(img);
-            if (!galKindDone.has(key) || galKindDone.get(key) === 'results' || !doorReason(img)) return;
+            if (!galKindDone.has(key) || galResultsAt(img, h) || !doorReason(img)) return;
             const r = img.getBoundingClientRect(), a = r.width * r.height, k = at.get(h);
             if (k == null) { at.set(h, out.length); out.push({ h: h, img: img, a: a }); }
             else if (a > out[k].a) { out[k].img = img; out[k].a = a; }
@@ -15432,6 +15448,8 @@
         if (!href || galChipHot === el) return;
         galKindOf(el, href).then(function (kind) {
             if (kind === 'results' || galChipHot === el) return;
+            galDoorKindRead(el, href);
+            if (galDoorKinds.get(href) === 'results') return;
             if (!holds(el.getBoundingClientRect(), galPt.x, galPt.y)) return;
             const prev = galChipHot;
             galChipHot = el;
@@ -16022,7 +16040,7 @@
             if (!h || !doorReason(img)) { if (old) { old.remove(); galMarkPlace(img); } return; }
             const key = domChain(img);
             if (!galKindDone.has(key)) { galKindOf(img, h).then(galMarkSoon); return; }
-            if (galKindDone.get(key) === 'results') { if (old) { old.remove(); galMarkPlace(img); } return; }
+            if (galResultsAt(img, h)) { if (old) { old.remove(); galMarkPlace(img); } return; }
             const chip = galChipEl(img, h);
             if (!chip) return;
             galMarkPlace(img);
@@ -16114,7 +16132,7 @@
             if (galPreTried.has(h)) return;
             if (any ? galCountTried.has(h) || galCache.has(h) || galLists.has(h) || !!galCountsAll()[h] :galCache.has(h) && !galCountTried.has(h)) return;
             const key = domChain(img);
-            if (!galKindDone.has(key) || galKindDone.get(key) === 'results' || !doorReason(img)) return;     // where a chip shows
+            if (!galKindDone.has(key) || galResultsAt(img, h) || !doorReason(img)) return;     // where a chip shows
             try { if (new URL(h).origin !== location.origin) return; } catch (e) { return; }
             const r = galHoleRect(img);
             if (!r.width || !r.height) return;
@@ -16401,7 +16419,7 @@
             if (plain && !CAPTCHA_HERE && siteEnabled()) {
                 if (e.target === galHost && galCur) { e.preventDefault(); return; }
                 const door = doorAt(e.target, e.clientX, e.clientY), href = door && galLinkOf(door);
-                if (href && galKindDone.get(domChain(door)) !== 'results') {     // a door to a gallery, anywhere: peek at its pictures. See P17.
+                if (href && !galResultsAt(door, href)) {     // a door to a gallery, anywhere: peek at its pictures. See P17.
                     e.preventDefault();
                     e.stopImmediatePropagation();
                     galMidAt = Date.now();
