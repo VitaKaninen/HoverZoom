@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.378.0
+// @version      0.379.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -4525,6 +4525,7 @@
             capH: null,             // frame height clearWidget() shrank it to, so it ends above the widget
             anchor: null,           // the remembered spot it was placed by; posApply() sets it
         };
+        if (galCur && galOwns(active)) galHov = { href: galCur.href, el: active, url: activeShown || '' };
         reflow();
 
         applyLook();
@@ -11799,6 +11800,7 @@
     const GAL_SAVEDFROM_KEY = 'hoverZoomGallerySavedFrom';   // linked pages something was saved from
     const GAL_SAVED_MARK = 'data-hz-saved';
     let galSeen = {}, galMarkTimer = 0;
+    let galHov = null;                  // {href, el, url}: the gallery picture last shown in the window, where ⛶ starts
     const GAL_FLY_MS = 320;             // the clicked picture's flight to the corner and back
     const GAL_FLY_FRAC = 0.2;           // its height there, of the window's (user)
     const GAL_FULL_FRAC = 0.45;         // in fullscreen, at most this of the screen tall (a portrait is not cropped below that); its width is the strip's text
@@ -13490,7 +13492,16 @@
         if (ck) ck.checked = !!cfg.galleryEndless;
     }
 
-    // ⛶ on the clicked picture: this gallery's slideshow from its first picture, fullscreen.
+    // Where ⛶ starts: the gallery picture last shown in the window (element, then URL), else the first.
+    function galHovAt(set) {
+        const h = galHov;
+        if (!h || h.href !== set.href) return 0;
+        let k = set.pics.findIndex(function (q) { return q.img === h.el; });
+        if (k < 0 && h.url) k = set.pics.findIndex(function (q) { return q.item.thumb === h.url || q.img.currentSrc === h.url || q.img.src === h.url; });
+        return k < 0 ? 0 : k;
+    }
+
+    // ⛶ on the clicked picture: this gallery's slideshow fullscreen, from the picture last previewed in it.
     function galFullStart() {
         if (fullActive()) { leaveFull(); return; }      // in fullscreen it leaves (user)
         if (!galCur) return;
@@ -13502,8 +13513,10 @@
             if (view && placed && box && box.classList.contains('on')) { if (!fullActive()) enterFull(); return; }
             if (!fullActive() && document.fullscreenElement === de) { const x = document.exitFullscreen || document.webkitExitFullscreen; if (x) try { x.call(document); } catch (e) { /* stays */ } }
         };
-        if (placed && view && tour) { twGoTo(0); full(); return; }
-        tourFromStart(1, true, 0).then(full, full);
+        if (placed && view && tour) { full(); return; }     // a slideshow already up goes fullscreen where it stands
+        const at = galHovAt(galCur);
+        dbg('gallery: ⛶ slideshow from picture ' + (at + 1), { of: galCur.pics.length });
+        tourFromStart(1, true, at).then(full, full);
     }
 
     // The clicked picture's top-left ⓘ and bottom-left ☐ Endless.
@@ -13539,7 +13552,7 @@
         const b = btn.getBoundingClientRect();
         galMenuShow(b.left, b.top, [
             ['The picture in the corner', 'click: close · drag: move · drag a corner: resize (Ctrl: no snapping) · right-click: settings'],
-            ['⤓ ⛶ ✕', 'save every picture of this gallery not saved yet (once its page is read; never the rest of the endless queue) · the slideshow from its first picture, fullscreen · close the gallery'],
+            ['⤓ ⛶ ✕', 'save every picture of this gallery not saved yet (once its page is read; never the rest of the endless queue) · the slideshow fullscreen, from the picture last previewed (else the first) · close the gallery'],
             ['Right-click', 'settings, and open the gallery\'s page in a new tab'],
             ['Strip', 'drag it by its background to take it off the picture'],
             ['Page row ◀ ▶', 'a page of thumbnails back or on · also ↑ ↓, PageUp / PageDown, the wheel away from the preview'],
@@ -14224,7 +14237,7 @@
         const dl = tool('⤓', 'Download every picture of this gallery not saved yet, into the folder under Settings, Saving · works once the whole page has been read · click again to stop',
             function () { galDownloadAll(href); });
         tool('✕', 'Close the gallery', function () { galHide('hole'); });
-        tool('⛶', 'Slideshow from the first picture, fullscreen · in fullscreen: leave it', function () { galFullStart(); }, low);
+        tool('⛶', 'Slideshow fullscreen, from the picture last previewed here (else the first) · in fullscreen: leave it', function () { galFullStart(); }, low);
         pw.appendChild(bar);
         pw.appendChild(low);
         galDlBtn = { href: href, btn: dl };
@@ -15408,7 +15421,7 @@
             ['Click the picture: close · drag it: move · drag a corner: resize (Ctrl: no snapping)',
                 'Drag the strip by its background to take it off the picture',
                 '◀ ▶ or ← →, or the wheel over the strip: picture · ↑ ↓: page · click a number to type one',
-                '⤓ saves every picture not saved yet, once the page is read (greyed until then) · ⛶ slideshow from the first picture, fullscreen · ✕ close'].forEach(function (t) {
+                '⤓ saves every picture not saved yet, once the page is read (greyed until then) · ⛶ slideshow fullscreen, from the picture last previewed (else the first) · ✕ close'].forEach(function (t) {
                 const d = document.createElement('div');
                 d.className = 'lb hp';
                 d.textContent = t;
