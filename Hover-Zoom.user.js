@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.370.0
+// @version      0.371.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -1962,7 +1962,7 @@
         const pathOf = function (u) { try { const x = new URL(u); return x.pathname + x.search; } catch (e) { return u; } };
         const gridPaths = new Set(Array.from(grid).map(pathOf));        // one file, any CDN host
         if (og && gridPaths.has(pathOf(og.url))) { dbg('linked page: its og:image is one of its own grid cells, not the page\'s picture', og.url); og = null; }
-        return { declared: og, body: pageBodyMedia(doc, pageUrl).filter(function (u) { return !grid.has(u); }), onward: onwardMedia(doc, pageUrl) };
+        return { declared: og, body: pageBodyMedia(doc, pageUrl).filter(function (u) { return !grid.has(u); }), onward: onwardMedia(doc, pageUrl), gridPaths: gridPaths };
     }
 
     const ONWARD_ATTRS = ['src', 'data-src', 'data-original', 'data-lazy-src'];
@@ -2109,17 +2109,42 @@
             const hasLink = !!e.querySelector('a[href]');
             if (n && slides < 0 && !hasLink) slides = n;
             if (n && n !== slides) return [];
-            const hrefs = new Set();
+            const hrefs = new Set(), theirs = new Set();      // a link wrapping another picture (the poster's avatar) is that picture's
             e.querySelectorAll('a[href]').forEach(function (a) {
                 let u;
                 try { u = new URL(a.getAttribute('href'), at); } catch (x) { return; }
                 u.hash = '';
+                if (a.querySelector('img')) theirs.add(u.href);
                 if (/^https?:$/.test(u.protocol) && u.origin === location.origin && u.href !== at.split('#')[0] &&
                     !looksLikeImage(u.href) && !isVideoUrl(u.href)) hrefs.add(u.href);
             });
+            theirs.forEach(function (h) { hrefs.delete(h); });
             if (hrefs.size) return slides > 0 && hrefs.size > 3 ? [] : Array.from(hrefs).slice(0, 4);
         }
         return [];
+    }
+
+    // A picture's door link: its own, else (a linkless picture of this page) its card's one link.
+    function doorLink(el) {
+        if (!el || skipLinkedPage(el)) return null;
+        if (closestAcross(el, 'a[href]')) return linkTarget(el);
+        return el.ownerDocument === document && el.tagName === 'IMG' ? cardLink(el) : null;
+    }
+
+    // The page's pictures that lead somewhere: every linked <img>, and per card link the largest drawn linkless one (a slider's showing slide).
+    function doorImgs(root) {
+        const out = [], cards = new Map();
+        root.querySelectorAll('img').forEach(function (img) {
+            if (img.closest('a[href]')) { out.push(img); return; }
+            const r = img.getBoundingClientRect();
+            if (r.width < 24 || r.height < 24) return;
+            const u = cardLink(img);
+            if (!u) return;
+            const k = cards.get(u.href);
+            if (!k || r.width * r.height > k.a) cards.set(u.href, { img: img, a: r.width * r.height });
+        });
+        cards.forEach(function (k) { out.push(k.img); });
+        return out;
     }
 
     function linkedMedia(u) {
@@ -2276,8 +2301,11 @@
             if (trusted) areaApply('linkAreas', areaDrop, lchain, lpath);
             else areaApply('linkAreas', areaLearn, lchain, lpath, lt.href);
         }
-        if (ownLink && full && token.door && !token.cancelled) doorLearn(doorVerdict({
-            linked: lfetched ? 'fetched' : lskip ? 'skipped' : null, trusted: trusted,
+        const tPath = function (u) { try { const x = new URL(u); return x.pathname + x.search; } catch (e) { return u; } };
+        const inGrid = !!(trusted && lpage && lpage.gridPaths && lpage.gridPaths.has(tPath(trusted.url)));
+        if (inGrid) dbg('door: the bigger copy is one of the linked page\'s own grid of pictures, so it is a gallery', { link: lt.href, copy: trusted.url });
+        if (lt && full && token.door && !token.cancelled) doorLearn(doorVerdict({
+            linked: lfetched ? 'fetched' : lskip ? 'skipped' : null, trusted: inGrid ? null : trusted,
             displayed: displayed, failed: lfailed }), doorChainOf(lchain, lt.href), lpath, lt.href, !trusted && linksOnward(el, lpage));
         if (trusted) {
             // The linked page names the picture, but the page's own copy of it may be bigger.
@@ -6199,8 +6227,9 @@
     function doorReason(el) {
         const e = (cfg.doorAreas || {})[pageHost()];
         if (!e || !e.rules || !e.rules.length || el.ownerDocument !== document) return null;
-        if (skipLinkedPage(el) || !linkTarget(el)) return null;
-        const r = vdRuleFor(e, doorChainOf(domChain(el), linkTarget(el).href), pagePath());
+        const lt = doorLink(el);
+        if (!lt) return null;
+        const r = vdRuleFor(e, doorChainOf(domChain(el), lt.href), pagePath());
         return r ? 'it leads to a page of other pictures, as thumbnails like it here have (' + r.dom + ' on ' + r.path + ')' : null;
     }
 
@@ -6218,7 +6247,7 @@
     function doorHover(el, x, y) {
         galDoorHover(el, x, y);
         if (doorCheckEl === el) return;
-        const lt = linkTarget(el), path = pagePath();
+        const lt = doorLink(el), path = pagePath();
         if (!lt) return;
         areaApply('doorAreas', areaTouch, doorChainOf(domChain(el), lt.href), path);
         if (Math.random() >= LINK_RECHECK) return;
@@ -6261,10 +6290,10 @@
         const host = pageHost(), path = pagePath(), today = areaDay();
         const memo = (cfg.doorScanned || {})[host] || {};
         const els = new Map(), items = [];
-        document.querySelectorAll('a[href] img').forEach(function (el) {
+        doorImgs(document).forEach(function (el) {
             const d = sizeOf(el);
             if (!d || d.w < DOOR_SCAN_PX || d.h < DOOR_SCAN_PX || skipLinkedPage(el)) return;
-            const u = linkTarget(el);
+            const u = doorLink(el);
             if (!u || refusal(el)) return;
             items.push({ chain: doorChainOf(domChain(el), u.href), href: u.href });
             if (!els.has(u.href)) els.set(u.href, el);
@@ -11714,6 +11743,7 @@
     function galLinkOf(t) {
         if (!t || t.nodeType !== 1 || !t.closest) return null;
         const a = t.closest('a[href]');
+        if (!a && t.tagName === 'IMG') { const c = doorLink(t); return c ? c.href : null; }     // a card's picture
         if (!a || !(t.tagName === 'IMG' || a.querySelector('img'))) return null;
         let u;
         try { u = new URL(a.href, location.href); } catch (e) { return null; }
@@ -11803,7 +11833,7 @@
 
     // Another door in the same area on this page, leading somewhere else.
     function galKindOther(key, href) {
-        const imgs = document.querySelectorAll('a[href] img');
+        const imgs = doorImgs(document);
         for (let i = 0; i < imgs.length; i++) {
             const h = galLinkOf(imgs[i]);
             if (h && h !== href && domChain(imgs[i]) === key && doorReason(imgs[i])) return h;
@@ -11816,16 +11846,17 @@
         if (!doc) return null;
         const pics = galGroup(doc, href), pages = [];
         const k = { pics: pics.length, linked: 0, images: 0, checked: 0, leaves: 0 };
+        const went = new Set();
         pics.forEach(function (x) {
             const a = x.el.closest('a[href]');
             let u;
-            try { u = a && new URL(a.getAttribute('href'), href); } catch (e) { u = null; }
+            try { u = a ? new URL(a.getAttribute('href'), href) : cardLink(x.el); } catch (e) { u = null; }      // a card's picture: its card link
             if (!u || !/^https?:$/.test(u.protocol)) return;
             u.hash = '';
             if (u.href === href.split('#')[0]) return;
             k.linked++;
             if (looksLikeImage(u.href)) k.images++;
-            else if (u.origin === location.origin) pages.push({ u: u, thumb: x.thumb });
+            else if (u.origin === location.origin && !went.has(u.href)) { went.add(u.href); pages.push({ u: u, thumb: x.thumb }); }     // a slider's slides share one page
         });
         if (!doorKindVerdict(k)) {
             for (const c of pages.slice(0, 2)) {
@@ -11847,13 +11878,15 @@
         if (!p) { p = fetchPageMedia(u); pageCache.set(u.href, p); }
         const page = await p;
         if (!page) return null;
-        const same = (page.declared ? [page.declared.url] : []).concat(page.body || [])
-            .filter(function (x) { return x !== thumb && sameStem(x, thumb); });
-        if (!same.length) return false;
+        const same = (page.body || []).filter(function (x) { return x !== thumb && sameStem(x, thumb); });
+        const decl = page.declared && page.declared.url !== thumb ? page.declared.url : '';     // not a grid cell (pageMediaFrom drops those): the page's one picture
+        if (!same.length && !decl) return false;
         const own = await probe(thumb, false);
-        for (const x of same.slice(0, 3)) {
+        for (const x of (decl ? [decl] : []).concat(same.slice(0, 3))) {
             const d = await probe(x, false);
-            if (d && (!own || d.w * d.h > own.w * own.h)) return true;
+            if (!d || (own && d.w * d.h <= own.w * own.h)) continue;
+            if (x === decl && !sameStem(x, thumb) && (!own || Math.abs(Math.log((own.w / own.h) / (d.w / d.h))) > 0.14)) continue;      // og under another name: the shape must agree closely
+            return true;
         }
         return false;
     }
@@ -13061,7 +13094,7 @@
     // The page's doors in document order, one per link (its biggest picture), where a chip shows.
     function galDoorList() {
         const out = [], at = new Map();
-        document.querySelectorAll('a[href] img').forEach(function (img) {
+        doorImgs(document).forEach(function (img) {
             const h = galLinkOf(img);
             if (!h) return;
             const key = domChain(img);
@@ -15909,7 +15942,7 @@
         if (!seen.size && !went.size && !from.size) { galMarkLog({ stored: 'none' }); return; }
         const dbgOn = debugOn(), st = { seenStored: seen.size, visitedStored: went.size, pictures: 0, linked: 0, ticks: 0, tooSmall: 0, hidden: [] };
         const links = new Set(), biggest = new Map(), area = function (img) { const r = galMarkRect(img, img.closest('picture') || img); return r.width * r.height; };
-        const imgs = Array.from(document.querySelectorAll('a[href] img'));
+        const imgs = doorImgs(document);
         imgs.forEach(function (img) {
             const h = galLinkOf(img);
             if (h && (went.has(h) || seen.has(h) || from.has(h)) && (!biggest.has(h) || area(img) > area(biggest.get(h)))) biggest.set(h, img);
@@ -15967,7 +16000,7 @@
 
     // A chip on every door's picture whose area leads to galleries; hidden (spot kept) when galleryChips is off. An area's kind is read once, then this runs again.
     function galChipsAll() {
-        document.querySelectorAll('a[href] img').forEach(function (img) {
+        doorImgs(document).forEach(function (img) {
             const h = galLinkOf(img), at = img.closest('picture') || img;
             const old = galMarkFind(at, GAL_DOOR_MARK);
             if (!h || !doorReason(img)) { if (old) { old.remove(); galMarkPlace(img); } return; }
@@ -16058,7 +16091,7 @@
     function galPrePick(any) {
         const seen = new Set(), W = vpW(), H = vpH();
         let best = null, bestD = Infinity;
-        document.querySelectorAll('a[href] img').forEach(function (img) {
+        doorImgs(document).forEach(function (img) {
             const h = galLinkOf(img);
             if (!h || seen.has(h)) return;
             seen.add(h);
@@ -16164,7 +16197,7 @@
         const e = (cfg.doorAreas || {})[pageHost()];
         const out = [], seen = new Set();
         if (!e || !e.rules || !e.rules.length) return out;
-        root.querySelectorAll('a[href] img').forEach(function (img) {
+        doorImgs(root).forEach(function (img) {
             const h = galLinkOf(img);
             if (!h || seen.has(h) || !vdRuleFor(e, doorChainOf(domChain(img), h), path)) return;
             seen.add(h);
