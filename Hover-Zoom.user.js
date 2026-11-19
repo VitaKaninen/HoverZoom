@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.374.0
+// @version      0.375.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -2152,6 +2152,35 @@
         return out;
     }
 
+    // sxypix: thumbnails carry signed URLs; one POST to the gallery's viewer returns every picture's original and medium copy.
+    function siteLookup(el, shown) {
+        if (!/(^|\.)sxypix\.com$/.test(pageHost()) || !/\/\/x\.sxypix\.com\/pixiw?\/[^/]+\/\d+\/s\//.test(shown || '')) return null;
+        const g = el.ownerDocument.querySelector('.gallgrid[data-aid][data-ghash]');
+        if (!g) return null;
+        const f = { x: g.getAttribute('data-x') || '', aid: g.getAttribute('data-aid'), ghash: g.getAttribute('data-ghash') };
+        const key = 'sxypix|' + f.aid + '|' + f.ghash + '|' + f.x;
+        if (pageCache.has(key)) return pageCache.get(key);
+        const p = (async function () {
+            try {
+                const pid = (el.closest('[data-photoid]') || g).getAttribute('data-photoid') || '';
+                const res = await fetch('/php/gall.php', { method: 'POST', credentials: 'same-origin',
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                    body: new URLSearchParams({ x: f.x, pid: pid, aid: f.aid, ghash: f.ghash, width: String(vpW()) }) });
+                if (!res.ok) return null;
+                const j = JSON.parse(await res.text()), body = [];
+                (Array.isArray(j.r) ? j.r : []).join('').replace(/data-src\s*=\s*['"]([^'"]+)['"]/g, function (m, u) {
+                    try { body.push(new URL(u, location.href).href); } catch (e) { /* skip */ }
+                    return m;
+                });
+                dbg('sxypix lookup', { pictures: body.length / 2 });
+                return body.length ? { body: body, declared: null } : null;
+            } catch (e) { return null; }
+        })();
+        pageCache.set(key, p);
+        p.then(function (r) { if (!r && pageCache.get(key) === p) pageCache.delete(key); });
+        return p;
+    }
+
     function linkedMedia(u) {
         if (!u) return Promise.resolve(null);
         if (pageCache.has(u.href)) return pageCache.get(u.href);
@@ -2208,7 +2237,8 @@
         let lfetched = false, lpage = null;
         const lskip =lt && !token.recheck && areaRule('linkAreas', lchain, lpath) && Math.random() >= LINK_RECHECK;
         if (lskip) dbg('linked page skipped — pages linked from here have never held the original', { link: lt.href });
-        const linked = !lt || lskip ? Promise.resolve(null) : linkedMedia(lt).then(async function (page) {
+        const look = lt ? null : siteLookup(el, shown);
+        const linked = (look || (!lt || lskip ? Promise.resolve(null) : linkedMedia(lt))).then(async function (page) {
             if (!page || token.cancelled) return null;
             lfetched = true;
             lpage = page;
@@ -2224,7 +2254,7 @@
                     from: 'the page the thumbnail links to (og: media)' });
             page.body.forEach(function (u) {
                 if (shown && u !== shown && sameStem(u, shown))
-                    tries.push({ url: u, named: true, from: 'the page the thumbnail links to (its own markup)' });
+                    tries.push({ url: u, named: true, from: look ? 'the site\'s own viewer' : 'the page the thumbnail links to (its own markup)' });
             });
             // Largest of the page's own answers, not the first — og: may be a share crop.
             for (const t of tries.slice(0, LINKED_TRIES)) {
@@ -15808,8 +15838,8 @@
         const area = ir.width * ir.height, out = [];
         let scope = galMarkHost(at);
         if (!scope) return out;
-        for (let i = 0; i < 2 && scope.parentElement && scope.parentElement !== document.body; i++) {
-            const pr = scope.parentElement.getBoundingClientRect();
+        for (let i = 0; i < 4 && scope.parentElement && scope.parentElement !== document.body; i++) {
+            const pr = galShownRect(scope.parentElement);
             if (pr.width * pr.height > area * 2) break;
             scope = scope.parentElement;
         }
@@ -15823,6 +15853,19 @@
             out.push(r);
         });
         return out;
+    }
+
+    // An element's box cut to what its overflow-hiding ancestors show (a slider strip is many slides wide, its box one).
+    function galShownRect(el) {
+        const a = el.getBoundingClientRect();
+        let l = a.left, t = a.top, r = a.right, b = a.bottom;
+        for (let e = el.parentElement, i = 0; e && e !== document.body && i < 6; e = e.parentElement, i++) {
+            const cs = getComputedStyle(e);
+            if (cs.overflowX === 'visible' && cs.overflowY === 'visible') continue;
+            const c = e.getBoundingClientRect();
+            l = Math.max(l, c.left); t = Math.max(t, c.top); r = Math.min(r, c.right); b = Math.min(b, c.bottom);
+        }
+        return { width: Math.max(0, r - l), height: Math.max(0, b - t) };
     }
 
     const GAL_PILL_CSS = ':host{all:initial}' +
