@@ -1,4 +1,20 @@
-# Handoff 2026-11-18 (~370k tokens, fullscreen + endless polish) — read this first
+# Handoff 2026-11-19 (~355k tokens, v0.367.0–v0.374.0) — read this first
+
+**Asked, in order (all built, pushed):** (1) wheel on fullscreen black space left fullscreen after a page
+change → v0.367.0 (`commitSwap` refits with `fitFull()`; VIEWER.md E35 list). (2) nsfw.xxx gallery cells of
+multi-picture posts showed 480 px → v0.368.0 (slider slides get the card link; `pageUrlLists`/`pairedUrl`
+pair thumbnails[i] ↔ urls[i]; RESOLVER.md "Card link"). (3) xmoviesforyou galleries not recognised →
+v0.369.0–v0.370.0 (og:image that is a grid cell, by path, is dropped; GATES.md measured list); **user
+confirmed it works**. (4) nsfw.xxx home → `/user/NAME` whose posts are galleries should be results, and
+`/user/NAME` post cards should be gallery doors → v0.371.0–v0.374.0 (GATES.md P17 "Card pictures are
+doors too": `doorLink`, `doorImgs`, grid-cell copy = door, script-built kind via `galLoad`, per-door kind
+`galDoorKindRead`/`galResultsAt`).
+**Verified:** (1) pane A/B; (2)(4) live in Chrome — (4) by injecting the pushed commit (Chrome's
+Tampermonkey was stuck on v0.368.0, not tracking disk); (3) fixture `door-og.html` A/B + user live.
+**Not verified:** (4) in LibreWolf; per-door kind only runs on hover (chip drops after 2 post reads).
+**Last asked:** user to try v0.374.0 in LibreWolf; send `door kind of this one door` if wrong. Not answered yet.
+
+# Handoff 2026-11-18 (~370k tokens, fullscreen + endless polish)
 
 **Asked, in order (all built, pushed v0.365.0–v0.366.0; reasons in GALLERY.md "Endless", TOUR.md wheel bullet,
 VIEWER.md E76 and the status-bar section):** fullscreen middle-click on the black saves; no status bar in fullscreen;
