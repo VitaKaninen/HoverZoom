@@ -1,0 +1,53 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Door areas, og is a grid cell</title>
+<!-- xmoviesforyou-like: each door links a gallery whose og:image is its own first grid cell's full file. Must judge as doors, not leaves. -->
+<style>
+  body { font: 14px system-ui, sans-serif; background: #1e1e2e; color: #cdd6f4; padding: 20px; }
+  .results { display: flex; flex-wrap: wrap; gap: 40px; margin-bottom: 40px; }
+  img { width: 160px; height: 120px; display: block; }
+</style>
+<div class="results">
+  <div class="result"><a id="o1" href="gallery-og.html?g=1"><img src="/test-images/photo-200x150.jpg?g1"></a></div>
+  <div class="result"><a id="o2" href="gallery-og.html?g=2"><img src="/test-images/photo-200x150.jpg?g2"></a></div>
+  <div class="result"><a id="o3" href="gallery-og.html?g=3"><img src="/test-images/photo-200x150.jpg?g3"></a></div>
+  <div class="result"><a id="o4" href="gallery-og.html?g=4"><img src="/test-images/photo-200x150.jpg?g4"></a></div>
+  <div class="result"><a id="o5" href="gallery-og.html?g=5"><img src="/test-images/photo-200x150.jpg?g5"></a></div>
+  <div class="result"><a id="o6" href="gallery-og.html?g=6"><img src="/test-images/photo-200x150.jpg?g6"></a></div>
+  <div class="result"><a id="o7" href="gallery-og.html?g=7"><img src="/test-images/photo-200x150.jpg?g7"></a></div>
+  <div class="result"><a id="o8" href="gallery-og.html?g=8"><img src="/test-images/photo-200x150.jpg?g8"></a></div>
+</div>
+<script>
+  if (!localStorage.getItem('hoverZoomSettings'))
+    localStorage.setItem('hoverZoomSettings', JSON.stringify({ debug: true }));
+  var GM_getValue = function (key, dflt) {
+    var v = localStorage.getItem(key);
+    return v === null ? dflt : v;
+  };
+  var GM_setValue = function (key, val) { localStorage.setItem(key, val); };
+  var GM_addValueChangeListener = function () {};
+  var GM_listValues = function () { return Object.keys(localStorage); };
+  var GM_deleteValue = function (key) { localStorage.removeItem(key); };
+  window.__saved = [];      // the download queue's saves, instead of files
+  window.__fail = null;     // a RegExp: saves whose URL matches it fail
+  var GM_download = function (d) { setTimeout(function () {
+    if (window.__fail && window.__fail.test(d.url)) { if (d.onerror) d.onerror({ error: 'not_succeeded' }); return; }
+    window.__saved.push(d.url); if (d.onload) d.onload(); }, 150); };
+  window.__xhr = [];        // GM_xmlhttpRequest calls: {url, range}; whole-file GETs are what a second download would be
+  var GM_xmlhttpRequest = function (o) {
+    var h = o.headers || {}, range = h.Range || h.range || '';
+    window.__xhr.push({ url: o.url, range: range });
+    fetch(o.url, { method: o.method || 'GET', headers: h }).then(function (r) {
+      var hs = ''; r.headers.forEach(function (v, k) { hs += k + ': ' + v + '\r\n'; });
+      var body = o.responseType === 'blob' ? r.blob() : o.responseType === 'arraybuffer' ? r.arrayBuffer() : r.text();
+      return body.then(function (b) {
+        if (o.onload) o.onload({ status: r.status, statusText: r.statusText, responseHeaders: hs, finalUrl: r.url,
+          response: b, responseText: typeof b === 'string' ? b : '' });
+      });
+    }, function (e) { if (o.onerror) o.onerror({ error: String(e) }); });
+    return { abort: function () {} };
+  };
+  var GM_registerMenuCommand = function () { return 'x'; };
+  var GM_unregisterMenuCommand = function () {};
+</script>
+<script src="../Hover-Zoom.user.js"></script>

@@ -1,0 +1,29 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta property="og:image" content="/test-images/photo.jpg">
+<title>Gallery whose og is a cell</title>
+<!-- door-og.html links it as ?g=N. og:image = the first cell's full file. -->
+<style>body{margin:0;background:#1e1e2e} .grid img{width:200px;height:150px;margin:6px}</style>
+<div class="grid">
+  <div class="tile"><a href="/test-images/photo.jpg"><img src="/test-images/photo-200x150.jpg"></a></div>
+  <div class="tile"><a href="/many/og-2.jpg"><img src="/many/og-2.jpg"></a></div>
+  <div class="tile"><a href="/many/og-3.jpg"><img src="/many/og-3.jpg"></a></div>
+  <div class="tile"><a href="/many/og-4.jpg"><img src="/many/og-4.jpg"></a></div>
+  <div class="tile"><a href="/many/og-5.jpg"><img src="/many/og-5.jpg"></a></div>
+  <div class="tile"><a href="/many/og-6.jpg"><img src="/many/og-6.jpg"></a></div>
+  <div class="tile"><a href="/many/og-7.jpg"><img src="/many/og-7.jpg"></a></div>
+  <div class="tile"><a href="/many/og-8.jpg"><img src="/many/og-8.jpg"></a></div>
+</div>
+<script>
+  var GM_getValue = function (key, dflt) {
+    var v = localStorage.getItem(key);
+    return v === null ? dflt : v;
+  };
+  var GM_setValue = function (key, val) { localStorage.setItem(key, val); };
+  var GM_addValueChangeListener = function () {};
+  var GM_listValues = function () { return Object.keys(localStorage); };
+  var GM_deleteValue = function (key) { localStorage.removeItem(key); };
+  var GM_registerMenuCommand = function () { return 'x'; };
+  var GM_unregisterMenuCommand = function () {};
+</script>
+<script src="../Hover-Zoom.user.js"></script>

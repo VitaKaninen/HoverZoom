@@ -1003,7 +1003,11 @@ the link is an image file; door = HTML fetched, no bigger copy.
   stem (smaller, so the size test is what calls it a door); posts are script-built and **unlinked**
   (no link = leaf).
 - Refused by the Browser pane ("safety restrictions"): pornpics.com, porntrex.com,
-  xmoviesforyou.com — needs the user's console snippet.
+  xmoviesforyou.com — needs the user's console snippet. (Chrome refuses xmoviesforyou too.)
+- xmoviesforyou.com `/pictures` → `/pictures/<slug>` (user's snippet 2026-11-19): a grid of
+  `t/0001.webp` → `0001.webp`, and **og:image = the first cell's full file**, so the cover read as a
+  leaf. v0.369.0: `pageMediaFrom` drops og when it is in `gridMedia` (same rule as the body).
+  Fixture `test-pages/door-og.html` → `gallery-og.html` (old code: no door learned; new: door rule).
 - sexygirlspics.com `/` (category tiles) → `/young/` (gallery list) → `/pics/NAME-ID/` (~26 `/460/`
   thumbs, each linking a `/1280/` file; the listing's cover is not among them) → doors, then leaves.
 - Open: a leaf whose viewer is script-built has no bigger copy in HTML, so it reads as a door and
