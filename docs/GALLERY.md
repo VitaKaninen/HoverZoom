@@ -544,8 +544,9 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   (nsfw.xxx cards hold the profile avatar too). Corners: `galMarkPlace` lays the saved disc (top-left
   first) and the tick (top-right first) out together with `galCorners` (pure, in `test-resolver.js`):
   first corner clear of page elements and earlier marks, else beside an earlier mark, else least
-  covered. Page elements = `galMarkBlockers`, read from the card's tree (link + up to 2 ancestors no
-  bigger than 2x the picture), not hit-tested: `elementsFromPoint` failed off screen (tick drawn on
+  covered. Page elements = `galMarkBlockers`, read from the card's tree (link + up to 4 ancestors whose
+  *shown* box, `galShownRect`, is no bigger than 2x the picture: a slider strip is N slides wide but
+  shows one; nsfw.xxx slider cards keep their ↗ button 3 levels up), not hit-tested: `elementsFromPoint` failed off screen (tick drawn on
   the badge, moved after scrolling), under the link's `::before` overlay, and for `pointer-events:none`.
   nsfw.xxx: badge top-right, name bar across the bottom, so a saved card shows disc and tick side by
   side top-left (a fixed top-left disc pushed the tick onto the badge). Re-derived when any `<img>` loads (masonry relayouts move cards). `galMarkRect` clips the picture by

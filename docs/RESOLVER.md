@@ -1032,6 +1032,17 @@ Reported upstream and still open: [#395](https://github.com/extesy/hoverzoom/iss
 The repo is active but effort goes to per-site plugins — 399 of them in `plugins/`; the generic
 path has been touched twice ever, both times in 2021.
 
+## A site's own viewer lookup · `siteLookup` · v0.375.0
+
+sxypix.com gallery thumbnails (`x.sxypix.com/pixi/<token>/<exp>/s/…/<stem>.jpg`) have no link, and every
+size has its own signed token, so no URL rewrite can reach the `/n/` (800 px jpg) or `/o/` original
+(`pixiw`, `.webp`, measured 1600–2008 px). The site's click handler POSTs `x, pid, aid, ghash, width` (from
+`.gallgrid`'s data attributes; `width` changes nothing) to `/php/gall.php`; the JSON's `r` holds every
+picture's `data-src` for both, keyed by the thumbnail's stem. `siteLookup` runs it once per gallery
+(`pageCache`) and hands the URLs to the linked-page branch of `resolve()` as `page.body` (same stem =
+named, largest wins). `data-ow` under-reports (525 for a 1600 file): never trust it over the probe.
+pemsrv.com on that site is an ad network (`popunder1000.js`), not an image host.
+
 ## Known limits
 
 - HZ+'s 398 plugins were classified in v0.86.0 — **173 are pure URL rewrites, 144 are jQuery
