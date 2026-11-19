@@ -1,8 +1,8 @@
 <!doctype html>
 <meta charset="utf-8">
-<meta property="og:image" content="/test-images/photo.jpg">
+<meta property="og:image" content="http://127.0.0.1:8899/test-images/photo.jpg">
 <title>Gallery whose og is a cell</title>
-<!-- door-og.html links it as ?g=N. og:image = the first cell's full file. -->
+<!-- door-og.html links it as ?g=N. og:image = the first cell's full file on another host (a CDN alias). -->
 <style>body{margin:0;background:#1e1e2e} .grid img{width:200px;height:150px;margin:6px}</style>
 <div class="grid">
   <div class="tile"><a href="/test-images/photo.jpg"><img src="/test-images/photo-200x150.jpg"></a></div>

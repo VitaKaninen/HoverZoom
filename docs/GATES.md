@@ -1006,7 +1006,9 @@ the link is an image file; door = HTML fetched, no bigger copy.
   xmoviesforyou.com — needs the user's console snippet. (Chrome refuses xmoviesforyou too.)
 - xmoviesforyou.com `/pictures` → `/pictures/<slug>` (user's snippet 2026-11-19): a grid of
   `t/0001.webp` → `0001.webp`, and **og:image = the first cell's full file**, so the cover read as a
-  leaf. v0.369.0: `pageMediaFrom` drops og when it is in `gridMedia` (same rule as the body).
+  leaf. v0.369.0: `pageMediaFrom` drops og when it is in `gridMedia` (same rule as the body);
+  v0.370.0 compares path + query only (og may name another CDN host). User: v0.369.0 still failed
+  live, cause unconfirmed — the host guess is unverified on the site; the fixture's og is on 127.0.0.1.
   Fixture `test-pages/door-og.html` → `gallery-og.html` (old code: no door learned; new: door rule).
 - sexygirlspics.com `/` (category tiles) → `/young/` (gallery list) → `/pics/NAME-ID/` (~26 `/460/`
   thumbs, each linking a `/1280/` file; the listing's cover is not among them) → doors, then leaves.
