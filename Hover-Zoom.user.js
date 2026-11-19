@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.367.0
+// @version      0.368.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -2029,7 +2029,46 @@
     async function fetchPageMedia(pageUrl) {
         const r = await pageText(pageUrl.href).p;
         if (!r.text) return null;
-        return pageMediaFrom(new DOMParser().parseFromString(r.text, 'text/html'), pageUrl);
+        const m = pageMediaFrom(new DOMParser().parseFromString(r.text, 'text/html'), pageUrl);
+        if (m) m.lists = pageUrlLists(r.text, pageUrl.href);
+        return m;
+    }
+
+    // Every list of 2+ picture URLs written out in a page's text (its script data included), in page order.
+    function pageUrlLists(text, base) {
+        const out = [], t = String(text).split('\\u002F').join('/').split('\\/').join('/');
+        const re = /\[\s*("(?:[^"\\\]]|\\.)*"(?:\s*,\s*"(?:[^"\\\]]|\\.)*")+)\s*\]/g;
+        let m;
+        while ((m = re.exec(t)) && out.length < 400) {
+            const items = m[1].split(/"\s*,\s*"/).map(function (s) { return s.replace(/^"|"$/g, ''); });
+            if (items.length > 500) continue;
+            const urls = [];
+            for (const s of items) {
+                let u = '';
+                try { u = new URL(s, base).href; } catch (e) { u = ''; }
+                if (!u || !looksLikeImage(u)) { urls.length = 0; break; }
+                urls.push(u);
+            }
+            if (urls.length >= 2) out.push({ at: m.index, urls: urls });
+        }
+        return out;
+    }
+
+    // The thumbnail's partner in the page's parallel list (thumbnails[i] -> urls[i]), the nearest list of the same length; '' when none.
+    function pairedUrl(page, thumb) {
+        const lists = page && page.lists;
+        if (!lists || !thumb) return '';
+        for (const l of lists) {
+            const at = l.urls.reduce(function (a, u, i) { return sameStem(u, thumb) ? a.concat(i) : a; }, []);
+            if (at.length !== 1) continue;
+            let best = null;
+            lists.forEach(function (o) {
+                if (o === l || o.urls.length !== l.urls.length || sameStem(o.urls[at[0]], thumb)) return;
+                if (!best || Math.abs(o.at - l.at) < Math.abs(best.at - l.at)) best = o;
+            });
+            if (best) return best.urls[at[0]];
+        }
+        return '';
     }
 
     // The same-origin page this picture links to, worth fetching for its media; null when none.
@@ -2058,9 +2097,15 @@
     function cardLinks(el) {
         if (!el || !el.parentElement) return [];
         const at = baseOf(el), doc = el.ownerDocument;
-        const like = function (n) { return n !== el && n.className === el.className; };
+        const cls = function (n) { return Array.prototype.filter.call(n.classList, function (c) { return !/^(active|loaded|lazy\w*|current|selected|show\w*|visible|hidden)$/i.test(c); }).sort().join(' '); };
+        const mine = cls(el);
+        const like = function (n) { return n !== el && cls(n) === mine; };
+        let slides = -1;        // pictures like it in a linkless box below the card: one card's slider, not the next card
         for (let e = el.parentElement, i = 0; e && i < 4 && e !== doc.body; e = e.parentElement, i++) {
-            if (Array.prototype.some.call(e.getElementsByTagName(el.tagName), like)) return [];
+            const n = Array.prototype.filter.call(e.getElementsByTagName(el.tagName), like).length;
+            const hasLink = !!e.querySelector('a[href]');
+            if (n && slides < 0 && !hasLink) slides = n;
+            if (n && n !== slides) return [];
             const hrefs = new Set();
             e.querySelectorAll('a[href]').forEach(function (a) {
                 let u;
@@ -2069,7 +2114,7 @@
                 if (/^https?:$/.test(u.protocol) && u.origin === location.origin && u.href !== at.split('#')[0] &&
                     !looksLikeImage(u.href) && !isVideoUrl(u.href)) hrefs.add(u.href);
             });
-            if (hrefs.size) return Array.from(hrefs).slice(0, 4);
+            if (hrefs.size) return slides > 0 && hrefs.size > 3 ? [] : Array.from(hrefs).slice(0, 4);
         }
         return [];
     }
@@ -2135,10 +2180,12 @@
             lfetched = true;
             lpage = page;
             const tries = [];
+            const pair = pairedUrl(page, shown);
+            if (pair) tries.push({ url: pair, named: false, from: 'the page the thumbnail links to (its partner in the page\'s list)' });
             // og:image is the share card on some sites, and that is the thumbnail itself.
             // A matching filename proves identity, so it outranks the shape test here too — the
             // thumbnail is often a square crop of a portrait original. See v0.58.0 and v0.90.0.
-            if (page.declared && page.declared.url !== shown)
+            if (page.declared && page.declared.url !== shown && (!pair || page.declared.url === pair))
                 tries.push({ url: page.declared.url,
                     named: !!(shown && sameStem(page.declared.url, shown)),
                     from: 'the page the thumbnail links to (og: media)' });
@@ -13928,7 +13975,9 @@
         if (!page || tok.cancelled) return null;
         const nat = { w: img.naturalWidth || 0, h: img.naturalHeight || 0 };
         const tries = [];
-        if (page.declared) tries.push({ url: page.declared.url, named: sameStem(page.declared.url, item.thumb) });
+        const pair = pairedUrl(page, item.thumb);
+        if (pair) tries.push({ url: pair, named: false });
+        if (page.declared && (!pair || page.declared.url === pair)) tries.push({ url: page.declared.url, named: sameStem(page.declared.url, item.thumb) });
         page.body.forEach(function (x) { if (x !== item.thumb && sameStem(x, item.thumb)) tries.push({ url: x, named: true }); });
         let best = null;
         for (const t of tries.slice(0, LINKED_TRIES)) {

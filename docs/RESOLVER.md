@@ -246,6 +246,21 @@ fetches it like an own link, but **door learning stays on own links only** (`own
 comments or poster link would otherwise teach a door and stop previews. The gallery picks among
 several by path shape (`galLinksPick`, GALLERY.md).
 
+**Slider cards (v0.368.0).** A multi-picture post's card holds all its slides as `<img>`s of one
+class; that used to read as "the next card", so only the slide with an extra state class (`active`)
+got the link. Now state classes (`active`, `loaded`, `lazy*`, …) are ignored when comparing, and
+pictures like it in a *linkless* box below the card are its slides: the climb stops only when the
+count grows. A slider box whose card has > 3 links gives none (a grid, not a card).
+
+**Paired lists (v0.368.0).** A slide's thumbnail and its original share no file name (nsfw.xxx:
+`gallery/300/<a>.jpg` vs `gallery/<b>.jpg`), and `og:image` is slide 1's original, so it is wrong
+for every other slide. `pageUrlLists()` reads every quoted list of picture URLs from the linked
+page's text (Nuxt data included); `pairedUrl()` finds the thumbnail's index in one list and takes
+the same index of the nearest list of equal length. When a pair exists, og is tried only if it IS
+the pair. Shape test still applies (`named: false`). Verified live on nsfw.xxx /post/45225471.
+Open: hovering a slider card directly on a profile page still gets no link when the card also links
+its poster (`cardLink` wants exactly one); the gallery picks by `galLinksPick`.
+
 ### A matching filename outranks the shape test · v0.58.0
 
 `angryduck.cc` is a grid of clips where **some posts previewed and some did not, with byte-identical

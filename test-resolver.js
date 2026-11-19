@@ -1397,6 +1397,16 @@ const galPH = function (min) {
     eq('pages: page of index', [P.pageOfIndex(gs, 0), P.pageOfIndex(gs, 13), P.pageOfIndex(gs, 35)], [0, 1, 2]);
     eq('pages: a single page is never worth a row', P.pagesWorth(30, 1), false);
 }
+{   // nsfw.xxx multi-picture post: thumbnails[i] pairs with urls[i]; the file names share nothing
+    const s = src.indexOf('    // Every list of 2+ picture URLs'), e = src.indexOf('    // The same-origin page this picture links to');
+    const L = new Function('looksLikeImage', 'sameStem', src.slice(s, e) + '\nreturn {pageUrlLists, pairedUrl};')(looksLikeImage, sameStem);
+    const B = 'https:' + '\\u002F\\u002Fcdn31.nsfw.xxx\\u002Fgallery\\u002F';
+    const text = 'post:{data:{urls:["' + B + 'AAA1.jpg","' + B + 'BBB2.jpg","' + B + 'CCC3.jpg"],thumbnails:["' + B + '300' + '\\u002F' + 'xx1.jpg","' + B + '300' + '\\u002F' + 'yy2.jpg","' + B + '300' + '\\u002F' + 'zz3.jpg"]}},related:{urls:["' + B + 'R1.jpg","' + B + 'R2.jpg","' + B + 'R3.jpg"]}';
+    const page = { lists: L.pageUrlLists(text, 'https://nsfw.xxx/post/1') };
+    eq('paired lists: three lists read from script data', page.lists.length, 3);
+    eq('paired lists: the 2nd thumbnail (480 copy) pairs with the 2nd original', L.pairedUrl(page, 'https://cdn31.nsfw.xxx/gallery/480/yy2.jpg'), 'https://cdn31.nsfw.xxx/gallery/BBB2.jpg');
+    eq('paired lists: a picture in no list pairs with nothing', L.pairedUrl(page, 'https://cdn31.nsfw.xxx/gallery/480/qq.jpg'), '');
+}
 {   // a second top-level function of one name silently replaces the first (v0.365.0's galKept broke kept gallery lists)
     const seen = {}, dup = [];
     for (const m of src.matchAll(/^    (?:async )?function (\w+)\(/gm)) { if (seen[m[1]]) dup.push(m[1]); seen[m[1]] = 1; }
