@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.376.0
+// @version      0.377.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -2158,6 +2158,7 @@
         if (!/(^|\.)sxypix\.com$/.test(pageHost()) || !/\/\/x\.sxypix\.com\/pixiw?\/[^/]+\/\d+\/s\//.test(shown || '')) return null;
         const sel = '.gallgrid[data-aid][data-ghash]';
         if (!pageHref) {
+            if (!el.ownerDocument) return null;
             const g = el.ownerDocument.querySelector(sel);
             return g ? sxyGall(g, (el.closest('[data-photoid]') || g).getAttribute('data-photoid') || '') : null;
         }
@@ -14072,7 +14073,7 @@
         const linked = await galLinkedHit(item, img, tok);
         if (linked) return (item.hit = linked);
         const look = siteLookup(img, item.thumb, item.base);
-        const viewer = look ? await galBestOf(await look, item, img, tok) : null;
+        const viewer = look ? await galPageBest(await look, item, img, tok) : null;
         if (viewer) return (item.hit = viewer);
         for (let i = 0; i < list.length; i++) {
             if (tok.cancelled) return null;
@@ -14090,13 +14091,13 @@
         try { u = item.link ? new URL(item.link) : null; } catch (e) { u = null; }
         if (!u || u.origin !== location.origin || looksLikeImage(u.href) || isVideoUrl(u.href)) return null;
         const page = await linkedMedia(u);
-        const best = await galBestOf(page, item, img, tok);
+        const best = await galPageBest(page, item, img, tok);
         dbg('gallery preview: the picture\'s own page', { link: u.href, declared: page && page.declared && page.declared.url, hit: best && best.url });
         return best;
     }
 
     // The biggest copy a page names for a gallery picture (its pair, its declared one, one of the same name), larger than the thumbnail.
-    async function galBestOf(page, item, img, tok) {
+    async function galPageBest(page, item, img, tok) {
         if (!page || tok.cancelled) return null;
         const nat = { w: img.naturalWidth || 0, h: img.naturalHeight || 0 };
         const tries = [];
