@@ -955,6 +955,22 @@ name (girlstop `psto.php` rules still match).
 site (`onwardMedia` → `linksOnward`) → `areaLearnSure` makes the rule now (pure, tested); `doorScan` stops reading that
 grid. A URL seen 3+ times there is a placeholder (pornpics' lazy `1px.png`) and never counts. Home → category →
 gallery: the category's copy links to a gallery page, the gallery's copy to the `/1280/` file (an image link: not onward).
+**Card pictures are doors too (v0.371.0–v0.374.0, user 2026-11-19, nsfw.xxx).** Old rule: only an own link
+teaches a door (a card's poster/comments link would teach one and stop previews). Answered by `cardLinks`
+dropping any link that wraps another picture (the poster's avatar), so a card left with one link is its post's.
+`doorLink(el)` = own link, else a linkless page picture's `cardLink`; used by `doorReason`, `doorHover`,
+`doorScan`, `galLinkOf`. `doorImgs(root)` replaces the `a[href] img` scans (chips, marks, preload, next
+doors, scan): linked imgs plus, per card link, the slide with most width inside its clipping ancestor (a
+slider's hidden slides are full size beside the box). `resolve()` learns from card links; a `trusted` copy
+whose path is in the linked page's `gridPaths` is a gallery cell → door, not leaf (nsfw.xxx posts: 16
+thumbs → their full `.jpg`, og = the first). **Kind on a script-built page** (`/user/NAME` HTML holds 1
+picture): `galKindRead` falls back to `galLoad`'s rendered read. `galLeafAt` also counts the page's
+declared og (not a grid cell) when its aspect is within 15 % of the thumb's: a single-picture post is a leaf.
+**Per-door kind:** the area kind is read from its first door (nsfw.xxx home: `/user/miolenamio`, single
+pictures → gallery), but creators differ — `galDoorKindRead` judges a hovered door on its own
+(`galDoorKinds`, page-lived) and `galResultsAt` (area or door says results) gates chip, preload, peek.
+Verified in Chrome by injecting the pushed commit: home → sammie-daniels `results`, miolenamio `gallery`;
+`/user/sammie-daniels` learned `img.to-post>div.gallery-container--slider…`, 17 chips on screen with counts.
 **Fixture trap:** `photo-200x150.jpg` is upgraded to a 1600 px `photo.jpg` by a URL rule — a leaf;
 door fixtures use `mural.jpg`.
 
@@ -1001,7 +1017,7 @@ the link is an image file; door = HTML fetched, no bigger copy.
 - girlstop.info `/` (40-grid) → `psto.php?id=` (41-grid, cover thumb only) → `.avif` files direct.
 - nsfw.xxx `/` (`a.user` masonry) → `/user/NAME`: Nuxt, HTML = logo + 180 px avatar of the same
   stem (smaller, so the size test is what calls it a door); posts are script-built and **unlinked**
-  (no link = leaf).
+  (no link = leaf) — since v0.371.0 their card link counts; a multi-picture post is a gallery.
 - Refused by the Browser pane ("safety restrictions"): pornpics.com, porntrex.com,
   xmoviesforyou.com — needs the user's console snippet. (Chrome refuses xmoviesforyou too.)
 - xmoviesforyou.com `/pictures` → `/pictures/<slug>` (user's snippet 2026-11-19): a grid of

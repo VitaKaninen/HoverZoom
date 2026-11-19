@@ -258,8 +258,8 @@ for every other slide. `pageUrlLists()` reads every quoted list of picture URLs 
 page's text (Nuxt data included); `pairedUrl()` finds the thumbnail's index in one list and takes
 the same index of the nearest list of equal length. When a pair exists, og is tried only if it IS
 the pair. Shape test still applies (`named: false`). Verified live on nsfw.xxx /post/45225471.
-Open: hovering a slider card directly on a profile page still gets no link when the card also links
-its poster (`cardLink` wants exactly one); the gallery picks by `galLinksPick`.
+A link wrapping another picture (the poster's avatar) is left out (v0.371.0), so such a card has one
+link; card pictures are doors too — GATES.md P17 "Card pictures are doors too".
 
 ### A matching filename outranks the shape test · v0.58.0
 
