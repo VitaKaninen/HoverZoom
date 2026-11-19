@@ -1040,7 +1040,9 @@ size has its own signed token, so no URL rewrite can reach the `/n/` (800 px jpg
 `.gallgrid`'s data attributes; `width` changes nothing) to `/php/gall.php`; the JSON's `r` holds every
 picture's `data-src` for both, keyed by the thumbnail's stem. `siteLookup` runs it once per gallery
 (`pageCache`) and hands the URLs to the linked-page branch of `resolve()` as `page.body` (same stem =
-named, largest wins). `data-ow` under-reports (525 for a 1600 file): never trust it over the probe.
+named, largest wins). Gallery-mode cells never reach `resolve()`: `galResolve` calls `siteLookup(img, thumb,
+item.base)`, which reads the ids from the fetched gallery page (`pageText`), then `galPageBest` (v0.376.0–
+v0.377.0). `data-ow` under-reports (525 for a 1600 file): never trust it over the probe.
 pemsrv.com on that site is an ad network (`popunder1000.js`), not an image host.
 
 ## Known limits
