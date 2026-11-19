@@ -971,6 +971,12 @@ pictures → gallery), but creators differ — `galDoorKindRead` judges a hovere
 (`galDoorKinds`, page-lived) and `galResultsAt` (area or door says results) gates chip, preload, peek.
 Verified in Chrome by injecting the pushed commit: home → sammie-daniels `results`, miolenamio `gallery`;
 `/user/sammie-daniels` learned `img.to-post>div.gallery-container--slider…`, 17 chips on screen with counts.
+**Viewer pages that carry the whole gallery (v0.378.0, pictoa.com):** a cover links to one photo page (`#player` =
+the full `s2` file, og = the same) whose strip holds every picture of the gallery. The `trusted` copy's path is a
+strip cell → door. On that photo page the strip's own thumbnails link to sibling photo pages with the same strip;
+`gridShownHere` (≥ half of the linked grid's pictures are on this page too) keeps them leaves. og is dropped as a grid
+cell only when the page's body (outside the grid) does not show that exact URL — else lazy covers (`src` = `1.png`,
+no stem to match the body) had no candidate and learned a false `linkAreas` rule.
 **Fixture trap:** `photo-200x150.jpg` is upgraded to a 1600 px `photo.jpg` by a URL rule — a leaf;
 door fixtures use `mural.jpg`.
 

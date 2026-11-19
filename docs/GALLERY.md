@@ -81,6 +81,10 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   pictures, unless most of its links share the read page's first path segment (a "more like this" strip:
   20 `/gallery/` cards at the foot of an eporner `/gallery/` page) and another group holds ≥ `GAL_OWN_MIN` 4 —
   then that one. Without it a 16-picture gallery read as its strip → `results` → no chips (eporner /search-photos/spreading/).
+  **State classes don't split a group (v0.378.0):** `galMergeAlike` joins groups whose chains are `chainsAlike`
+  (same tags, one's classes ⊆ the other's at every level) when the smaller lies inside the bigger's own container
+  (`commonAncestor`), then sorts by document order. pictoa's photo page strip came as 3 groups — the current cell
+  (`a.img-sel`), page 1 (`div.lasy`), pages 2–4 — so the grid left out the very picture its cover shows.
 - **Door hover** (`doorHover(el, x, y)` → `galDoorHover`): the event's x, y go into `galPt` first —
   mouseover lands before the mousemove that sets it, and a cached `galKindOf()` would test a stale
   point and skip the chip. `galKindOf()` settles once per area per page, unknown included (nsfw.xxx

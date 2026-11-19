@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.377.0
+// @version      0.378.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -1961,8 +1961,9 @@
         const grid = gridMedia(doc, pageUrl.href);
         const pathOf = function (u) { try { const x = new URL(u); return x.pathname + x.search; } catch (e) { return u; } };
         const gridPaths = new Set(Array.from(grid).map(pathOf));        // one file, any CDN host
-        if (og && gridPaths.has(pathOf(og.url))) { dbg('linked page: its og:image is one of its own grid cells, not the page\'s picture', og.url); og = null; }
-        return { declared: og, body: pageBodyMedia(doc, pageUrl).filter(function (u) { return !grid.has(u); }), onward: onwardMedia(doc, pageUrl), gridPaths: gridPaths };
+        const body = pageBodyMedia(doc, pageUrl).filter(function (u) { return !grid.has(u); });
+        if (og && gridPaths.has(pathOf(og.url)) && body.indexOf(og.url) < 0) { dbg('linked page: its og:image is one of its own grid cells, not the page\'s picture', og.url); og = null; }
+        return { declared: og, body: body, onward: onwardMedia(doc, pageUrl), gridPaths: gridPaths };
     }
 
     const ONWARD_ATTRS = ['src', 'data-src', 'data-original', 'data-lazy-src'];
@@ -1992,6 +1993,20 @@
         ONWARD_ATTRS.forEach(function (k) { const v = el.getAttribute && el.getAttribute(k); if (v) { try { urls.add(new URL(v, b).href); } catch (e) { /* not a URL */ } } });
         for (const u of urls) { const n = u && page.onward.get(u); if (n && n < 3) return true; }
         return false;
+    }
+
+    // Most of a linked page's grid is on this page too: the hovered picture is a cell of that same gallery (pictoa's strip).
+    function gridShownHere(el, gridPaths) {
+        const doc = el.ownerDocument || document, here = new Set();
+        doc.querySelectorAll('img').forEach(function (n) {
+            ONWARD_ATTRS.forEach(function (k) {
+                const v = n.getAttribute(k);
+                if (v && !/^(data|blob):/.test(v)) { try { const x = new URL(v, baseOf(n)); here.add(x.pathname + x.search); } catch (e) { /* not a URL */ } }
+            });
+        });
+        let n = 0, pics = 0;
+        gridPaths.forEach(function (p) { if (looksLikeImage(p)) { pics++; if (here.has(p)) n++; } });
+        return pics >= GAL_HTML_ENOUGH && n * 2 >= pics;
     }
 
     // The URLs of a fetched page's grid cells (thumbnail and link): a copy there is one of many, not the page's picture. See P17.
@@ -2350,7 +2365,11 @@
             else areaApply('linkAreas', areaLearn, lchain, lpath, lt.href);
         }
         const tPath = function (u) { try { const x = new URL(u); return x.pathname + x.search; } catch (e) { return u; } };
-        const inGrid = !!(trusted && lpage && lpage.gridPaths && lpage.gridPaths.has(tPath(trusted.url)));
+        let inGrid = !!(trusted && lpage && lpage.gridPaths && lpage.gridPaths.has(tPath(trusted.url)));
+        if (inGrid && gridShownHere(el, lpage.gridPaths)) {
+            dbg('leaf: the linked page\'s grid is the one this page shows, so this is one of its cells', { link: lt.href });
+            inGrid = false;
+        }
         if (inGrid) dbg('door: the bigger copy is one of the linked page\'s own grid of pictures, so it is a gallery', { link: lt.href, copy: trusted.url });
         if (lt && full && token.door && !token.cancelled) doorLearn(doorVerdict({
             linked: lfetched ? 'fetched' : lskip ? 'skipped' : null, trusted: inGrid ? null : trusted,
@@ -6783,6 +6802,20 @@
             if (g.length >= GAL_OWN_MIN && !sib(g) && (own < 0 || g.length > groups[own].length)) own = i;
         });
         return best >= 0 && own >= 0 && own !== best && sib(groups[best]) ? own : best;
+    }
+
+    // Two chains are one shape with state classes added (selected, lazy-loaded): same tags, one's classes within the other's at every level.
+    function chainsAlike(a, b) {
+        const pa = a.split('>'), pb = b.split('>');
+        if (pa.length !== pb.length) return false;
+        for (let i = 0; i < pa.length; i++) {
+            const x = pa[i].split('.'), y = pb[i].split('.');
+            if (x[0] !== y[0]) return false;
+            const xs = x.slice(1), ys = y.slice(1);
+            const sub = xs.length <= ys.length ? [xs, ys] : [ys, xs];
+            if (!sub[0].every(function (c) { return sub[1].indexOf(c) >= 0; })) return false;
+        }
+        return true;
     }
 
     // The entry for a host: its own, else the most specific user entry covering it.
@@ -11830,6 +11863,34 @@
     }
 
     // The fetched page's biggest group of like-placed pictures, as [{el, thumb}].
+    // Deepest element holding every node.
+    function commonAncestor(nodes) {
+        let a = nodes[0] && nodes[0].parentElement;
+        while (a && !nodes.every(function (n) { return a.contains(n); })) a = a.parentElement;
+        return a;
+    }
+
+    // One strip split by state classes (pictoa: the selected cell, the lazy first page) is one group, in page order.
+    function galMergeAlike(groups) {
+        const keys = Array.from(groups.keys()).sort(function (a, b) { return groups.get(b).length - groups.get(a).length; });
+        const roots = [];
+        keys.forEach(function (k) {
+            const g = groups.get(k);
+            const r = roots.find(function (r) {
+                if (r.cells.length < 2 || !chainsAlike(r.key, k)) return false;
+                const box = r.box || (r.box = commonAncestor(r.cells.map(function (x) { return x.el; })));
+                return !!box && g.every(function (x) { return box.contains(x.el); });
+            });
+            if (!r) { roots.push({ key: k, cells: g.slice() }); return; }
+            g.forEach(function (x) { if (!r.cells.some(function (y) { return y.thumb === x.thumb; })) r.cells.push(x); });
+            r.merged = true;
+        });
+        return roots.map(function (r) {
+            if (r.merged) r.cells.sort(function (a, b) { return a.el.compareDocumentPosition(b.el) & 2 ? 1 : -1; });
+            return r.cells;
+        });
+    }
+
     function galGroup(doc, href, quiet) {
         const groups = new Map();
         doc.querySelectorAll('img').forEach(function (n) {
@@ -11845,7 +11906,7 @@
             const g = groups.get(k);
             if (!g.some(function (x) { return x.thumb === thumb; })) g.push({ el: n, thumb: thumb });
         });
-        const list = Array.from(groups.values());
+        const list = galMergeAlike(groups);
         const pick = galChoose(list.map(function (g) {
             return g.map(function (x) {
                 const a = x.el.closest('a[href]');

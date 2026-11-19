@@ -878,7 +878,7 @@ const vdStart = src.indexOf('    const VDELAY_SAMPLES');
 const vdEnd = src.indexOf('    // The entry for a host');
 if (vdStart < 0 || vdEnd < 0) { console.error('vdLearn markers not found'); process.exit(1); }
 const vd = new Function(src.slice(vdStart, vdEnd) +
-    NL + 'return {vdLearn, vdRound, vdRuleFor, chainPrefix, pathPrefix, chainMatches, pathMatches, sharedHead, vdWaitOf, vdForget, vdWorked, areaLearn, areaLearnSure, areaTouch, areaAge, areaDrop, doorVerdict, doorKindVerdict, doorScanPick, doorChainOf, galChoose, VDELAY_SAMPLES, VDELAY_FORGET};')();
+    NL + 'return {vdLearn, vdRound, vdRuleFor, chainPrefix, pathPrefix, chainMatches, pathMatches, sharedHead, vdWaitOf, vdForget, vdWorked, areaLearn, areaLearnSure, areaTouch, areaAge, areaDrop, doorVerdict, doorKindVerdict, doorScanPick, doorChainOf, galChoose, chainsAlike, VDELAY_SAMPLES, VDELAY_FORGET};')();
 
 eq('vdRound rounds up to 50 ms', vd.vdRound(1001), 1050);
 eq('vdRound never goes under one step', vd.vdRound(10), 250);
@@ -1054,6 +1054,11 @@ eq('gallery group: a results page keeps its gallery cards', vd.galChoose([gl('ga
 eq('gallery group: too few own pictures leaves the strip', vd.galChoose([gl('gallery', 20), gl('photo', 3)], GP), 0);
 eq('gallery group: unlinked pictures count as own', vd.galChoose([gl('gallery', 20), ['', '', '', '', '']], GP), 1);
 eq('gallery group: none', vd.galChoose([], GP), -1);
+const PS = 'div.thumb-nav>div>div>main';   // pictoa's strip: selected and lazy cells carry extra classes
+eq('chains alike: a state class added', vd.chainsAlike('img>a>div.thumb-nav-img>' + PS, 'img>a.img-sel>div.lasy.thumb-nav-img>' + PS), true);
+eq('chains alike: other classes are another shape', vd.chainsAlike('img>a>div.thumb-nav-img>' + PS, 'img>a.gallery-link>div.cover-box>' + PS), false);
+eq('chains alike: other tags', vd.chainsAlike('img>a>div', 'img>a>li'), false);
+eq('chains alike: other depth', vd.chainsAlike('img>a>div', 'img>a'), false);
 let dmix = null;
 ['a', 'b', 'c'].forEach(function (x) { dmix = vd.areaLearn(dmix && dmix.entry, vd.doorChainOf(EP, 'https://e.com/gallery/' + x + '/'), '/pics', 7, 'https://e.com/gallery/' + x + '/'); });
 eq('door chain: three gallery cards make an area', dmix.change, 'learned');
