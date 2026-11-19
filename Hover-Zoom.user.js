@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.371.0
+// @version      0.372.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -11858,6 +11858,22 @@
             if (looksLikeImage(u.href)) k.images++;
             else if (u.origin === location.origin && !went.has(u.href)) { went.add(u.href); pages.push({ u: u, thumb: x.thumb }); }     // a slider's slides share one page
         });
+        if (!doorKindVerdict(k) && k.pics < GAL_HTML_ENOUGH) {       // a script-built page: judge the rendered read the gallery itself uses
+            const items = await galLoad(href);
+            if (Array.isArray(items) && items.length) {
+                galLinksPick(items);
+                k.pics = items.length; k.linked = 0; k.images = 0; pages.length = 0; went.clear();
+                items.forEach(function (it) {
+                    let u;
+                    try { u = it.link ? new URL(it.link) : null; } catch (e) { u = null; }
+                    if (!u || u.href === href.split('#')[0]) return;
+                    k.linked++;
+                    if (looksLikeImage(u.href)) k.images++;
+                    else if (u.origin === location.origin && !went.has(u.href)) { went.add(u.href); pages.push({ u: u, thumb: it.thumb }); }
+                });
+                dbg('door kind: the page is script-built, judged from its rendered read', { href: href, pictures: k.pics, linked: k.linked });
+            }
+        }
         if (!doorKindVerdict(k)) {
             for (const c of pages.slice(0, 2)) {
                 const leaf = await galLeafAt(c.u, c.thumb);
