@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.380.0
+// @version      0.381.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -4519,6 +4519,7 @@
 
     function showViewer(res, pointer) {
         buildViewer();
+        hzRaise();
         stopDecodeWait();
 
         const m = viewportBox();
@@ -12508,30 +12509,69 @@
         return galTop;
     }
 
-    // The clicked picture's own layer, last in <html>: under the preview, over it while the pointer is on the picture (user).
+    // galHost and galFlyHost share the preview's slot in <body>, before docked widgets and the panel: all at z max, tree order puts them over the page.
+    // Order: galHost, galFlyHost at rest, the preview's host, galFlyHost raised.
+    function galSlot(node, overPreview) {
+        const parent = document.body || document.documentElement;
+        const hostIn = !!host && host.parentNode === parent;
+        const flyIn = node !== galFlyHost && !!galFlyHost && galFlyHost.parentNode === parent;
+        let ref;
+        if (hostIn && overPreview) ref = host.nextSibling;
+        else if (hostIn) ref = flyIn && galFlyHost.nextSibling === host ? galFlyHost : host;
+        else if (flyIn) ref = galFlyHost;
+        else ref = Array.prototype.find.call(parent.children, function (c) {
+            return c !== node && (c === panelHost || c.hasAttribute('data-us-dock'));
+        }) || null;
+        if (ref === node || (node.parentNode === parent && node.nextSibling === ref)) return;
+        parent.insertBefore(node, ref);
+    }
+
+    // A page element added after our layers wins the z-max tie: move ours, in order, after the last one (before any docked widget after it).
+    const INERT_TAGS = /^(SCRIPT|STYLE|LINK|META|TEMPLATE|NOSCRIPT)$/;
+    function hzRaise() {
+        const parent = document.body;
+        if (!parent) return;
+        const byOrder = function (a, b) { return a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1; };
+        const mine = [galHost, galFlyHost, host].filter(function (n) { return n && n.parentNode === parent; }).sort(byOrder);
+        if (!mine.length || (vidEl && !vidEl.paused && host && host.contains(vidEl))) return;     // a move would pause the clip
+        const tops = [tw && tw.host, panelHost].filter(function (n) { return n && n.parentNode === parent; }).sort(byOrder);
+        let stray = null;
+        for (let n = mine[0].nextElementSibling; n; n = n.nextElementSibling) {
+            if (mine.indexOf(n) < 0 && tops.indexOf(n) < 0 && !n.hasAttribute('data-us-dock') && !INERT_TAGS.test(n.tagName)) stray = n;
+        }
+        if (!stray) return;
+        let ref = stray.nextElementSibling;
+        while (ref && ref !== panelHost && !ref.hasAttribute('data-us-dock')) ref = ref.nextElementSibling;
+        mine.forEach(function (n) { parent.insertBefore(n, ref); });
+        tops.forEach(function (n) { if (n !== ref && byOrder(n, stray) < 0) parent.insertBefore(n, ref); });     // our widget and panel stay over the preview
+        dbg('our layers moved back over a page element added after them', { after: stray.tagName + (stray.id ? '#' + stray.id : '') });
+    }
+
+    // The clicked picture's own layer: under the preview, over it while the pointer is on the picture (user).
     function galFlyLayer() {
         galLayer();
-        document.documentElement.appendChild(galFlyHost);
+        if (!galHost.isConnected) galSlot(galHost);
+        galSlot(galFlyHost, false);
+        hzRaise();
         return galFlyRootEl;
     }
 
     // Raise the clicked picture over the preview while the pointer is on it or it is being dragged.
     function galFlyZ() {
-        if (!galFlyHost) return;
+        if (!galFlyHost || !galFlyHost.isConnected) return;
         const f = galFly, m = GAL_HD / 2;
         let up = !!galEdit;
         if (!up && f) {
             const r = galFlyRect();     // where it lands, not where its flight is now (a switch measured it at the card: hidden till the pointer moved)
             up = galPt.x >= r.x - m && galPt.x <= r.x + r.w + m && galPt.y >= r.y - m && galPt.y <= r.y + r.h + m;
         }
-        const z = up ? '2147483647' : '2147483646';
-        if (galFlyHost.style.zIndex !== z) galFlyHost.style.zIndex = z;
+        galSlot(galFlyHost, up);
     }
 
     function galLayer() {
         if (galRoot) return galRoot;
         galHost = document.createElement('div');
-        galHost.style.cssText = 'all:initial;position:fixed;inset:0;pointer-events:none;z-index:2147483646';
+        galHost.style.cssText = 'all:initial;position:fixed;inset:0;pointer-events:none;z-index:2147483647';
         galRoot = galHost.attachShadow({ mode: 'open' });
         const st = document.createElement('style');
         st.textContent =
@@ -12628,7 +12668,7 @@
         galTop = galTopHost.attachShadow({ mode: 'open' });
         galTop.appendChild(st.cloneNode(true));
         galFlyHost = document.createElement('div');
-        galFlyHost.style.cssText = 'all:initial;position:fixed;inset:0;pointer-events:none;z-index:2147483646';
+        galFlyHost.style.cssText = 'all:initial;position:fixed;inset:0;pointer-events:none;z-index:2147483647';
         galFlyRootEl = galFlyHost.attachShadow({ mode: 'open' });
         galFlyRootEl.appendChild(st.cloneNode(true));
         // Outside the fading .set: an ancestor below opacity 1 is a backdrop root, so the blur would show nothing mid-fade.
@@ -12725,7 +12765,7 @@
     function galVeil(on) {
         if (!on) { if (galVeilEl) galVeilEl.classList.remove('on'); return; }
         galLayer();
-        if (!galHost.isConnected) document.documentElement.appendChild(galHost);
+        if (!galHost.isConnected) galSlot(galHost);
         galVeilEl.style.clipPath = galBlur.style.clipPath = galClip(galHole);
         void galVeilEl.offsetWidth;
         galVeilEl.classList.add('on');
@@ -13802,7 +13842,7 @@
 
     function galBuild(href, pics) {
         const root = galLayer();
-        if (!galHost.isConnected) document.documentElement.appendChild(galHost);
+        if (!galHost.isConnected) galSlot(galHost);
         const page = galCur && galCur.href === href ? galCur.page : 0;
         if (galCur) galDrop(galCur);
         const set = { href: href, el: document.createElement('div'), shade: document.createElement('div'),
@@ -14143,7 +14183,7 @@
     async function galResolve(img, tok) {
         const item = img.__hzItem, nw = img.naturalWidth || 0;
         const abs = function (v) { try { return new URL(v, item.base).href; } catch (e) { return ''; } };
-        let list = (item.cands || []).slice();
+        let list = (item.cands || []).concat(upgradeCandidates(item.thumb));
         (item.ss || []).forEach(function (v) { list = list.concat(parseSrcset(v).map(abs)); });
         list = list.filter(function (u, i) { return u && list.indexOf(u) === i && !blocked(u); });
         const hitOf = function (u, d) { return { url: u, w: d.w, h: d.h, video: !!d.video, duration: d.duration, display: d.display }; };
@@ -15451,7 +15491,7 @@
     // From the card to the corner; a press on it closes the gallery.
     function galFlyOut(pic, hr, href) {
         galTopRoot();
-        if (!galHost.isConnected) document.documentElement.appendChild(galHost);
+        if (!galHost.isConnected) galSlot(galHost);
         const root = galFlyLayer();     // after galHost: same z at rest, so tree order keeps it over the cells
         const U = galHole, m = galStripM, sh = m.m === 'dock' ? galStripH() : 0, band = m.m === 'in' ? galStripH() : 0;
         const H = { x: U.x, y: m.side === 't' ? U.y + sh : U.y, w: U.w, h: U.h - sh };
@@ -15693,7 +15733,7 @@
     function galPendStart(href, how) {
         galPendClear();
         const root = galLayer();
-        if (!galHost.isConnected) document.documentElement.appendChild(galHost);
+        if (!galHost.isConnected) galSlot(galHost);
         const el = document.createElement('div'), h = galHole;
         el.className = 'pend';
         el.hidden = true;
@@ -15771,7 +15811,7 @@
     // The copyable popup: what this open did, step by step.
     function galDiag(p, why) {
         const root = galLayer();
-        if (!galHost.isConnected) document.documentElement.appendChild(galHost);
+        if (!galHost.isConnected) galSlot(galHost);
         const old = root.querySelector('.diag');
         if (old) old.remove();
         const d = document.createElement('div'), b = document.createElement('b'), ta = document.createElement('textarea');
@@ -15796,6 +15836,7 @@
         d.appendChild(close);
         d.appendChild(copy);
         root.appendChild(d);
+        hzRaise();
         dbg('gallery diagnostics', ta.value);
     }
 

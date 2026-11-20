@@ -139,7 +139,8 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   `galHole` holds, what the rows avoid and what the memory places. An `out` strip is a second bar
   in `galRows` (`galBars`). With no clicked picture (no `<img>` on the door) it sits under the hole
   (`galStripRect`). The dock widget hides while a gallery is open (`twGalOpen`) — never two ◀ ▶.
-- **Two layers** (v0.302.0; a third for the clicked picture since v0.336.0, below): cells, veil and pending glow in `galRoot` (`galHost`, z max − 1); the
+- **Two layers** (v0.302.0; a third for the clicked picture since v0.336.0, below): cells, veil, pending glow and the diagnostics box in `galRoot` (`galHost`, z max, in `<body>` before the preview's host — see
+  "Stacking over the page" below); the
   clicked picture, the strip and the menu in `galTop` (`galTopHost`, z max, appended to `<html>` after
   `<body>`, which holds the preview's host). Same stylesheet cloned. Before this a pinned preview
   covered the strip and the second ◀ ▶ press landed on the preview. `galTopHost` is in `ours()` and
@@ -278,10 +279,10 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   other, nsfw.xxx prefixes `amateur-`) → `galLinkedHit`, else the card's URL-rule candidates. The yellow
   ring and Close tab of v0.292.0 are gone (user: blue again).
 - **Under the preview unless the pointer is on it** (user, v0.336.0; a v0.335.0 fade was rejected):
-  `.fly` and its corners live in `galFlyHost` (`galFlyLayer`, appended last to `<html>` on every open),
-  z max − 1 at rest — under the preview's host (z max, in `<body>`), over `galHost` (same z, later in
-  the tree). `galFlyZ` (from `galMove`, edit start/stop, open/close) raises it to z max, which wins
-  over the preview by tree order, while `galPt` is within its box ± `GAL_HD`/2 or `galEdit`. An `in`
+  `.fly` and its corners live in `galFlyHost` (`galFlyLayer`), z max like the rest; at rest it sits
+  between `galHost` and the preview's host in `<body>`, so tree order puts it over the cells and under
+  the preview. `galFlyZ` (from `galMove`, edit start/stop, open/close) moves it right after the
+  preview's host (`galSlot(galFlyHost, true)`), over the preview, while `galPt` is within its box ± `GAL_HD`/2 or `galEdit`. An `in`
   strip rides inside `.fly`; `dock`/`out` strips and the menu stay in `galTop` (z max), over the
   preview, or the v0.302.0 bug (◀ ▶ press landing on a pinned preview) returns. The test is by
   coordinates, not `:hover`: a preview over the picture takes the pointer's hover itself.
@@ -291,9 +292,16 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   release without a 4 px move (`galEditDown`), since a drag moves it.
 - **No tooltips on the picture, its corners, its ⤓ ⛶ ✕ or the strip** (user, v0.339.0: "constantly popping
   up"). Their text is a "Using the gallery" section at the foot of the menu (`.lb.hp`). Don't add `setTip` back there.
-- **The menu stays over the raised picture**: `galFlyZ` gives `galFlyHost` the same z as `galTop`, so tree order
-  decides; `galMenuShow` moves `galTopHost` last in `<html>` before showing (v0.339.0: the menu was under the
+- **The menu stays over the raised picture**: `galTopHost` is in `<html>` after `<body>`, so it is over everything
+  in `<body>`; `galMenuShow` also moves it last in `<html>` before showing (v0.339.0: the menu was under the
   picture and the strip while the pointer was on them).
+- **Stacking over the page** (user, v0.381.0: a page's max-z launcher button covered the diagnostics box's
+  Close). Every host is z max, so only tree order separates ours from a page's own z-max element. `galHost`
+  and `galFlyHost` go through `galSlot` into the preview's slot in `<body>` (before `[data-us-dock]` widgets and
+  the panel, which must stay over the preview); `hzRaise()` (from `showViewer`, `galFlyLayer`, `galDiag`)
+  finds a non-inert page element after our first layer in `<body>` and moves our layers, and our own widget
+  and panel if they were behind it, after it. It skips the move while a clip plays (a moved `<video>` pauses).
+  z max − 1 is never safe for a layer the user must reach: a page at z max beats it wherever it sits.
 - **Right-click = our menu** (`galMenuShow`, `.menu` in the layer; also on the strip): ✓ toggles for
   `galleryChips`, `galleryTicks`,
   `gallerySavedMarks` (also in Settings → Galleries), `galleryMiddle`, then Close the gallery.
