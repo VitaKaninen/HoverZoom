@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.379.0
+// @version      0.380.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -890,6 +890,14 @@
             if (!/(^|\.)(twimg\.com)$/.test(u.hostname)) return null;
             if (u.searchParams.get('name') === 'orig') return null;
             u.searchParams.set('name', 'orig');
+            return u.href;
+        }),
+        // Girl Atlas: name.jpg!sml -> name.jpg!lrg (the largest it serves; the bare file 404s)
+        rule('Girl Atlas large', true, function (u) {
+            if (!/(^|\.)girl-atlas\.com$/.test(u.hostname)) return null;
+            const p = u.pathname.replace(/(\.[a-z0-9]+)!(?!lrg$)[a-z]+$/i, '$1!lrg');
+            if (p === u.pathname) return null;
+            u.pathname = p;
             return u.href;
         }),
         // WordPress and friends: image-150x150.jpg -> image.jpg

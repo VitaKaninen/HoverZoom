@@ -106,6 +106,12 @@ has('twitter name=small -> orig',
     upgradeCandidates('https://pbs.twimg.com/media/ABC.jpg?format=jpg&name=small'),
     'https://pbs.twimg.com/media/ABC.jpg?format=jpg&name=orig');
 
+has('girl-atlas !sml -> !lrg',
+    upgradeCandidates('https://girl-atlas.com/static/albums/2026-11-05/6aec028f4a0b3fea2a199eab/000-mzujs.jpg!sml'),
+    'https://girl-atlas.com/static/albums/2026-11-05/6aec028f4a0b3fea2a199eab/000-mzujs.jpg!lrg');
+none('girl-atlas !lrg stays',
+    'https://girl-atlas.com/static/albums/2026-11-05/6aec028f4a0b3fea2a199eab/000-mzujs.jpg!lrg');
+
 has('wordpress -150x150 suffix',
     upgradeCandidates('https://site.com/wp-content/uploads/2024/03/pic-150x150.jpg'),
     'https://site.com/wp-content/uploads/2024/03/pic.jpg');
