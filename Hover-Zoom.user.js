@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.385.0
+// @version      0.386.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -4880,10 +4880,12 @@
         twSync();
     }
 
+    let unplacing = false;
     function unplace() {
-        if (!placed) return;
+        if (!placed || unplacing) return;
+        unplacing = true;
         // Fullscreen outlives nothing: the window that asked for it is going away. Only ours.
-        if (fullActive()) leaveFull();
+        try { if (fullActive()) leaveFull(); } finally { unplacing = false; }
         placed = false;
         tourEnd();
         drag = null;
@@ -5175,6 +5177,7 @@
             view.top = p.top;
         }
         layout();
+        if (placed) unplace();      // leaving fullscreen closes the window too (user, v0.386.0)
     }
 
     // Only ever reacts to OUR fullscreen. A page putting its own player on the screen must pass
