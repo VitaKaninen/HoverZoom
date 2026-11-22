@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.384.0
+// @version      0.385.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -4317,6 +4317,7 @@
         placePop();
         twOpacity();
         syncSavedMark();    // pinned to the picture's corner, which this just moved
+        if (galCur) galStripHidesPreview();     // a still pointer on the page row: a new picture starts hidden
     }
 
     function clampScale(s) {
@@ -12597,9 +12598,10 @@
         return galCur && el && el.isConnected && !el.hidden ? el.getBoundingClientRect() : null;
     }
 
-    // The preview steps out of sight while the pointer is on the page strip, fullscreen too; nowhere else.
+    // The preview steps out of sight while the pointer is on the strip's page row, fullscreen too; nowhere else.
     function galStripHidesPreview() {
-        const r = galStripBox(), on = !!r && !galEdit && holds(r, galPt.x, galPt.y);
+        const row = galStripBox() && galSt.pgP.parentNode, r = row && row.getBoundingClientRect();
+        const on = !!r && r.width > 0 && !galEdit && holds(r, galPt.x, galPt.y);
         if (host) host.style.visibility = on ? 'hidden' : '';
     }
 
@@ -13132,6 +13134,7 @@
         s.picP.classList.toggle('faint', !n || (!!ch && !ch.picBack));
         s.picN.classList.toggle('faint', !n || (!!ch && !ch.picOn));
         if (galFly && fullActive() && !galEdit && Math.abs(Math.min(vpW() * 0.4, galFullW()) - galFullLast) > 1) galRefit();     // the text needs another width
+        galStripHidesPreview();     // the row may have come to a still pointer
     }
 
     // The set's pages: laid out, plus the pictures known but not loaded yet.
@@ -15594,6 +15597,7 @@
         if (!galCur || galCur.href !== href) galStripBlank();
         galStripPlace();
         galDlShow();        // galToolsBuild ran before el was in the page, so its own call skipped the button
+        setTimeout(galStripHidesPreview, GAL_FLY_MS + 20);      // the strip lands under a still pointer
     }
 
     // One file name ends with the other (a site prefixing a category to the same picture's name), 8+ characters.

@@ -287,8 +287,10 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   preview, or the v0.302.0 bug (◀ ▶ press landing on a pinned preview) returns. The test is by
   coordinates, not `:hover`: a preview over the picture takes the pointer's hover itself.
   **Only the page strip hides the preview** (user v0.384.0, "nowhere else"; v0.382.0–v0.383.0 hid it on the whole
-  corner picture): while the pointer is on `.strip` the preview's host is `visibility:hidden`, fullscreen too
-  (`galStripHidesPreview`, from `galMove` and `galFlyZ`). A pinned preview's bar buttons and zoom cluster shift left off
+  corner picture; v0.384.0 the whole strip): while the pointer is on the strip's **page row** (`.r.pg`, not the picture
+  row) the preview's host is `visibility:hidden`, fullscreen too (`galStripHidesPreview`). Re-tested on every pointer move
+  (`galMove`, `galFlyZ`), at the end of `layout()` (a page step swaps the picture under a still pointer: it must start
+  hidden), of `galStripText` (the row resizes) and after the corner picture's flight (`galFlyOut`, endless switching). A pinned preview's bar buttons and zoom cluster shift left off
   the corner picture and the strip (`barFlyShift` in `layoutChrome`), or they sit under something raised over them.
 - **A left click or middle press on it closes** (v0.294.0: middle had stopped closing once the hole
   left the card — the document handler's middle branch only `preventDefault`s presses on our layer;
