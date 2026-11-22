@@ -286,10 +286,10 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   strip rides inside `.fly`; `dock`/`out` strips and the menu stay in `galTop` (z max), over the
   preview, or the v0.302.0 bug (◀ ▶ press landing on a pinned preview) returns. The test is by
   coordinates, not `:hover`: a preview over the picture takes the pointer's hover itself.
-  While the pointer is in that box the preview's host is `visibility:hidden` (`galFlyHidePreview`, user v0.382.0,
-  fullscreen too); `galFlyZ` restores it on leaving and on `galFlyBack`.
-  So a pinned preview's bar buttons and zoom cluster shift left off that box (`barFlyShift` in `layoutChrome`, v0.383.0),
-  or they could never be clicked there.
+  **Only the page strip hides the preview** (user v0.384.0, "nowhere else"; v0.382.0–v0.383.0 hid it on the whole
+  corner picture): while the pointer is on `.strip` the preview's host is `visibility:hidden`, fullscreen too
+  (`galStripHidesPreview`, from `galMove` and `galFlyZ`). A pinned preview's bar buttons and zoom cluster shift left off
+  the corner picture and the strip (`barFlyShift` in `layoutChrome`), or they sit under something raised over them.
 - **A left click or middle press on it closes** (v0.294.0: middle had stopped closing once the hole
   left the card — the document handler's middle branch only `preventDefault`s presses on our layer;
   the `.fly` listener closes and sets `galMidAt` so `galMidEat` eats the auxclick). Left closes on

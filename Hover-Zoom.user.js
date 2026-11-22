@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.383.0
+// @version      0.384.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -4061,14 +4061,23 @@
         return btnGutter() + (w ? w + BAR_GAP : 0);
     }
 
-    // How far the bar's buttons and zoom cluster move left so none sits over the gallery's corner picture (it hides the preview on hover).
+    // How far the bar's buttons and zoom cluster move left so none sits under the gallery's corner picture or its page strip.
     function barFlyShift() {
-        if (!placed || !galFly || !galFly.el || !galFly.el.isConnected) return 0;
-        const f = galFlyRect(), m = GAL_HD / 2 + 4, c = capEl.getBoundingClientRect();
-        if (!(f.w > 0) || c.bottom <= f.y - m || c.top >= f.y + f.h + m) return 0;
-        const right = c.right - grabInset(), left = c.right - btnGutter() - zctlW();
-        if (right <= f.x - m || left >= f.x + f.w + m) return 0;
-        return Math.max(0, Math.min(right - (f.x - m), c.width - textGutter() - BAR_PAD));
+        if (!placed || !galCur) return 0;
+        const rs = [], m = GAL_HD / 2 + 4, c = capEl.getBoundingClientRect();
+        if (galFly && galFly.el && galFly.el.isConnected) rs.push(galFlyRect());
+        const sb = galStripBox();
+        if (sb) rs.push({ x: sb.left, y: sb.top, w: sb.width, h: sb.height });
+        const span = btnGutter() + zctlW() - grabInset();
+        let right = c.right - grabInset();
+        for (let pass = 0; pass < 2; pass++) {
+            rs.forEach(function (f) {
+                if (!(f.w > 0) || c.bottom <= f.y - m || c.top >= f.y + f.h + m) return;
+                if (right <= f.x - m || right - span >= f.x + f.w + m) return;
+                right = Math.min(right, f.x - m);
+            });
+        }
+        return Math.max(0, Math.min(c.right - grabInset() - right, c.width - textGutter() - BAR_PAD));
     }
 
     // The narrowest frame that still shows the whole cluster clear of the buttons. Filename and
@@ -12571,20 +12580,26 @@
 
     // Raise the clicked picture over the preview while the pointer is on it or it is being dragged.
     function galFlyZ() {
-        if (!galFlyHost || !galFlyHost.isConnected) { galFlyHidePreview(false); return; }
+        galStripHidesPreview();
+        if (!galFlyHost || !galFlyHost.isConnected) return;
         const f = galFly, m = GAL_HD / 2;
-        let up = !!galEdit, on = false;
-        if (f) {
+        let up = !!galEdit;
+        if (!up && f) {
             const r = galFlyRect();     // where it lands, not where its flight is now (a switch measured it at the card: hidden till the pointer moved)
-            on = galPt.x >= r.x - m && galPt.x <= r.x + r.w + m && galPt.y >= r.y - m && galPt.y <= r.y + r.h + m;
-            up = up || on;
+            up = galPt.x >= r.x - m && galPt.x <= r.x + r.w + m && galPt.y >= r.y - m && galPt.y <= r.y + r.h + m;
         }
-        galFlyHidePreview(on && !galEdit);
         galSlot(galFlyHost, up);
     }
 
-    // The preview steps out of sight while the pointer is on the gallery's corner picture, fullscreen too.
-    function galFlyHidePreview(on) {
+    // The gallery's page strip on screen, as a rect, else null.
+    function galStripBox() {
+        const el = galSt && galSt.el;
+        return galCur && el && el.isConnected && !el.hidden ? el.getBoundingClientRect() : null;
+    }
+
+    // The preview steps out of sight while the pointer is on the page strip, fullscreen too; nowhere else.
+    function galStripHidesPreview() {
+        const r = galStripBox(), on = !!r && !galEdit && holds(r, galPt.x, galPt.y);
         if (host) host.style.visibility = on ? 'hidden' : '';
     }
 
@@ -15888,7 +15903,7 @@
         galPt.x = e.clientX;
         galPt.y = e.clientY;
         galMovedAt = performance.now();
-        if (galFly) galFlyZ();
+        if (galFly) galFlyZ(); else galStripHidesPreview();
         const st = galStill;
         galStill = null;
         if (st && galCur === st.set && st.cell.isConnected && holds(st.cell.getBoundingClientRect(), galPt.x, galPt.y)) st.go();
