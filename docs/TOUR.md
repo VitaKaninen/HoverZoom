@@ -84,8 +84,9 @@ fight that. They are deleted. Do not put nav controls back on the frame.
 - **The wheel on a pinned window in a gallery or fullscreen flips pictures** (`wheelFlips()`, user v0.366.0; reverses
   v0.364.0's down-zooms-to-fit-then-steps and v0.361.0's zoom-on-the-picture, step-off-it): `twWheel` steps both ways
   anywhere in the window (fullscreen's spans the screen). A click on the picture (`boxTap`, `pointOnPicture`) sets
-  `picZoomOn = view.url`: the wheel zooms that picture (`onPinWheel`) until a second click, or a step to another
-  picture (keyed by URL, nothing to reset). Click 2 of a double-click undoes click 1's toggle (`tapZoomed`), like
+  `picZoomOn = view.url`: the wheel zooms that picture (`onPinWheel`) until a second click, a step to another
+  picture, or the window closing (v0.383.0: cleared in `showViewer`, `commitSwap`, `cancel`; kept by URL alone it
+  outlived the close, so a new slideshow opening on that picture zoomed on the wheel — user; `upgradeViewer` carries it). Click 2 of a double-click undoes click 1's toggle (`tapZoomed`), like
   `tapPaused`. A hover preview, and a pinned one outside galleries and fullscreen, zoom as always.
 - **Typed numbers** (`twAsk(kind, holder)`, v0.317.0, user; Forum Stumbler's counter box; the gallery widget too):
   click the picture or page number; Enter, leaving the box or a press anywhere else goes (window-capture
