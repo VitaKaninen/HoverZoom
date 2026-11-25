@@ -15,6 +15,7 @@ const BLOCKS = [
         targets: [
             'Forum-Stumbler/Forum-Stumbler.user.js',
             'HoverZoom/Hover-Zoom.user.js',
+            'Nexus-Check/Nexus-Check.user.js',
         ],
     },
 ];

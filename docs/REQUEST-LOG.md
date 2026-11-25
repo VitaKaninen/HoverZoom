@@ -1,7 +1,7 @@
 # Shared request log (`us-log`)
 
 Source: `shared/us-log.js`. Copied verbatim between `// ==== us-log begin/end ====` into
-Forum Stumbler and Hover Zoom by `node shared/sync-shared.js` (run from HoverZoom; `--check`
+Forum Stumbler, Hover Zoom and Nexus Check by `node shared/sync-shared.js` (run from HoverZoom; `--check`
 reports drift). **Never edit a synced copy.** Tests: `node shared/test-log.js` — the module, and
 Hover Zoom's wiring pulled out of `Hover-Zoom.user.js` by name. Forum Stumbler's wiring is in its
 own `CLAUDE.md` and `tests/bar-render.test.js`.
