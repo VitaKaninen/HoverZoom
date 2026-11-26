@@ -273,13 +273,16 @@ What loads ahead follows what the user does. Code: the `ah*` functions after `ga
 - **Main page** (`galPreNext` → `ahMainPick`, no gallery or preview up; v0.397.0, user 2026-11-26): page reads for every
   door all the time (`galCountNext`, HTML only, nearest the middle first — the read *is* the count and the thumbnail
   list, there is no separate count). From `ahAnchor` (the hovered door, else the first on screen) on in page order,
-  one job at a time, in passes: **1** every door's page read + first `AH_THUMBS_MAIN` 30 thumbnails (`ahDone`);
-  **2** every door's first `AH_ORIGS` 2 originals (`ahODone`; `ahOrig` → `galResolve` on a stand-in, `plKeepImage`);
-  **3** after a gallery preview, the door after it gets its whole first page of thumbnails (`ahLookLast`,
+  one job at a time, in **rounds** (v0.415.0, user: "28 galleries of thumbnails over 2 minutes before any full size
+  is not how a person uses a site"; numbers expected to change with testing): round r = for each door in page
+  order, its next `AH_THUMBS_STEP` 10 thumbnails then its original r+1 (`ahRound` = rounds done per door; `ahOrig` →
+  `galResolve` on a stand-in, `plKeepImage`), until `AH_THUMBS_MAIN` 30 thumbnails = 3 rounds (so 3 originals). The
+  ▦ chip still turns blue only once the last round's thumbnails are in (`galFirstIn`).
+  Then, after a gallery preview, the door after it gets its whole first page of thumbnails (`ahLookLast`,
   `ahNextDone`); then frame reads to the end (`galGrow`, the expensive `19+` → `40`) last of all (`ahIdleGrow`, once
   per door). Thumbnails already settled are skipped. The ▦ chip turns blue at the 30 (`galThumbsReady`); a preview
-  loads the rest of its page itself. Endless off: pass 1 for the first door + `AH_THUMBS_OFF` 3, pass 2 for the
-  first only, the rest once ≥ `AH_SHARE` 40 % of the page's doors are seen. Measured on eporner (Chrome, cold):
+  loads the rest of its page itself. Endless off: thumbnails for the first door + `AH_THUMBS_OFF` 3, originals for
+  the first only, the rest once ≥ `AH_SHARE` 40 % of the page's doors are seen. Measured on eporner (Chrome, cold):
   page reads ~0.4 s, 30 thumbnails ≈ 4 s a door, an original ≈ 1.1 s with 6 in flight. The covers' own originals
   (`pgFill`, `hoverPreload`) wait while counts are in flight (`galCountsBusy`) — user: revisit later.
 - **Scrolling** (`ahScrollNote` from `galScroll`, checked ≤ every 200 ms): the next door to load scrolled above the

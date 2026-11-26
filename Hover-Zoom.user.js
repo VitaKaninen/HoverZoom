@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.415.0
+// @version      0.416.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -12035,7 +12035,9 @@
     // Everything queued or in flight is abandoned; what has already been answered is kept.
     function plCancel() {
         plGen++;
+        const open = new Set(plQueue.map(function (q) { return q.aj; }).filter(Boolean));
         plQueue = [];
+        open.forEach(function (j) { if (!j.live) actEnd(j, 'stopped', 'cancelled'); });
         plLive.forEach(function (t) { t.cancelled = true; });
         plLive = [];
     }
@@ -12086,13 +12088,23 @@
         if (plPaused) return;
         while (plRunning < plWorkers() && plQueue.length) {
             const job = plQueue.shift();
-            if (job.gen !== plGen) continue;
+            if (job.gen !== plGen) { plActLeft(job); continue; }
             plRunning++;
-            plRun(job).then(plDoneOne, plDoneOne);
+            if (job.aj) job.aj.live = (job.aj.live || 0) + 1;
+            const done = function () { if (job.aj) job.aj.live--; plActLeft(job); plDoneOne(); };
+            plRun(job).then(done, done);
         }
     }
 
     function plDoneOne() { plRunning--; plPump(); twLoadLater(); }
+
+    // A queue entry gone, loaded or not: its header's total drops if nothing was said for it; the header ends with its last entry.
+    function plActLeft(job) {
+        const j = job.aj;
+        if (!j || j.state !== 'run') return;
+        if (!job.told) actTotal(j, Math.max(j.done, j.total - 1));
+        if (!j.live && !plQueue.some(function (q) { return q.aj === j; })) actEnd(j);
+    }
 
     async function plRun(job) {
         const wait = plReserve();
@@ -12110,7 +12122,8 @@
         plLive = plLive.filter(function (t) { return t !== token; });
         if (job.gen !== plGen || token.cancelled) return;
         plSet(job.el, { res: hit, displayed: displayed, sig: candSig(job.el, PL_GUESSES), warm: plWarmGen });
-        act(hit ? 'ok' : 'bad', (hit ? '✓ full size ' : '✗ no full size found ') + actFile(hit ? hit.url : pictureUrl(job.el) || '') + ' · ' + (job.page ? 'for the pictures on screen' : 'for the slideshow, ' + job.dist + ' ahead'));
+        job.told = true;
+        actKid(job.aj, !!hit, (hit ? '✓ full size ' : '✗ no full size found ') + actFile(hit ? hit.url : pictureUrl(job.el) || '') + (job.aj ? '' : ' · ' + (job.page ? 'for the pictures on screen' : 'for the slideshow, ' + job.dist + ' ahead')));
         dbg('preloaded', { ahead: job.dist, buffered: plDone.size, queued: plQueue.length,
             workers: plWorkers(), got: hit ? hit.w + '×' + hit.h + ' ' + hit.url.slice(-48)
                                           : 'nothing (the full search runs on arrival)' });
@@ -12123,7 +12136,7 @@
 
     // Queue every entry not yet answered, nearest first and ahead before behind. Nothing running
     // is cancelled: a picture passed at speed is still wanted when the user comes back.
-    let plFillLast = -1;
+    let plAct = null;
     function plFill(list, at, dir) {
         if (at < 0 || (tour && tour.gal)) return;      // a gallery loads its pages' originals itself (galHqAll)
         const depth = plDepth();
@@ -12146,8 +12159,15 @@
             if (pre && pre.res && pre.res.video) plWarmVideo(pre.res.url);
         }
         jobs.sort(function (x, y) { return x.dist - y.dist; });
-        if (jobs.length !== plFillLast) { plFillLast = jobs.length; if (jobs.length) act('job', 'Slideshow: ' + jobs.length + ' pictures still to load at full size, nearest first'); }
+        const real = jobs.filter(function (j) { return !j.rewarm; });
+        if (real.length) {
+            if (!plAct || plAct.state !== 'run') plAct = actJob('Slideshow: full size of the pictures ahead and behind, nearest first', 0);
+            actTotal(plAct, plAct.done + (plAct.live || 0) + real.length);
+            real.forEach(function (j) { j.aj = plAct; });
+        }
+        const dropped = plQueue.filter(function (q) { return q.aj && q.aj !== plAct; });
         plQueue = jobs;
+        dropped.forEach(plActLeft);
         plSerial = list.some(function (e) { return noRush(hostOf(e.url)); });
         plPump();
     }
@@ -12321,7 +12341,9 @@
             return hwScope.contains(p) && onScreen(p);
         });
         const want = new Set(pics);
+        const gone = plQueue.filter(function (j) { return !(!j.hover || j.page || want.has(j.el)); });
         plQueue = plQueue.filter(function (j) { return !j.hover || j.page || want.has(j.el); });
+        gone.forEach(plActLeft);
         let added = 0;
         pics.forEach(function (p) {
             if (plHas(p) || plQueue.some(function (j) { return j.el === p; })) return;
@@ -12387,16 +12409,19 @@
             want.push({ el: p, d: r.top >= 0 ? r.top : h - 2 * r.top });
         });
         want.sort(function (a, b) { return a.d - b.d; });
-        let added = 0;
+        const fresh = [];
         want.forEach(function (w) {
             if (plHas(w.el) || plQueue.some(function (j) { return j.el === w.el; })) return;
             const u = pictureUrl(w.el);
             if (!u || blocked(u)) return;
-            plQueue.push({ el: w.el, dist: PL_VIDEO_AHEAD + 1, gen: plGen, hover: true, page: true });
-            added++;
+            fresh.push({ el: w.el, dist: PL_VIDEO_AHEAD + 1, gen: plGen, hover: true, page: true });
         });
-        if (added) dbg('loading ' + added + ' more ahead', { queued: plQueue.length });
-        if (added) act('job', 'Page: loading the full size of ' + added + ' pictures ' + (level >= 3 ? 'on the page' : 'on and near the screen'));
+        const added = fresh.length;
+        if (added) {
+            dbg('loading ' + added + ' more ahead', { queued: plQueue.length + added });
+            const aj = actJob('Page: full size of the pictures ' + (level >= 3 ? 'on the page' : 'on and near the screen'), added);
+            fresh.forEach(function (j) { j.aj = aj; plQueue.push(j); });
+        }
         plPump();
     }
 

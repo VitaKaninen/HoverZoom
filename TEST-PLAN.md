@@ -123,24 +123,24 @@ Test pages:
 
 ---
 
-## 3. Main page: thumbnails for every gallery, then 2 originals each (v0.397.0)
+## 3. Main page: rounds of 10 thumbnails + 1 original per gallery (v0.415.0)
 
-3.1 **Order from the first gallery on screen.** Load a fresh tab and don't hover anything.
-    - **Expect, pass 1:** from the first gallery visible on screen down the page, one gallery at a time: its page
-      read, then its first 30 thumbnails. Each prints `loading ahead: thumbnails {href, cut: false}`. With Endless
-      on, this reaches the last gallery on the page before any original loads.
-    - **Expect, pass 2:** then, from the same first gallery down, each gallery's first 2 originals:
-      `loading ahead: first originals {href, originals: 2}`.
+3.1 **Order from the first gallery on screen.** Load a fresh tab and don't hover anything. Open the activity window.
+    - **Expect, round 1:** from the first gallery visible on screen down the page, one gallery at a time, a header
+      `Page: gallery N “…” — round 1: thumbnails 1–10 + full-size picture 1`, ending ✓ `11/11` with its time. With
+      Endless on, this reaches the last gallery on the page before any round 2 starts.
+    - **Expect, rounds 2 and 3:** then, from the same first gallery down, `thumbnails 11–20 + full-size picture 2`,
+      then `21–30 + full-size picture 3` (galleries under that size skip the thumbnail part).
     - Galleries above the first one on screen get counts but no thumbnails.
 
-3.1b **The next gallery after a preview.** Once passes 1 and 2 are done, open a gallery preview (5.1) on gallery N
+3.1b **The next gallery after a preview.** Once the 3 rounds are done, open a gallery preview (5.1) on gallery N
     and move off it.
     - **Expect:** `loading ahead: the next gallery's first page, after a preview` for gallery N+1: the rest of its
       first page of thumbnails (beyond 30). Only when nothing else is waiting.
 
 3.2 **A hovered gallery goes first.** On a fresh tab, hover a gallery near the bottom of the screen within
     the first second.
-    - **Expect:** the first `loading ahead: thumbnails` line is for the hovered gallery, followed by the
+    - **Expect:** the first `Page: … round 1` header is for the hovered gallery, followed by the
       galleries below it.
     - Not tested before: whether a hover *after* loading has started moves the start point. By the spec
       a hover moves it only when scrolling stops (test 4.3).
