@@ -44,8 +44,8 @@ fight that. They are deleted. Do not put nav controls back on the frame.
 - **The page row** (`◀ Page n / N ▶`, v0.321.0, user): a page is a screen of WHOLE pictures from the counter's own
   list (`widgetEntries`, or the running slideshow's) — it starts at a picture's top (`TW_PAGE_TOP` above it) and takes
   each next picture that fits whole below (`pageSplit`, pure, asserted). Never the document's height: footer and
-  reply pictures past the post end are not pages. ▶ scrolls the next page's first picture to the top (pinned: opens
-  it). **Shown only on a wall of pictures** (user 2026-11-26, v0.406.0: "restrictive"; Google Images / imgur yes,
+  reply pictures past the post end are not pages. ▶ scrolls the next page's first picture to the top; a click closes any preview first (pinned, slideshow, fullscreen — user v0.421.0: "they are done there"), ↑ ↓ under a pinned one open
+  that page's first picture instead. **Shown only on a wall of pictures** (user 2026-11-26, v0.406.0: "restrictive"; Google Images / imgur yes,
   forums and wikis never): `pagesWorth(pg, vw, vh)`, pure, asserted — `TW_WALL_PAGES` (3)+ pages, and at least half of
   them each ≥ `TW_WALL_COVER` (50 %) of the window covered by pictures, two pictures side by side, and no gap over
   `TW_WALL_GAP` (80 px) between picture rows. Measured per screen (cover / largest gap), 1610×927: Google Images

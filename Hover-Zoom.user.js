@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.420.0
+// @version      0.421.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -10169,10 +10169,10 @@
         row.appendChild(load);
         const pageRow = document.createElement('div');
         pageRow.className = 'tr tp';
-        const pgPrev = mkVBtn(ICON_PREV, null, function () { twPage(-1); });
+        const pgPrev = mkVBtn(ICON_PREV, null, function () { twPageBtn(-1); });
         const pgNum = document.createElement('span');
         pgNum.className = 'pg';
-        const pgNext = mkVBtn(ICON_NEXT, null, function () { twPage(1); });
+        const pgNext = mkVBtn(ICON_NEXT, null, function () { twPageBtn(1); });
         pageRow.appendChild(pgPrev);
         pageRow.appendChild(pgNum);
         pageRow.appendChild(pgNext);
@@ -10478,6 +10478,12 @@
             const list = tourEntries(), at = pg.starts[p];
             if (at < list.length && at !== tour.index) { tourTurnOn(); tour.total = list.length; seamDir = 0; plVidLeft(); tourGo(list, at, dir, false); }
         } else twRecount();
+    }
+
+    // The page row's ◀ / ▶: any preview closes (pinned, slideshow, fullscreen), then the page turns from where the screen is.
+    function twPageBtn(dir) {
+        if (placed) unplace(); else cancel();
+        twPage(dir);
     }
 
     // ◀ / ▶ on the page row and ↑ ↓: the next screen of whole pictures from the slideshow's list.
@@ -14059,7 +14065,7 @@
                     e.preventDefault();
                     e.stopPropagation();
                     if (e.button !== 0 || b.classList.contains('faint')) return;
-                    if (act === galPageStep && !fullActive() && (active || view)) { if (placed) unplace(); else cancel(); }
+                    if (act === galPageStep && (active || view)) { if (placed) unplace(); else cancel(); }
                     act(dir);
                 });
                 if (act === galStep) twHoldOn(b, dir);
