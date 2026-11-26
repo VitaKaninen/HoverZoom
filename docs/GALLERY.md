@@ -278,6 +278,13 @@ What loads ahead follows what the user does. Code: the `ah*` functions after `ga
   `galLookOpen` refuses until the next move — else the timer opened it at the stale `galPt`), a left press (the link is followed), or any other hover (`onOver` — it ran `return` for an open
   gallery and swallowed the next door's mouseover). Middle press / chip from it opens the gallery (`galMiddle`
   closes it first; `galChipOpen` ignores it). Wheel and keys stay the page's.
+- **Storage readout** (user, v0.394.0): `galStoreTick`, `.hzst`, bottom-right of the gallery's own picture — the
+  hovered door (`galHole`, fixed in `galTop`) for a preview, the corner box `galFly.pic0` once open (**not**
+  `galFly.pic`: that is the page's own `<img>`). Lines: RAM = `heldBytes`; ahead ≈ `plKeep` bytes not in `heldBlobs`
+  (an estimate from pixels, `PL_BYTES_PER_PX`); disk = `navigator.storage.estimate().usage` (the whole origin). Ticks
+  each second while `galLook`/`galCur`/`galWant`; started from `galShow`, `galLookOpen`, the `galCur` set and the fly's
+  creation (a closing preview's `galHide` removes it on a timeout that can land after the gallery opened); `.fly:hover`
+  lifts it over ⛶.
 - **Gallery, endless** (`ahG`, made in `galMiddle` unless a queue switch, dropped in `galHide`): thumbnails
   (first 2 pages) of the next `ahAheadN` galleries — 2, 5 once the user steps forward or reaches gallery 2,
   10 from gallery 3 (`ahGalAhead`, run on every landing and page step). Originals only after a preview

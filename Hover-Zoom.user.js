@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.393.0
+// @version      0.394.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -12731,7 +12731,10 @@
             '.diag textarea{display:block;width:100%;height:260px;box-sizing:border-box;margin:0 0 8px;padding:6px;' +
             'background:#313244;color:#cdd6f4;border:0;border-radius:4px;font:11px/1.4 ui-monospace,Consolas,monospace;resize:vertical}' +
             '.diag button{margin-left:8px;float:right;padding:4px 12px;background:#45475a;color:#cdd6f4;border:0;border-radius:4px;font:inherit;cursor:pointer}' +
-            '.diag button:hover{background:#585b70}';
+            '.diag button:hover{background:#585b70}' +
+            '.hzst{position:absolute;right:6px;bottom:6px;z-index:4;padding:2px 7px;border-radius:9px;background:rgba(30,30,46,.88);border:1px solid #45475a;' +
+            'color:#cdd6f4;font:11px/1.35 system-ui,sans-serif;font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap;pointer-events:none}' +
+            '.hzst.fix{position:fixed;right:auto;bottom:auto}.fly:hover .hzst{bottom:38px}';
         galRoot.appendChild(st);
         galTopHost = document.createElement('div');
         galTopHost.style.cssText = 'all:initial;position:fixed;inset:0;pointer-events:none;z-index:2147483647';
@@ -13872,6 +13875,7 @@
 
     // Measure every thumbnail first, then lay the set out once and fade it in.
     function galShow(href, list) {
+        galStoreTick();
         if (galWant !== href) { galTrace(href, 'show: skipped, another link is wanted now'); return; }
         if (galCur && galCur.href === href) { galTrace(href, 'show: already on screen'); galPendClear(); return; }
         if (list === 'cancel') { if (!galChainSkip(href, 'its load was cancelled')) galHide('fail: the load was cancelled'); return; }
@@ -14020,6 +14024,7 @@
         set.el.classList.add('on');
         galBlur.classList.add('on');
         galCur = set;
+        galStoreTick();
         if (!twGalOpen) { twGalOpen = true; twRefresh(); }
         setTimeout(function () { if (galCur === set) galVeil(false); }, GAL_FADE_MS);
         galTrace(href, 'shown: ' + pics.length + ' thumbnails');
@@ -14300,6 +14305,7 @@
     }
 
     function galHide(why) {
+        setTimeout(galStoreTick, 0);     // after the state below is cleared: the readout goes
         galEditStop(false);
         galMenuHide();
         if (galPend) {
@@ -15775,6 +15781,7 @@
         el.classList.add('on');
         el.style.transform = 'none';
         galFly = { el: el, img: img, pic: pic, href: href, asp: hr.width && hr.height ? hr.width / hr.height : 1, pic0: pw, hds: hds };
+        setTimeout(galStoreTick, 0);     // after a closing preview's own removal
         galFlyZ();
         galStripBuild();
         if (!galCur || galCur.href !== href) galStripBlank();
@@ -15901,6 +15908,36 @@
             setTip(m, open ? 'Close this gallery' : 'Show this gallery’s pictures' + (n ? ' (' + (n.slice(-1) === '+' ? 'at least ' + n.slice(0, -1) : n) + ')' : ''));
         }
         m.className = (open ? 'open' : shown ? '' : 'off') + (n ? ' n' : '') + (open || galThumbsReady(m.__hzHref) ? '' : ' wait');
+    }
+
+    // ---- storage readout on the gallery's own picture (the hovered door; the corner picture once open), refreshed each second while up
+    let galStoreEl = null, galStoreT = 0, galDiskB = null;
+    function galStoreTick() {
+        clearTimeout(galStoreT);
+        galStoreT = 0;
+        if (!galLook && !galCur && !galWant) { if (galStoreEl) galStoreEl.remove(); return; }
+        if (!galStoreEl) { galStoreEl = document.createElement('div'); galStoreEl.className = 'hzst'; }
+        const el = galStoreEl;
+        let ahead = 0;
+        plKeep.forEach(function (k) { if (!heldBlobs.has(k.url)) ahead += k.bytes; });
+        const mb = function (b) { return b >= 1073741824 ? (b / 1073741824).toFixed(2) + ' GB' : Math.round(b / 1048576) + ' MB'; };
+        const lines = ['RAM ' + mb(heldBytes), 'ahead ≈' + mb(ahead), 'disk ' + (galDiskB === null ? '…' : mb(galDiskB))];
+        if (el.childNodes.length !== 3) { while (el.firstChild) el.firstChild.remove(); lines.forEach(function () { el.appendChild(document.createElement('div')); }); }
+        lines.forEach(function (t, i) { el.childNodes[i].textContent = t; });
+        if (!galLook && galFly && galFly.pic0 && galFly.pic0.isConnected) {      // pic0: the corner box (pic is the page's own picture)
+            if (el.parentNode !== galFly.pic0) galFly.pic0.appendChild(el);
+            el.classList.remove('fix');
+            el.style.left = el.style.top = '';
+        } else if (galHole && galTop) {
+            if (!galTopHost.isConnected) document.documentElement.appendChild(galTopHost);
+            if (el.parentNode !== galTop) galTop.appendChild(el);
+            el.classList.add('fix');
+            const w = el.offsetWidth || 0, h = el.offsetHeight || 0;
+            el.style.left = Math.round(galHole.x + galHole.w - w - 6) + 'px';
+            el.style.top = Math.round(galHole.y + galHole.h - h - 6) + 'px';
+        }
+        try { if (navigator.storage && navigator.storage.estimate) navigator.storage.estimate().then(function (e) { galDiskB = e && e.usage >= 0 ? e.usage : null; }, function () { /* no estimate */ }); } catch (x) { /* no estimate */ }
+        galStoreT = setTimeout(galStoreTick, 1000);
     }
 
     function galChipRefresh(img) {
@@ -16792,6 +16829,7 @@
         galHole = { x: hr.left, y: hr.top, w: hr.width, h: hr.height };
         galWant = href;
         galTrace(href, 'gallery preview');
+        galStoreTick();
         galLoad(href).then(function (list) {
             if (!galLook || galLook.href !== href) return;
             galShow(href, list);
