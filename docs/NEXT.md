@@ -1,3 +1,18 @@
+# Handoff 2026-11-26 #8 (~377k tokens): v0.407.0 → v0.413.0, all pushed
+
+User asked, in order, all done:
+- 4chan widget count 1 = §1c post end (by design); report now says `after the post end` (v0.407.0).
+- Slideshow past the post's last picture stops once, "End of post — more below", next step goes into the replies
+  (v0.408.0); blocking the post's last picture goes back one and shows that note there (v0.409.0). INTERACTION `E71`.
+- Open gallery keeps 5 pages of thumbnails ahead after the first forward step (`GAL_AHEAD_ON`, v0.410.0).
+- Arrival check + optional miss log (v0.411.0, GALLERY.md "Arrival check", `G15`); `missLog` off by default.
+- Activity window (v0.412.0–v0.413.0, docs/ACTIVITY.md): plain-words log of background loading in a pop-up.
+- Gallery not loading after 2 page steps: a full-size run restart cancelled its in-flight downloads; now `hqTok.stop`
+  (GALLERY.md "A restart never cancels what is in flight"). Verified on door-whole only, **not on eporner**.
+**Last asked the user:** run the eporner repro (search `posing-kni4Kaby`, gallery `PEkPHH6nnGl`, middle-click, 2 page
+steps, wait, slideshow) with the activity window open and paste its Copy output. Unanswered. Their earlier report also
+had slideshow steps showing the small picture first — the log's `Slideshow:` lines will say whether full size was ready.
+
 # Handoff 2026-11-26 #7: gallery verdicts (v0.405.0); page row, widget, Dark Reader (v0.406.0)
 
 User asked: run 7.10, 7.13, 8.x, 9.2; time detection/counting on eporner `/search-photos/standing/`; fix galleries
