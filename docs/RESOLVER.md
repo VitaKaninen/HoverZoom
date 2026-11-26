@@ -447,7 +447,10 @@ Four things this needed that are easy to get wrong:
   carries its own wall-clock `setTimeout`, because GM_xhr's `timeout` option does not cover a dialog.
 - **`onerror` is deferred one tick** before deciding why a probe failed, so the violation event has
   landed and `cspRefused()` can see it.
-- **Blob URLs are revoked**, oldest first, past `BYTES_MAX` (12) — enough for a tour's window.
+- **Blob URLs are revoked**, oldest first, past `BYTES_MAX` (12) — enough for a tour's window. Never the one on
+  screen (`revokeSoon` waits, `revokeFlush` from `setMedia`/`clearMedia`): Chromium drops a hidden tab's decoded
+  pictures and re-reads the `src` on return, so a revoked one became the broken-image icon (v0.419.0). A stale
+  `display` reaching the window anyway (a kept `hit`) falls back to `view.url` (`imgBytesGone`, logged).
 - **The bytes are never fetched speculatively.** Only a refusal triggers the path, so the ordinary
   case still costs one image load and "probing is preloading" survives.
 

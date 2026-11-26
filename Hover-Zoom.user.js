@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.418.0
+// @version      0.419.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -993,7 +993,7 @@
         else if (ev === 'page') actKid(job, o.ok, (o.ok ? '✓ read the page of ' : '✗ could not read the page of ') + actGal(o.h) + (o.ok ? ': ' + o.n + ' pictures' : o.st ? ': status ' + o.st : '') + ' · ' + actSecs(o.ms) + why);
         else if (ev === 'act') {
             if (o.a === 'page') act('you', 'You went ' + (o.dir > 0 ? 'forward' : 'back') + ' a page');
-            else if (o.a === 'close') act('you', 'You closed the gallery — the page\'s own loading starts again from the first gallery on screen');
+            else if (o.a === 'close') act(o.you ? 'you' : 'info', (o.you ? 'You closed the gallery' : 'The gallery closed') + (o.why ? ' (' + o.why + ')' : '') + ' — the page\'s own loading starts again from the first gallery on screen');
             else if (o.a === 'look') act('you', 'Gallery preview (hover) of ' + actGal(o.h));
         }
     }
@@ -1997,9 +1997,15 @@
         while (liveBlobs.length > BYTES_MAX) {
             const old = liveBlobs.shift();
             bytesCache.delete(old.url);
-            URL.revokeObjectURL(old.objUrl);
+            revokeSoon(old.objUrl);
         }
     }
+
+    // Revoke a blob: URL, but not while the window shows it (a hidden tab re-reads it on return); setMedia/clearMedia flush.
+    const revokeWait = new Set();
+    function blobOnScreen(u) { return !!u && ((imgEl && imgEl.getAttribute('src') === u) || (vidEl && vidEl.getAttribute('src') === u)); }
+    function revokeSoon(u) { if (!u) return; if (blobOnScreen(u)) revokeWait.add(u); else URL.revokeObjectURL(u); }
+    function revokeFlush() { revokeWait.forEach(function (u) { if (!blobOnScreen(u)) { revokeWait.delete(u); URL.revokeObjectURL(u); } }); }
 
     // blob: where the policy allows it, data: otherwise — every blocked engine measured takes one.
     async function probeBytes(url, hold) {
@@ -2043,7 +2049,7 @@
         heldBytes -= h.blob.size;
         bytesCache.delete(u);
         probeCache.delete(u);
-        if (h.objUrl) URL.revokeObjectURL(h.objUrl);
+        revokeSoon(h.objUrl);
     }
 
     // A gallery's pictures are fetched as bytes from here on: its thumbnails' hosts and its candidates'.
@@ -3253,6 +3259,7 @@
 
         imgEl = document.createElement('img');
         imgEl.draggable = false;
+        imgEl.addEventListener('error', imgBytesGone);
 
         vidEl = document.createElement('video');
         vidEl.muted = true;
@@ -4677,6 +4684,7 @@
         const want = res.display || res.url, was = imgEl.getAttribute('src');
         imgEl.style.visibility = '';
         mediaEl.src = want;   // a CSP-refused picture displays from bytes. See E49.
+        revokeFlush();
         if (stage && !wantsVideo && was && was !== want) stageCover(want, seq);
         syncSavedMark();
         if (wantsVideo) {
@@ -4699,6 +4707,16 @@
         if (!el) return;
         if (el === vidEl) { vidEl.pause(); vidEl.removeAttribute('src'); vidEl.load(); }
         else el.removeAttribute('src');
+        revokeFlush();
+    }
+
+    // The picture on screen was shown from kept bytes that are gone (a hidden tab re-reads them): show it from its address.
+    function imgBytesGone() {
+        const s = imgEl.getAttribute('src');
+        if (!s || !/^blob:/.test(s) || !view || !view.url || /^(blob|data):/.test(view.url)) return;
+        dbg('picture on screen: its kept bytes were released; loading it from its address', { url: view.url, hidden: document.visibilityState });
+        act('warn', 'The picture on screen lost its kept copy (memory limit) — loading it again: ' + actFile(view.url));
+        imgEl.src = view.url;
     }
 
     // WHAT LOADED IS NOT WHAT WAS MEASURED.
@@ -12542,7 +12560,7 @@
     const GAL_DIAG_MS = 10000;          // an open that shows nothing this long after the press gets the diagnostics popup
     const GAL_USER_HIDE = ['press', 'esc', 'middle', 'ctrl', 'resize', 'scroll', 'chip', 'hole', 'menu', 'look'];
     const galTraces = new Map();        // href -> [[ms, what]], sanitised, the last 60 links
-    let galPend = null, galInputAt = 0; // the open waiting for its gallery; the user's last wheel/key/press
+    let galPend = null, galInputAt = 0, galInputEv = null, galPageY = null; // the open waiting for its gallery; the user's last wheel/key/press, its event; the page's scroll while a gallery is open
 
     // Seen / visited / saved marks: sites with learned doors.
     function galMarksHere() {
@@ -15172,7 +15190,7 @@
         clearTimeout(galHoverTimer);
         const look = !!galLook;
         galLook = null;
-        if (!look) ahGalClose();
+        if (!look) ahGalClose(why);
         galWant = null;
         galOn = false;
         galPeek = false;
@@ -17020,8 +17038,17 @@
         if (!galMarksHere() && !galWant && !galCur) return;
         const t = e.target;
         if (t !== document && !(t && t.nodeType === 1 && t.clientHeight >= vpH() / 2)) return;
-        if ((galWant || galCur) && performance.now() - galResizeAt > 1000 && performance.now() - galSelfScrollAt > 1000)      // a window resize reflows the page, and its scroll is not the user's; nor is endless's
-            galHide(performance.now() - galInputAt < 600 ? 'scroll' : 'page scrolled by itself');
+        const now = performance.now(), mine = now - galResizeAt <= 1000 || now - galSelfScrollAt <= 1000;     // a window resize reflows the page, and its scroll is not the user's; nor is endless's
+        if (!galCur || mine) galPageY = window.scrollY;
+        if ((galWant || galCur) && !mine) {
+            const user = now - galInputAt < 600 && !(galInputEv && galInputEv.defaultPrevented);     // a wheel or key the script used scrolled nothing
+            if (!user && galCur && t === document && galPageY != null) {      // the page scrolled itself (scroll anchoring, its own code): put it back
+                galSelfScrollAt = now;
+                dbg('gallery: the page scrolled by itself; put back', { from: window.scrollY, to: galPageY });
+                act('info', 'The page scrolled by itself (' + Math.round(window.scrollY - galPageY) + ' px) while the gallery was open — put back, gallery kept open');
+                window.scrollTo({ left: window.scrollX || 0, top: galPageY, behavior: 'instant' });
+            } else galHide(user ? 'scroll' : 'page scrolled by itself');
+        }
         galMarkSoon();
     }
 
@@ -17735,15 +17762,16 @@
 
     // A gallery opened (middle press, chip): its own loading ahead starts; the main page's waits.
     function ahGalOpen() {
+        galPageY = window.scrollY;
         ahT('act', { a: 'open' });
         ahDrop('main');
         ahG = { fwd: 0, origs: !!cfg.galleryLoadAll, at: null, back: null, from: 0, end: 0, run: 0, warm: null };
     }
 
     // The gallery closed: what it queued is dropped, and the main page starts again from the first door on screen.
-    function ahGalClose() {
+    function ahGalClose(why) {
         if (!ahG) return;
-        ahT('act', { a: 'close' });
+        ahT('act', { a: 'close', why: why || 'pointer left', you: GAL_USER_HIDE.indexOf(why) >= 0 });
         ahG = null;
         ahDrop('gal');
         ahDrop('galo'); ahDrop('galn');
@@ -17999,8 +18027,8 @@
             if (document.visibilityState === 'hidden') { if (galPre && galFrameStop) galFrameStop(); }   // only the tab in view preloads
             else { ahPics.pump(); ahPages.pump(); galPreNext(); }
         });
-        window.addEventListener('wheel', function () { galTap = false; galInputAt = performance.now(); }, { capture: true, passive: true });
-        window.addEventListener('touchstart', function () { galInputAt = performance.now(); }, { capture: true, passive: true });
+        window.addEventListener('wheel', function (e) { galTap = false; galInputAt = performance.now(); galInputEv = e; }, { capture: true, passive: true });
+        window.addEventListener('touchstart', function () { galInputAt = performance.now(); galInputEv = null; }, { capture: true, passive: true });
         setTimeout(function () {
             if (galMarksHere()) galListAdd(GAL_VISITED_KEY, location.href.split('#')[0]);
         }, 0);
@@ -18009,7 +18037,7 @@
             galTap = false;
             galMidAt = 0;
             galLeftAt = 0;
-            if (e.button === 0) galInputAt = performance.now();      // a scrollbar drag; the middle press itself is not
+            if (e.button === 0) { galInputAt = performance.now(); galInputEv = null; }      // a scrollbar drag; the middle press itself is not
             if (galMenuEl && !galMenuEl.hidden && e.composedPath().indexOf(galMenuEl) < 0) galMenuHide();
             if (e.composedPath().some(function (n) { return n.nodeType === 1 && n.hasAttribute(GAL_PILL); })) return;   // our marks act on their own
             const plain = e.button === 1 && cfg.galleryMiddle && !e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey;
@@ -18039,7 +18067,7 @@
             galHide('press');
         }, true);
         window.addEventListener('keydown', function (e) {
-            if (e.key !== 'Control') galInputAt = performance.now();
+            if (e.key !== 'Control') { galInputAt = performance.now(); galInputEv = e; }
             if (e.key === 'Escape' && (galEdit || (galMenuEl && !galMenuEl.hidden))) { e.stopImmediatePropagation(); if (galEdit) galEditStop(false); else galMenuHide(); }
             else if (e.key === 'Escape' && galCur && !(view && box && box.classList.contains('on'))) galHide('esc');   // a preview up: Esc closes it first
             if (!galCur || galLook || galEdit || panelHost || e.ctrlKey || e.metaKey || e.altKey || typingIn(e)) return;

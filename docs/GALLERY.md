@@ -679,7 +679,11 @@ The page a door opens is the ground truth for the press that opened it. Hovers c
   picture a `data-hz-saved` span (`galMarkSaved`). Marks are found by scanning the next 3 siblings
   (`galMarkFind`), since a picture can now have two.
 - **Scroll hides it** (`galScroll`: the document or a container ≥ half the viewport tall — a carousel
-  must not count).
+  must not count). Only the user's scroll: a wheel/key within 600 ms whose event the script did NOT
+  `preventDefault` (`galInputEv`; a slideshow wheel flips, it scrolls nothing). A page scroll with no such input
+  while a gallery is open (scroll anchoring, the site's code) is put back to `galPageY` and the gallery stays
+  (v0.419.0, user: fullscreen slideshows closed mid-wheel, logged as "You closed"). The activity line names
+  the close's real reason (`ahGalClose(why)`; `GAL_USER_HIDE` decides "You closed" vs "The gallery closed").
 - **Seen check** (user): a gallery opened by a press (`galPeek`: chip or middle) is seen at once (user,
   v0.343.0: ticks missing until reload — a scroll the page made in its first second hid the set, `galScroll`
   'page scrolled by itself', so the timer found it gone). The 1 s rule below now covers only a non-press show.
