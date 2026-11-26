@@ -241,7 +241,8 @@ Test pages:
     - **Expect:** the main page's loading stops at once. `orig galo` loads start within a second, from picture 1,
       through every picture of the gallery (`gallery originals: done {pictures, found}` at the end), with the next
       2 galleries' thumbnails (`thumbnails of gallery N of the queue`) alongside. eporner, Chrome: 279 pictures,
-      49 MB in about 80 s.
+      49 MB in about 80 s. `gallery originals: restarted` (v0.398.0) is a run replaced by a newer one (layout, hover,
+      page step), not a stop; `cut` is a stop.
     - **A hover jumps the queue:** hover a picture far down that hasn't loaded yet. **Expect:** `a preview;
       originals from picture N`, and loading carries on from N.
     - **Page steps don't stop it:** PageDown. **Expect:** no `pages skipped` line; loading carries on.

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.397.0
+// @version      0.398.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -11948,6 +11948,7 @@
     const GAL_DOOR_MARK = 'data-hz-door';      // the ▦ chip, in the card like the marks
     const GAL_PILL = 'data-hz-marks';          // one dark pill per picture holding chip, tick, disc
     const galThumbDone = new Set();            // thumbnail URLs loaded or failed; a chip is grey until its first page is all here
+    const galFirstIn = new Set();              // doors whose main-page thumbnail pass finished; galPer grows once the thumb shape is known
     let galThumbT = 0;
     let galPeek = false, galPeekTapAt = 0, galGrowing = null, galGrowEnd = null, galChipHot = null, galLeftAt = 0;
     const galGrown = new Set(), galLists = new Map();
@@ -13997,6 +13998,7 @@
     function galThumbsReady(href) {
         const list = href && galLists.get(href);
         if (!list || !list.length) return false;
+        if (galFirstIn.has(href)) return true;
         const n = Math.min(list.length, Math.max(1, galPer(null)), AH_THUMBS_MAIN);     // what the main page's first pass loads
         for (let i = 0; i < n; i++) if (!galThumbDone.has(list[i].thumb)) return false;
         return true;
@@ -14401,6 +14403,7 @@
         usLog.enable(cfg.logRequests !== false);
         const lg = usLog.start('origs', { host: pageHost(), pace: version().replace(/\?/g, '') + ' ' + AH_PIC_GAP.join('-') + 'ms, ' + GAL_HQ_PAR + ' max', slowed: noRush(pageHost()) });
         const tok = set.hqTok = { cancelled: false, fresh: false };
+        const cutWhy = function () { return set.hqTok !== tok ? 'restarted' : 'cut'; };     // a newer run replaced this one
         let i = 0, running = 0, ended = false, got = 0, bytes = 0, sizing = 0, full = false;
         const end = function (why) {
             if (ended || sizing) return;
@@ -14414,10 +14417,10 @@
             sizing++;
             const held = heldBlobs.get(hit.url);
             (held ? Promise.resolve(held.blob.size) : galBytes(hit.url)).then(function (n) { bytes += n; })
-                .then(function () { sizing--; if (!running && (tok.cancelled || i >= imgs.length)) end(tok.cancelled ? 'cut' : full ? 'memory full' : 'done'); });
+                .then(function () { sizing--; if (!running && (tok.cancelled || i >= imgs.length)) end(tok.cancelled ? cutWhy() : full ? 'memory full' : 'done'); });
         };
         const next = function () {
-            if (tok.cancelled) { if (!running) end('cut'); return; }
+            if (tok.cancelled) { if (!running) end(cutWhy()); return; }
             if (i >= imgs.length) { if (!running) end(full ? 'memory full' : 'done'); return; }
             if (Date.now() - keepFullAt < 3000) { i = imgs.length; full = true; if (!running) end('memory full'); return; }     // a later page step or preview resumes it
             while (running < GAL_HQ_PAR && i < imgs.length) {
@@ -16920,6 +16923,7 @@
             const per = Math.max(1, galPer(null)), todo = function (n) { return list.slice(0, n).filter(function (it) { return !galThumbDone.has(it.thumb); }); };
             if (job.stage === 1) {
                 await Promise.all(todo(Math.min(per, AH_THUMBS_MAIN)).map(function (it) { return ahImg(it, 'main'); }));
+                if (gen === ahGen) { galFirstIn.add(href); galPillMarks(GAL_DOOR_MARK).forEach(galChipStyle); }
                 dbg('loading ahead: thumbnails', { href: href, cut: gen !== ahGen });
             } else if (job.stage === 2) {
                 const tok = { cancelled: false, fresh: false };
