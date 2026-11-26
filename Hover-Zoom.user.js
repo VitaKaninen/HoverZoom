@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.406.0
+// @version      0.407.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -9949,7 +9949,7 @@
 
     // Debug: every drawn picture and why the widget did or did not count it. No URLs, only shapes.
     function twReport() {
-        const floor = idleFloor();
+        const floor = idleFloor(), pe = postEnd();
         const all = document.querySelectorAll('img,video');
         const urls = new Map(), out = [];
         for (let i = 0; i < all.length && out.length < 40; i++) {
@@ -9965,6 +9965,7 @@
             else if (!tourWorthy(el, floor)) why = 'under the floor (' + floor + 'px)';
             else if (sideColumn(el)) why = 'side column';
             else if (popupLayer(el)) why = 'popup layer';
+            else if (pe && pe.cut && atOrAfter(pe.cut, el)) why = 'after the post end (' + pe.how + ')';
             else why = 'COUNTED';
             out.push(el.tagName.toLowerCase() + ' ' + Math.round(r.width) + 'x' + Math.round(r.height) +
                 (el.naturalWidth ? ' nat ' + el.naturalWidth + 'x' + el.naturalHeight : '') + ' ' + urls.get(u) + lazy +

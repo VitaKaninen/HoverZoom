@@ -8,8 +8,9 @@ Then (v0.406.0, user's asks, verified live): the page row only on picture walls 
 measurements); no page widget when gallery covers are 30 %+ (eporner beach search: 91 of 100, hidden; standing
 search: 27 of 100, shown); Dark Reader no longer blanks the widget (SETTINGS.md "Dark Reader and the widgets");
 the gallery-did-not-open popup now also writes a `console.warn`, which a tool sees.
-**Last asked the user:** nothing open. Unexamined: on a 4chan thread the widget count settles at 1 though its
-report lists 40 COUNTED rows, so the widget hides; it did so before v0.406.0.
+**Last asked the user:** nothing open. The 4chan count of 1 is §1c's post end (posts are sibling
+`div.postContainer`s, cut at the 2nd); the report now says `after the post end` (v0.407.0). Asked the user whether
+imageboard threads should count replies; unanswered.
 
 # Handoff 2026-11-26 #6: the rest of TEST-PLAN on eporner (v0.404.0, no code change)
 
