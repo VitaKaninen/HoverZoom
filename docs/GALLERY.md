@@ -258,12 +258,17 @@ What loads ahead follows what the user does. Code: the `ah*` functions after `ga
   Order (`ahPri`): the open gallery (`gal` thumbnails, `galo` originals) → counts → the main page. `ahDrop(tag)`
   resolves a tag's waiting slots to null (callers skip). A hidden tab starts nothing. Measured on `door-long`:
   picture starts 58 / 141 / 453 ms (min / median / max).
-- **Main page** (`galPreNext`, no gallery or preview up): counts for every door all the time (`galCountNext`, HTML
-  only, nearest the middle first); from `ahAnchor` (the hovered door, else the first door on screen) on in page
-  order, one door at a time: its count, its first page of thumbnails, its first `AH_ORIGS` 2 originals
-  (`ahOrig` → `galResolve` on a stand-in, `plKeepImage`). Frame reads to the end (`galGrow`) only when nothing else
-  is owed (`ahIdleGrow`, once per door). Endless off: originals only for the first door, thumbnails for
-  `AH_THUMBS_OFF` 3 more, the rest once ≥ `AH_SHARE` 40 % of the page's doors are seen. The covers' own originals
+- **Main page** (`galPreNext` → `ahMainPick`, no gallery or preview up; v0.397.0, user 2026-11-26): page reads for every
+  door all the time (`galCountNext`, HTML only, nearest the middle first — the read *is* the count and the thumbnail
+  list, there is no separate count). From `ahAnchor` (the hovered door, else the first on screen) on in page order,
+  one job at a time, in passes: **1** every door's page read + first `AH_THUMBS_MAIN` 30 thumbnails (`ahDone`);
+  **2** every door's first `AH_ORIGS` 2 originals (`ahODone`; `ahOrig` → `galResolve` on a stand-in, `plKeepImage`);
+  **3** after a gallery preview, the door after it gets its whole first page of thumbnails (`ahLookLast`,
+  `ahNextDone`); then frame reads to the end (`galGrow`, the expensive `19+` → `40`) last of all (`ahIdleGrow`, once
+  per door). Thumbnails already settled are skipped. The ▦ chip turns blue at the 30 (`galThumbsReady`); a preview
+  loads the rest of its page itself. Endless off: pass 1 for the first door + `AH_THUMBS_OFF` 3, pass 2 for the
+  first only, the rest once ≥ `AH_SHARE` 40 % of the page's doors are seen. Measured on eporner (Chrome, cold):
+  page reads ~0.4 s, 30 thumbnails ≈ 4 s a door, an original ≈ 1.1 s with 6 in flight. The covers' own originals
   (`pgFill`, `hoverPreload`) wait while counts are in flight (`galCountsBusy`) — user: revisit later.
 - **Scrolling** (`ahScrollNote` from `galScroll`, checked ≤ every 200 ms): the next door to load scrolled above the
   viewport = behind → `ahDrop('main')` and nothing new starts (counts go on). Still for `AH_STILL_MS` 250, then
@@ -285,9 +290,30 @@ What loads ahead follows what the user does. Code: the `ah*` functions after `ga
   each second while `galLook`/`galCur`/`galWant`; started from `galShow`, `galLookOpen`, the `galCur` set and the fly's
   creation (a closing preview's `galHide` removes it on a timeout that can land after the gallery opened); `.fly:hover`
   lifts it over ⛶.
+- **Load all** (`cfg.galleryLoadAll`, default on, v0.397.0; ☐ Load all above ☐ Endless on the clicked picture, and
+  Settings → Galleries): the open gallery's originals load at once — `ahG.origs` true from `ahGalOpen`, `galHqAhead`
+  from the page on screen through every built cell, then stand-ins for the list's unbuilt rest, then the
+  `KEEP_BACK_PAGES` behind it. A hover on a picture not loaded yet (`hqTried` unset) restarts the run there (jumps
+  the queue). Page steps never stop it; a queue switch (`galBuild`, new href) starts the new gallery from its
+  start. Turned off mid-gallery: `galo` dropped, nothing new until a preview. Off = the data-saver rules below
+  (originals from a preview on; a forward page step stops them, also the step past a gallery's end).
+  The clicked picture is never under `GAL_PIC_MIN_W`×`GAL_PIC_MIN_H` 196×130 (`galPlace`, drag `lo`, `galBoxKept`):
+  measured, the stacked checkboxes (11 px in, 77 wide, 54 tall) and the storage readout (81×51, raised 38 px on
+  hover over ⛶) need 181×127.
+  A run stops starting more (`memory full`) within 3 s of the memory keep dropping a picture *ahead*
+  (`keepFullAt`); the next layout/page step/preview resumes it.
+- **Memory keep** (`keepTrim`, user 2026-11-26; replaces HELD_MAX / plBudget's oldest-first): `heldBlobs` (exact
+  bytes) and `plKeep` (estimated, `PL_BYTES_PER_PX` — over-counts JPEGs ~3×, so the cap uses held bytes where
+  present) as one set. Gallery entries (`keepItem` url → item) are placed on the open queue (`keepPlaces`, linear
+  over the queue's lists); behind the user = dropped past `KEEP_BACK_PAGES` 2 pages or `KEEP_BEHIND_MS` 5 min
+  behind. Over `cfg.galleryKeepMB` (1024): behind first (farthest first), then the farthest ahead. Everything
+  else: `cfg.keepMB` (512), oldest first. Under 8 GB `deviceMemory`, each cap ≤ 128 MB per GB. A dropped
+  original's item loses `hqTried`, so a backward run loads it again. Runs on every add and each storage-readout
+  tick (1 s). Verified on eporner with a 64 MB cap: 361/666 then `memory full`.
 - **Gallery, endless** (`ahG`, made in `galMiddle` unless a queue switch, dropped in `galHide`): thumbnails
   (first 2 pages) of the next `ahAheadN` galleries — 2, 5 once the user steps forward or reaches gallery 2,
-  10 from gallery 3 (`ahGalAhead`, run on every landing and page step). Originals only after a preview
+  10 from gallery 3 (`ahGalAhead`, run on every landing and page step, and when Endless is ticked). With Load all
+  off, originals only after a preview
   (`ahSaw` from `galPv` and from `tourGo` in a gallery): `galHqAhead` = from the previewed picture through 2
   pages on (only what `galFeed` has built); within reach of the end, the next gallery's first page too. A
   forward page step outside a slideshow = skipping: originals stop (`galo` dropped) until the next preview. A

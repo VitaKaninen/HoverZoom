@@ -1338,7 +1338,7 @@ const galPH = function (min) {
 // ---- resizing the clicked picture: snaps to row edges, gap middles and the window's centre lines; Alt (not here) is free.
 {
     const cut = function (from, to) { const a = src.indexOf(from), b = src.indexOf(to, a); return src.slice(a, b); };
-    const S = new Function('const GAL_GAP = 12, GAL_MIN_H = 120, GAL_FLY_FRAC = 0.2, POS_SNAP_EDGE = 16, POS_SNAP_CENTRE = 40, GAL_STRIP_H = 60, cfg = {};' + NL +
+    const S = new Function('const GAL_GAP = 12, GAL_MIN_H = 120, GAL_FLY_FRAC = 0.2, POS_SNAP_EDGE = 16, POS_SNAP_CENTRE = 40, GAL_STRIP_H = 60, GAL_PIC_MIN_W = 196, GAL_PIC_MIN_H = 130, cfg = {};' + NL +
         cut('    function posPt(', '    // The window placed by a spec') +
         cut('    function galRowLines(', '    // The strip\'s box') + cut('    function galSnapH(', '    function galFlyPut(') +
         NL + 'return {galRowLines, galSnapH, galPagedRows, galLines, galEdgeOn, galEdgeAt, galPlace, galBoxSnap};')();
@@ -1350,9 +1350,10 @@ const galPH = function (min) {
     eq('anchor: that line in a taller window', S.galEdgeAt(onRow, 900, r900), 746);
     eq('anchor: a line past the rows is gone', S.galEdgeAt({ k: 'r', e: 's', i: 40 }, 900, r900), null);
     const rec = { ey: { t: onRow, b: { k: 'w', e: 'e', o: 12 } }, ex: { r: { k: 'w', e: 'e', o: 12 } } };
-    eq('anchor: both y edges on lines set the height, the strip included', S.galPlace(rec, 0.75, 60, 1400, 900, r900), { x: 1327, y: 746, w: 62, h: 142 });
+    eq('anchor: both y edges on lines set the height, the strip included; below the controls floor it grows to it', S.galPlace(rec, 0.75, 60, 1400, 900, r900), { x: 1192, y: 579, w: 196, h: 321 });
+    eq('anchor: both y edges on lines set the height when above the floor', S.galPlace({ ey: { t: { k: 'w', e: 's', o: 12 }, b: { k: 'w', e: 'e', o: 12 } }, ex: { r: { k: 'w', e: 'e', o: 12 } } }, 0.75, 60, 1400, 900, r900).h, 876);
     eq('anchor: a fixed box follows its edge line', S.galPlace({ ex: { l: { k: 'c' } }, y: { m: 's', o: 20 } }, 1, 0, 1000, 800, [], { w: 190, h: 60 }), { x: 500, y: 20, w: 190, h: 60 });
-    eq('anchor: nothing on a line falls back to the remembered third and size', S.galPlace({ x: { m: 'e', o: -12 }, y: { m: 'e', o: -12 }, hf: 0.2 }, 1, 60, 1000, 800, []), { x: 828, y: 568, w: 160, h: 220 });
+    eq('anchor: nothing on a line falls back to the remembered third and size', S.galPlace({ x: { m: 'e', o: -12 }, y: { m: 'e', o: -12 }, hf: 0.2 }, 1, 60, 1000, 800, []), { x: 792, y: 532, w: 196, h: 256 });     // 160 wide grows to GAL_PIC_MIN_W
     eq('move snap: the right edge goes to the margin', S.galBoxSnap(1205, 300, 180, 100, 1400, 900, r900).x, 1208);
     eq('resize snap: the strip counts in the box', S.galSnapH({ l: 1700, t: 800, w: 200, h: 260 }, 'tl', 110, [900], 1920, 1080, 60), 100);
     const L = [{ x: 0, y: 12, w: 160, h: 120 }, { x: 170, y: 12, w: 160, h: 120 }, { x: 0, y: 150, w: 160, h: 120 }, null];

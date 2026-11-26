@@ -1,13 +1,16 @@
-# 2026-11-26 #4: make loading ahead match the user's goals, then test it in Chrome on real sites
+# 2026-11-26 #4: loading ahead made to match the user's goals (v0.396.0–v0.397.0); next: the TEST-PLAN run
 
-User: fix the behaviour first, then the full TEST-PLAN run, in Claude in Chrome on live sites (eporner, girlstop), not
-a test server. Tools: v0.396.0 trace (`hover-zoom:ahead-trace`, TESTING.md). No flush button (a new tab clears the
-script's memory; Chrome's HTTP cache stays — read `ms` in the trace). Gaps put to the user, awaiting answers:
-1. Main page does count → thumbs → 2 originals **per gallery**; their alternative was thumbs for all first, originals after.
-2. Open gallery loads no originals until a preview; user (session #3) expected originals for the open page at once.
-3. No direction-aware keep: plKeep 1 GB / heldBlobs 512 MB, oldest first. Proposed: the shelved spec (2 pages back, all
-   ahead, nothing behind > 5 min, gallery 1 GB) applied to RAM, behind dropped first.
-4. Slideshow keeps a fixed 2 pages of originals ahead; unclear whether "as far as they are previewing" means speed-based.
+User: build first, then the full TEST-PLAN run in Claude in Chrome on live sites (eporner, girlstop), not a test
+server. Built (spec in GALLERY.md "Loading ahead"): trace; main page in passes (read + 30 thumbnails for every door,
+then 2 originals each, then the door after a preview, full counts last); ☐ Load all (`G14`, default on, data saver
+off); memory keep (2 pages back, 5 min, 1 GB / 512 MB settings); clicked picture ≥ 196×130. No flush button (a new
+tab clears the script's memory; Chrome's cache stays — read `ms`). Verified in Chrome: pass order, Load all whole
+gallery, memory full at a 64 MB cap, data saver (no originals until a hover, then from it). Not verified: 3.1b
+anticipation, the 5-minute rule, behind drops on paging, LibreWolf.
+**User's Chrome state:** Endless turned on by Claude (it was off); 16 number settings were set by a bad selector and
+restored to their **defaults** — tell the user if any had been custom (Hover delay, zoom limit, min ratio, ignore
+under, small under, emoji size, display scaling, tour floor, JPEG quality, wheel step, max zoom, border, radius,
+row min, both memory caps).
 
 # Handoff 2026-11-26 #3 (~320k tokens), v0.388.0 → v0.395.0, all pushed
 

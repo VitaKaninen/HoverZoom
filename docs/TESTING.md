@@ -401,7 +401,13 @@ logs `retrying` ×3 — an artefact of the stub, not of the manager. The pane wo
   prints one `ahead trace {…}` console line: `events` (`thumb`/`orig`/`page` loads with `tag` main|count|gal|galo|shown,
   `s` start, `ms`, `ok`, `g` = door in page order, `p` = picture; `act` = open/close/page/preview/slide/look; `note` = the
   `loading ahead:` dbg lines) and `state` (anchor, behind, queue position, `ahead`, gate waits by tag, plKeep/held MB).
-  Page with `since` = the last `now`. Detail goes as a JSON string (sandbox). **Cache:** a new tab clears the script's
+  Page with `since` = the last `now`. Detail goes as a JSON string (sandbox). `sum: 1` = per kind/tag count + median
+  ms, per gallery loads, the last `steps` notes. `attr: 1` writes the JSON to `<html data-hz-trace>` instead of the
+  console — use it: `read_console_messages` kept returning stale lines (2026-11-26). `hover-zoom:debug` true is
+  kept in the tab's sessionStorage (`hzPageDebug`), so the trace records from boot after a reload.
+- **Setting one value in the settings panel from `javascript_tool`:** find the input's own row (climb while the
+  parent holds a single input), never test an ancestor's `textContent` — that matched every row and set 16 settings
+  in the user's Chrome at once (2026-11-26; restored to defaults). **Cache:** a new tab clears the script's
   memory (sessionStorage, Maps) but not Chrome's HTTP cache — thumbnails at 2–4 ms are cache hits; for a cold run use
   listing pages / galleries not visited before.
 

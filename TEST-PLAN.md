@@ -1,4 +1,4 @@
-# Test plan: loading ahead, the gallery preview and galleries (v0.387.0 – v0.395.0)
+# Test plan: loading ahead, the gallery preview and galleries (v0.387.0 – v0.397.0)
 
 Written for the user to run by hand (user, 2026-11-26). Each test says what to do, what should happen,
 which console line proves it, and what counts as a failure. **When a later version changes a behaviour
@@ -62,8 +62,10 @@ Test pages:
 - **Live:** a pornpics search (e.g. `?q=standing`), since that's where the complaint came from, and any
   other site with learned gallery doors (eporner, girlstop).
 - **Local:** `python test-server.py`, then `http://localhost:8899/test-pages/door-long.html` (150
-  galleries of 40 pictures each). Claude can only run the local page; pornpics is refused to it, so
-  the live results are yours.
+  galleries of 40 pictures each).
+- **Claude's runs (user, 2026-11-26):** in Claude in Chrome on live sites (eporner, girlstop), not the test server;
+  pornpics is refused to Claude. Measure with the trace (`hover-zoom:ahead-trace`, `docs/TESTING.md`). A new tab
+  clears the script's memory; Chrome's image cache stays, so use listing pages not visited before for cold runs.
 
 ---
 
@@ -103,33 +105,40 @@ Test pages:
       read to its end (test 6.1).
     - Doors to another site (a different origin) get no count. That's by design.
 
-2.2 **Grey until the first page is in** (v0.388.0).
-    - **Expect:** a chip's ▦ icon is grey until that gallery's first page of thumbnails has loaded, then
-      it turns blue. A gallery with a broken thumbnail still turns blue. The open gallery's yellow ✕ is
+2.2 **Grey until the first 30 are in** (v0.388.0; 30 since v0.397.0).
+    - **Expect:** a chip's ▦ icon is grey until that gallery's first 30 thumbnails (or its whole first page, if
+      smaller) have loaded, then it turns blue. A gallery with a broken thumbnail still turns blue. The open gallery's yellow ✕ is
       never grey.
     - **Fail:** a chip that stays grey after its gallery's thumbnails are visibly in (open the preview
       to check), or a chip that turns blue before any thumbnail request.
 
 ---
 
-## 3. Main page: thumbnails, then 2 originals per gallery
+## 3. Main page: thumbnails for every gallery, then 2 originals each (v0.397.0)
 
 3.1 **Order from the first gallery on screen.** Load a fresh tab and don't hover anything.
-    - **Expect:** starting with the first gallery visible on screen, then going down the page in order,
-      one gallery at a time: its first page of thumbnails, then its first 2 originals. Each gallery
-      prints `loading ahead: thumbnails and first originals {href, originals: 2, cut: false}`.
+    - **Expect, pass 1:** from the first gallery visible on screen down the page, one gallery at a time: its page
+      read, then its first 30 thumbnails. Each prints `loading ahead: thumbnails {href, cut: false}`. With Endless
+      on, this reaches the last gallery on the page before any original loads.
+    - **Expect, pass 2:** then, from the same first gallery down, each gallery's first 2 originals:
+      `loading ahead: first originals {href, originals: 2}`.
     - Galleries above the first one on screen get counts but no thumbnails.
+
+3.1b **The next gallery after a preview.** Once passes 1 and 2 are done, open a gallery preview (5.1) on gallery N
+    and move off it.
+    - **Expect:** `loading ahead: the next gallery's first page, after a preview` for gallery N+1: the rest of its
+      first page of thumbnails (beyond 30). Only when nothing else is waiting.
 
 3.2 **A hovered gallery goes first.** On a fresh tab, hover a gallery near the bottom of the screen within
     the first second.
-    - **Expect:** the first `thumbnails and first originals` line is for the hovered gallery, followed by
-      the galleries below it.
+    - **Expect:** the first `loading ahead: thumbnails` line is for the hovered gallery, followed by the
+      galleries below it.
     - Not tested before: whether a hover *after* loading has started moves the start point. By the spec
       a hover moves it only when scrolling stops (test 4.3).
 
 3.3 **It keeps going down the page.** Leave a long search page alone for a minute.
-    - **Expect:** `thumbnails and first originals` lines keep arriving, about 1.8 galleries a second on
-      Claude's fixture, until the last gallery. The chips below turn blue in order.
+    - **Expect:** `loading ahead: thumbnails` lines keep arriving, about one gallery every 4 s on eporner (measured
+      cold, Chrome), until the last gallery. The chips below turn blue in order.
     - **Fail, already reported once and never reproduced:** all traffic stops for minutes, the galleries
       below stay grey, and a small scroll restarts it. If you see this, copy every `loading ahead:` line
       from the last 30 s **before** you scroll, and note whether a gallery or preview was open at the
@@ -160,7 +169,7 @@ Test pages:
 4.3 **Stop, wait 1 s for a hover.** After 4.2, stop scrolling and hover a gallery straight away, within
     about a second.
     - **Expect:** after about 1.25 s, `loading ahead: scroll stopped; from the hovered gallery`, then
-      `thumbnails and first originals` for that gallery and the ones below it.
+      `loading ahead: thumbnails` for that gallery and the ones below it.
 
 4.4 **Stop with no hover.** Repeat 4.2, then stop with the pointer on empty space.
     - **Expect:** `loading ahead: scroll stopped; from the first gallery on screen`, and loading restarts
@@ -216,8 +225,8 @@ Test pages:
 
 ## 6. Idle work
 
-6.1 **Counts read to their end only when idle.** Leave a page alone until 3.3 has reached the end of the
-    page.
+6.1 **Counts read to their end only when idle, last of all.** Leave a page alone until 3.1's two passes (and
+    3.1b, if you previewed) have reached the end of the page.
     - **Expect:** `loading ahead: idle, reading a count to its end {href}`, one gallery at a time, and
       that gallery's chip goes from `N+` to its true `N` (e.g. `19+` → `40`).
     - **Fail:** this line appears while thumbnails are still loading, or a chip stays at `N+` forever
@@ -227,14 +236,27 @@ Test pages:
 
 ## 7. Opening a gallery (endless on, the default)
 
-7.1 **On open: 2 galleries of thumbnails ahead, no originals.** Middle-click a cover (or click its chip)
-    and don't hover any picture.
+7.0 **Load all on (the default): every original at once** (v0.397.0, `G14`). Middle-click a cover (or click its chip)
+    and don't hover anything.
+    - **Expect:** the main page's loading stops at once. `orig galo` loads start within a second, from picture 1,
+      through every picture of the gallery (`gallery originals: done {pictures, found}` at the end), with the next
+      2 galleries' thumbnails (`thumbnails of gallery N of the queue`) alongside. eporner, Chrome: 279 pictures,
+      49 MB in about 80 s.
+    - **A hover jumps the queue:** hover a picture far down that hasn't loaded yet. **Expect:** `a preview;
+      originals from picture N`, and loading carries on from N.
+    - **Page steps don't stop it:** PageDown. **Expect:** no `pages skipped` line; loading carries on.
+    - **Next gallery:** step past the last page into the next gallery. **Expect:** its originals start from its
+      picture 1.
+    - **Memory full:** on a gallery bigger than the memory cap (Settings → *Memory for an open gallery*; set it
+      to 64 to try it), **expect** `memory keep: dropped …` and then `gallery originals: memory full`, and no more
+      original requests until you page on.
+
+7.1 **Load all off (data saver): 2 galleries of thumbnails ahead, no originals.** Untick ☐ Load all, close the
+    gallery, then middle-click a cover and don't hover any picture.
     - **Expect:** the main page's loading stops at once. Then
       `loading ahead: thumbnails of gallery N of the queue {href, ahead: 2}` for the next 2 galleries:
-      thumbnails of their first 2 pages, and **no originals**. The storage readout moves to the clicked
-      picture in the corner.
-    - **Fail:** a burst of originals on open. v0.386.0 downloaded every original on open; v0.387.0 does
-      not.
+      thumbnails of their first 2 pages, and **no originals**. eporner, Chrome: verified (v0.397.0).
+    - Tests 7.2–7.7 are data-saver tests unless they say otherwise; tick ☐ Load all again afterwards.
 
 7.2 **A hover starts originals.** Hover a picture in the gallery, say picture 4.
     - **Expect:** `loading ahead: a preview; originals from picture 4`, then original requests from
@@ -254,7 +276,7 @@ Test pages:
       `ahead` to 5. Reaching the 3rd gallery raises it to 10. Each raise prints `thumbnails of gallery N
       of the queue` lines for the newly covered galleries.
 
-7.6 **A forward page step means skipping: thumbnails only.** After 7.2, press PageDown.
+7.6 **A forward page step means skipping: thumbnails only** (Load all off). After 7.2, press PageDown.
     - **Expect:** `loading ahead: pages skipped, thumbnails only until the next preview`. Original
       requests stop (in-flight ones finish), and the next galleries' thumbnails continue.
     - Hovering a picture on the new page starts originals again from that picture (7.2's line again).
@@ -314,17 +336,24 @@ Turn Endless back on afterwards.
 
 ---
 
-## 9. Storage readout (v0.394.0)
+## 9. Storage readout (v0.394.0) and the memory keep (v0.397.0)
 
 9.1 **Expect:** three lines at the bottom right of the gallery's picture:
-    - **RAM:** pictures this script holds in memory.
-    - **ahead:** an estimate of the pictures loaded ahead, from their pixel counts.
+    - **RAM:** gallery originals this script holds in memory (exact bytes).
+    - **ahead:** an estimate of the pictures loaded ahead, from their pixel counts (over-counts JPEGs about 3×).
     - **disk:** the whole site's storage, as the browser reports it.
 
-    It updates every second while a preview or gallery is open. During 7.2, "ahead" should climb. It
-    disappears when everything closes.
+    It updates every second while a preview or gallery is open. During 7.0, RAM should climb. It disappears when
+    everything closes.
 
----
+9.2 **Nothing overlaps at the smallest size.** Drag a corner of the clicked picture to make it as small as it goes,
+    then hover it. **Expect:** it stops at 196×130 (the picture, without the strip); ⓘ, ⤓ ✕ ⛶, ☐ Load all, ☐ Endless
+    and the readout (raised on hover) all clear of each other and clickable.
+
+9.3 **Behind is dropped, ahead kept.** With debug on, open a long gallery with Load all on and page forward 4+ pages.
+    **Expect:** `memory keep: dropped N` lines once pictures are more than 2 pages behind you; RAM stops growing
+    without bound. Pictures behind you are also dropped after 5 minutes. Page back 5 pages: the dropped ones load
+    again (the 5-before rule), not from memory.
 
 ## 10. Did the files loaded ahead survive in the cache?
 

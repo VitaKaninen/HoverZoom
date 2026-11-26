@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.396.0
+// @version      0.397.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -252,6 +252,9 @@
         hoverDelay: 120,            // ms before resolving
         galleryMiddle: false,       // a middle-click on a result opens its gallery (else the ▦ chip's click does)
         galleryEndless: true,       // at a gallery's end the next one on the page opens (☐ Endless on the clicked picture)
+        galleryLoadAll: true,
+        galleryKeepMB: 1024,        // memory for an open gallery's pictures: 2 pages behind the user and everything ahead
+        keepMB: 512,                // memory for pictures loaded ahead elsewhere; the oldest go first       // an open gallery's originals load at once; off: only from a preview on (☐ Load all on the clicked picture)
         galleryEndlessViewed: false,    // endless also queues galleries already seen or visited
         galleryEndlessStop: true,       // endless: a step past a gallery's end stops there once with a note; the next crosses
         galleryChips: true,         // the ▦ chip on every gallery thumbnail; off: only on the one under the pointer
@@ -623,8 +626,10 @@
     // This page only, never stored: `document.dispatchEvent(new CustomEvent('hover-zoom:debug',
     // {detail: true}))` from the console turns the log on without touching the settings.
     let pageDebug = false;
+    try { pageDebug = sessionStorage.getItem('hzPageDebug') === '1'; } catch (e) { /* storage refused */ }     // survives a reload in this tab, so a trace starts at boot
     document.addEventListener('hover-zoom:debug', function (e) {
         pageDebug = !!e.detail;
+        try { sessionStorage.setItem('hzPageDebug', pageDebug ? '1' : '0'); } catch (x) { /* storage refused */ }
         try { console.log('[HoverZoom ' + version() + '] debug ' + (pageDebug ? 'on' : 'off') + ' for this page'); } catch (x) { /* no console */ }
     });
     // `document.dispatchEvent(new CustomEvent('hover-zoom:gallery-state'))`: gallery mode's state and every load trace, as one console line.
@@ -647,7 +652,11 @@
         let d = e && e.detail;
         if (typeof d === 'string') { try { d = JSON.parse(d); } catch (x) { d = {}; } }
         d = d || {};
-        try { console.log('[HoverZoom ' + version() + '] ahead trace ' + JSON.stringify(ahTraceDump(d))); } catch (x) { try { console.log('[HoverZoom] ahead trace failed: ' + x); } catch (y) { /* no console */ } }
+        try {
+            const j = JSON.stringify(ahTraceDump(d));
+            if (d.attr) document.documentElement.setAttribute('data-hz-trace', j);      // a tool reads it from the page
+            else console.log('[HoverZoom ' + version() + '] ahead trace ' + j);
+        } catch (x) { try { console.log('[HoverZoom] ahead trace failed: ' + x); } catch (y) { /* no console */ } }
         if (d.clear) ahTraceBuf.length = 0;
     });
 
@@ -1580,7 +1589,6 @@
     const bytesMime = new Map();    // url -> the fetched file's type, for a saved file's extension
     const liveBlobs = [];           // object URLs held open, oldest first
     const BYTES_MAX = 12;           // enough for a tour's window; the oldest is revoked
-    const HELD_MAX = 512 * 1024 * 1024; // gallery originals kept as bytes for saving; the oldest go first
     const heldBlobs = new Map();    // url -> {blob, objUrl}: a gallery's originals, fetched once for the preview and the save
     let heldBytes = 0;
     const bytesHosts = new Set();   // hosts of an opened gallery's pictures: fetched as bytes (this page only)
@@ -1621,20 +1629,23 @@
         return p;
     }
 
-    // A gallery original's bytes kept until HELD_MAX is passed; a dropped one is fetched again when next asked for.
+    // A gallery original's bytes, kept by keepTrim's rule; a dropped one is fetched again when next asked for.
     function holdBlob(url, blob, objUrl, onDisk) {
         if (heldBlobs.has(url)) return;
         heldBlobs.set(url, { blob: blob, objUrl: objUrl });
         heldBytes += blob.size;
         if (!onDisk) heldPut(url, blob);
-        for (const [u, h] of heldBlobs) {
-            if (heldBytes <= HELD_MAX || heldBlobs.size <= 1) break;
-            heldBlobs.delete(u);
-            heldBytes -= h.blob.size;
-            bytesCache.delete(u);
-            probeCache.delete(u);
-            if (h.objUrl) URL.revokeObjectURL(h.objUrl);
-        }
+        keepTrim();
+    }
+
+    function heldDrop(u) {
+        const h = heldBlobs.get(u);
+        if (!h) return;
+        heldBlobs.delete(u);
+        heldBytes -= h.blob.size;
+        bytesCache.delete(u);
+        probeCache.delete(u);
+        if (h.objUrl) URL.revokeObjectURL(h.objUrl);
     }
 
     // A gallery's pictures are fetched as bytes from here on: its thumbnails' hosts and its candidates'.
@@ -11520,6 +11531,7 @@
         plWarmGen++;
         plKeep.length = 0;
         plKeepBytes = 0;
+        plKeepBytes = 0;
         dbg('preloader: the browser dropped the loaded pictures; loading them again');
         if (!tour || !tour.on || tour.index < 0) return;
         plFill(tourEntries(), tour.index, plDir || 1);
@@ -11529,6 +11541,7 @@
         plStop();
         plDone.clear();
         plKeep.length = 0;
+        plKeepBytes = 0;
         plKeepBytes = 0;
     }
 
@@ -11632,20 +11645,93 @@
     let plKeepBytes = 0;
     const PL_BYTES_PER_PX = 0.5;    // an estimate of a compressed picture's size; nothing measures it
 
-    function plBudget() {
-        const dm = +navigator.deviceMemory || 0;       // GB, rounded; Chromium only (the pane reports 32)
-        return (dm ? Math.min(1024, dm * 128) : 1024) * 1048576;
+    // Memory caps in bytes: galleries (cfg.galleryKeepMB) and everything else (cfg.keepMB); a machine under 8 GB gets at most 128 MB per GB.
+    function keepCaps() {
+        const dm = +navigator.deviceMemory || 0, lim = dm && dm < 8 ? dm * 128 : Infinity;     // GB, rounded; Chromium only, at most 8
+        return { gal: Math.min(lim, +cfg.galleryKeepMB || 1024) * 1048576, page: Math.min(lim, +cfg.keepMB || 512) * 1048576 };
+    }
+    function plBudget() { return keepCaps().page; }
+
+    const KEEP_BACK_PAGES = 2, KEEP_BEHIND_MS = 5 * 60000;     // a gallery keeps this many pages behind the user, none behind longer than this
+    let keepFullAt = 0;                 // the last time the gallery cap dropped a picture ahead: a run stops starting more
+    const keepItem = new Map();         // a gallery original's url -> its item: where it sits, and hqTried cleared when it is dropped
+
+    // Every gallery picture's place in the open queue (thumbnail -> index across the queue), and the user's place in it.
+    function keepPlaces() {
+        const at = new Map(), set = galCur;
+        if (!set || galLook) return { at: at, now: null, per: 1 };
+        const hrefs = galEndless() && galChain ? galChain.hrefs : [set.href];
+        let off = 0, now = null;
+        hrefs.forEach(function (h) {
+            const list = galLists.get(h);
+            if (h === set.href) {
+                const k = galShownAt(set), P = set.pages && set.pages[set.page];
+                now = off + (k >= 0 ? k : P ? P[0] : 0);
+            }
+            if (Array.isArray(list)) list.forEach(function (it, i) { if (it && it.thumb && !at.has(it.thumb)) at.set(it.thumb, off + i); });
+            off += Math.max(Array.isArray(list) ? list.length : 0, galKnownN(h)[0] || 0);
+        });
+        return { at: at, now: now, per: Math.max(1, galPer(set)) };
     }
 
-    function plKeepImage(res) {
+    // The memory keep (user, 2026-11-26): a gallery keeps KEEP_BACK_PAGES pages behind the user and everything ahead, nothing behind past
+    // KEEP_BEHIND_MS; over the gallery cap, behind goes first (farthest first), then the farthest ahead; the rest of the page oldest first.
+    function keepTrim() {
+        const P = keepPlaces(), t = Date.now(), caps = keepCaps(), gal = [], page = [];
+        let galB = 0, pageB = 0;
+        const place = function (e) {
+            const it = keepItem.get(e.url), th = it ? it.thumb : e.thumb, lin = th != null ? P.at.get(th) : undefined;
+            e.lin = lin == null ? null : lin;
+            const o = e.pl || e.held;
+            if (P.now != null && e.lin != null && e.lin < P.now) { if (!o.bh) o.bh = t; } else o.bh = 0;
+            e.drop = !!o.bh && (P.now - e.lin > KEEP_BACK_PAGES * P.per || t - o.bh > KEEP_BEHIND_MS);
+        };
+        let n = 0;
+        heldBlobs.forEach(function (h, u) { const e = { url: u, held: h, b: h.blob.size, age: n++ }; place(e); gal.push(e); galB += e.b; });
+        plKeep.forEach(function (k, i) {
+            if (heldBlobs.has(k.url)) return;
+            const e = { url: k.url, pl: k, b: k.bytes, age: n + i, thumb: k.thumb };
+            place(e);
+            if (keepItem.has(k.url) || k.thumb) { gal.push(e); galB += e.b; } else { page.push(e); pageB += e.b; }
+        });
+        const drop = function (e) {
+            const it = keepItem.get(e.url);
+            if (it && !(e.held ? plKeep.some(function (k) { return k.url === e.url; }) : heldBlobs.has(e.url))) it.hqTried = false;     // a later run loads it again
+            if (e.held) heldDrop(e.url);
+            else { const i = plKeep.indexOf(e.pl); if (i >= 0) { plKeep.splice(i, 1); plKeepBytes -= e.pl.bytes; } }
+        };
+        let cut = 0;
+        gal.forEach(function (e) { if (e.drop) { drop(e); galB -= e.b; cut++; } });
+        if (galB > caps.gal) {
+            const rest = gal.filter(function (e) { return !e.drop; }).sort(function (a, b) {
+                const ab = a.lin != null && P.now != null && a.lin < P.now, bb = b.lin != null && P.now != null && b.lin < P.now;
+                if (ab !== bb) return ab ? -1 : 1;                                  // behind first
+                if (ab) return a.lin - b.lin;                                       // ...farthest back first
+                if (a.lin != null && b.lin != null && P.now != null) return b.lin - a.lin;     // then the farthest ahead
+                return a.age - b.age;                                               // no place known: oldest first
+            });
+            while (galB > caps.gal && rest.length > 1) {
+                const e = rest.shift();
+                if (!(e.lin != null && P.now != null && e.lin < P.now)) keepFullAt = Date.now();      // ahead had to go: the cap is full of what is ahead
+                drop(e); galB -= e.b; cut++;
+            }
+        }
+        page.sort(function (a, b) { return a.age - b.age; });
+        while (pageB > caps.page && page.length > 1) { const e = page.shift(); drop(e); pageB -= e.b; cut++; }
+        if (cut) dbg('memory keep: dropped ' + cut, { galleryMb: Math.round(galB / 1048576), pageMb: Math.round(pageB / 1048576), behindPages: KEEP_BACK_PAGES });
+    }
+
+    function plKeepImage(res, item) {
+        const thumb = item && item.thumb;
+        if (item) keepItem.set(res.url, item);
         if (plKeep.some(function (k) { return k.url === res.url; })) return;
         const im = new Image();
         if (noReferrerHere()) im.referrerPolicy = 'no-referrer';
         im.src = res.display || res.url;
         const bytes = Math.max(1, (res.w * res.h) || 0) * PL_BYTES_PER_PX;
-        plKeep.push({ url: res.url, im: im, bytes: bytes });
+        plKeep.push({ url: res.url, im: im, bytes: bytes, thumb: thumb || null });
         plKeepBytes += bytes;
-        while (plKeep.length > 1 && plKeepBytes > plBudget()) plKeepBytes -= plKeep.shift().bytes;
+        keepTrim();
     }
 
     // Stage 2 for clips: a real buffered fetch, which the metadata probe deliberately aborts.
@@ -11825,9 +11911,11 @@
     const AH_BACK = 5;                  // originals loaded the other way on a backward step
     const AH_SHARE = 0.4;               // endless off: originals past the first gallery once this share of the page's galleries was opened
     const AH_THUMBS_OFF = 3;            // endless off: galleries after the first whose thumbnails load before that share
+    const AH_THUMBS_MAIN = 30;          // main page: thumbnails per gallery in the first pass (the preview loads the rest)
     const ahPics = ahGate(AH_PIC_GAP, GAL_HQ_PAR), ahPages = ahGate(AH_PAGE_GAP, 4);
     let ahAnchor = null;                // the door the main page loads from: the hovered one, else the first on screen
-    const ahDone = new Set(), ahGrowTried = new Set();
+    const ahDone = new Set(), ahODone = new Set(), ahNextDone = new Set(), ahGrowTried = new Set();     // main page: thumbnails, first originals, the next gallery's whole first page
+    let ahLookLast = null;              // the last gallery preview's door: the one after it is filled when idle
     const ahFiles = new Set();          // originals loaded ahead, checked when shown
     const ahWarm = { n: 0, kept: 0 };
     let ahBehind = false, ahStillT = 0, ahCheckAt = 0, ahGen = 0;
@@ -11845,6 +11933,7 @@
     const GAL_STRIP_H1 = 34;            // the picture row alone: a one-page gallery
     const GAL_STRIP_DL = 26;            // the download row the strip gains while this site has downloads
     const GAL_UNIT_MIN_W = 120;         // a picture holding the strip: never narrower, or its numbers cannot fit
+    const GAL_PIC_MIN_W = 196, GAL_PIC_MIN_H = 130;     // the clicked picture never smaller: its ⓘ, ⤓ ✕ ⛶, ☐ Load all / ☐ Endless and the storage readout clear of each other (measured v0.397.0)
     const GAL_HD = 7;                   // a resize corner: the frame's 3 px border plus 2 px inside and out
     const GAL_STRIP_W = 190;            // their least width; wider under a wider picture
     const GAL_STRIP_GAP = 6;            // between the picture and the strip
@@ -12725,7 +12814,7 @@
             'background:rgba(30,30,46,.92);border:1px solid #45475a;color:#cdd6f4;font:13px/1 system-ui,sans-serif;white-space:nowrap;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.5)}' +
             '.fly .tools span:hover{background:#313244;color:#89b4fa}' +
             '.fly .endl{position:absolute;bottom:6px;left:' + (GAL_HD + 4) + 'px;display:flex;gap:6px;opacity:.6;transition:opacity .15s ease}' +
-            '.fly .endl.top{top:6px;bottom:auto}' +
+            '.fly .endl.top{top:6px;bottom:auto}.fly .endl:not(.top){flex-direction:column;align-items:flex-start}' +
             '.fly:hover .endl{opacity:1}.fly.edit .endl,.fly.asking .endl{display:none}' +
             '.fly .endl>*{display:flex;align-items:center;gap:5px;height:24px;padding:0 8px;box-sizing:border-box;border-radius:12px;' +
             'background:rgba(30,30,46,.92);border:1px solid #45475a;color:#cdd6f4;font:12px/1 system-ui,sans-serif;white-space:nowrap;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.5)}' +
@@ -13004,6 +13093,7 @@
             if (t !== null && b !== null && b - t - sh >= 48) ph = b - t - sh;
             else if (l !== null && r !== null && r - l >= 48) ph = (r - l) / asp;
             else { ph = H * Math.max(0.05, Math.min(0.9, +rec.hf || GAL_FLY_FRAC)) + (sh ? GAL_STRIP_H - sh : 0); both = false; }
+            ph = Math.max(ph, GAL_PIC_MIN_H, GAL_PIC_MIN_W / asp);
             w = ph * asp;
             const maxW = both ? W - 8 : W * 0.4;
             if (w > maxW) { w = maxW; ph = w / asp; }
@@ -13341,15 +13431,19 @@
     function galHqAhead(set) {
         const g = ahG;
         if (!set.pv || !g || !g.origs || galCur !== set || galLook) return;
-        const P = set.pages && set.pages.length ? set.pages : [[0, set.pics.length]], pg = Math.min(set.page || 0, P.length - 1);
+        const P = set.pages && set.pages.length ? set.pages : [[0, set.pics.length]], pg = Math.min(set.page || 0, P.length - 1), all = !!cfg.galleryLoadAll;
         let from = P[pg][0];
-        const end = P[Math.min(P.length - 1, pg + 2)][1];
+        const end = all ? set.pics.length : P[Math.min(P.length - 1, pg + 2)][1];
         if (g.at != null && g.at >= from && g.at < end) from = g.at;
         const back = g.back != null ? set.pics.slice(Math.max(0, g.back - AH_BACK), g.back).reverse() : [];
         g.from = from;
         g.end = end;
         if (set.hqTok) set.hqTok.cancelled = true;
-        galHqAll(set, back.concat(set.pics.slice(from, end)).map(function (q) { return q.img; }));
+        const list = galLists.get(set.href), rest = all && Array.isArray(list) ? list.slice(set.pics.length).map(function (it) {
+            return { __hzItem: it, naturalWidth: 0, naturalHeight: 0, src: it.thumb, currentSrc: it.thumb };     // not built yet: a stand-in, as ahOrig
+        }) : [];
+        const behind = all ? set.pics.slice(Math.max(0, from - KEEP_BACK_PAGES * Math.max(1, galPer(set))), from) : [];     // what the memory keep holds behind
+        galHqAll(set, back.concat(set.pics.slice(from, end)).map(function (q) { return q.img; }).concat(rest, behind.map(function (q) { return q.img; })));     // forward first, then what is behind
         if (end >= set.pics.length) ahGalAhead();     // this gallery's end is in reach: the next one's first page too
     }
 
@@ -13373,8 +13467,8 @@
         const last = (set.pages ? set.pages.length : 1) - 1, to = (set.page || 0) + dir;
         if (to < 0) { galChainGo(-1, 'page'); return; }
         if (to > last) {
-            if (!galWhole(set)) galTourMore(set).then(function (grew) { if (galCur !== set) return; if (grew) galPageStep(dir); else galChainGo(1, 'page'); });
-            else galChainGo(1, 'page');
+            if (!galWhole(set)) galTourMore(set).then(function (grew) { if (galCur !== set) return; if (grew) galPageStep(dir); else { ahPageStep(set, 1); galChainGo(1, 'page'); } });
+            else { ahPageStep(set, 1); galChainGo(1, 'page'); }
             return;
         }
         if (placed && view && tour && tour.gal === set) {
@@ -13391,7 +13485,11 @@
         const g = ahG;
         if (!g) return;
         ahT('act', { a: 'page', dir: dir, page: (set.page || 0) + 1 });
-        if (dir > 0) {
+        if (dir > 0 && cfg.galleryLoadAll) {
+            g.fwd++;
+            g.back = null;
+            ahGalAhead();
+        } else if (dir > 0) {
             g.fwd++;
             g.back = null;
             if (g.origs) dbg('loading ahead: pages skipped, thumbnails only until the next preview');
@@ -13680,13 +13778,31 @@
         refreshPanel();
         if (on && galCur && (!galChain || galChain.hrefs[galChain.at] !== galCur.href)) galChain = galChainFrom(galCur.href);
         dbg('endless ' + (on ? 'on' : 'off'), { galleries: galChain ? galChain.hrefs.length : 0 });
+        if (on) ahGalAhead();
         galEndlessPaint();
         if (galCur) galPageNote(galCur);
     }
 
     function galEndlessPaint() {
-        const ck = galFly && galFly.el.querySelector('.endl input');
+        const ck = galFly && galFly.el.querySelector('.endl .ek input');
         if (ck) ck.checked = !!cfg.galleryEndless;
+        const la = galFly && galFly.el.querySelector('.endl .la input');
+        if (la) la.checked = !!cfg.galleryLoadAll;
+    }
+
+    // The ☐ Load all box was pressed: on, the open gallery's originals start now; off, nothing new starts until a preview.
+    function galLoadAllSet(on) {
+        reloadSettings();
+        cfg.galleryLoadAll = on;
+        saveSettings();
+        refreshPanel();
+        galEndlessPaint();
+        const g = ahG, set = galCur;
+        dbg('load all ' + (on ? 'on' : 'off'));
+        if (!g || !set) return;
+        g.origs = on;
+        if (on) galHqAhead(set);
+        else { if (set.hqTok) set.hqTok.cancelled = true; ahDrop('galo'); }
     }
 
     // Where ⛶ starts: the gallery picture in the preview, else the first picture of the page on screen.
@@ -13719,22 +13835,30 @@
     function galEndlessBuild(pw) {
         const bar = document.createElement('div');
         bar.className = 'endl';
-        const lb = document.createElement('label'), ck = document.createElement('input'), tx = document.createElement('span');
-        ck.type = 'checkbox';
-        ck.checked = !!cfg.galleryEndless;
-        tx.textContent = 'Endless';
-        lb.appendChild(ck);
-        lb.appendChild(tx);
-        setTip(lb, 'Endless: at the end of this gallery the next one on the page opens; back from its first page goes to the one before');
+        const box = function (cls, on, text, tip) {
+            const l = document.createElement('label'), c = document.createElement('input'), t = document.createElement('span');
+            l.className = cls;
+            c.type = 'checkbox';
+            c.checked = on;
+            t.textContent = text;
+            l.appendChild(c);
+            l.appendChild(t);
+            setTip(l, tip);
+            return l;
+        };
+        const lb = box('ek', !!cfg.galleryEndless, 'Endless', 'Endless: at the end of this gallery the next one on the page opens; back from its first page goes to the one before');
+        const la = box('la', !!cfg.galleryLoadAll, 'Load all', 'Load all: every original of a gallery loads as soon as it opens; a hover jumps the queue. Off: originals wait for a preview, and a page step stops them');
         const info = document.createElement('span');
         info.textContent = 'ⓘ';
         setTip(info, 'What the buttons and numbers mean');
         const eat = function (e) { e.preventDefault(); e.stopPropagation(); };
         lb.addEventListener('mousedown', function (e) { eat(e); if (e.button === 0) galEndlessSet(!cfg.galleryEndless); });
+        la.addEventListener('mousedown', function (e) { eat(e); if (e.button === 0) galLoadAllSet(!cfg.galleryLoadAll); });
         info.addEventListener('mousedown', function (e) { eat(e); if (e.button === 0) galInfoShow(info); });
-        [lb, info].forEach(function (b) {
+        [lb, la, info].forEach(function (b) {
             ['mouseup', 'click', 'auxclick', 'dblclick', 'contextmenu'].forEach(function (t) { b.addEventListener(t, eat); });
         });
+        bar.appendChild(la);
         bar.appendChild(lb);
         pw.appendChild(bar);
         const top = document.createElement('div');
@@ -13754,6 +13878,7 @@
             ['Page row ◀ ▶', 'a page of thumbnails back or on · also ↑ ↓, PageUp / PageDown, the wheel away from the preview'],
             ['Picture row ◀ ▶', 'the slideshow, one picture back or on · also ← →, the wheel over the strip · hold to repeat'],
             ['Numbers', 'click one to type where to go · + = still being read'],
+            ['☐ Load all', 'on: every original of the gallery loads as soon as it opens, and a hovered picture not loaded yet goes first · off: originals load from a preview (hover or slideshow) on, and a page step without one stops them'],
             ['☐ Endless', 'at the end of this gallery the next one on the page opens, and back from its first page goes to the one before · galleries already seen or visited are left out (right-click to include them), judged once when queued · a step past a gallery\'s end stops there once, the next goes on (right-click to turn that off) · the last gallery\'s last picture stops for good'],
             ['P:11/18', 'endless: page 11 of 18, counting every queued gallery — one not read yet counts as one page'],
             ['G:10/16', 'endless, page row: gallery 10 of the 16 queued'],
@@ -13872,7 +13997,7 @@
     function galThumbsReady(href) {
         const list = href && galLists.get(href);
         if (!list || !list.length) return false;
-        const n = Math.min(list.length, Math.max(1, galPer(null)));
+        const n = Math.min(list.length, Math.max(1, galPer(null)), AH_THUMBS_MAIN);     // what the main page's first pass loads
         for (let i = 0; i < n; i++) if (!galThumbDone.has(list[i].thumb)) return false;
         return true;
     }
@@ -14015,6 +14140,7 @@
         const root = galLayer();
         if (!galHost.isConnected) galSlot(galHost);
         const page = galCur && galCur.href === href ? galCur.page : 0;
+        if (ahG && !galLook && galCur && galCur.href !== href) { ahG.at = ahG.back = null; ahG.from = ahG.end = 0; if (cfg.galleryLoadAll) ahG.origs = true; }     // a queue switch
         if (galCur) galDrop(galCur);
         const set = { href: href, el: document.createElement('div'), shade: document.createElement('div'),
             cells: [], asp: [], pics: [], page: page, fed: 0, far: page };
@@ -14275,7 +14401,7 @@
         usLog.enable(cfg.logRequests !== false);
         const lg = usLog.start('origs', { host: pageHost(), pace: version().replace(/\?/g, '') + ' ' + AH_PIC_GAP.join('-') + 'ms, ' + GAL_HQ_PAR + ' max', slowed: noRush(pageHost()) });
         const tok = set.hqTok = { cancelled: false, fresh: false };
-        let i = 0, running = 0, ended = false, got = 0, bytes = 0, sizing = 0;
+        let i = 0, running = 0, ended = false, got = 0, bytes = 0, sizing = 0, full = false;
         const end = function (why) {
             if (ended || sizing) return;
             ended = true;
@@ -14288,11 +14414,12 @@
             sizing++;
             const held = heldBlobs.get(hit.url);
             (held ? Promise.resolve(held.blob.size) : galBytes(hit.url)).then(function (n) { bytes += n; })
-                .then(function () { sizing--; if (!running && (tok.cancelled || i >= imgs.length)) end(tok.cancelled ? 'cut' : 'done'); });
+                .then(function () { sizing--; if (!running && (tok.cancelled || i >= imgs.length)) end(tok.cancelled ? 'cut' : full ? 'memory full' : 'done'); });
         };
         const next = function () {
             if (tok.cancelled) { if (!running) end('cut'); return; }
-            if (i >= imgs.length) { if (!running) end('done'); return; }
+            if (i >= imgs.length) { if (!running) end(full ? 'memory full' : 'done'); return; }
+            if (Date.now() - keepFullAt < 3000) { i = imgs.length; full = true; if (!running) end('memory full'); return; }     // a later page step or preview resumes it
             while (running < GAL_HQ_PAR && i < imgs.length) {
                 const img = imgs[i++];
                 running++;
@@ -14302,7 +14429,7 @@
                     galHqLive.add(live);
                     galResolve(img, tok).then(function (hit) {
                         ahT('orig', { tag: 'galo', u: (img.__hzItem && img.__hzItem.thumb) || img.src, s: Math.round(t0), ms: Math.round(performance.now() - t0), ok: hit ? 1 : 0 });
-                        if (hit) { got++; if (!hit.video) { plKeepImage(hit); ahFiles.add(hit.url); } size(hit); nextWarmSeen(hit.url, performance.now() - t0); }
+                        if (hit) { got++; if (!hit.video) { plKeepImage(hit, img.__hzItem); ahFiles.add(hit.url); } size(hit); nextWarmSeen(hit.url, performance.now() - t0); }
                         if (hit && !tok.cancelled && img.__hzItem) img.__hzItem.hqTried = true;     // a miss is asked again by the next run
                         if (r) r.done({ status: hit ? 200 : 0 });
                     }, function () { if (r) r.done({ status: 0 }); }).then(function () { free(); galHqLive.delete(live); running--; next(); });
@@ -15412,8 +15539,9 @@
         const k = galBoxKeep, W = vpW();
         if (!k || fullActive() || Math.abs(k.W - W) > 24 || Math.abs(k.H - vpH()) > 24) return null;     // a scrollbar's width either way
         const u = k.u;
+        if (u.w < GAL_PIC_MIN_W - 1 || u.h - galAttH() < GAL_PIC_MIN_H - 1) return null;     // smaller than its controls need: placed afresh
         if (!asp || Math.abs(asp - k.asp) <= 0.02 * k.asp) return Object.assign({}, u);
-        const w = Math.min(W - 8, Math.max(GAL_UNIT_MIN_W, (u.h - galAttH()) * asp));
+        const w = Math.min(W - 8, Math.max(GAL_UNIT_MIN_W, GAL_PIC_MIN_W, (u.h - galAttH()) * asp));
         const x = u.x + u.w / 2 > W / 2 ? u.x + u.w - w : u.x;
         return { x: Math.round(Math.max(0, Math.min(W - w, x))), y: u.y, w: Math.round(w), h: u.h };
     }
@@ -15533,7 +15661,7 @@
             if (corner) {
                 const sx = corner[1] === 'r' ? 1 : -1, sy = corner[0] === 'b' ? 1 : -1;
                 const k = Math.max((st.w + sx * dx) / st.w, (ph0 + sy * dy) / ph0);
-                const lo = Math.max(48, sh ? GAL_UNIT_MIN_W / asp : 0);
+                const lo = Math.max(GAL_PIC_MIN_H, GAL_PIC_MIN_W / asp, sh ? GAL_UNIT_MIN_W / asp : 0);
                 let ph = Math.max(lo, Math.min(H * 0.9, ph0 * k));
                 if (!ev.ctrlKey) ph = Math.max(lo, galSnapH(st, corner, ph, ys, W, H, sh, xs));
                 w = ph * asp;
@@ -15937,6 +16065,7 @@
         clearTimeout(galStoreT);
         galStoreT = 0;
         if (!galLook && !galCur && !galWant) { if (galStoreEl) galStoreEl.remove(); return; }
+        if (galCur && !galLook) keepTrim();      // the user moved: what is now behind
         if (!galStoreEl) { galStoreEl = document.createElement('div'); galStoreEl.className = 'hzst'; }
         const el = galStoreEl;
         let ahead = 0;
@@ -16625,9 +16754,10 @@
             const t0 = performance.now();
             return galResolve({ __hzItem: item, naturalWidth: 0, naturalHeight: 0, src: item.thumb, currentSrc: item.thumb }, tok).then(function (hit) {
                 ahT('orig', { tag: tag, u: item.thumb, s: Math.round(t0), ms: Math.round(performance.now() - t0), ok: hit ? 1 : 0 });
+                if (hit && !tok.cancelled) item.hqTried = true;     // as galHqAll: a run skips it
                 return hit;
             });
-        }).then(function (hit) { if (hit && !hit.video && hit.url !== item.thumb) { plKeepImage(hit); ahFiles.add(hit.url); } return hit; });
+        }).then(function (hit) { if (hit && !hit.video && hit.url !== item.thumb) { plKeepImage(hit, item); ahFiles.add(hit.url); } return hit; });
     }
 
     // The trace with each load's gallery (page order, 1-based) and picture, and the loader's state now.
@@ -16645,18 +16775,32 @@
             if (o.h) { const gi = doors.indexOf(o.h) + 1; if (gi) { o.g = gi; if (!d.urls) delete o.h; } }
             return o;
         });
+        if (d.sum) {        // per kind and tag: count, ok, median ms; per gallery: loads by kind; the notes and steps in order
+            const kinds = {}, gals = {}, steps = [];
+            all.forEach(function (e, i) {
+                const o = ev[i] || (function () { const w = e.u && where.get(e.u); return w ? { g: w[0], p: w[1] } : e.h ? { g: doors.indexOf(e.h) + 1 } : {}; })();
+                if (e.ev === 'note' || e.ev === 'act') { steps.push([e.t, e.m || e.a, e.d || e.pic || e.dir || '']); return; }
+                const k = e.ev + ':' + e.tag, r = kinds[k] || (kinds[k] = { n: 0, ok: 0, ms: [] });
+                r.n++; r.ok += e.ok ? 1 : 0; r.ms.push(e.ms);
+                const g = gals[o.g] || (gals[o.g] = {});
+                g[e.ev] = (g[e.ev] || 0) + 1;
+            });
+            Object.keys(kinds).forEach(function (k) { const m = kinds[k].ms.sort(function (a, b) { return a - b; }); kinds[k].ms = m.length ? m[m.length >> 1] : null; });
+            ev.length = 0;
+            ev.push({ kinds: kinds, galleries: gals, steps: steps.slice(-+(d.steps || 40)) });
+        }
         const waits = function (g) { const n = {}; g.wait.forEach(function (w) { n[w.tag] = (n[w.tag] || 0) + 1; }); return { live: g.live, wait: n }; };
         const c = galChain, cur = galCur;
         return {
             now: Math.round(performance.now()), events: ev, more: all.length - ev.length,
             state: {
                 hidden: document.visibilityState === 'hidden', stop: galPreStop, doors: doors.length, lists: galLists.size,
-                main: { anchor: ahAnchor ? doors.indexOf(ahAnchor) + 1 : null, behind: ahBehind, busy: galPre ? doors.indexOf(galPre) + 1 : null, counts: galCnt, done: ahDone.size, growing: !!galGrowing },
+                main: { anchor: ahAnchor ? doors.indexOf(ahAnchor) + 1 : null, behind: ahBehind, busy: galPre ? doors.indexOf(galPre) + 1 : null, counts: galCnt, thumbs: ahDone.size, origs: ahODone.size, lookLast: ahLookLast ? doors.indexOf(ahLookLast) + 1 : null, growing: !!galGrowing },
                 look: galLook ? doors.indexOf(galLook.href) + 1 || true : null,
                 gallery: cur ? { g: doors.indexOf(cur.href) + 1, page: (cur.page || 0) + 1, pages: (cur.pages || []).length, queueAt: c ? c.at + 1 : null, queue: c ? c.hrefs.length : null,
                     ahead: ahG && c ? ahAheadN(c.at, ahG.fwd) : null, origs: ahG ? ahG.origs : null, fwd: ahG ? ahG.fwd : null, from: ahG ? ahG.from + 1 : null, end: ahG ? ahG.end : null, back: ahG && ahG.back != null ? ahG.back + 1 : null } : null,
                 pics: waits(ahPics), pages: waits(ahPages),
-                keep: { n: plKeep.length, mb: Math.round(plKeepBytes / 1048576), budgetMb: Math.round(plBudget() / 1048576) }, heldMb: Math.round(heldBytes / 1048576), held: heldBlobs.size,
+                keep: { n: plKeep.length, mb: Math.round(plKeepBytes / 1048576), galCapMb: Math.round(keepCaps().gal / 1048576), pageCapMb: Math.round(keepCaps().page / 1048576), behind: plKeep.filter(function (k) { return k.bh; }).length }, heldMb: Math.round(heldBytes / 1048576), held: heldBlobs.size,
             },
         };
     }
@@ -16732,7 +16876,7 @@
         }
     }
 
-    // The main page's next door: from the anchor (hovered, else the first on screen) on in page order, not loaded yet.
+    // The main page's next job from the anchor (hovered, else the first door on screen) on in page order: thumbnails for every door, then first originals, then the door after the last preview.
     function ahMainPick() {
         const doors = galDoorList().filter(function (d) { try { return new URL(d.h).origin === location.origin; } catch (e) { return false; } });
         if (!doors.length) return null;
@@ -16743,16 +16887,15 @@
             if (i < 0) return null;
             ahAnchor = doors[i].h;
         }
-        const seen = galList(GAL_SEEN_KEY), engaged = doors.filter(function (d) { return seen.has(d.h); }).length >= doors.length * AH_SHARE;
-        for (let k = i; k < doors.length; k++) {
-            if (ahDone.has(doors[k].h)) continue;
-            if (!cfg.galleryEndless && k - i > AH_THUMBS_OFF && !engaged) return null;
-            return { door: doors[k], origs: cfg.galleryEndless || k === i || engaged };
-        }
+        const seen = galList(GAL_SEEN_KEY), wide = cfg.galleryEndless || doors.filter(function (d) { return seen.has(d.h); }).length >= doors.length * AH_SHARE;
+        for (let k = i; k < doors.length && (wide || k - i <= AH_THUMBS_OFF); k++) if (!ahDone.has(doors[k].h)) return { door: doors[k], stage: 1 };
+        for (let k = i; k < doors.length && (wide || k === i); k++) if (!ahODone.has(doors[k].h)) return { door: doors[k], stage: 2 };
+        const j = ahLookLast ? doors.findIndex(function (d) { return d.h === ahLookLast; }) : -1;
+        if (j >= 0 && j + 1 < doors.length && !ahNextDone.has(doors[j + 1].h)) return { door: doors[j + 1], stage: 3 };
         return null;
     }
 
-    // Main page, one door at a time: its count, its first page of thumbnails, its first AH_ORIGS originals; frames only when nothing else waits.
+    // Main page, one job at a time: a door's page read and first AH_THUMBS_MAIN thumbnails; its first AH_ORIGS originals; after a preview, the next door's whole first page. Full counts only when nothing else waits.
     function galPreNext() {
         if (!isTopFrame || !cfg.galleryPreload || galPreStop || document.visibilityState === 'hidden' || !siteEnabled() || CAPTCHA_HERE) return;
         galCountNext();
@@ -16768,19 +16911,26 @@
             usLog.enable(cfg.logRequests !== false);
             galPreLog = usLog.start('gallery', { host: pageHost(), pace: version().replace(/\?/g, '') + ' pictures ' + AH_PIC_GAP.join('-') + 'ms', slowed: noRush(pageHost()) });
         }
-        const href = job.door.h, gen = ahGen;
+        const href = job.door.h, gen = ahGen, done = [null, ahDone, ahODone, ahNextDone][job.stage];
         galPre = href;
-        ahDone.add(href);
+        done.add(href);
         (async function () {
             const list = await galPreRead(href);
-            if (!Array.isArray(list) || !list.length) { if (list === 'cancel') ahDone.delete(href); return; }
-            await Promise.all(list.slice(0, Math.max(1, galPer(null))).map(function (it) { return ahImg(it, 'main'); }));
-            if (!job.origs || gen !== ahGen) { dbg('loading ahead: thumbnails', { href: href, cut: gen !== ahGen }); return; }
-            const tok = { cancelled: false, fresh: false };
-            const hits = await Promise.all(list.slice(0, AH_ORIGS).map(function (it) { return ahOrig(it, 'main', tok); }));
-            dbg('loading ahead: thumbnails and first originals', { href: href, originals: hits.filter(Boolean).length, cut: gen !== ahGen });
+            if (!Array.isArray(list) || !list.length) { if (list === 'cancel') done.delete(href); return; }
+            const per = Math.max(1, galPer(null)), todo = function (n) { return list.slice(0, n).filter(function (it) { return !galThumbDone.has(it.thumb); }); };
+            if (job.stage === 1) {
+                await Promise.all(todo(Math.min(per, AH_THUMBS_MAIN)).map(function (it) { return ahImg(it, 'main'); }));
+                dbg('loading ahead: thumbnails', { href: href, cut: gen !== ahGen });
+            } else if (job.stage === 2) {
+                const tok = { cancelled: false, fresh: false };
+                const hits = await Promise.all(list.slice(0, AH_ORIGS).map(function (it) { return ahOrig(it, 'main', tok); }));
+                dbg('loading ahead: first originals', { href: href, originals: hits.filter(Boolean).length, cut: gen !== ahGen });
+            } else {
+                await Promise.all(todo(per).map(function (it) { return ahImg(it, 'main'); }));
+                dbg('loading ahead: the next gallery\'s first page, after a preview', { href: href, cut: gen !== ahGen });
+            }
         })().catch(function () { /* the next door */ }).then(function () {
-            if (gen !== ahGen) ahDone.delete(href);     // cut short by a scroll: done again later
+            if (gen !== ahGen) done.delete(href);     // cut short by a scroll: done again later
             galPre = null;
             setTimeout(galPreNext, 0);
         });
@@ -16828,7 +16978,7 @@
     function ahGalOpen() {
         ahT('act', { a: 'open' });
         ahDrop('main');
-        ahG = { fwd: 0, origs: false, at: null, back: null, from: 0, end: 0, run: 0, warm: null };
+        ahG = { fwd: 0, origs: !!cfg.galleryLoadAll, at: null, back: null, from: 0, end: 0, run: 0, warm: null };
     }
 
     // The gallery closed: what it queued is dropped, and the main page starts again from the first door on screen.
@@ -16853,8 +17003,10 @@
         g.origs = true;
         if (dir < 0) { if (g.back === k) return; g.back = k; }
         else {
+            const at = g.at;
             g.at = k;
-            if (was && k >= g.from && k < g.end - 1) return;      // still inside what is loading
+            if (cfg.galleryLoadAll) { const it = set.pics[k].item; if (was && (k === at || (it && it.hqTried))) return; }     // load all: an unloaded picture jumps the queue
+            else if (was && k >= g.from && k < g.end - 1) return;      // still inside what is loading
         }
         if (!was) dbg('loading ahead: a preview; originals from picture ' + (k + 1));
         galHqAhead(set);
@@ -16885,6 +17037,7 @@
         const hr = galHoleRect(pic || el);
         if (!hr.width || !hr.height || !holds(hr, galPt.x, galPt.y)) return;
         galLook = { el: el, href: href };
+        ahLookLast = href;
         ahT('act', { a: 'look', h: href });
         galOn = true;
         galHole = { x: hr.left, y: hr.top, w: hr.width, h: hr.height };
@@ -18667,6 +18820,12 @@
             'Off: middle-click opens the link in a new tab as usual, and clicking the ▦ chip on a result opens its gallery.');
         check('galleryEndless', 'Endless galleries',
             'At the end of a gallery the next one on the page opens, and back from its first page goes to the one before. Also the ☐ Endless box on the clicked picture.');
+        check('galleryLoadAll', 'Load all of a gallery\'s originals when it opens',
+            'Off (saves data): originals load only from a preview (hover or slideshow) on, and a page step without one stops them. Also the ☐ Load all box on the clicked picture.');
+        num('galleryKeepMB', 'Memory for an open gallery (MB)',
+            'Its pictures 2 pages behind you and everything ahead; nothing behind kept past 5 minutes. Over this, pictures behind go first, then the farthest ahead. (default: 1024)', 64, 16384, 64);
+        num('keepMB', 'Memory for pictures loaded ahead elsewhere (MB)',
+            'The oldest go first. (default: 512)', 32, 16384, 32);
         check('galleryEndlessViewed', 'Endless: include galleries already viewed',
             'Off: galleries already seen or visited are left out of the queue, judged once when each joins it.');
         check('galleryEndlessStop', 'Endless: stop once at each gallery\'s end',
