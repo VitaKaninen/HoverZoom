@@ -1,3 +1,20 @@
+# Next: keep pictures on disk (user 2026-11-26; not built, waiting on the user's answer to the numbers)
+
+Spec so far (user): galleries — keep thumbnails + originals on the previous 2 pages and everything ahead; nothing
+older than 5 min that is behind; cap 1 GB (setting). Everything else (search results, ordinary hovers) — a plain MB
+cap, 512 MB suggested (setting). Extend the v0.342.0 IndexedDB store (`HELD_DB`), don't write a second one.
+Lists and link kinds are already kept per tab (v0.390.0, GALLERY.md "Lists kept per tab").
+
+Measured 2026-11-26 in Chrome (window 1314×826, screen 1920×1080), bytes from `fetch` → `blob.size`:
+- Google Images, "4k landscape photography", 10 screens: 200 results, originals 638 MP in all (Google's `imgurl`
+  w/h). Thumbnails 34 KB avg (60/60) → ~7 MB. Originals: 105/200 fetchable = 57 MB, 0.142 MB/MP, median 0.1 MB,
+  p90 1.3 MB, max 6.1 MB; the 95 refused average 2.5 MP → ~34 MB more. **~100 MB per 10 screens, every original.**
+- eporner gallery: thumbnails 27 KB avg (40); originals 2.81 MB avg, median 3.0, max 4.0, 20 MP (30 of 30).
+- Pictures per gallery page (`galPer`, `galleryRowMin` 120): 1314×826 → 48 (thumb shape 1.17, eporner's) to 72
+  (0.75); 1920×970 → 84–126; 2560×1300 → 135–207.
+- So 2 back + current + 2 ahead of eporner originals at 1920×970 = 5 × 84 × 2.8 MB ≈ 1.2 GB: the 1 GB cap binds.
+  Thumbnails are noise (10 galleries × 2 pages × 84 × 27 KB ≈ 45 MB).
+
 # Built 2026-11-26 (v0.387.0) — loading ahead, by what the user is doing. Reference: GALLERY.md "Loading ahead"
 
 **Unreproduced (user, v0.388.0, Endless on):** once, the main page loaded counts + thumbnails for the screen, then
