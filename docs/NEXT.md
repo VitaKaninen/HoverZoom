@@ -1,3 +1,16 @@
+# Handoff 2026-11-26 #3 (~320k tokens), v0.388.0 → v0.395.0, all pushed
+
+**Asked and done:** grey ▦ chip until a gallery's first page of thumbnails is in (v0.388.0); gallery preview never
+opens / closes once the pointer leaves the window (v0.388.0–v0.389.0, `galPtLeft`); every gallery list and link kind
+kept per tab (v0.390.0); `beforeunload` only while downloads are queued (v0.391.0, bfcache — Chrome confirmed);
+disk keep of pictures measured then shelved (LibreWolf's disabled disk cache was the cause, user fixed it in
+about:config; see "Shelved" below); storage readout on the gallery's picture (v0.394.0, `galStoreTick`); a run of
+originals no longer marks a picture tried when nothing was found (v0.395.0).
+**Not reproduced:** loading ahead stalling at the screen's bottom (note below); thumbnail-size "remembered" previews
+in LibreWolf (gone in a fresh tab); one-at-a-time originals on girlstop in LibreWolf (Chrome: 37/37 in 13 s) —
+v0.395.0 is the likely fix, unconfirmed.
+**Last asked the user:** nothing open. If girlstop recurs: their `gallery originals: done {pictures, found}` line.
+
 # Shelved: keep pictures on disk (user 2026-11-26: not needed)
 
 Asked because every reload/Back re-downloaded every picture in LibreWolf. Cause: LibreWolf's
