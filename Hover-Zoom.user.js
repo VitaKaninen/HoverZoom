@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.388.0
+// @version      0.389.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -7869,7 +7869,7 @@
     document.addEventListener('mousemove', perfWrap(onMove, 'event'), true);
     document.addEventListener('mouseover', perfWrap(onOver, 'event'), true);
     document.addEventListener('mouseout', perfWrap(onOut, 'event'), true);
-    document.addEventListener('mouseout', function (e) { if (!e.relatedTarget) { twLeave(); if (galLook) galHide('look'); } }, true);   // left the window (or into a frame)
+    document.addEventListener('mouseout', function (e) { if (!e.relatedTarget) { twLeave(); galPtLeft(); } }, true);   // left the window (or into a frame)
 
     // Middle-click on the window (in fullscreen: anywhere but the gallery's own pieces) saves the original to the download folder. See E76.
     function midInFull(x, y) { return fullActive() && placed && !!box && box.classList.contains('on') && !galTopAt(x, y); }
@@ -11847,6 +11847,7 @@
     const galGrowWhy = new Map();       // href -> why reading its page stopped short of the end, or 'html' when only its HTML could be read
     const galCache = new Map();         // href -> Promise of [{thumb, ss, cands, base}] | null | 'cancel'
     let galFrameStop = null;
+    let galPtOut = false;                      // the pointer left the window: galPt is stale, no gallery preview opens
     let galHoverTimer = 0, galPt = { x: 0, y: 0 }, galMovedAt = 0, galLaidAt = 0, galStill = null, galStripOne = true, galStripDl = false;
     const GAL_SEEN_KEY = 'hoverZoomGallerySeen';   // linked pages whose gallery was shown, oldest first
     const GAL_SEEN_MAX = 10000;
@@ -15785,7 +15786,7 @@
     // A hovered door: its chip shows (with galleryChips off) and its pictures are read ahead.
     function galDoorHover(el, x, y) {
         if (!isTopFrame) return;
-        if (x !== undefined) { galPt.x = x; galPt.y = y; }    // mouseover lands before the mousemove that would set it
+        if (x !== undefined) { galPt.x = x; galPt.y = y; galPtOut = false; }    // mouseover lands before the mousemove that would set it
         const href = galLinkOf(el);
         if (!href || galChipHot === el) return;
         if (galLook && galLook.el !== el) galHide('look');     // mouseover lands before the move that would close it
@@ -15793,7 +15794,7 @@
             if (kind === 'results' || galChipHot === el) return;
             galDoorKindRead(el, href);
             if (galDoorKinds.get(href) === 'results') return;
-            if (!holds(el.getBoundingClientRect(), galPt.x, galPt.y)) return;
+            if (galPtOut || !holds(el.getBoundingClientRect(), galPt.x, galPt.y)) return;
             const prev = galChipHot;
             galChipHot = el;
             if (prev) galChipRefresh(prev);
@@ -16030,6 +16031,7 @@
         if (e.clientX === galPt.x && e.clientY === galPt.y) return;     // the browser's own move after a layout
         galPt.x = e.clientX;
         galPt.y = e.clientY;
+        galPtOut = false;
         galMovedAt = performance.now();
         if (galLook) {
             const H = galHole;
@@ -16040,6 +16042,14 @@
         galStill = null;
         if (st && galCur === st.set && st.cell.isConnected && holds(st.cell.getBoundingClientRect(), galPt.x, galPt.y)) st.go();
         if (galChipHot && !holds(galChipHot.getBoundingClientRect(), galPt.x, galPt.y)) galChipCool();
+    }
+
+    // The pointer left the window (or went into a frame): a pending gallery preview never opens, an open one closes.
+    function galPtLeft() {
+        galPtOut = true;
+        clearTimeout(galHoverTimer);
+        galChipCool();
+        if (galLook) galHide('look');
     }
 
     function galChipCool() {
@@ -16716,7 +16726,7 @@
 
     // The gallery preview: a hovered door's first page of thumbnails laid out around it, nothing active; leaving the door closes it.
     function galLookOpen(el, href) {
-        if (galCur || galWant || placed || tour || !isTopFrame) return;
+        if (galPtOut || galCur || galWant || placed || tour || !isTopFrame) return;
         const pic = el.tagName === 'IMG' ? el : el.querySelector('img');
         const hr = galHoleRect(pic || el);
         if (!hr.width || !hr.height || !holds(hr, galPt.x, galPt.y)) return;

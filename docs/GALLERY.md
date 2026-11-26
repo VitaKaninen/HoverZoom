@@ -270,8 +270,9 @@ What loads ahead follows what the user does. Code: the `ah*` functions after `ga
   thumbnails around it, the door left in place as the hole (`galHole` = its rect, `galBars` → hole only). Inert:
   the set never gets `live` (no cell events), no strip (`galLayout` skips `galPageNote`/`galFeed`), never marked
   seen (seen shapes the endless queue), no originals, upgrades or frame. Closes on leaving the door (`galMove`), a
-  page scroll, the pointer leaving the window (the document `mouseout` with no `relatedTarget`; a fast exit
-  sends no `galMove` outside the door), a left press (the link is followed), or any other hover (`onOver` — it ran `return` for an open
+  page scroll, the pointer leaving the window (`galPtLeft`, from the document `mouseout` with no `relatedTarget`: a fast
+  exit sends no `galMove` outside the door, so it also clears `galHoverTimer` and sets `galPtOut`, which
+  `galLookOpen` refuses until the next move — else the timer opened it at the stale `galPt`), a left press (the link is followed), or any other hover (`onOver` — it ran `return` for an open
   gallery and swallowed the next door's mouseover). Middle press / chip from it opens the gallery (`galMiddle`
   closes it first; `galChipOpen` ignores it). Wheel and keys stay the page's.
 - **Gallery, endless** (`ahG`, made in `galMiddle` unless a queue switch, dropped in `galHide`): thumbnails
