@@ -293,6 +293,10 @@ What loads ahead follows what the user does. Code: the `ah*` functions after `ga
   forward page step outside a slideshow = skipping: originals stop (`galo` dropped) until the next preview. A
   backward step puts the `AH_BACK` 5 before it first; forward resumes after. Closing the gallery drops `gal`
   and `galo` and the main page restarts from the first door on screen.
+- **`hqTried` only on a found original** (v0.395.0): a run (`galHqAll`) probes without `fresh`, so it reuses a cached
+  miss (`probeMiss`, `PROBE_RETRY_MS`); marking every picture tried made one bad patch permanent — no run ever
+  loaded those pictures again and each hover fetched its own (user, LibreWolf, girlstop; Chrome's run: 37/37,
+  18.3 MB in 13 s). Not confirmed as the user's cause: their `gallery originals: done {pictures, found}` would show it.
 - **Cache check**: originals loaded ahead (`ahFiles`) that a slideshow paints are timed in `swapViewer`;
   `ahWarmReport` writes us-log `aheadwarm` (ok = under `PL_COLD_MS`) when the gallery closes. Hover previews are
   not timed.
