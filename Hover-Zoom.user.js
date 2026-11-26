@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.409.0
+// @version      0.410.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -12058,6 +12058,7 @@
     const GAL_FRAME_MS = 10000;         // longest wait for the hidden frame's page to load
     const GAL_HTML_ENOUGH = 6;          // the plain HTML is trusted at once from this many pictures (a logo group is 1-3)
     const GAL_REPORT_MS = 4500;         // longest wait for its report once loaded (the frame's own cap + slack)
+    const GAL_AHEAD_ON = 5;             // pages of thumbnails kept ahead once the user steps forward in a gallery
     const GAL_HQ_PAR = 6;               // originals in flight at most (their starts are paced by ahPics)
     const AH_PIC_GAP = [50, 200], AH_PAGE_GAP = [300, 800];     // ms between starts, random in the range (pages: Forum Stumbler's gap)
     const AH_ORIGS = 2;                 // originals loaded ahead per gallery on the main page
@@ -13152,15 +13153,15 @@
         return ph.n * Math.max(1, Math.floor((vpW() - G) / (a * ph.h + G)));
     }
 
-    // How many pictures the set should hold: through the furthest page reached plus the pages ahead (1 at first, then more the further the user goes: page 3 keeps 2 ahead, page 5 on as many as its number).
+    // How many pictures the set should hold: through the furthest page reached plus the pages ahead.
     function galWantN(set) {
         const far = set.far = Math.max(set.far || 0, set.page || 0), at = far + 1;
         return (at + galAhead(at)) * galPer(set);
     }
 
-    // Pages kept loaded ahead of page `at` (1-based): 1 at first, then more the further the user goes (user, v0.309.0).
+    // Pages of thumbnails kept loaded ahead of page `at` (1-based): 1 on the first page, GAL_AHEAD_ON once the user goes on, then as many as the page's number.
     function galAhead(at) {
-        return at <= 1 ? 1 : at < 5 ? at - 1 : at;
+        return at <= 1 ? 1 : Math.max(GAL_AHEAD_ON, at);
     }
 
     // The stored list's pictures not in the set yet join it, as many as galWantN asks; the rest stay unloaded.

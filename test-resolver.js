@@ -1467,5 +1467,14 @@ const galPH = function (min) {
     gt.pump();
     eq('gate: equal priority takes turns, main last (v0.399.0)', order, ['gal', 'galo', 'gal', 'galo', 'gal', 'gal', 'main']);
 }
+// ---- the open gallery's thumbnail ramp: 1 page ahead on page 1, GAL_AHEAD_ON once the user steps on, then the page's number.
+{
+    const at = src.indexOf('    function galAhead(at)'), k = src.indexOf('const GAL_AHEAD_ON');
+    const body = src.slice(at, src.indexOf('\n    }\n', at) + 7), c = src.slice(k, src.indexOf(';', k) + 1);
+    const ga = new Function(c + NL + body + NL + 'return galAhead;')();
+    eq('gallery ramp: page 1 keeps 1 page ahead', ga(1), 1);
+    eq('gallery ramp: after a forward step, 5 ahead', [2, 3, 4, 5].map(ga), [5, 5, 5, 5]);
+    eq('gallery ramp: page 6 on, as many as its number', [6, 9].map(ga), [6, 9]);
+}
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);
