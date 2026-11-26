@@ -1052,6 +1052,11 @@ On flickr.com `siteLookup` reads `/photo.gne?id=<id>` (same-origin) and declares
 (`o` > `6k` … `k` > `h` > `b`); it runs even when the thumbnail has a link, because the photo page's `og:image`
 is `_b`. Measured 2026-11-26 on Explore: 9 of 10 photos list `_k` or larger; one owner allows only up to `_b`.
 
+**wallhaven (v0.404.0, `wallFull`):** thumbnails (`th.wallhaven.cc/small|lg/<xx>/<id>.jpg`) are fixed 3:2 crops and the
+file is `w.wallhaven.cc/full/<xx>/wallhaven-<id>.jpg|png` (extension unknown without the page), so the shape test and
+`sameStem` both refuse it. `siteLookup` reads `/w/<id>` and returns it with `same: true`, which marks the declared
+URL as named (no shape test) in `resolve()` and `galPageBest()`.
+
 ## Known limits
 
 - HZ+'s 398 plugins were classified in v0.86.0 — **173 are pure URL rewrites, 144 are jQuery

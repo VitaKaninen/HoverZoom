@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.403.0
+// @version      0.404.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -2226,6 +2226,8 @@
     function siteLookup(el, shown, pageHref, linked) {
         const fm = /(^|\.)flickr\.com$/.test(pageHost()) && (shown || '').match(/\/\/live\.staticflickr\.com\/\d+\/(\d+)_[0-9a-f]+(?:_[a-z0-9]{1,2})?\.(?:jpg|png)/i);
         if (fm) return flickrSizes(fm[1]);
+        const wm = /(^|\.)wallhaven\.cc$/.test(pageHost()) && (shown || '').match(/\/\/th\.wallhaven\.cc\/[a-z]+\/[a-z0-9]{2}\/([a-z0-9]+)\.[a-z]+/i);
+        if (wm) return wallFull(wm[1]);
         if (linked) return null;
         if (!/(^|\.)sxypix\.com$/.test(pageHost()) || !/\/\/x\.sxypix\.com\/pixiw?\/[^/]+\/\d+\/s\//.test(shown || '')) return null;
         const sel = '.gallgrid[data-aid][data-ghash]';
@@ -2278,6 +2280,19 @@
             const k = FLICKR_RANK.find(function (x) { return got[x]; });
             dbg('flickr sizes', { id: id, sizes: Object.keys(got).join(' '), best: k || null });
             return k ? { body: [], declared: { url: got[k] } } : null;
+        }, function () { return null; });
+        pageCache.set(key, p);
+        p.then(function (r) { if (!r && pageCache.get(key) === p) pageCache.delete(key); });
+        return p;
+    }
+
+    // wallhaven: the thumbnail is a fixed 3:2 crop and the file is wallhaven-<id>.jpg|png; the wallpaper page names it. `same`: no shape test.
+    function wallFull(id) {
+        const key = 'wallhaven|' + id;
+        if (pageCache.has(key)) return pageCache.get(key);
+        const p = pageText(location.origin + '/w/' + id).p.then(function (r) {
+            const m = r && r.text && r.text.match(new RegExp('https://w\\.wallhaven\\.cc/full/[a-z0-9]{2}/wallhaven-' + id + '\\.(?:jpg|png)'));
+            return m ? { body: [], declared: { url: m[0] }, same: true } : null;
         }, function () { return null; });
         pageCache.set(key, p);
         p.then(function (r) { if (!r && pageCache.get(key) === p) pageCache.delete(key); });
@@ -2353,7 +2368,7 @@
             // thumbnail is often a square crop of a portrait original. See v0.58.0 and v0.90.0.
             if (page.declared && page.declared.url !== shown && (!pair || page.declared.url === pair))
                 tries.push({ url: page.declared.url,
-                    named: !!(shown && sameStem(page.declared.url, shown)),
+                    named: !!page.same || !!(shown && sameStem(page.declared.url, shown)),
                     from: 'the page the thumbnail links to (og: media)' });
             page.body.forEach(function (u) {
                 if (shown && u !== shown && sameStem(u, shown))
@@ -14637,7 +14652,7 @@
         const tries = [];
         const pair = pairedUrl(page, item.thumb);
         if (pair) tries.push({ url: pair, named: false });
-        if (page.declared && (!pair || page.declared.url === pair)) tries.push({ url: page.declared.url, named: sameStem(page.declared.url, item.thumb) });
+        if (page.declared && (!pair || page.declared.url === pair)) tries.push({ url: page.declared.url, named: !!page.same || sameStem(page.declared.url, item.thumb) });
         page.body.forEach(function (x) { if (x !== item.thumb && sameStem(x, item.thumb)) tries.push({ url: x, named: true }); });
         let best = null;
         for (const t of tries.slice(0, LINKED_TRIES)) {
