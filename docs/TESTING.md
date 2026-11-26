@@ -418,8 +418,9 @@ logs `retrying` ×3 — an artefact of the stub, not of the manager. The pane wo
   listing pages / galleries not visited before.
 
 **The user's Chrome runs Dark Reader**, which copies our shadow-root stylesheets and rewrites `background:var(--bg)` to
-`var(--darkreader-bg--bg)`. That variable is undefined, because `--bg` is set inline by `twPaint`, so the widget panel draws
-transparent (buttons keep their fill). Check `[...root.styleSheets]` for a `darkreader--sync` sheet before calling a
+`var(--darkreader-bg--bg)`. That variable was undefined (`--bg` is set inline by `twPaint`), so the widget panel drew
+transparent. Since v0.406.0 `twPaint` also sets `--darkreader-{bg,text,border}--<key>` to our own colours (SETTINGS.md
+"Dark Reader"). Check `[...root.styleSheets]` for a `darkreader--sync` sheet before calling a
 colour a bug. Key `repeat` on `computer` mostly lands one step; dispatch `keydown`s with 500 ms gaps instead. A
 `left_click_drag` with `modifiers` does not hold Ctrl: drive a Ctrl resize with synthetic mousedown/move/up.
 

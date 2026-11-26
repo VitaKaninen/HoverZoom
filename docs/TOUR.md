@@ -45,8 +45,16 @@ fight that. They are deleted. Do not put nav controls back on the frame.
   list (`widgetEntries`, or the running slideshow's) — it starts at a picture's top (`TW_PAGE_TOP` above it) and takes
   each next picture that fits whole below (`pageSplit`, pure, asserted). Never the document's height: footer and
   reply pictures past the post end are not pages. ▶ scrolls the next page's first picture to the top (pinned: opens
-  it). Shown only when a page press saves work: ≥ 2 pages and on average ≥ `TW_PAGE_MIN_PER` (4) pictures a page
-  (`pagesWorth`) — a forum post or Wikipedia article, one picture a screen, hides it. ↑ ↓ still page when hidden.
+  it). **Shown only on a wall of pictures** (user 2026-11-26, v0.406.0: "restrictive"; Google Images / imgur yes,
+  forums and wikis never): `pagesWorth(pg, vw, vh)`, pure, asserted — `TW_WALL_PAGES` (3)+ pages, and at least half of
+  them each ≥ `TW_WALL_COVER` (50 %) of the window covered by pictures, two pictures side by side, and no gap over
+  `TW_WALL_GAP` (80 px) between picture rows. Measured per screen (cover / largest gap), 1610×927: Google Images
+  81–83 % / 0, eporner search 87 % / 0, imgur front 50–75 % / 0, Wikipedia ≤ 45 % / up to 734 px, a 4chan thread
+  7–11 % / 39–212 px. The count per page (the old rule, 4 a page) let forum posts through. The verdict is cached on
+  the page list (`pg.worth`, keyed on the window size). ↑ ↓ still page when hidden.
+- **No widget on a page of galleries** (user 2026-11-26, v0.406.0): `twGalleryPage()` — settled gallery covers
+  (`galDoorList`, counted in `twRefresh`) are `TW_GAL_SHARE` (30 %)+ of covers plus counted pictures. eporner
+  `/search-photos/standing/` is 27 galleries to 73 photos (27 %), so it keeps the widget.
   The idle pages (`twPg`, `{y, h}` only) are retaken with every count, including the one a late duplicate triggers,
   or the row judges a list the counter no longer shows.
 - **The idle widget always shows the start number** `twStartAt` (`twStartOf`: the first picture at or below the top of the screen; `1 / N` on arrival, `21 / 50` after Page ▶ past 20). The wheel button and the wheel over the widget open at that number; ▶ at number+1, ◀ at number−1 (wrapping) — `tourFromStart(dir, same)` (v0.316.0, user). `twWarmFirst` only warms entry 0, so a start elsewhere resolves cold. **→ / ← do the same as ▶ / ◀** (`tourKeyStart`, default on):

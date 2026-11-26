@@ -1,17 +1,15 @@
-# Handoff 2026-11-26 #7: wrong gallery verdicts fixed (v0.405.0); TEST-PLAN 7.10, 8.x, 9.2
+# Handoff 2026-11-26 #7: gallery verdicts (v0.405.0); page row, widget, Dark Reader (v0.406.0)
 
 User asked: run 7.10, 7.13, 8.x, 9.2; time detection/counting on eporner `/search-photos/standing/`; fix galleries
 that showed the wrong 8 pictures (`PzRdoVKzNwD`, 5 real) or lost their chip after hovers (`Woq5tDLi910`).
 Fixed in v0.405.0, verified live (reasons: GALLERY.md "Peek, pages, reading on"). New TEST-PLAN 2.3.
 Pass: 7.10, 8.1, 8.2, 9.2. 7.13 not run: eporner found every original.
-**Last asked the user (open):**
-- The page widget on that search page: the page holds 27 galleries and 73 single photos (`/photo/`, from card 30
-  down, plus 2 at the top). The widget counts the 73. The user wants no widget on a page that is "mostly galleries".
-  Asked whether galleries on screen, or any gallery on the page, should hide it.
-- What they meant by "notice the widget in the bottom corner" during the GIF gallery (`3KkpMJGNr0g`) open.
-  Its first GIF originals took 19-35 s each; the user saw a "took more than 10 seconds" message on an earlier open
-  of it (`GAL_DIAG_MS`).
-Found: the widget looking half-transparent in Chrome is Dark Reader (TESTING.md), not the script.
+Then (v0.406.0, user's asks, verified live): the page row only on picture walls (TOUR.md "The page row" has the
+measurements); no page widget when gallery covers are 30 %+ (eporner beach search: 91 of 100, hidden; standing
+search: 27 of 100, shown); Dark Reader no longer blanks the widget (SETTINGS.md "Dark Reader and the widgets");
+the gallery-did-not-open popup now also writes a `console.warn`, which a tool sees.
+**Last asked the user:** nothing open. Unexamined: on a 4chan thread the widget count settles at 1 though its
+report lists 40 COUNTED rows, so the widget hides; it did so before v0.406.0.
 
 # Handoff 2026-11-26 #6: the rest of TEST-PLAN on eporner (v0.404.0, no code change)
 

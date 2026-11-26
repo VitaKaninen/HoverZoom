@@ -413,6 +413,14 @@ one is up. That is also what `GM_addValueChangeListener` has always done for ano
 `openPanel()` carries `.body`'s `scrollTop` across the rebuild, or a ⊘ press throws the reader
 back to the top of the panel.
 
+## Dark Reader and the widgets (v0.406.0)
+
+Dark Reader copies a shadow root's stylesheet into a `style.darkreader--sync` sheet beside it, rewriting `var(--bg)` to
+`var(--darkreader-bg--bg)` (also `-text-`, `-border-`). Variables we set inline are never given those names, so the
+widget's panel went transparent. `twPaint` sets `--darkreader-{bg,text,border}--<key>` to our own values: its rules
+then draw our colours, and stylesheet `:hover` colours keep working (inline `!important`, Forum Stumbler's way, would
+pin them). Verify with `[...root.styleSheets]` on a Dark Reader tab.
+
 ## Dark Reader repaints the loading ring
 
 Reported: the ring is always light while Dark Reader is on, and obeys `spinnerTheme` with it off.
