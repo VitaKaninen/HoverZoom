@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.419.0
+// @version      0.420.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -12228,7 +12228,8 @@
     function plBudget() { return keepCaps().page; }
 
     const KEEP_BACK_PAGES = 2, KEEP_BEHIND_MS = 5 * 60000;     // a gallery keeps this many pages behind the user, none behind longer than this
-    let keepFullAt = 0;                 // the last time the gallery cap dropped a picture ahead: a run stops starting more
+    const KEEP_BEHIND_W = 2;            // a picture behind counts this many times as far as one ahead
+    const KEEP_EST_BYTES = 4 * 1048576; // a gallery original's size before any is kept here
     const keepItem = new Map();         // a gallery original's url -> its item: where it sits, and hqTried cleared when it is dropped
 
     // Every gallery picture's place in the open queue (thumbnail -> index across the queue), and the user's place in it.
@@ -12249,8 +12250,40 @@
         return { at: at, now: now, per: Math.max(1, galPer(set)) };
     }
 
+    // How far a kept picture is from the user: not in the queue = Infinity, behind counts KEEP_BEHIND_W times.
+    function keepDist(lin, now) {
+        if (lin == null || now == null) return Infinity;
+        return lin < now ? (now - lin) * KEEP_BEHIND_W : lin - now;
+    }
+
+    // The gallery originals kept now: [{url, b, lin, d}] and their bytes.
+    function keepGal(P) {
+        const out = [];
+        let b = 0;
+        const add = function (url, bytes, th) {
+            const it = keepItem.get(url), t = it ? it.thumb : th, lin = t != null ? P.at.get(t) : undefined;
+            const L = lin == null ? null : lin;
+            out.push({ url: url, b: bytes, lin: L, d: keepDist(L, P.now) });
+            b += bytes;
+        };
+        heldBlobs.forEach(function (h, u) { add(u, h.blob.size, null); });
+        plKeep.forEach(function (k) { if (!heldBlobs.has(k.url) && (keepItem.has(k.url) || k.thumb)) add(k.url, k.bytes, k.thumb); });
+        return { list: out, bytes: b };
+    }
+
+    // May a run load this gallery picture? Yes while it fits, or fits by dropping only pictures farther than it; no = the cap's horizon.
+    function keepRoomFor(item) {
+        const P = keepPlaces(), lin = item && item.thumb != null ? P.at.get(item.thumb) : undefined;
+        const d = keepDist(lin == null ? null : lin, P.now), K = keepGal(P), cap = keepCaps().gal;
+        const need = K.list.length ? K.bytes / K.list.length : KEEP_EST_BYTES;
+        if (K.bytes + need <= cap) return true;
+        let free = 0;
+        K.list.forEach(function (e) { if (e.d > d) free += e.b; });
+        return K.bytes - free + need <= cap;
+    }
+
     // The memory keep (user, 2026-11-26): a gallery keeps KEEP_BACK_PAGES pages behind the user and everything ahead, nothing behind past
-    // KEEP_BEHIND_MS; over the gallery cap, behind goes first (farthest first), then the farthest ahead; the rest of the page oldest first.
+    // KEEP_BEHIND_MS; over the gallery cap the farthest goes first (keepDist: other galleries, then behind x2, then ahead); the rest of the page oldest first.
     function keepTrim() {
         const P = keepPlaces(), t = Date.now(), caps = keepCaps(), gal = [], page = [];
         let galB = 0, pageB = 0;
@@ -12279,17 +12312,11 @@
         gal.forEach(function (e) { if (e.drop) { drop(e); galB -= e.b; cut++; } });
         if (galB > caps.gal) {
             const rest = gal.filter(function (e) { return !e.drop; }).sort(function (a, b) {
-                const ab = a.lin != null && P.now != null && a.lin < P.now, bb = b.lin != null && P.now != null && b.lin < P.now;
-                if (ab !== bb) return ab ? -1 : 1;                                  // behind first
-                if (ab) return a.lin - b.lin;                                       // ...farthest back first
-                if (a.lin != null && b.lin != null && P.now != null) return b.lin - a.lin;     // then the farthest ahead
-                return a.age - b.age;                                               // no place known: oldest first
+                const da = keepDist(a.lin, P.now), db = keepDist(b.lin, P.now);
+                if (da !== db) return da > db ? -1 : 1;                             // farthest first
+                return a.age - b.age;                                               // as far: oldest first
             });
-            while (galB > caps.gal && rest.length > 1) {
-                const e = rest.shift();
-                if (!(e.lin != null && P.now != null && e.lin < P.now)) keepFullAt = Date.now();      // ahead had to go: the cap is full of what is ahead
-                drop(e); galB -= e.b; cut++;
-            }
+            while (galB > caps.gal && rest.length > 1) { const e = rest.shift(); drop(e); galB -= e.b; cut++; }
         }
         page.sort(function (a, b) { return a.age - b.age; });
         while (pageB > caps.page && page.length > 1) { const e = page.shift(); drop(e); pageB -= e.b; cut++; }
@@ -15126,11 +15153,12 @@
         const end = function (why) {
             if (ended || sizing) return;
             ended = true;
+            set.hqHorizon = why === 'memory full';
             if (lg) lg.end(why, bytes);
             if (galGrown.has(set.href)) galKeep(set.href, galGrowWhy.get(set.href) === 'html');     // with the originals found, a return skips the guessing
             nextWarmReport();
             dbg('gallery originals: ' + why, { href: set.href, pictures: imgs.length, found: got, bytes: humanBytes(bytes) });
-            actEnd(job, why === 'done' ? 'done' : 'stopped', ({ done: '', cut: 'stopped', restarted: 'replaced by a run from a new place', 'memory full': 'stopped, memory full (Settings → Galleries memory)' }[why] || why) +
+            actEnd(job, why === 'done' ? 'done' : 'stopped', ({ done: '', cut: 'stopped', restarted: 'replaced by a run from a new place', 'memory full': 'stopped: the memory limit is full of nearer pictures (Settings → Galleries memory); it goes on as you move' }[why] || why) +
                 (why === 'done' ? '' : ': ') + got + ' found, ' + humanBytes(bytes));
         };
         const size = function (hit) {
@@ -15142,8 +15170,8 @@
         const next = function () {
             if (tok.cancelled || tok.stop) { if (!running) end(cutWhy()); return; }
             if (i >= imgs.length) { if (!running) end(full ? 'memory full' : 'done'); return; }
-            if (Date.now() - keepFullAt < 3000) { i = imgs.length; full = true; if (!running) end('memory full'); return; }     // a later page step or preview resumes it
             while (running < GAL_HQ_PAR && i < imgs.length) {
+                if (!keepRoomFor(imgs[i].__hzItem)) { i = imgs.length; full = true; break; }      // the cap's horizon: what is nearer fills it; a later step resumes
                 const img = imgs[i++];
                 running++;
                 ahSlot(ahPics, 'galo', tok).then(function (free) {
@@ -15160,6 +15188,7 @@
                     }, function () { if (r) r.done({ status: 0 }); }).then(function () { if (it) it.hqBusy = false; free(); galHqLive.delete(live); running--; next(); });
                 });
             }
+            if (full && !running) end('memory full');
         };
         next();
     }
@@ -17496,6 +17525,7 @@
         if (item.hqTried && item.hit) return Promise.resolve(item.hit);     // found already: no slot, no line
         return ahRun(ahPics, tag, function () {
             if (item.hqBusy || (item.hqTried && item.hit)) return null;
+            if (tag === 'galn' && !keepRoomFor(item)) return null;      // past the memory horizon: it would only push out nearer pictures
             item.hqBusy = true;
             const t0 = performance.now();
             return galResolve({ __hzItem: item, naturalWidth: 0, naturalHeight: 0, src: item.thumb, currentSrc: item.thumb }, tok).then(function (hit) {
@@ -17792,7 +17822,7 @@
         else {
             const at = g.at;
             g.at = k;
-            if (cfg.galleryLoadAll) { const it = set.pics[k].item; if (was && (k === at || (it && it.hqTried))) return; }     // load all: an unloaded picture jumps the queue
+            if (cfg.galleryLoadAll) { const it = set.pics[k].item; if (was && !set.hqHorizon && (k === at || (it && it.hqTried))) return; }     // load all: an unloaded picture jumps the queue; a run stopped at the memory horizon goes on from here
             else if (was && k >= g.from && k < g.end - 1) return;      // still inside what is loading
         }
         if (!was) dbg('loading ahead: a preview; originals from picture ' + (k + 1));

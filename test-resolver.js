@@ -1494,5 +1494,30 @@ const srcLf = src.split(String.fromCharCode(13)).join('');     // the checkout m
     eq('arrival: a results verdict that is a gallery keeps it', af('results', 'gallery'), 'keep gallery');
     eq('arrival: agreement and unknown change nothing', [af('gallery', 'gallery'), af('results', 'results'), af('none', null)], [null, null, null]);
 }
+// ---- the memory keep: distance from the user, and the horizon a run stops at (v0.420.0).
+{
+    const fn = function (name) { const at = srcLf.indexOf('    function ' + name + '('); return srcLf.slice(at, srcLf.indexOf('\n    }\n', at) + 7); };
+    const k = srcLf.indexOf('const KEEP_BEHIND_W'), c = srcLf.slice(k, srcLf.indexOf(';', k) + 1);
+    const kd = new Function(c + NL + fn('keepDist') + NL + 'return keepDist;')();
+    eq('keep: ahead counts its distance, behind twice, the user\'s own 0', [kd(15, 10), kd(5, 10), kd(10, 10)], [5, 10, 0]);
+    eq('keep: not in the queue (or no gallery) is farthest', [kd(null, 10), kd(3, null)], [Infinity, Infinity]);
+    const MB = 1048576;
+    // kept: {thumb: [lin, MB]}; the user at 10, cap 40 MB
+    const room = function (kept, lin) {
+        const at = new Map(), list = [];
+        let b = 0;
+        Object.keys(kept).forEach(function (t) { if (kept[t][0] != null) at.set(t, kept[t][0]); list.push({ b: kept[t][1] * MB, d: kd(kept[t][0], 10) }); b += kept[t][1] * MB; });
+        at.set('new', lin);
+        const r = new Function('keepPlaces', 'keepGal', 'keepCaps', 'KEEP_EST_BYTES', c + NL + fn('keepDist') + NL + fn('keepRoomFor') + NL + 'return keepRoomFor;')(
+            function () { return { at: at, now: 10 }; }, function () { return { list: list, bytes: b }; }, function () { return { gal: 40 * MB }; }, 4 * MB);
+        return r({ thumb: 'new' });
+    };
+    eq('keep: room while under the cap', room({ a: [11, 10], b: [12, 10] }, 13), true);
+    eq('keep: full of nearer pictures = the horizon', room({ a: [11, 10], b: [12, 10], c: [13, 10], d: [14, 10] }, 15), false);
+    eq('keep: full, but a farther one ahead can go', room({ a: [11, 10], b: [12, 10], c: [13, 10], d: [20, 10] }, 14), true);
+    eq('keep: full, but one 3 behind (counts 6) makes way for 5 ahead', room({ a: [11, 10], b: [12, 10], c: [13, 10], d: [7, 10] }, 15), true);
+    eq('keep: full, one 2 behind (counts 4) does not make way for 5 ahead', room({ a: [11, 10], b: [12, 10], c: [13, 10], d: [8, 10] }, 15), false);
+    eq('keep: another gallery\'s pictures always make way', room({ a: [11, 10], b: [12, 10], c: [13, 10], x: [null, 10] }, 30), true);
+}
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

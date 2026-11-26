@@ -316,13 +316,20 @@ What loads ahead follows what the user does. Code: the `ah*` functions after `ga
   The clicked picture is never under `GAL_PIC_MIN_W`×`GAL_PIC_MIN_H` 196×130 (`galPlace`, drag `lo`, `galBoxKept`):
   measured, the stacked checkboxes (11 px in, 77 wide, 54 tall) and the storage readout (81×51, raised 38 px on
   hover over ⛶) need 181×127.
-  A run stops starting more (`memory full`) within 3 s of the memory keep dropping a picture *ahead*
-  (`keepFullAt`); the next layout/page step/preview resumes it.
+  A run stops at the **memory horizon** (`keepRoomFor(item)`, v0.420.0, user: "stay under the cap, drop things to
+  make room"): it loads the next picture while it fits, or fits by dropping only pictures *farther* than it
+  (`keepDist`); otherwise it ends `memory full` and sets `set.hqHorizon`, and every slideshow step/preview
+  (`ahSaw`) starts it again from there, so it walks forward as the user does. `galn` (next gallery) loads ask the
+  same. Replaced `keepFullAt` (any drop ahead blocked every run for 3 s — the run started for the
+  picture on screen ended `0 found, 0 ms` and the slideshow showed thumbnails). Main-page originals don't ask:
+  with no gallery open every distance is Infinity and they would never load.
 - **Memory keep** (`keepTrim`, user 2026-11-26; replaces HELD_MAX / plBudget's oldest-first): `heldBlobs` (exact
   bytes) and `plKeep` (estimated, `PL_BYTES_PER_PX` — over-counts JPEGs ~3×, so the cap uses held bytes where
   present) as one set. Gallery entries (`keepItem` url → item) are placed on the open queue (`keepPlaces`, linear
   over the queue's lists); behind the user = dropped past `KEEP_BACK_PAGES` 2 pages or `KEEP_BEHIND_MS` 5 min
-  behind. Over `cfg.galleryKeepMB` (1024): behind first (farthest first), then the farthest ahead. Everything
+  behind. Over `cfg.galleryKeepMB` (1024): farthest first by `keepDist` — not in the queue (other galleries) =
+  Infinity, behind = distance × `KEEP_BEHIND_W` 2, ahead = distance (was: behind, then ahead, unplaced mixed in by
+  age, so a left gallery's pictures outlived what was just ahead). Thumbnails are not in this cap (HTTP cache). Everything
   else: `cfg.keepMB` (512), oldest first. Under 8 GB `deviceMemory`, each cap ≤ 128 MB per GB. A dropped
   original's item loses `hqTried`, so a backward run loads it again. Runs on every add and each storage-readout
   tick (1 s). Verified on eporner with a 64 MB cap: 361/666 then `memory full`.
