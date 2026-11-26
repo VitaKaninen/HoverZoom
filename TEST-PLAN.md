@@ -168,8 +168,10 @@ Test pages:
 
 4.3 **Stop, wait 1 s for a hover.** After 4.2, stop scrolling and hover a gallery straight away, within
     about a second.
-    - **Expect:** after about 1.25 s, `loading ahead: scroll stopped; from the hovered gallery`, then
-      `loading ahead: thumbnails` for that gallery and the ones below it.
+    - **Expect:** after about 1.25 s, `loading ahead: scroll stopped; from the hovered gallery`. The gallery
+      preview opens on that cover at 500 ms, and the main page waits while any preview is up (`galPreNext`), so
+      `loading ahead: thumbnails` for that gallery and the ones below come once the pointer leaves the cover.
+      eporner, Chrome: verified (v0.404.0).
 
 4.4 **Stop with no hover.** Repeat 4.2, then stop with the pointer on empty space.
     - **Expect:** `loading ahead: scroll stopped; from the first gallery on screen`, and loading restarts
@@ -285,7 +287,9 @@ Test pages:
 7.7 **A backward step loads 5 the other way first.** On page 3, hover a picture, then press PageUp (or ↑).
     - **Expect:** originals for the 5 pictures before where you were load first, then forward loading
       resumes. Pressing PageUp again follows you back.
-    - Not verified by Claude.
+    - "Where you were" is the first picture of the page you stepped back from. eporner, Chrome (v0.404.0): from
+      page 5, PageUp loaded 180 → 176 first, then 192 on. With no preview since the last forward step (originals
+      off), a backward step loads nothing until the next hover.
 
 7.8 **Slideshow: originals run ahead of it.** In a gallery, start the slideshow (⛶ on the clicked
     picture's bottom right) and step forward with → or `]`.

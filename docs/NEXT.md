@@ -1,3 +1,15 @@
+# Handoff 2026-11-26 #6: the rest of TEST-PLAN on eporner (v0.404.0, no code change)
+
+User asked: continue #5. Run in Chrome on eporner searches (forest/lake/river/waterfall/garden/pool), window 1610×927.
+**Last asked the user:** nothing open.
+Pass: 3.2, 4.1, 4.2 (in-flight gallery ends `cut: true`, nothing new starts), 4.3, 4.5, 5.8, 5.10 (seen tick only on
+the opened gallery), 5.11, 7.1, 7.2, 7.3, 7.5, 7.6, 7.7, 7.11, 9.3. 4.3 and 7.7's wording was corrected in TEST-PLAN.
+Not run: 3.4 (user's), 5.4 (the tool can't leave the window), 7.4, 7.10, 7.13, 8.x, 9.2. 7.9 inconclusive: the
+pictures behind were already loaded.
+Seen, by design, not changed: at the page foot no gallery is on screen, so main loading rests (`ahMainPick` → null).
+A gallery preview pauses all main loading while it is up (`galWant`/`galCur` in `galPreNext`; GALLERY.md
+"Preload": a frame read would be killed by `galRender`). A pointer resting on a cover stops loading for as long as it rests.
+
 # Handoff 2026-11-26 #5: TEST-PLAN on eporner + girlstop, basic run on 11 other sites (v0.398.0–v0.404.0, all pushed)
 
 User asked: run TEST-PLAN.md in Claude in Chrome on eporner/girlstop, then a basic check (hover, best quality, galleries)

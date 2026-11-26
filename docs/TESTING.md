@@ -395,6 +395,12 @@ logs `retrying` ×3 — an artefact of the stub, not of the manager. The pane wo
   (`mousedown` button 0 opens); ⤓ is a leaf `span` starting `⤓` (plain `⤓` = ready); queue progress is `span.txt`
   ("Saving N / M"), site-wide, in any tab of that site. A ⤓ on a fully saved gallery calls `confirm()`.
 - Do not `Escape` after opening the settings panel with a gallery open: it closes the gallery too.
+- **`computer` coordinates are the screenshot frame, not CSS px**: 1456×838 against a 1610×927 viewport (2026-11-26).
+  Convert with `1456 / innerWidth` before hovering. A synthetic `mouseover` never opens a door (`galDoorHover` needs
+  the real pointer in `galPt`), so hover for real and then dispatch only the press: a middle `mousedown`/`mouseup`/`auxclick`
+  at the pointer's CSS point opens the gallery. Clicking a chip with no hover did not open one.
+- The trace records a load when it **finishes**: filter on `s` (start), and wait for the in-flight ones before
+  reading "nothing started".
 - Each `javascript_tool` call dies at 45 s: poll in calls of ≤ 30 s.
 - **Loading-ahead trace** (v0.396.0, `ahT`/`ahTraceDump`, debug only — records nothing until `hover-zoom:debug` true
   or Settings debug): `document.dispatchEvent(new CustomEvent('hover-zoom:ahead-trace', {detail: JSON.stringify({since, max, urls, clear})}))`
