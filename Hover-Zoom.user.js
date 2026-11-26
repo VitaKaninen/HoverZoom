@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.414.0
+// @version      0.415.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -17,6 +17,7 @@
 // @grant       GM_listValues
 // @grant       GM_deleteValue
 // @grant       GM_openInTab
+// @grant       GM_addElement
 // @connect     *
 // @run-at      document-idle
 // @downloadURL https://raw.githubusercontent.com/VitaKaninen/HoverZoom/master/Hover-Zoom.user.js
@@ -641,83 +642,246 @@
     function debugOn() { return pageDebug || !!cfg.debug; }
 
     // ---- activity window: what loads in the background and why, in plain words, in a window of its own. See docs/ACTIVITY.md.
-    const ACT_NAME = 'hzActivity', ACT_KEEP = 3000, ACT_DOM_MAX = 6000;
-    const actBuf = [];          // this page's lines, kept so a window opened later shows them
-    let actWin = null, actList = null, actArmed = false, actIdx = null, actIdxAt = 0;
+    const ACT_NAME = 'hzActivity', ACT_KEEP = 4000, ACT_KIDS = 600;
+    const actBuf = [];          // this page's entries, {line} or {job}, replayed to a window that opens or comes back
+    const actPid = Math.random().toString(36).slice(2, 10);
+    let actWin = null, actRecv = null, actLive = false, actArmed = false, actIdx = null, actIdxAt = 0, actJobN = 0, actChan = null, actTT = null, actCountJob = null;
 
-    // One line: kind 'job' (what starts), 'ok'/'bad' (a file done), 'you' (what the user did), 'warn', 'info'.
+    function actNow() { const n = new Date(); return n.toTimeString().slice(0, 8) + '.' + String(n.getMilliseconds()).padStart(3, '0').slice(0, 1); }
+    function actUrl() { return location.href.split('#')[0]; }
+
+    // To the window: straight in when this page drew it itself, else over the channel the window listens on.
+    function actSend(m) {
+        m.to = 'win';
+        m.pid = actPid;
+        m.url = actUrl();
+        if (actRecv) { try { actRecv(m); return; } catch (e) { actRecv = null; } }
+        if (actLive && actChan) { try { actChan.postMessage(m); } catch (e) { /* channel gone */ } }
+    }
+    function actJobMsg(j) { return { t: 'job', id: j.id, at: j.t, text: j.text, total: j.total, done: j.done, bad: j.bad, ms: j.ms, state: j.state, note: j.note }; }
+    function actReplay() {
+        actSend({ t: 'hello', at: actNow(), ver: version() });
+        actBuf.forEach(function (b) {
+            if (!b.job) { actSend({ t: 'line', at: b.t, kind: b.kind, text: b.text }); return; }
+            actSend(actJobMsg(b.job));
+            b.job.kids.forEach(function (k) { actSend({ t: 'kid', id: b.job.id, at: k.t, kind: k.kind, text: k.text }); });
+        });
+    }
+    function actKeep(b) { actBuf.push(b); if (actBuf.length > ACT_KEEP) actBuf.splice(0, actBuf.length - ACT_KEEP); }
+
+    // One plain line: 'you' (what the user did), 'warn', 'info', 'job' (work with no files to count), 'ok'/'bad'.
     function act(kind, text) {
-        const now = new Date();
-        const line = { t: now.toTimeString().slice(0, 8) + '.' + String(now.getMilliseconds()).padStart(3, '0').slice(0, 1), kind: kind, text: text };
-        actBuf.push(line);
-        if (actBuf.length > ACT_KEEP) actBuf.splice(0, actBuf.length - ACT_KEEP);
-        if (actWin) actDraw(line);
+        const b = { t: actNow(), kind: kind, text: text };
+        actKeep(b);
+        actSend({ t: 'line', at: b.t, kind: kind, text: text });
     }
 
-    const ACT_COLORS = { job: '#cdd6f4', ok: '#a6adc8', bad: '#f38ba8', you: '#89b4fa', warn: '#f9e2af', info: '#9399b2', page: '#a6e3a1' };
-    function actDraw(line) {
-        try {
-            if (!actWin || actWin.closed || !actList || !actList.isConnected) { actWin = null; return; }
-            const d = actWin.document, row = d.createElement('div'), sc = d.scrollingElement || d.documentElement;
-            const stick = sc.scrollHeight - sc.scrollTop - sc.clientHeight < 40;
-            row.style.cssText = 'white-space:pre-wrap;padding:1px 0;color:' + (ACT_COLORS[line.kind] || '#cdd6f4') +
-                (line.kind === 'job' || line.kind === 'you' || line.kind === 'page' ? ';font-weight:600;margin-top:4px' : '');
+    // A piece of work: a header with a live count; its files go under it (actKid), actEnd closes it with its time.
+    function actJob(text, total) {
+        const j = { id: ++actJobN, t: actNow(), t0: performance.now(), text: text, total: total || 0, done: 0, bad: 0, ms: null, state: 'run', note: '', kids: [] };
+        actKeep({ job: j });
+        actSend(actJobMsg(j));
+        return j;
+    }
+    function actKid(j, ok, text) {
+        if (!j) { act(ok ? 'ok' : 'bad', text); return; }
+        j.done++;
+        if (!ok) j.bad++;
+        const k = { t: actNow(), kind: ok ? 'ok' : 'bad', text: text };
+        if (j.kids.length < ACT_KIDS) j.kids.push(k);
+        actSend({ t: 'kid', id: j.id, at: k.t, kind: k.kind, text: text });
+        actSend(actJobMsg(j));
+    }
+    function actTotal(j, n) { if (j && j.total !== n) { j.total = n; actSend(actJobMsg(j)); } }
+    function actEnd(j, state, note) {
+        if (!j || j.state !== 'run') return;
+        j.state = state || 'done';
+        j.ms = performance.now() - j.t0;
+        j.note = note || '';
+        actSend(actJobMsg(j));
+    }
+
+    // The window's own code, run inside it (own) so it outlives a reload of this page; else run from here, drawing into it.
+    function actPopup(win, own) {
+        const d = win.document, de = d.documentElement;
+        if (own && de.getAttribute('data-hz-act') === 'live') return null;
+        const C = { job: '#cdd6f4', ok: '#a6adc8', bad: '#f38ba8', you: '#89b4fa', warn: '#f9e2af', info: '#9399b2', page: '#a6e3a1' };
+        const S = { run: '#cdd6f4', done: '#a6e3a1', stopped: '#f9e2af', failed: '#f38ba8' };
+        const MAX = 1500, KIDS = 1000;
+        d.title = 'Hover Zoom activity';
+        d.body.style.cssText = 'margin:0;background:#1e1e2e;color:#cdd6f4;font:12px/1.45 ui-monospace,Consolas,monospace';
+        const oldBar = d.getElementById('hz-act-bar');
+        if (oldBar) oldBar.remove();
+        let list = d.getElementById('hz-act');
+        if (list) { const fresh = list.cloneNode(true); list.replaceWith(fresh); list = fresh; }     // drops the listeners of a page that is gone
+        else { list = d.createElement('div'); list.id = 'hz-act'; list.style.cssText = 'padding:6px 10px 24px'; d.body.appendChild(list); }
+        const bar = d.createElement('div');
+        bar.id = 'hz-act-bar';
+        bar.style.cssText = 'position:sticky;top:0;z-index:1;display:flex;gap:8px;align-items:center;padding:6px 10px;background:#313244;border-bottom:1px solid #45475a;font:12px system-ui,sans-serif';
+        const title = d.createElement('span');
+        title.style.cssText = 'flex:1;color:#cdd6f4';
+        title.textContent = 'Hover Zoom — what it is loading, and why. Click a line with ▸ to see its files.';
+        bar.appendChild(title);
+        const btn = function (label, fn) {
+            const b = d.createElement('button');
+            b.textContent = label;
+            b.style.cssText = 'font:12px system-ui,sans-serif;color:#cdd6f4;background:#45475a;border:1px solid #585b70;border-radius:4px;padding:2px 10px;cursor:pointer';
+            b.addEventListener('click', function () { fn(b); });
+            bar.appendChild(b);
+        };
+        const groups = new Map(), pids = new Set((list.getAttribute('data-pids') || '').split(',').filter(Boolean));
+        const grp = function (key) {
+            let g = groups.get(key);
+            if (!g) {
+                const row = list.querySelector('[data-g="' + key + '"]');
+                if (row) { g = { row: row, hd: row.lastChild, ar: row.children[1], box: row.nextElementSibling }; groups.set(key, g); }
+            }
+            return g;
+        };
+        const textOf = function (r) { return r.textContent.replace(/^(\S+)\s+[▸▾]\s*/, '$1  '); };
+        btn('Copy', function (b) {
+            const out = [];
+            Array.prototype.forEach.call(list.children, function (r) {
+                if (r.getAttribute('data-box')) { if (!r.hidden) Array.prototype.forEach.call(r.children, function (k) { out.push('    ' + k.textContent); }); }
+                else out.push(textOf(r));
+            });
+            const text = out.join('\n'), ok = function () { b.textContent = 'Copied'; setTimeout(function () { b.textContent = 'Copy'; }, 1500); };
+            try { win.navigator.clipboard.writeText(text).then(ok, function () {}); } catch (e) { /* no clipboard */ }
+        });
+        btn('Open all', function () { list.querySelectorAll('[data-box]').forEach(function (x) { x.hidden = false; if (x.previousElementSibling) x.previousElementSibling.children[1].textContent = '▾ '; }); });
+        btn('Close all', function () { list.querySelectorAll('[data-box]').forEach(function (x) { x.hidden = true; if (x.previousElementSibling) x.previousElementSibling.children[1].textContent = '▸ '; }); });
+        btn('Clear', function () { while (list.firstChild) list.firstChild.remove(); groups.clear(); });
+        d.body.insertBefore(bar, list);
+        list.addEventListener('click', function (e) {
+            const r = e.target.closest && e.target.closest('[data-g]');
+            if (!r || !r.nextElementSibling) return;
+            const box = r.nextElementSibling;
+            box.hidden = !box.hidden;
+            r.children[1].textContent = box.hidden ? '▸ ' : '▾ ';
+        });
+        const secs = function (ms) { return ms >= 1000 ? (ms / 1000).toFixed(1) + ' s' : Math.round(ms) + ' ms'; };
+        const line = function (at, kind, text, bold) {
+            const row = d.createElement('div');
+            row.style.cssText = 'white-space:pre-wrap;padding:1px 0;color:' + (C[kind] || '#cdd6f4') + (bold ? ';font-weight:600;margin-top:4px' : '');
             const tm = d.createElement('span');
-            tm.style.cssText = 'color:#6c7086';
-            tm.textContent = line.t + '  ';
+            tm.style.cssText = 'color:#6c7086;font-weight:400';
+            tm.textContent = at + '  ';
             row.appendChild(tm);
-            row.appendChild(d.createTextNode((line.kind === 'ok' || line.kind === 'bad' ? '    ' : '') + line.text));
-            actList.appendChild(row);
-            while (actList.childElementCount > ACT_DOM_MAX) actList.firstElementChild.remove();
+            row.appendChild(d.createTextNode(text));
+            return row;
+        };
+        const put = function (el, box) {
+            const sc = d.scrollingElement || de, stick = sc.scrollHeight - sc.scrollTop - sc.clientHeight < 40;
+            list.appendChild(el);
+            if (box) list.appendChild(box);
+            while (list.childElementCount > MAX) {
+                const f = list.firstElementChild;
+                if (f.getAttribute('data-g')) groups.delete(f.getAttribute('data-g'));
+                f.remove();
+            }
             if (stick) sc.scrollTop = sc.scrollHeight;
-        } catch (e) { actWin = null; }
+        };
+        const head = function (m) {
+            const sym = m.state === 'run' ? '…' : m.state === 'done' ? '✓' : m.state === 'stopped' ? '⏹' : '✗';
+            const n = m.total || m.done ? ' · ' + m.done + (m.total ? '/' + m.total : '') : '';
+            return sym + ' ' + m.text + n + (m.bad ? ' (' + m.bad + ' failed)' : '') + (m.ms != null ? ' · ' + secs(m.ms) : '') + (m.note ? ' — ' + m.note : '');
+        };
+        const receive = function (m) {
+            if (!m || !m.t) return;
+            if (m.t === 'hello') {
+                if (pids.has(m.pid)) return;
+                pids.add(m.pid);
+                list.setAttribute('data-pids', Array.from(pids).slice(-50).join(','));
+                put(line(m.at, 'page', '── page: ' + m.url + ' (' + m.ver + ') ──', true));
+            } else if (m.t === 'line') put(line(m.at, m.kind, (m.kind === 'ok' || m.kind === 'bad' ? '    ' : '') + m.text, m.kind === 'job' || m.kind === 'you'));
+            else if (m.t === 'job') {
+                const key = m.pid + '-' + m.id;
+                let g = grp(key);
+                if (!g) {
+                    const row = line(m.at, 'job', '', true), ar = d.createElement('span'), hd = d.createElement('span');
+                    row.lastChild.remove();
+                    row.setAttribute('data-g', key);
+                    row.style.cursor = 'pointer';
+                    ar.textContent = '▸ ';
+                    row.appendChild(ar);
+                    row.appendChild(hd);
+                    const box = d.createElement('div');
+                    box.setAttribute('data-box', '1');
+                    box.hidden = true;
+                    box.style.cssText = 'padding-left:24px;border-left:1px solid #45475a;margin-left:6px';
+                    g = { row: row, hd: hd, ar: ar, box: box };
+                    groups.set(key, g);
+                    put(row, box);
+                }
+                g.hd.textContent = head(m);
+                g.row.style.color = S[m.state] || '#cdd6f4';
+            } else if (m.t === 'kid') {
+                const g = grp(m.pid + '-' + m.id);
+                if (!g || g.box.childElementCount >= KIDS) return;
+                g.box.appendChild(line(m.at, m.kind, m.text));
+            }
+        };
+        if (!own) return receive;
+        de.setAttribute('data-hz-act', 'live');
+        const ch = new win.BroadcastChannel('hz-activity');
+        const openerUrl = function () { try { return win.opener && !win.opener.closed ? win.opener.location.href.split('#')[0] : null; } catch (e) { return null; } };
+        ch.onmessage = function (e) {
+            const m = e.data;
+            if (!m || m.to !== 'win') return;
+            if (m.t === 'who') { ch.postMessage({ to: 'page', t: 'here', url: openerUrl() }); return; }
+            if (m.url === openerUrl()) receive(m);
+        };
+        ch.postMessage({ to: 'page', t: 'here', url: openerUrl() });
+        return null;
     }
 
-    // The window: opened (or found again by name) and filled with this page's lines so far.
+    // This page finds a window still open from before a reload, and answers a window that has just opened.
+    if (isTopFrame) {
+        try {
+            actChan = new BroadcastChannel('hz-activity');
+            actChan.onmessage = function (e) {
+                const m = e.data;
+                if (m && m.to === 'page' && m.t === 'here' && m.url === actUrl()) { actLive = true; actRecv = null; actReplay(); }
+            };
+            actChan.postMessage({ to: 'win', t: 'who' });
+        } catch (e) { actChan = null; }
+    }
+
+    // The window's code into the window itself: the manager's way first (it passes the page's CSP), else a plain script.
+    function actInject(w) {
+        const code = '(' + actPopup.toString() + ')(window, true);';
+        const de = w.document.documentElement, live = function () { return de.getAttribute('data-hz-act') === 'live'; };
+        try { if (typeof GM_addElement === 'function') GM_addElement(w.document.head || de, 'script', { textContent: code }); } catch (e) { /* refused */ }
+        if (live()) return true;
+        try {
+            const s = w.document.createElement('script'), n = document.querySelector('script[nonce]');
+            if (n) s.setAttribute('nonce', n.nonce || n.getAttribute('nonce'));
+            if (window.trustedTypes && !actTT) { try { actTT = window.trustedTypes.createPolicy('hzActivity', { createScript: function (x) { return x; } }); } catch (e) { actTT = null; } }
+            s.textContent = actTT ? actTT.createScript(code) : code;
+            (w.document.head || de).appendChild(s);
+        } catch (e) { /* refused */ }
+        return live();
+    }
+
+    // The window: opened (or found again by name), its own code put in, and this page's lines so far sent to it.
     function actOpen() {
         if (!isTopFrame) return;
         let w = null;
-        try { w = window.open('', ACT_NAME, 'popup=yes,width=620,height=720'); } catch (e) { w = null; }
+        try { w = window.open('', ACT_NAME, 'popup=yes,width=700,height=760'); } catch (e) { w = null; }
         if (!w) {
             actArmed = true;
             toast('Pop-up blocked: click anywhere on the page to open the activity window', 5000);
             return;
         }
         actArmed = false;
-        const d = w.document;
-        let list = d.getElementById('hz-act');
-        if (!list) {
-            d.title = 'Hover Zoom activity';
-            d.body.style.cssText = 'margin:0;background:#1e1e2e;color:#cdd6f4;font:12px/1.45 ui-monospace,Consolas,monospace';
-            const bar = d.createElement('div');
-            bar.style.cssText = 'position:sticky;top:0;display:flex;gap:8px;align-items:center;padding:6px 10px;background:#313244;border-bottom:1px solid #45475a;font:12px system-ui,sans-serif';
-            const title = d.createElement('span');
-            title.style.cssText = 'flex:1;color:#cdd6f4';
-            title.textContent = 'Hover Zoom — what it is loading, and why';
-            bar.appendChild(title);
-            const btn = function (label, fn) {
-                const b = d.createElement('button');
-                b.textContent = label;
-                b.style.cssText = 'font:12px system-ui,sans-serif;color:#cdd6f4;background:#45475a;border:1px solid #585b70;border-radius:4px;padding:2px 10px;cursor:pointer';
-                b.addEventListener('click', function () { fn(b); });
-                bar.appendChild(b);
-            };
-            btn('Copy', function (b) {
-                const text = Array.prototype.map.call(d.getElementById('hz-act').children, function (r) { return r.textContent; }).join('\n');
-                const ok = function () { b.textContent = 'Copied'; setTimeout(function () { b.textContent = 'Copy'; }, 1500); };
-                try { w.navigator.clipboard.writeText(text).then(ok, function () {}); } catch (e) { /* no clipboard */ }
-            });
-            btn('Clear', function () { const l = d.getElementById('hz-act'); while (l.firstChild) l.firstChild.remove(); });
-            d.body.appendChild(bar);
-            list = d.createElement('div');
-            list.id = 'hz-act';
-            list.style.cssText = 'padding:6px 10px 24px';
-            d.body.appendChild(list);
-        }
         actWin = w;
-        actList = list;
-        actDraw({ t: new Date().toTimeString().slice(0, 8) + '.0', kind: 'page', text: '── this page: ' + location.href.split('#')[0] + ' (' + version() + ') — the lines since it opened ──' });
-        actBuf.forEach(actDraw);
+        const was = w.document.documentElement.getAttribute('data-hz-act') === 'live';
+        if (was) { if (!actLive && actChan) actChan.postMessage({ to: 'win', t: 'who' }); }
+        else if (!actInject(w)) {
+            actRecv = actPopup(w, false);
+            actReplay();
+            act('warn', 'This site blocks the window\'s own code: after a reload of the page, open the window again from the menu');
+        }
         try { w.focus(); } catch (e) { /* focus refused */ }
     }
 
@@ -803,11 +967,12 @@
 
     const ACT_WHY = { main: 'for the page', gal: 'for the next galleries', galo: 'for the open gallery', galn: 'for the next gallery', count: 'to count it', shown: 'for the open gallery' };
 
-    // A loading-ahead trace event as a line.
-    function actTrace(ev, o) {
-        if (ev === 'thumb') act(o.ok ? 'ok' : 'bad', (o.ok ? '✓ thumbnail ' : '✗ thumbnail failed ') + actPic(o.u) + ' · ' + actSecs(o.ms) + ' · ' + (ACT_WHY[o.tag] || o.tag));
-        else if (ev === 'orig') act(o.ok ? 'ok' : 'bad', (o.ok ? '✓ full size ' : '✗ no full size found ') + actPic(o.u) + ' · ' + actSecs(o.ms) + ' · ' + (ACT_WHY[o.tag] || o.tag));
-        else if (ev === 'page') act(o.ok ? 'ok' : 'bad', (o.ok ? '✓ read the page of ' : '✗ could not read the page of ') + actGal(o.h) + (o.ok ? ': ' + o.n + ' pictures' : o.st ? ': status ' + o.st : '') + ' · ' + actSecs(o.ms) + ' · ' + (ACT_WHY[o.tag] || o.tag));
+    // A loading-ahead trace event as a line: under its job when it has one, else on its own with the reason.
+    function actTrace(ev, o, job) {
+        const why = job ? '' : ' · ' + (ACT_WHY[o.tag] || o.tag);
+        if (ev === 'thumb') actKid(job, o.ok, (o.ok ? '✓ thumbnail ' : '✗ thumbnail failed ') + actPic(o.u) + ' · ' + actSecs(o.ms) + why);
+        else if (ev === 'orig') actKid(job, o.ok, (o.ok ? '✓ full size ' : '✗ no full size found ') + actPic(o.u) + ' · ' + actSecs(o.ms) + why);
+        else if (ev === 'page') actKid(job, o.ok, (o.ok ? '✓ read the page of ' : '✗ could not read the page of ') + actGal(o.h) + (o.ok ? ': ' + o.n + ' pictures' : o.st ? ': status ' + o.st : '') + ' · ' + actSecs(o.ms) + why);
         else if (ev === 'act') {
             if (o.a === 'page') act('you', 'You went ' + (o.dir > 0 ? 'forward' : 'back') + ' a page');
             else if (o.a === 'close') act('you', 'You closed the gallery — the page\'s own loading starts again from the first gallery on screen');
@@ -815,15 +980,24 @@
         }
     }
 
-    // `hover-zoom:activity`: the activity lines as text on <html data-hz-activity>, for a tool.
+    // `hover-zoom:activity`: the activity as text on <html data-hz-activity>, for a tool; a job's files indented under it.
     document.addEventListener('hover-zoom:activity', function () {
-        try { document.documentElement.setAttribute('data-hz-activity', actBuf.map(function (l) { return l.t + ' ' + l.kind + ' ' + l.text; }).join('\n')); } catch (x) { /* none */ }
+        try {
+            const out = [];
+            actBuf.forEach(function (b) {
+                if (!b.job) { out.push(b.t + ' ' + b.kind + ' ' + b.text); return; }
+                const j = b.job;
+                out.push(j.t + ' job[' + j.state + '] ' + j.text + ' · ' + j.done + (j.total ? '/' + j.total : '') + (j.bad ? ' (' + j.bad + ' failed)' : '') + (j.ms != null ? ' · ' + actSecs(j.ms) : '') + (j.note ? ' — ' + j.note : ''));
+                j.kids.forEach(function (k) { out.push('    ' + k.t + ' ' + k.kind + ' ' + k.text); });
+            });
+            document.documentElement.setAttribute('data-hz-activity', out.join('\n'));
+        } catch (x) { /* none */ }
     });
 
     // Loading-ahead trace, debug only: `hover-zoom:ahead-trace` (detail {since, max, urls, clear}, or that as JSON) prints it as one JSON line.
     const ahTraceBuf = [];
-    function ahT(ev, o) {
-        try { actTrace(ev, o || {}); } catch (e) { /* a line lost, never the load */ }
+    function ahT(ev, o, job) {
+        try { actTrace(ev, o || {}, job); } catch (e) { /* a line lost, never the load */ }
         if (!debugOn()) return;
         const e = { t: Math.round(performance.now()), ev: ev };
         if (o) for (const k in o) e[k] = o[k];
@@ -12253,7 +12427,7 @@
     const GAL_AHEAD_ON = 5;             // pages of thumbnails kept ahead once the user steps forward in a gallery
     const GAL_HQ_PAR = 6;               // originals in flight at most (their starts are paced by ahPics)
     const AH_PIC_GAP = [50, 200], AH_PAGE_GAP = [300, 800];     // ms between starts, random in the range (pages: Forum Stumbler's gap)
-    const AH_ORIGS = 2;                 // originals loaded ahead per gallery on the main page
+    const AH_THUMBS_STEP = 10;          // main page: thumbnails per gallery per round; each round also loads that round's one original
     const AH_LOOK_MS = 500;             // a door hovered this long shows its gallery preview
     const AH_STILL_MS = 250, AH_HOVER_WAIT_MS = 1000;   // a scroll counts as stopped after this, then this long for a hover
     const AH_BACK = 5;                  // originals loaded the other way on a backward step
@@ -12262,7 +12436,7 @@
     const AH_THUMBS_MAIN = 30;          // main page: thumbnails per gallery in the first pass (the preview loads the rest)
     const ahPics = ahGate(AH_PIC_GAP, GAL_HQ_PAR), ahPages = ahGate(AH_PAGE_GAP, 4);
     let ahAnchor = null;                // the door the main page loads from: the hovered one, else the first on screen
-    const ahDone = new Set(), ahODone = new Set(), ahNextDone = new Set(), ahGrowTried = new Set();     // main page: thumbnails, first originals, the next gallery's whole first page
+    const ahRound = new Map(), ahNextDone = new Set(), ahGrowTried = new Set();     // main page: thumbnails, first originals, the next gallery's whole first page
     let ahLookLast = null;              // the last gallery preview's door: the one after it is filled when idle
     const ahFiles = new Set();          // originals loaded ahead, checked when shown
     const ahWarm = { n: 0, kept: 0 };
@@ -12469,14 +12643,22 @@
     function galKindOf(el, href) {
         const key = domChain(el);
         if (galKinds.has(key)) return galKinds.get(key);
+        let many = 0;
+        try { doorImgs(document).forEach(function (im) { if (domChain(im) === key) many++; }); } catch (e) { many = 0; }
+        const aj = actJob('Finding galleries: are pictures like this one (' + many + ' on the page) links to galleries? Reading one linked page', 1);
+        const said = function (h, k) { actKid(aj, !!k, 'read ' + actTitle(h, null) + ' → ' + (k === 'gallery' ? 'a gallery' : k === 'results' ? 'more results (not a gallery)' : 'could not tell')); };
         const p = galKindRead(href).then(async function (k) {
+            said(href, k);
             if (k) galDoorKinds.set(href, k);
             if (k === 'results') {          // one gallery with odd file names must not decide the area: a second door has to agree
                 const other = galKindOther(key, href);
+                if (other) actTotal(aj, 2);
                 const k2 = other ? await galKindRead(other) : null;
+                if (other) said(other, k2);
                 dbg('door kind: second opinion', { first: href, other: other, kind: k2 });
                 if (k2 && k2 !== 'results') k = k2;
             }
+            actEnd(aj, k ? 'done' : 'failed', k === 'gallery' ? 'yes: ' + many + ' galleries get a chip' : k === 'results' ? 'no: ' + many + ' links lead to more results, not galleries' : 'could not tell; a hover asks again');
             galKindDone.set(key, k);
             setTimeout(twRecount, 0);       // a settled area may make this a page of galleries
             return k;
@@ -14073,17 +14255,18 @@
             if (!g.warm.has(h)) {
                 g.warm.add(h);
                 dbg('loading ahead: thumbnails of gallery ' + (i + 1) + ' of the queue', { href: h, ahead: n });
-                act('job', 'Next galleries: loading the first 2 pages of thumbnails of ' + actGal(h) + ' (keeping ' + n + ' galleries ready)');
-                await Promise.all(list.slice(0, 2 * per).map(function (it) { return ahImg(it, 'gal'); }));
+                const tl = list.slice(0, 2 * per), job = actJob('Next galleries: thumbnails of the first 2 pages of ' + actGal(h) + ' (keeping ' + n + ' galleries ready)', tl.length);
+                await Promise.all(tl.map(function (it) { return ahImg(it, 'gal', job); }));
+                actEnd(job, live() ? 'done' : 'stopped');
                 if (!live()) return;
             }
             if (g.origs && near && i === c.at + 1) {
                 const todo = list.slice(0, per).filter(function (it) { return it && !(it.hqTried && it.hit); });
                 if (g.otok) g.otok.stop = true;     // the last walk's waiters leave the line
                 if (!todo.length) continue;
-                act('job', 'Next gallery: loading the full-size pictures of its first page (' + todo.length + ' left) — ' + actGal(h));
-                const tok = g.otok = { cancelled: false, fresh: false };
+                const tok = g.otok = { cancelled: false, fresh: false, job: actJob('Next gallery: full-size pictures of its first page — ' + actGal(h), todo.length) };
                 await Promise.all(todo.map(function (it) { return ahOrig(it, 'galn', tok); }));
+                actEnd(tok.job, tok.stop ? 'stopped' : 'done', tok.stop ? 'a newer pass took over' : '');
                 if (!live()) return;
             }
         }
@@ -14431,7 +14614,7 @@
     }
 
     // Load one thumbnail; resolves {img, item, asp} once it has a size, or null.
-    function galImg(item, tag) {
+    function galImg(item, tag, job) {
         return new Promise(function (resolve) {
             const img = document.createElement('img'), t0 = performance.now();
             img.decoding = 'async';
@@ -14439,11 +14622,11 @@
             img.onload = function () {
                 img.onload = img.onerror = null;
                 galThumbSettled(item.thumb);
-                ahT('thumb', { tag: tag || 'shown', u: item.thumb, s: Math.round(t0), ms: Math.round(performance.now() - t0), ok: 1 });
+                ahT('thumb', { tag: tag || 'shown', u: item.thumb, s: Math.round(t0), ms: Math.round(performance.now() - t0), ok: 1 }, job);
                 const nw = img.naturalWidth, nh = img.naturalHeight;
                 resolve(nw && nh ? { img: img, item: item, nw: nw, asp: nw / nh } : null);
             };
-            img.onerror = function () { img.onload = img.onerror = null; galThumbSettled(item.thumb); ahT('thumb', { tag: tag || 'shown', u: item.thumb, s: Math.round(t0), ms: Math.round(performance.now() - t0), ok: 0 }); resolve(null); };
+            img.onerror = function () { img.onload = img.onerror = null; galThumbSettled(item.thumb); ahT('thumb', { tag: tag || 'shown', u: item.thumb, s: Math.round(t0), ms: Math.round(performance.now() - t0), ok: 0 }, job); resolve(null); };
             img.src = item.thumb;
         });
     }
@@ -14501,10 +14684,11 @@
         let timer = 0, failed = 0;
         const got = [], t0 = performance.now();
         galTrace(href, 'thumbnails: loading ' + list.length + ' (' + galHostMix(list.map(function (it) { return it.thumb; })) + ')');
-        act('job', (galLook ? 'Gallery preview: loading the thumbnails of its first page' : 'Open gallery: loading the thumbnails of its first 2 pages') + ' (' + list.length + ' pictures)');
+        const job = actJob((galLook ? 'Gallery preview: thumbnails of its first page' : 'Open gallery: thumbnails of its first 2 pages') + ' — ' + actGal(href), list.length);
         const all = Promise.all(list.map(function (item, i) {
-            return galImg(item).then(function (v) { got[i] = v; if (!v) failed++; return v; });
+            return galImg(item, null, job).then(function (v) { got[i] = v; if (!v) failed++; return v; });
         }));
+        all.then(function () { actEnd(job); });
         const cap = new Promise(function (r) { timer = setTimeout(r, GAL_WAIT_MS, null); });
         Promise.race([all, cap]).then(function (v) {
             clearTimeout(timer);
@@ -14689,7 +14873,8 @@
 
     // New pictures for an open set: their thumbnails load (up to GAL_WAIT_MS), then one relayout on the same page.
     function galAppend(set, items) {
-        act('job', 'Open gallery: loading ' + items.length + ' more thumbnails — keeping ' + galAhead((set.far || 0) + 1) + ' pages ahead of page ' + ((set.far || 0) + 1));
+        const job = actJob('Open gallery: more thumbnails — keeping ' + galAhead((set.far || 0) + 1) + ' pages ahead of page ' + ((set.far || 0) + 1), items.length);
+        let left = items.length;
         let pending = [], timer = 0;
         const flush = function () {
             timer = 0;
@@ -14708,7 +14893,8 @@
         };
         set.inflight = (set.inflight || 0) + items.length;
         items.forEach(function (it, k) {
-            galImg(it).then(function (p) {
+            galImg(it, null, job).then(function (p) {
+                if (!--left) actEnd(job);
                 set.inflight--;
                 if (galCur !== set) return;
                 if (!p) { galFeed(set); if (!set.inflight && set.want != null && !pending.length && !timer) galLayout(set, set.open); return; }     // the last one failed: a wanted page still settles
@@ -14865,8 +15051,8 @@
     function galHqAll(set, imgs) {
         imgs = imgs.filter(function (img) { return !(img.__hzItem && (img.__hzItem.hqTried || img.__hzItem.hqBusy)); });
         if (!imgs.length) return;
-        act('job', 'Open gallery: loading ' + imgs.length + ' full-size pictures, starting with ' + actPic((imgs[0].__hzItem && imgs[0].__hzItem.thumb) || imgs[0].src) +
-            (cfg.galleryLoadAll ? ' (Load all)' : ' (from the picture you previewed)'));
+        const job = actJob('Open gallery: full-size pictures, starting with ' + actPic((imgs[0].__hzItem && imgs[0].__hzItem.thumb) || imgs[0].src) +
+            (cfg.galleryLoadAll ? ' (Load all)' : ' (from the picture you previewed)'), imgs.length);
         imgs.forEach(function (img) { galBytesHosts(img.__hzItem); });
         usLog.enable(cfg.logRequests !== false);
         const lg = usLog.start('origs', { host: pageHost(), pace: version().replace(/\?/g, '') + ' ' + AH_PIC_GAP.join('-') + 'ms, ' + GAL_HQ_PAR + ' max', slowed: noRush(pageHost()) });
@@ -14880,8 +15066,8 @@
             if (galGrown.has(set.href)) galKeep(set.href, galGrowWhy.get(set.href) === 'html');     // with the originals found, a return skips the guessing
             nextWarmReport();
             dbg('gallery originals: ' + why, { href: set.href, pictures: imgs.length, found: got, bytes: humanBytes(bytes) });
-            act(why === 'done' ? 'info' : 'warn', 'Open gallery: full-size loading ' + ({ done: 'finished', cut: 'stopped', restarted: 'restarted from a new place', 'memory full': 'stopped — memory full (Settings → Galleries memory)' }[why] || why) +
-                ' — ' + got + ' of ' + imgs.length + ' found, ' + humanBytes(bytes));
+            actEnd(job, why === 'done' ? 'done' : 'stopped', ({ done: '', cut: 'stopped', restarted: 'replaced by a run from a new place', 'memory full': 'stopped, memory full (Settings → Galleries memory)' }[why] || why) +
+                (why === 'done' ? '' : ': ') + got + ' found, ' + humanBytes(bytes));
         };
         const size = function (hit) {
             sizing++;
@@ -14903,7 +15089,7 @@
                     const r = lg && lg.req(), live = { t: performance.now(), mine: tok }, t0 = performance.now();
                     galHqLive.add(live);
                     galResolve(img, tok).then(function (hit) {
-                        ahT('orig', { tag: 'galo', u: (img.__hzItem && img.__hzItem.thumb) || img.src, s: Math.round(t0), ms: Math.round(performance.now() - t0), ok: hit ? 1 : 0 });
+                        ahT('orig', { tag: 'galo', u: (img.__hzItem && img.__hzItem.thumb) || img.src, s: Math.round(t0), ms: Math.round(performance.now() - t0), ok: hit ? 1 : 0 }, job);
                         if (hit) { got++; if (!hit.video) { plKeepImage(hit, img.__hzItem); ahFiles.add(hit.url); } size(hit); nextWarmSeen(hit.url, performance.now() - t0); }
                         if (hit && !tok.cancelled && img.__hzItem) img.__hzItem.hqTried = true;     // a miss is asked again by the next run
                         if (r) r.done({ status: hit ? 200 : 0 });
@@ -17231,7 +17417,7 @@
         if (!free) return null;
         try { return await fn(); } finally { free(); }
     }
-    function ahImg(item, tag) { return ahRun(ahPics, tag, function () { return galImg(item, tag); }); }
+    function ahImg(item, tag, job) { return ahRun(ahPics, tag, function () { return galImg(item, tag, job); }); }
     // An item's original, loaded through the hover's own probe, so a preview finds it.
     function ahOrig(item, tag, tok) {
         if (item.hqTried && item.hit) return Promise.resolve(item.hit);     // found already: no slot, no line
@@ -17240,7 +17426,7 @@
             item.hqBusy = true;
             const t0 = performance.now();
             return galResolve({ __hzItem: item, naturalWidth: 0, naturalHeight: 0, src: item.thumb, currentSrc: item.thumb }, tok).then(function (hit) {
-                ahT('orig', { tag: tag, u: item.thumb, s: Math.round(t0), ms: Math.round(performance.now() - t0), ok: hit ? 1 : 0 });
+                ahT('orig', { tag: tag, u: item.thumb, s: Math.round(t0), ms: Math.round(performance.now() - t0), ok: hit ? 1 : 0 }, tok.job);
                 if (hit && !tok.cancelled) item.hqTried = true;     // as galHqAll: a run skips it
                 return hit;
             }).finally(function () { item.hqBusy = false; });
@@ -17282,7 +17468,7 @@
             now: Math.round(performance.now()), events: ev, more: all.length - ev.length,
             state: {
                 hidden: document.visibilityState === 'hidden', stop: galPreStop, doors: doors.length, lists: galLists.size,
-                main: { anchor: ahAnchor ? doors.indexOf(ahAnchor) + 1 : null, behind: ahBehind, busy: galPre ? doors.indexOf(galPre) + 1 : null, counts: galCnt, thumbs: ahDone.size, origs: ahODone.size, lookLast: ahLookLast ? doors.indexOf(ahLookLast) + 1 : null, growing: !!galGrowing },
+                main: { anchor: ahAnchor ? doors.indexOf(ahAnchor) + 1 : null, behind: ahBehind, busy: galPre ? doors.indexOf(galPre) + 1 : null, counts: galCnt, rounds: Array.from(ahRound.values()).join(''), lookLast: ahLookLast ? doors.indexOf(ahLookLast) + 1 : null, growing: !!galGrowing },
                 look: galLook ? doors.indexOf(galLook.href) + 1 || true : null,
                 gallery: cur ? { g: doors.indexOf(cur.href) + 1, page: (cur.page || 0) + 1, pages: (cur.pages || []).length, queueAt: c ? c.at + 1 : null, queue: c ? c.hrefs.length : null,
                     ahead: ahG && c ? ahAheadN(c.at, ahG.fwd) : null, origs: ahG ? ahG.origs : null, fwd: ahG ? ahG.fwd : null, from: ahG ? ahG.from + 1 : null, end: ahG ? ahG.end : null, back: ahG && ahG.back != null ? ahG.back + 1 : null } : null,
@@ -17316,7 +17502,7 @@
     }
 
     // A door's list from its HTML alone, for its chip's count; where frames are refused that is the whole read.
-    function galCountLoad(href, tag) {
+    function galCountLoad(href, tag, job) {
         if (galNoFrame(href) || galKept(href)) return galLoad(href, galPreLog);
         return ahRun(ahPages, tag || 'count', function () {
             const req = galPreLog && !pageTextHeld(href) && galPreLog.req(), t0 = performance.now();
@@ -17329,7 +17515,8 @@
                 if (req) req.done(refused ? { status: refused.status, limited: busy, signal: 'hard', retryAfter: busy ? usLog.retryAfterOf(refused.headers) : null } : { status: doc ? 200 : 0 });
                 if (doc) keepDocInfo(href, doc);
                 const got = doc ? galPick(doc, href) : null;
-                ahT('page', { tag: tag || 'count', h: href, s: Math.round(t0), ms: Math.round(performance.now() - t0), ok: doc ? 1 : 0, st: refused ? refused.status : undefined, n: got ? got.length : 0 });
+                ahT('page', { tag: tag || 'count', h: href, s: Math.round(t0), ms: Math.round(performance.now() - t0), ok: doc ? 1 : 0, st: refused ? refused.status : undefined, n: got ? got.length : 0 }, job);
+                if (job && doc) { if (got && got.length >= GAL_HTML_ENOUGH) job.gal = (job.gal || 0) + 1; else job.few = (job.few || 0) + 1; }
                 dbg('gallery count from its page', { href: href, pictures: got ? got.length : null, why: refused ? 'status ' + refused.status : !doc ? 'no page' : got && got.length < GAL_HTML_ENOUGH ? 'too few, the frame decides' : null, shared: pageTextHits });
                 if (got && got.length >= GAL_HTML_ENOUGH && !galLists.has(href)) { galLists.set(href, got); galFromHtml.add(href); galChipsCount(href); galWholeTake(href); galKeep(href, false); }
             });
@@ -17348,14 +17535,23 @@
     function galCountNext() {
         while (galCnt < GAL_COUNT_PAR && !galPreStop) {
             const href = galPrePick();
-            if (!href) return;
+            if (!href) {
+                const j = actCountJob;
+                if (j && !galCnt) {
+                    actCountJob = null;
+                    actEnd(j, 'done', (j.gal || 0) + ' galleries' + (j.few ? ', ' + j.few + ' with too few pictures in the page itself (read in a hidden copy later)' : '') + (j.bad ? ', ' + j.bad + ' could not be read' : ''));
+                }
+                return;
+            }
             if (!galPreLog) {
                 usLog.enable(cfg.logRequests !== false);
                 galPreLog = usLog.start('gallery', { host: pageHost(), pace: version().replace(/\?/g, '') + ' counts ' + AH_PAGE_GAP.join('-') + 'ms', slowed: noRush(pageHost()) });
             }
             galCnt++;
             galCountTried.add(href);
-            Promise.resolve(galCountLoad(href)).catch(function () { /* counted nothing */ }).then(function () {
+            if (!actCountJob) actCountJob = actJob('Finding galleries: reading each gallery\'s page to count its pictures', 0);
+            actTotal(actCountJob, actCountJob.total + 1);
+            Promise.resolve(galCountLoad(href, 'count', actCountJob)).catch(function () { /* counted nothing */ }).then(function () {
                 galCnt--;
                 if (!galCnt) pgFill();
                 setTimeout(galPreNext, 0);
@@ -17363,7 +17559,7 @@
         }
     }
 
-    // The main page's next job from the anchor (hovered, else the first door on screen) on in page order: thumbnails for every door, then first originals, then the door after the last preview.
+    // The main page's next job from the anchor (hovered, else the first door on screen) on in page order: rounds of AH_THUMBS_STEP thumbnails + one original per door, then the door after the last preview.
     function ahMainPick() {
         const doors = galDoorList().filter(function (d) { try { return new URL(d.h).origin === location.origin; } catch (e) { return false; } });
         if (!doors.length) return null;
@@ -17375,14 +17571,18 @@
             ahAnchor = doors[i].h;
         }
         const seen = galList(GAL_SEEN_KEY), wide = cfg.galleryEndless || doors.filter(function (d) { return seen.has(d.h); }).length >= doors.length * AH_SHARE;
-        for (let k = i; k < doors.length && (wide || k - i <= AH_THUMBS_OFF); k++) if (!ahDone.has(doors[k].h)) return { door: doors[k], stage: 1 };
-        for (let k = i; k < doors.length && (wide || k === i); k++) if (!ahODone.has(doors[k].h)) return { door: doors[k], stage: 2 };
+        const rounds = Math.ceil(AH_THUMBS_MAIN / AH_THUMBS_STEP);
+        for (let r = 0; r < rounds; r++) {
+            for (let k = i; k < doors.length && (wide || k - i <= AH_THUMBS_OFF); k++) {
+                if ((ahRound.get(doors[k].h) || 0) <= r) return { door: doors[k], stage: 1, round: r, orig: wide || k === i };
+            }
+        }
         const j = ahLookLast ? doors.findIndex(function (d) { return d.h === ahLookLast; }) : -1;
         if (j >= 0 && j + 1 < doors.length && !ahNextDone.has(doors[j + 1].h)) return { door: doors[j + 1], stage: 3 };
         return null;
     }
 
-    // Main page, one job at a time: a door's page read and first AH_THUMBS_MAIN thumbnails; its first AH_ORIGS originals; after a preview, the next door's whole first page. Full counts only when nothing else waits.
+    // Main page, one job at a time: a door's next round (its next AH_THUMBS_STEP thumbnails, then its next original); after a preview, the next door's whole first page.
     function galPreNext() {
         if (!isTopFrame || !cfg.galleryPreload || galPreStop || document.visibilityState === 'hidden' || !siteEnabled() || CAPTCHA_HERE) return;
         galCountNext();
@@ -17398,29 +17598,38 @@
             usLog.enable(cfg.logRequests !== false);
             galPreLog = usLog.start('gallery', { host: pageHost(), pace: version().replace(/\?/g, '') + ' pictures ' + AH_PIC_GAP.join('-') + 'ms', slowed: noRush(pageHost()) });
         }
-        const href = job.door.h, gen = ahGen, done = [null, ahDone, ahODone, ahNextDone][job.stage];
+        const href = job.door.h, gen = ahGen;
+        const undo = function () { if (job.stage === 1) ahRound.set(href, job.round); else ahNextDone.delete(href); };
         galPre = href;
-        done.add(href);
-        act('job', ['', 'Page: loading the first thumbnails of ', 'Page: loading the first 2 full-size pictures of ', 'Page: loading the whole first page of thumbnails of '][job.stage] +
-            actGal(href) + (job.stage === 3 ? ' (you previewed the gallery before it)' : ''));
+        if (job.stage === 1) ahRound.set(href, job.round + 1);
+        else ahNextDone.add(href);
+        let aj = null;
         (async function () {
             const list = await galPreRead(href);
-            if (!Array.isArray(list) || !list.length) { if (list === 'cancel') done.delete(href); return; }
-            const per = Math.max(1, galPer(null)), todo = function (n) { return list.slice(0, n).filter(function (it) { return !galThumbDone.has(it.thumb); }); };
+            if (!Array.isArray(list) || !list.length) { if (list === 'cancel') undo(); return; }
+            const per = Math.max(1, galPer(null)), cap = Math.min(per, AH_THUMBS_MAIN, list.length);
+            const notDone = function (it) { return !galThumbDone.has(it.thumb); };
             if (job.stage === 1) {
-                await Promise.all(todo(Math.min(per, AH_THUMBS_MAIN)).map(function (it) { return ahImg(it, 'main'); }));
-                if (gen === ahGen) { galFirstIn.add(href); galPillMarks(GAL_DOOR_MARK).forEach(galChipStyle); }
-                dbg('loading ahead: thumbnails', { href: href, cut: gen !== ahGen });
-            } else if (job.stage === 2) {
-                const tok = { cancelled: false, fresh: false };
-                const hits = await Promise.all(list.slice(0, AH_ORIGS).map(function (it) { return ahOrig(it, 'main', tok); }));
-                dbg('loading ahead: first originals', { href: href, originals: hits.filter(Boolean).length, cut: gen !== ahGen });
+                const from = job.round * AH_THUMBS_STEP, to = Math.min(cap, from + AH_THUMBS_STEP);
+                const th = from < to ? list.slice(from, to).filter(notDone) : [];
+                const one = list[job.round], o = job.orig && one && !(one.hqTried && one.hit) ? one : null;
+                if (!th.length && !o) { if (to >= cap) galFirstIn.add(href); return; }
+                aj = actJob('Page: ' + actGal(href) + ' — round ' + (job.round + 1) + ': ' +
+                    (th.length ? 'thumbnails ' + (from + 1) + '–' + to : '') + (th.length && o ? ' + ' : '') + (o ? 'full-size picture ' + (job.round + 1) : ''), th.length + (o ? 1 : 0));
+                await Promise.all(th.map(function (it) { return ahImg(it, 'main', aj); }));
+                if (to >= cap && gen === ahGen) { galFirstIn.add(href); galPillMarks(GAL_DOOR_MARK).forEach(galChipStyle); }
+                if (o && gen === ahGen) await ahOrig(o, 'main', { cancelled: false, fresh: false, job: aj });
+                dbg('loading ahead: round', { href: href, round: job.round + 1, thumbs: th.length, orig: !!o, cut: gen !== ahGen });
             } else {
-                await Promise.all(todo(per).map(function (it) { return ahImg(it, 'main'); }));
+                const th = list.slice(0, per).filter(notDone);
+                if (!th.length) return;
+                aj = actJob('Page: the whole first page of thumbnails of ' + actGal(href) + ' (you previewed the gallery before it)', th.length);
+                await Promise.all(th.map(function (it) { return ahImg(it, 'main', aj); }));
                 dbg('loading ahead: the next gallery\'s first page, after a preview', { href: href, cut: gen !== ahGen });
             }
         })().catch(function () { /* the next door */ }).then(function () {
-            if (gen !== ahGen) done.delete(href);     // cut short by a scroll: done again later
+            actEnd(aj, gen === ahGen ? 'done' : 'stopped', gen === ahGen ? '' : 'you scrolled away; it loads again later');
+            if (gen !== ahGen) undo();     // cut short by a scroll: done again later
             galPre = null;
             setTimeout(galPreNext, 0);
         });
