@@ -46,8 +46,8 @@ const sizeFromHeaders = new Function(
 const location = { href: 'https://example.com/page/index.html' };
 const body = src.slice(start, end);
 const exported = new Function('location', body +
-    '\nreturn {parseSrcset, looksLikeImage, isVideoUrl, upgradeCandidates, upgradeRules, linkParamCandidates, blockMatch, sameStem, urlStem, betterHit, sniffAnimated, sniffFormat, taughtRuleFrom, taughtApply};')(location);
-const { parseSrcset, looksLikeImage, isVideoUrl, upgradeCandidates, upgradeRules, linkParamCandidates, blockMatch, sameStem, urlStem, betterHit, sniffAnimated, sniffFormat, taughtRuleFrom, taughtApply } = exported;
+    '\nreturn {parseSrcset, looksLikeImage, isVideoUrl, upgradeCandidates, upgradeRules, linkParamCandidates, blockMatch, sameStem, sameFileId, urlStem, betterHit, sniffAnimated, sniffFormat, taughtRuleFrom, taughtApply};')(location);
+const { parseSrcset, looksLikeImage, isVideoUrl, upgradeCandidates, upgradeRules, linkParamCandidates, blockMatch, sameStem, sameFileId, urlStem, betterHit, sniffAnimated, sniffFormat, taughtRuleFrom, taughtApply } = exported;
 
 let pass = 0, fail = 0;
 const NL = String.fromCharCode(10);
@@ -706,6 +706,14 @@ eq('wordpress -150x150 crops match their original',
 
 eq('_thumbnail is inside the tail budget',
     sameStem('/a/cat_thumbnail.jpg', '/a/cat.jpg'), true);
+
+// eporner: the gallery's list drops the apostrophe, the photo page spells it -039-; the id is the match (v0.405.0).
+eq('a shared 6+ digit id is the same picture',
+    sameFileId('https://x/37096555-standing-dp-039-s-23225164-014-bba9-nude_880x660.jpg', 'https://x/37096555-standing-dp-s-23225164-014-bba9-nude_296x1000.jpg'), true);
+eq('different ids are different pictures',
+    sameFileId('https://x/19155703-casey-0002_296x1000.jpg', 'https://x/37096555-standing-dp-s_296x1000.jpg'), false);
+eq('a shared date is not a shared id',
+    sameFileId('/a/IMG_20231105_1201.jpg', '/a/IMG_20231105_1830.jpg'), false);
 
 // The tail must be separator-led and short, or the rule starts matching neighbouring pictures.
 eq('a digit with no separator is a different picture, not a size',

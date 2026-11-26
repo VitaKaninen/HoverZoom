@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.404.0
+// @version      0.405.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -743,6 +743,13 @@
         const short = x.length > y.length ? y : x;
         if (long.indexOf(short) === 0 && SIZE_TAIL_RE.test(long.slice(short.length))) return true;
         return long.slice(-short.length) === short && SIZE_HEAD_RE.test(long.slice(0, -short.length));
+    }
+
+    // Do two file names carry the same id of 6+ digits (eporner: 37096555-standing-dp-s-… and 37096555-standing-dp-039-s-…)?
+    function sameFileId(a, b) {
+        const ids = function (u) { const f = String(u).split(/[?#]/)[0].split('/').pop(); return (f.match(/\d{6,}/g) || []).filter(function (d) { return !/^(19|20)\d\d(0[1-9]|1[0-2])/.test(d); }); };     // a date is shared by a day's photos
+        const y = ids(b);
+        return ids(a).some(function (d) { return y.indexOf(d) >= 0; });
     }
 
     const THUMB_PARAM = /(?:^|[_-])(?:thumb|thumbnail|tn|small|preview|icon|avatar)(?:$|[_-])/i;
@@ -11960,9 +11967,10 @@
     const GAL_FADE_MS = 200;
     const GAL_UPGRADE = 1.3;            // drawn this much larger than the thumbnail's file -> fetch the next size
     const GAL_CACHE = 300;              // fetched pages kept by URL
-    const GAL_KEPT_KEY = 'hzGalLists';  // sessionStorage: {href: {items, html, whole, at}}, every gallery read in this tab; oldest dropped when full
+    const GAL_KEPT_KEY = 'hzGalLists2';  // sessionStorage: {href: {items, html, whole, at}}, every gallery read in this tab; oldest dropped when full
     const GAL_KEPT_MS = Infinity;
-    const GAL_KINDS_KEY = 'hzDoorKinds';  // sessionStorage: {href: kind}, a link read once as gallery or results is not read again in this tab
+    const GAL_KINDS_KEY = 'hzDoorKinds2';  // sessionStorage: {href: 'gallery'}, a link read once as a gallery is not read again in this tab
+    const GAL_OLD_KEYS = ['hzGalLists', 'hzDoorKinds', 'hzGalCounts'];     // written by a picker before v0.405.0; renamed when the picker changes, so old wrong lists go
     const GAL_TRIES = 4;                // bigger sizes tried per thumbnail
     const GAL_LAZY = ['data-src', 'data-lazy-src', 'data-original', 'data-lazy', 'data-echo', 'data-defer-src', 'data-url'];
     const GAL_MAX = Infinity;           // every picture the page has
@@ -12125,6 +12133,12 @@
         });
     }
 
+    // A picture in the site's own header, footer or menu, outside the page's main content.
+    function galSiteFurniture(n) {
+        const f = n.closest && n.closest('nav,[role=navigation],header,footer,[role=banner],[role=contentinfo]');
+        return !!f && !f.closest('main,article,[role=main]');
+    }
+
     function galGroup(doc, href, quiet) {
         const groups = new Map();
         doc.querySelectorAll('img').forEach(function (n) {
@@ -12135,6 +12149,7 @@
             const h = parseInt(n.getAttribute('height') || '0', 10) || 0;
             if ((w || h) && w < cfg.minDisplayed && h < cfg.minDisplayed) return;
             if (cfg.skipFurniture && decorativeReason(n)) return;
+            if (galSiteFurniture(n)) return;
             const k = domChain(n);
             if (!groups.has(k)) groups.set(k, []);
             const g = groups.get(k);
@@ -12161,13 +12176,19 @@
     function galResultsAt(img, h) { return galKindDone.get(domChain(img)) === 'results' || galDoorKinds.get(h) === 'results'; }
 
     // One hovered door judged on its own: an area of creators can hold both picture pages and pages of galleries.
+    // A 'results' or unknown verdict is read again by a hover this long after it, so a bad read is not final.
+    const GAL_DOOR_REREAD_MS = 20000;
+    const galDoorKindAt = new Map();
     function galDoorKindRead(el, href) {
-        if (galDoorKinds.has(href)) return;
+        const was = galDoorKinds.get(href);
+        if (was && (was === 'reading' || was === 'gallery' || Date.now() - (galDoorKindAt.get(href) || 0) < GAL_DOOR_REREAD_MS)) return;
         galDoorKinds.set(href, 'reading');
         galKindRead(href).then(function (k) {
             galDoorKinds.set(href, k || 'unknown');
-            dbg('door kind of this one door', { href: href, kind: k, area: galKindDone.get(domChain(el)) });
+            galDoorKindAt.set(href, Date.now());
+            dbg('door kind of this one door', { href: href, kind: k, was: was || null, area: galKindDone.get(domChain(el)) });
             if (k === 'results') { if (galChipHot === el) { galChipHot = null; galChipRefresh(el); } galMarkSoon(); }
+            else if (was === 'results') galMarkSoon();
         }, function () { galDoorKinds.delete(href); });
     }
 
@@ -12204,7 +12225,7 @@
         const kept = galKindsKept()[href];
         if (kept) return kept;
         const k = await galKindFetch(href);
-        if (k) galKindKeep(href, k);
+        if (k === 'gallery') galKindKeep(href, k);      // 'results' is never kept: one bad read must not hide a gallery for the tab
         return k;
     }
 
@@ -12261,7 +12282,7 @@
         if (!p) { p = fetchPageMedia(u); pageCache.set(u.href, p); }
         const page = await p;
         if (!page) return null;
-        const same = (page.body || []).filter(function (x) { return x !== thumb && sameStem(x, thumb); });
+        const same = (page.body || []).filter(function (x) { return x !== thumb && (sameStem(x, thumb) || sameFileId(x, thumb)); });
         const decl = page.declared && page.declared.url !== thumb ? page.declared.url : '';     // not a grid cell (pageMediaFrom drops those): the page's one picture
         if (!same.length && !decl) return false;
         const own = await probe(thumb, false);
@@ -14319,7 +14340,7 @@
         });
     }
 
-    const GAL_COUNTS_KEY = 'hzGalCounts';   // sessionStorage: {href: [count, at]}, galleries read to their end; far more than the kept lists
+    const GAL_COUNTS_KEY = 'hzGalCounts2';   // sessionStorage: {href: [count, at]}, galleries read to their end; far more than the kept lists
     const GAL_COUNTS_MAX = 3000;
     let galCountsMemo = null;
     function galCountsAll() {
@@ -17287,6 +17308,7 @@
     }
 
     if (isTopFrame) {
+        try { GAL_OLD_KEYS.forEach(function (k) { sessionStorage.removeItem(k); }); } catch (e) { /* storage refused */ }
         document.addEventListener('scroll', galScroll, { capture: true, passive: true });
         window.addEventListener('pagehide', function () { if (galKeptT) galKeptWrite(); if (galPreLog) { galPreLog.end('cut'); galPreLog = null; } dlqHalt(); dlqPresence(false); });     // a save in flight never calls back after a bfcache freeze: its picture is redone
         setTimeout(function () { dlqTick(); setInterval(dlqTick, DLQ_TICK_MS); dlqFindHere(); }, 800);
