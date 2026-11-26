@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.390.0
+// @version      0.391.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -14763,6 +14763,22 @@
         return dlqJobs().some(function (j) { return j.origin === location.origin && dlqLeft(dlqStates(j)) > 0; });
     }
 
+    // The site's last tab with downloads left: the browser asks whether to leave (they pause).
+    function dlqLeaveAsk(e) {
+        if (Date.now() - dlqNavAt < 3000 || !dlqBusyHere() || dlqOtherTabs()) return;
+        e.preventDefault();
+        e.returnValue = '';
+    }
+
+    // beforeunload only while this site has downloads left: the listener can keep the page out of the back-forward cache.
+    let dlqLeaveOn = false;
+    function dlqLeaveSync() {
+        const want = dlqBusyHere();
+        if (want === dlqLeaveOn) return;
+        dlqLeaveOn = want;
+        if (want) window.addEventListener('beforeunload', dlqLeaveAsk); else window.removeEventListener('beforeunload', dlqLeaveAsk);
+    }
+
     // A left press on a link to another page of this site: the queue carries on there, so leaving warns of nothing.
     function dlqNavNote(e) {
         if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
@@ -14774,6 +14790,7 @@
     // Every DLQ_TICK_MS: claim this site's queue unless another tab holds it, then download.
     function dlqTick() {
         if (!isTopFrame) return;
+        dlqLeaveSync();
         let jobs = dlqJobs();
         jobs.forEach(function (j) { if (j.read !== 'queued') { dbg('download queue: dropped a gallery an older version was still reading', { href: j.href }); dlqDrop(j.id); } });
         jobs = jobs.filter(function (j) { return j.read === 'queued'; });
@@ -16945,11 +16962,6 @@
         document.addEventListener('scroll', galScroll, { capture: true, passive: true });
         window.addEventListener('pagehide', function () { if (galKeptT) galKeptWrite(); if (galPreLog) { galPreLog.end('cut'); galPreLog = null; } dlqHalt(); dlqPresence(false); });     // a save in flight never calls back after a bfcache freeze: its picture is redone
         setTimeout(function () { dlqTick(); setInterval(dlqTick, DLQ_TICK_MS); dlqFindHere(); }, 800);
-        window.addEventListener('beforeunload', function (e) {     // the site's last tab with downloads left: the browser asks whether to leave (they pause)
-            if (Date.now() - dlqNavAt < 3000 || !dlqBusyHere() || dlqOtherTabs()) return;
-            e.preventDefault();
-            e.returnValue = '';
-        });
         document.addEventListener('click', dlqNavNote, true);
         document.addEventListener('submit', function (e) {
             try { if (new URL(e.target.action || location.href, location.href).origin === location.origin) dlqNavAt = Date.now(); } catch (x) { /* not a URL */ }
