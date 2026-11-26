@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.400.0
+// @version      0.401.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -7238,11 +7238,25 @@
             if ((stack[i].tagName === 'IMG' || stack[i].tagName === 'VIDEO') && shownMedia(stack[i]))
                 under.push(stack[i]);
         }
-        if (!under.length) return null;
+        if (!under.length) return deafMedia(el, x, y);
         let n = el;
         for (let up = 0; n && up <= COVER_UP; up++, n = n.parentElement) {
             if (peerMedia(n) > 1) return null;       // a grid or a page, not a card
             for (let i = 0; i < under.length; i++) if (n.contains(under[i])) return under[i];
+        }
+        return null;
+    }
+
+    // A card's picture with pointer-events:none (Behance) never reaches elementsFromPoint: found in the card by the pointer's position.
+    function deafMedia(el, x, y) {
+        let n = el;
+        for (let up = 0; n && up <= COVER_UP; up++, n = n.parentElement) {
+            if (peerMedia(n) > 1) return null;
+            const all = n.querySelectorAll ? n.querySelectorAll('img,video') : [];
+            for (let i = 0; i < all.length; i++) {
+                const r = all[i].getBoundingClientRect();
+                if (r.width >= 2 && x >= r.left && x <= r.right && y >= r.top && y <= r.bottom && shownMedia(all[i]) && getComputedStyle(all[i]).pointerEvents === 'none') return all[i];
+            }
         }
         return null;
     }
