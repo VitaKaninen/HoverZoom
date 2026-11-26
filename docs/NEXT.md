@@ -1,4 +1,9 @@
-# 2026-11-26 #4: loading ahead made to match the user's goals (v0.396.0–v0.397.0); next: the TEST-PLAN run
+# Handoff 2026-11-26 #4 (~360k tokens): loading ahead made to match the user's goals (v0.396.0–v0.397.0), all pushed
+
+**Next:** run TEST-PLAN.md in full in Claude in Chrome on eporner / girlstop, expected vs measured per test, using the
+trace (`attr: 1`). **Last asked the user:** nothing open; told them to check the 16 restored Chrome settings (below).
+Screenshots of Claude's own browser tabs are now allowed (global CLAUDE.md, `screen_guard.py`).
+
 
 User: build first, then the full TEST-PLAN run in Claude in Chrome on live sites (eporner, girlstop), not a test
 server. Built (spec in GALLERY.md "Loading ahead"): trace; main page in passes (read + 30 thumbnails for every door,
