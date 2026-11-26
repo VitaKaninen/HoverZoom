@@ -23,6 +23,11 @@ reads it for **what changes and how long each piece takes**, not file names. Cod
   page whose URL matches replays its `actBuf` and then streams (`actLive`). The window accepts only messages whose
   `url` is its opener's current URL (other tabs of the site are ignored). A new page draws a `── page: … ──` line
   (once per page id, `data-pids`). Across origins the channel does not reach: reopen from the menu there.
+- **Window code version**: `<html data-hz-act-ver>`. `actOpen` re-injects when it differs from `version()`; the new
+  copy closes the old one's channel (`win.__hzActCh`) and clones the list, or both copies would draw. A page that
+  only reloads does not re-inject (no `window.open` unasked), so an old window can meet new message states: unknown
+  states draw `·`. A job that ends with nothing done ends as `skip` and its header is removed (empty cover batches).
+  On a new page's `hello`, headers of other page ids still `data-s="run"` become ⏹ "cut off: the page was left".
 - **Fallback**, when the injected code does not mark `<html data-hz-act="live">` (a CSP that refuses both ways):
   `actPopup(w, false)` runs in the page's script and returns `receive`, which `actSend` calls directly; a `warn`
   line says a reload needs a reopen. A reopen rebuilds the bar and clones the list (drops dead listeners).

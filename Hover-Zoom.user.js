@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.416.0
+// @version      0.417.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -695,6 +695,13 @@
     function actTotal(j, n) { if (j && j.total !== n) { j.total = n; actSend(actJobMsg(j)); } }
     function actEnd(j, state, note) {
         if (!j || j.state !== 'run') return;
+        if (!j.done && (state || 'done') === 'done') {     // nothing was needed after all: the header goes
+            j.state = 'skip';
+            const k = actBuf.findIndex(function (b) { return b.job === j; });
+            if (k >= 0) actBuf.splice(k, 1);
+            actSend(actJobMsg(j));
+            return;
+        }
         j.state = state || 'done';
         j.ms = performance.now() - j.t0;
         j.note = note || '';
@@ -702,9 +709,10 @@
     }
 
     // The window's own code, run inside it (own) so it outlives a reload of this page; else run from here, drawing into it.
-    function actPopup(win, own) {
+    function actPopup(win, own, ver) {
         const d = win.document, de = d.documentElement;
-        if (own && de.getAttribute('data-hz-act') === 'live') return null;
+        if (own && de.getAttribute('data-hz-act') === 'live' && de.getAttribute('data-hz-act-ver') === ver) return null;
+        if (own && win.__hzActCh) { try { win.__hzActCh.close(); } catch (e) { /* gone */ } }     // a newer copy of this code takes over
         const C = { job: '#cdd6f4', ok: '#a6adc8', bad: '#f38ba8', you: '#89b4fa', warn: '#f9e2af', info: '#9399b2', page: '#a6e3a1' };
         const S = { run: '#cdd6f4', done: '#a6e3a1', stopped: '#f9e2af', failed: '#f38ba8' };
         const MAX = 1500, KIDS = 1000;
@@ -782,7 +790,7 @@
             if (stick) sc.scrollTop = sc.scrollHeight;
         };
         const head = function (m) {
-            const sym = m.state === 'run' ? '…' : m.state === 'done' ? '✓' : m.state === 'stopped' ? '⏹' : '✗';
+            const sym = m.state === 'run' ? '…' : m.state === 'done' ? '✓' : m.state === 'stopped' ? '⏹' : m.state === 'failed' ? '✗' : '·';
             const n = m.total || m.done ? ' · ' + m.done + (m.total ? '/' + m.total : '') : '';
             return sym + ' ' + m.text + n + (m.bad ? ' (' + m.bad + ' failed)' : '') + (m.ms != null ? ' · ' + secs(m.ms) : '') + (m.note ? ' — ' + m.note : '');
         };
@@ -790,6 +798,12 @@
             if (!m || !m.t) return;
             if (m.t === 'hello') {
                 if (pids.has(m.pid)) return;
+                list.querySelectorAll('[data-s="run"]').forEach(function (r) {     // the page before was left mid-way
+                    if (r.getAttribute('data-g').split('-')[0] === m.pid) return;
+                    r.setAttribute('data-s', 'stopped');
+                    r.style.color = S.stopped;
+                    r.lastChild.textContent = r.lastChild.textContent.replace(/^…/, '⏹') + ' — cut off: the page was left';
+                });
                 pids.add(m.pid);
                 list.setAttribute('data-pids', Array.from(pids).slice(-50).join(','));
                 put(line(m.at, 'page', '── page: ' + m.url + ' (' + m.ver + ') ──', true));
@@ -797,6 +811,7 @@
             else if (m.t === 'job') {
                 const key = m.pid + '-' + m.id;
                 let g = grp(key);
+                if (m.state === 'skip') { if (g) { g.row.remove(); g.box.remove(); groups.delete(key); } return; }
                 if (!g) {
                     const row = line(m.at, 'job', '', true), ar = d.createElement('span'), hd = d.createElement('span');
                     row.lastChild.remove();
@@ -814,6 +829,7 @@
                     put(row, box);
                 }
                 g.hd.textContent = head(m);
+                g.row.setAttribute('data-s', m.state);
                 g.row.style.color = S[m.state] || '#cdd6f4';
             } else if (m.t === 'kid') {
                 const g = grp(m.pid + '-' + m.id);
@@ -823,7 +839,8 @@
         };
         if (!own) return receive;
         de.setAttribute('data-hz-act', 'live');
-        const ch = new win.BroadcastChannel('hz-activity');
+        de.setAttribute('data-hz-act-ver', ver || '');
+        const ch = win.__hzActCh = new win.BroadcastChannel('hz-activity');
         const openerUrl = function () { try { return win.opener && !win.opener.closed ? win.opener.location.href.split('#')[0] : null; } catch (e) { return null; } };
         ch.onmessage = function (e) {
             const m = e.data;
@@ -849,8 +866,8 @@
 
     // The window's code into the window itself: the manager's way first (it passes the page's CSP), else a plain script.
     function actInject(w) {
-        const code = '(' + actPopup.toString() + ')(window, true);';
-        const de = w.document.documentElement, live = function () { return de.getAttribute('data-hz-act') === 'live'; };
+        const code = '(' + actPopup.toString() + ')(window, true, ' + JSON.stringify(version()) + ');';
+        const de = w.document.documentElement, live = function () { return de.getAttribute('data-hz-act') === 'live' && de.getAttribute('data-hz-act-ver') === version(); };
         try { if (typeof GM_addElement === 'function') GM_addElement(w.document.head || de, 'script', { textContent: code }); } catch (e) { /* refused */ }
         if (live()) return true;
         try {
@@ -875,7 +892,7 @@
         }
         actArmed = false;
         actWin = w;
-        const was = w.document.documentElement.getAttribute('data-hz-act') === 'live';
+        const de = w.document.documentElement, was = de.getAttribute('data-hz-act') === 'live' && de.getAttribute('data-hz-act-ver') === version();
         if (was) { if (!actLive && actChan) actChan.postMessage({ to: 'win', t: 'who' }); }
         else if (!actInject(w)) {
             actRecv = actPopup(w, false);
