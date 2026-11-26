@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.401.0
+// @version      0.402.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -995,6 +995,15 @@
         }),
         rule('Flickr 2048', false, function (u) {
             return flickrSize(u, 'k');
+        }),
+        // ArtStation artwork: /large/ is 1920 px; /4k/ holds up to 3840 where the upload is that big (else a 404).
+        rule('ArtStation 4k', false, function (u) {
+            if (!/(^|\.)artstation\.com$/.test(u.hostname)) return null;
+            const p = u.pathname.replace(/^(\/p\/assets\/images\/images\/(?:\d+\/){3})(?:\d{14}\/)?(?:large|medium|small|smaller|smaller_square|small_square|micro_square)\//, '$14k/');
+            if (p === u.pathname) return null;
+            u.pathname = p;
+            u.search = '';
+            return u.href;
         }),
         // A thumbnail marker leads the filename as often as it trails it: thumbnail_<hash>.jpg.
         rule('thumbnail prefix', false, function (u) {

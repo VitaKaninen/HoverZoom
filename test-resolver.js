@@ -396,6 +396,14 @@ has('reddit bare form still works',
     'https://i.redd.it/abc123def.png');
 eq('i.redd.it is already the direct host',
     upgradeCandidates('https://i.redd.it/sw0xl9lxexnh1.jpg').filter(u => /redd\.it/.test(u)), []);
+has('artstation large offers 4k (v0.402.0)',
+    upgradeCandidates('https://cdna.artstation.com/p/assets/images/images/104/358/364/large/biikhan-aibashev-untitled-019-2.jpg?1795681441'),
+    'https://cdna.artstation.com/p/assets/images/images/104/358/364/4k/biikhan-aibashev-untitled-019-2.jpg');
+has('artstation timestamped square thumb offers 4k',
+    upgradeCandidates('https://cdna.artstation.com/p/assets/images/images/001/936/185/20160207045143/smaller_square/tiago-kogi-red-panda-2.jpg'),
+    'https://cdna.artstation.com/p/assets/images/images/001/936/185/4k/tiago-kogi-red-panda-2.jpg');
+eq('artstation covers get no 4k',
+    upgradeCandidates('https://cdna.artstation.com/p/assets/covers/images/104/358/640/small_square/x.jpg').filter(function (u) { return /\/4k\//.test(u); }), []);
 has('flickr _n upgrades to _b',
     upgradeCandidates('https://live.staticflickr.com/4120/4820124455_f657d22a9c_n.jpg'),
     'https://live.staticflickr.com/4120/4820124455_f657d22a9c_b.jpg');
