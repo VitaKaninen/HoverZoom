@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.412.0
+// @version      0.413.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -19341,6 +19341,10 @@
             'recognise, or a gallery that is really a photo or a results page), note the two addresses, what it thought and what ' +
             'it was. Fixed on the spot either way; the log is for fixing sites in bulk. Holds addresses of pages you visited.');
         missLogRow();
+        const actBtn = document.createElement('button');
+        actBtn.textContent = 'Open…';
+        actBtn.addEventListener('click', actOpen);
+        row('Activity window', 'What is loading in the background and why, in plain words, in a window of its own you can move off the page.', actBtn);
         brokenRulesNotice();
 
         section('Per-site fixes');
