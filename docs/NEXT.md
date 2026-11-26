@@ -1,3 +1,14 @@
+# 2026-11-26 #4: make loading ahead match the user's goals, then test it in Chrome on real sites
+
+User: fix the behaviour first, then the full TEST-PLAN run, in Claude in Chrome on live sites (eporner, girlstop), not
+a test server. Tools: v0.396.0 trace (`hover-zoom:ahead-trace`, TESTING.md). No flush button (a new tab clears the
+script's memory; Chrome's HTTP cache stays — read `ms` in the trace). Gaps put to the user, awaiting answers:
+1. Main page does count → thumbs → 2 originals **per gallery**; their alternative was thumbs for all first, originals after.
+2. Open gallery loads no originals until a preview; user (session #3) expected originals for the open page at once.
+3. No direction-aware keep: plKeep 1 GB / heldBlobs 512 MB, oldest first. Proposed: the shelved spec (2 pages back, all
+   ahead, nothing behind > 5 min, gallery 1 GB) applied to RAM, behind dropped first.
+4. Slideshow keeps a fixed 2 pages of originals ahead; unclear whether "as far as they are previewing" means speed-based.
+
 # Handoff 2026-11-26 #3 (~320k tokens), v0.388.0 → v0.395.0, all pushed
 
 **Asked and done:** grey ▦ chip until a gallery's first page of thumbnails is in (v0.388.0); gallery preview never
