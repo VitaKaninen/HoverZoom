@@ -22,16 +22,12 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   end (`galGrown`, or sessionStorage `hzGalCounts` {href: [n, at]}, 3000, written by `galKeep` — the kept lists
   hold only 20, too few for a 99-gallery page), `N+` from the HTML only, nothing when unknown. `galChipsCount(href)`
   restyles after `galLoad`, `galMore` and `galGrow`'s end.
-- **The preload reads doors to their end, at the user's pace** (user, v0.350.0–v0.351.0: pornpics chips sat at `19+`
-  until opened; "fast → as far ahead as you can, slow → a page or 2 ahead"). `galPreRead`: the door's page via the
-  count's read (shared, see "One request per page"), `galLoad` only when it holds < `GAL_HTML_ENOUGH`; then `galGrow`
-  (one frame); `galRender`'s end resumes the preload, one frame at a time, and a hover's frame replaces it.
-  Order: on screen nearest the pointer, then below by position up to `galReach` (`galPaceNote`, set in `galScroll`
-  at scroll time — measured at pick time it had already decayed: the user's own scrolls (`galInputAt`) in the last
-  8 s, ≥ 4 screens → everything below, else max(2, 2 × screens) screens past the viewport; it never shrinks).
-  Doors above the viewport are not read. Counts (`galCountNext`, HTML only) run before the frame guards — v0.350.0
-  had them behind `galGrowing`, so in a browser whose frame never reports (10 s each) half the chips had no number.
-  The open gallery's own page ramp is `galAhead` — a name clash once replaced it silently (v0.351.0 dev).
+- **Reads to the end only when idle** (v0.387.0 reverses v0.350.0's "scroll fast → read further ahead", user). The
+  old reason — pornpics chips sat at `19+` until opened — is answered by counts, which still run for every door
+  at all times; only the frame reads (`galGrow`) moved to idle (`ahIdleGrow`). See "Loading ahead". Counts
+  (`galCountNext`, HTML only) run before the frame guards — v0.350.0 had them behind `galGrowing`, so in a
+  browser whose frame never reports (10 s each) half the chips had no number. The open gallery's own page ramp
+  is `galAhead` — a name clash once replaced it silently (v0.351.0 dev).
 - **One request per page** (user, v0.351.0: "we are not asking each page for multiple things?" — we were: count,
   preload, hover read-ahead and the resolver's linked-page read each fetched it, plus two frames). `pageText` keeps
   each page's text (successes only, `PAGE_TEXT_KEEP` 120, misses asked again); `fetchDoc` and `fetchPageMedia`
@@ -39,7 +35,7 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   Fixture `door-long.html` (150 doors): one `fetch` per gallery page. Frames still load the page again (a frame
   cannot be fed text).
 - **Debug lines** for counts: `gallery count from its page {pictures, why, shared}`, `gallery read to its end:
-  <why> {from, pictures, final, ms}`, `gallery preload: reading N screens ahead`.
+  <why> {from, pictures, final, ms}`; the rest under "Loading ahead".
 - **Sites whose pages hold the whole gallery** (v0.358.0; user, sexygirlspics in LibreWolf: every chip `16+` for
   hours, because each count waited on a ~9 s frame read, serial, that always ended `from: 16, pictures: 16`).
   `galWholeSeen`: a read to its end that ends where the HTML did counts toward the host; `GAL_WHOLE_RUN` 3 in a row →
@@ -244,6 +240,52 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
 - Why the 683-picture gallery showed 9–15: the frame reported once, 4 s after load, and the page
   mounts posts as it is scrolled. Unverified on nsfw.xxx itself.
 
+## Loading ahead (v0.387.0, user's spec 2026-11-26; INTERACTION.md `G13`)
+
+What loads ahead follows what the user does. Code: the `ah*` functions after `galWarm`, constants beside
+`GAL_HQ_PAR`. Terms: **gallery** = the middle-click view (code: peek); **gallery preview** = the hover view.
+
+- **Pacing** (`ahGate`): every background start waits for a slot; starts are a random `AH_PIC_GAP` 50–200 ms
+  apart for pictures (≤ `GAL_HQ_PAR` 6 in flight), `AH_PAGE_GAP` 300–800 ms for page reads (Forum Stumbler's gap,
+  ≤ 4). In flight settles at download time ÷ gap, so a faster line has *fewer* overlapping, the rate stays human.
+  Order (`ahPri`): the open gallery (`gal` thumbnails, `galo` originals) → counts → the main page. `ahDrop(tag)`
+  resolves a tag's waiting slots to null (callers skip). A hidden tab starts nothing. Measured on `door-long`:
+  picture starts 58 / 141 / 453 ms (min / median / max).
+- **Main page** (`galPreNext`, no gallery or preview up): counts for every door all the time (`galCountNext`, HTML
+  only, nearest the middle first); from `ahAnchor` (the hovered door, else the first door on screen) on in page
+  order, one door at a time: its count, its first page of thumbnails, its first `AH_ORIGS` 2 originals
+  (`ahOrig` → `galResolve` on a stand-in, `plKeepImage`). Frame reads to the end (`galGrow`) only when nothing else
+  is owed (`ahIdleGrow`, once per door). Endless off: originals only for the first door, thumbnails for
+  `AH_THUMBS_OFF` 3 more, the rest once ≥ `AH_SHARE` 40 % of the page's doors are seen. The covers' own originals
+  (`pgFill`, `hoverPreload`) wait while counts are in flight (`galCountsBusy`) — user: revisit later.
+- **Scrolling** (`ahScrollNote` from `galScroll`, checked ≤ every 200 ms): the next door to load scrolled above the
+  viewport = behind → `ahDrop('main')` and nothing new starts (counts go on). Still for `AH_STILL_MS` 250, then
+  `AH_HOVER_WAIT_MS` 1000 for a hover: the hovered door becomes the anchor, else the first door on screen. A job cut
+  by the drop (`ahGen` changed) is un-done so it loads again later.
+- **Gallery preview** (`galLookOpen`, `galLook`): a door hovered `AH_LOOK_MS` 500 lays out its first page of
+  thumbnails around it, the door left in place as the hole (`galHole` = its rect, `galBars` → hole only). Inert:
+  the set never gets `live` (no cell events), no strip (`galLayout` skips `galPageNote`/`galFeed`), never marked
+  seen (seen shapes the endless queue), no originals, upgrades or frame. Closes on leaving the door (`galMove`), a
+  page scroll, a left press (the link is followed), or any other hover (`onOver` — it ran `return` for an open
+  gallery and swallowed the next door's mouseover). Middle press / chip from it opens the gallery (`galMiddle`
+  closes it first; `galChipOpen` ignores it). Wheel and keys stay the page's.
+- **Gallery, endless** (`ahG`, made in `galMiddle` unless a queue switch, dropped in `galHide`): thumbnails
+  (first 2 pages) of the next `ahAheadN` galleries — 2, 5 once the user steps forward or reaches gallery 2,
+  10 from gallery 3 (`ahGalAhead`, run on every landing and page step). Originals only after a preview
+  (`ahSaw` from `galPv` and from `tourGo` in a gallery): `galHqAhead` = from the previewed picture through 2
+  pages on (only what `galFeed` has built); within reach of the end, the next gallery's first page too. A
+  forward page step outside a slideshow = skipping: originals stop (`galo` dropped) until the next preview. A
+  backward step puts the `AH_BACK` 5 before it first; forward resumes after. Closing the gallery drops `gal`
+  and `galo` and the main page restarts from the first door on screen.
+- **Cache check**: originals loaded ahead (`ahFiles`) that a slideshow paints are timed in `swapViewer`;
+  `ahWarmReport` writes us-log `aheadwarm` (ok = under `PL_COLD_MS`) when the gallery closes. Hover previews are
+  not timed.
+- Debug lines: `loading ahead: …` (thumbnails [and first originals] {href, cut}, scrolled past…, scroll stopped…,
+  a preview; originals from picture N, pages skipped…, thumbnails of gallery N of the queue {ahead}, idle,
+  reading a count to its end).
+- Not verified (2026-11-26): the slideshow backward rule, endless off, LibreWolf, pornpics (refused by both
+  browsers' safety lists — needs the user's run).
+
 ## Behaviour (user's numbers, 2026-11-09)
 
 - Every picture the page has (`GAL_MAX` = Infinity, user v0.251.0: galleries run 10-100 and a cap
@@ -351,16 +393,12 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   picture (none fits even at 8 px → the unplaced cells are hidden). Rows are one height because a
   segment beside the hole cannot be justified independently of the rows above and below.
 - Upgrade check uses each picture's drawn width.
-- **Read-ahead**: hovering a door, after `cfg.hoverDelay`, reads its gallery (`galLoad`) and warms its
-  thumbnails (`galWarm`). `GAL_CACHE` 300.
-- **Preload** (`galPreNext`, user v0.297.0, `cfg.galleryPreload` on): the first page (`galLoad` +
-  `galWarm`, never the reading on) of every door **on screen** that shows a chip (kind settled, not
-  `results`), same origin, one at a time, nearest the pointer first; kicked after each `galMarkAll`
-  (boot, scroll, new results) and each frame's end. Waits while any frame is busy (`galFrameStop`,
-  `galGrowing`) or a gallery is wanted or open — `galRender` would kill that frame. Stops for the
+- **Hovering a door** shows its gallery preview after 500 ms (`G13`, "Loading ahead"). `GAL_CACHE` 300.
+- **Preload** (`galPreNext`, `cfg.galleryPreload` on): "Loading ahead". Kicked after each `galMarkAll`
+  (boot, scroll, new results), each frame's end and each close. Waits while any frame is busy (`galFrameStop`,
+  `galGrowing`) or a gallery or preview is up — `galRender` would kill that frame. Stops for the
   page on a 429/503 or a frozen page (`galPreHalt`); a hidden tab stops its frame. Logged as one
-  `gallery` row in `us-log`. The v0.291.0 retirement removed the old whole-page one only because it
-  belonged to gallery mode (`galPreTried` = tried this page).
+  `gallery` row in `us-log`.
 - **Next page** (`nextCheck` … `nextWarmReport`, user v0.325.0–v0.327.0): within a screen of the
   bottom of a page with learned doors, idle (`nextIdle`: no preload, frame, gallery or slideshow), and
   going through it — `nextEngaged`: galleries ticked since arrival ≥ `NEXT_SHARE` (20 %) of those
@@ -482,16 +520,15 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
 - **A cell's preview asks the picture's own page first** (`galLinkedHit`, v0.292.0): its `og:image`
   (same shape as the thumbnail unless the names match) or a same-named copy, the biggest wider than
   the thumbnail. nsfw.xxx profile cells: 300×533 thumbnail → the post's 960×1704.
-- **Originals on open** (user, v0.263.0 — hovering each cell then waiting for its fetch was the
-  complaint): when a set is built and its thumbnails preview (`set.pv`), `galHqAll` runs `galResolve`
-  on every built cell (v0.323.0: all of them, the page on screen first — before, only that page and
-  `galAhead`), `GAL_HQ_PAR` 4 at a time. Same probe as the hover, so `probeCache` shares an in-flight
+- **Originals after a preview** (v0.387.0, user; before: every cell's original on open, v0.263.0–v0.386.0, the
+  complaint then was hovering each cell and waiting): `galHqAhead` → `galHqAll` runs `galResolve` from the
+  previewed picture through 2 pages ("Loading ahead"), each start paced by `ahPics`. Same probe as the hover, so `probeCache` shares an in-flight
   fetch and a hover finds the answer. **Each found original is held** (`plKeepImage`): the browser
   cache cannot be relied on to keep it (user: a hover minutes later still downloaded). `galDrop`
   cancels it (`set.hqTok`); probes in flight finish. us-log kind `origs`, one row per open, on the
   page's host, with its bytes (`b`; `transferBytes`, else `diagnose()`'s Content-Range total — one
   small range request per file, only with `logRequests`). Measured 2026-11-16: girlstop galleries
-  are 30–52 MB for 41 originals. No pacing beyond the 4: log first.
+  are 30–52 MB for 41 originals.
   Each item keeps its winner (`item.hit`, v0.267.0): a hover is a `fresh` probe, which re-asks every
   settled miss, and a gallery's candidates usually start with guesses that 404 — every hover waited on
   them (spinner, 100-500 ms) even when preloaded. The kept hit is re-probed (cache) and dropped if gone.
@@ -602,8 +639,8 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
 ## Endless (v0.359.0, user; INTERACTION.md `G12`)
 
 `cfg.galleryEndless` (remembered; ☐ Endless at the clicked picture's bottom-left, ⓘ top-left (`.endl.top`), `galEndlessBuild`; also the
-right-click menu and the panel). Code: `galEndless` … `galInfoShow`, after `galPageStep`.
-- **The queue** (`galChain` {hrefs, at, land, warm}, made in `galMiddle` by `galChainFrom` for a user's open, kept for
+right-click menu and the panel; on by default since v0.387.0, user). Code: `galEndless` … `galInfoShow`, after `galPageStep`.
+- **The queue** (`galChain` {hrefs, at, land}, made in `galMiddle` by `galChainFrom` for a user's open, kept for
   a queued one: `land.href === href`): the opened door, then the doors after it in document order (`galDoorList`:
   where a chip shows, one per link, its biggest picture). **Viewed (seen ∪ visited) is judged once, when a door
   joins** (user: "if we recheck, we will skip it half way through, or on the back button") — `galChainExtend` only
@@ -625,8 +662,8 @@ right-click menu and the panel). Code: `galEndless` … `galInfoShow`, after `ga
   (`+` = some count not final). A gallery not open counts `galChainN` (its list or `hzGalCounts`) ÷ this `galPer`,
   1 page when unknown. P and G are plain numbers: `twAsk` reads the first `\d+/`; a typed page maps across the queue
   (`galChainPageAt`). The page row always shows in endless (`galStripRows`).
-- On the open gallery's last page, once whole, the next one's list and first thumbnails are read ahead
-  (`galChainWarm`, once per href).
+- The galleries ahead load per "Loading ahead" (`ahGalAhead`; replaced `galChainWarm`, which read only the next
+  one's thumbnails, on the last page).
 - **Closing** (`galHide`) after the queue moved on scrolls the current card into view (`behavior: 'instant'` — a
   smooth scroll would still be moving when `galFlyBack` measures) so the picture flies back to it.
 - ⤓ stays per gallery (user): each switch builds a new corner picture with its own `galToolsBuild(href)`.

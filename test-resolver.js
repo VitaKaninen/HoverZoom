@@ -1423,5 +1423,17 @@ const galPH = function (min) {
     for (const m of src.matchAll(/^    (?:async )?function (\w+)\(/gm)) { if (seen[m[1]]) dup.push(m[1]); seen[m[1]] = 1; }
     eq('no two top-level functions share a name', dup, []);
 }
+// Loading ahead (GALLERY.md "Loading ahead"): the gallery ramp and the gate's order.
+{
+    const aS = src.indexOf('    // Galleries kept loaded ahead'), aE = src.indexOf('    // Endless: the next galleries');
+    const ahAheadN = new Function(src.slice(aS, aE) + '\nreturn ahAheadN;')();
+    eq('ahead: just opened = 2', ahAheadN(0, 0), 2);
+    eq('ahead: paging forward in the first = 5', ahAheadN(0, 1), 5);
+    eq('ahead: second gallery = 5', ahAheadN(1, 0), 5);
+    eq('ahead: third on = 10', [ahAheadN(2, 0), ahAheadN(7, 3)], [10, 10]);
+    const pS = src.indexOf('    function ahPri'), pE = src.indexOf('    // A start slot');
+    const ahPri = new Function(src.slice(pS, pE) + '\nreturn ahPri;')();
+    eq('gate: open gallery before counts before the main page', [ahPri('gal'), ahPri('galo'), ahPri('count'), ahPri('main')], [0, 0, 1, 2]);
+}
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

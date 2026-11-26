@@ -1,4 +1,8 @@
-# Build in progress 2026-11-26 — loading ahead, by what the user is doing (user's spec, "Build it")
+# Built 2026-11-26 (v0.387.0) — loading ahead, by what the user is doing. Reference: GALLERY.md "Loading ahead"
+
+**Last asked:** user to try v0.387.0 on pornpics (both browsers refuse it to Claude). Not answered yet.
+
+The spec as agreed (kept until the user confirms it works):
 
 Replaces the scroll-pace preload (`galPreNext`/`galPaceNote`, v0.350.0 "fast → further ahead" — reversed by the user)
 and `galChainWarm`. Terms: **gallery** = the middle-click view (code: peek); **gallery preview** = the new hover view.
