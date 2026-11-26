@@ -424,7 +424,7 @@ transparent. Since v0.406.0 `twPaint` also sets `--darkreader-{bg,text,border}--
 colour a bug. Key `repeat` on `computer` mostly lands one step; dispatch `keydown`s with 500 ms gaps instead. A
 `left_click_drag` with `modifiers` does not hold Ctrl: drive a Ctrl resize with synthetic mousedown/move/up.
 
-The user's Chrome HAS Tampermonkey with Hover Zoom updating from the pushed GitHub copy (a pushed version shows up 1–3 min after the push, on a reload; an unpushed edit never does — 2026-11-26), and it runs in Claude in
+The user's Chrome HAS Tampermonkey with Hover Zoom, and it **runs the file on disk** (2026-11-26 #9: an unpushed edit was live on the next reload; the "pushed copy only" note from earlier that day was wrong — read the version off the page before testing). Right after a save it can briefly run nothing (no `perf-report` answer, no error): reload again. It runs in Claude in
 Chrome's tabs. Never tell the user it is not installed; "no widget" is not "not running". Prove it alive
 from the page: dispatch `hover-zoom:perf` with detail `'report'` and count `hover-zoom:perf-report`
 answers (one per copy), then `hover-zoom:debug` true and a synthetic `mouseover` on a thumbnail — a
