@@ -12,6 +12,11 @@ Measured 2026-11-26 in Chrome (window 1314×826, screen 1920×1080), bytes from 
 - eporner gallery: thumbnails 27 KB avg (40); originals 2.81 MB avg, median 3.0, max 4.0, 20 MP (30 of 30).
 - Pictures per gallery page (`galPer`, `galleryRowMin` 120): 1314×826 → 48 (thumb shape 1.17, eporner's) to 72
   (0.75); 1920×970 → 84–126; 2560×1300 → 135–207.
+- `<img>` vs GM_xhr → blob → shown, one at a time, cache-busted, alternating order (v0.392.0's temporary
+  `hover-zoom:fetch-speed`, removed v0.393.0), Chrome + Tampermonkey, eporner, 15 files each:
+  thumbnails 31 KB: `<img>` median 293 ms, GM 410 ms (+117 ms, +40 %); originals 2.0 MB: 523 vs 658 ms (+135 ms,
+  +26 %; GM faster on 3/15). **A fixed ~120–135 ms per request**, not per byte. Not measured: with 6 in flight.
+- Back/Forward: v0.391.0 adds `beforeunload` only while downloads are queued (bfcache); user to confirm in Gecko.
 - So 2 back + current + 2 ahead of eporner originals at 1920×970 = 5 × 84 × 2.8 MB ≈ 1.2 GB: the 1 GB cap binds.
   Thumbnails are noise (10 galleries × 2 pages × 84 × 27 KB ≈ 45 MB).
 
