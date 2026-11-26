@@ -336,6 +336,13 @@ What loads ahead follows what the user does. Code: the `ah*` functions after `ga
   which `galResolve` honours: each restart killed the run's 6 in-flight originals, so few ever finished. Now it sets
   `hqTok.stop` (start nothing more); in-flight ones land and set `hqTried`, and `hqBusy` keeps the new run from
   starting them twice. Real cancels stay: gallery closed (`galDrop`), Load all turned off, a skip with Load all off.
+- **Stopped runs leave the queue; the next gallery waits behind the open one** (v0.414.0, eporner repro: one page step
+  fired 9 `galHqAhead`s in 3 s; each re-queued the next gallery's 54 already-found originals as `galo`, FIFO ahead of
+  the open run, which then found nothing for ~2 min). `ahSlot` takes the run's `tok` and `ahGate.pump` resolves a
+  stopped/cancelled run's waiters to null. `ahOrig` skips found (`hqTried && hit`) and in-flight (`hqBusy`) pictures
+  without a slot. The next gallery's first page is tag `galn` (priority 0.5: after `gal`/`galo`, before counts), and
+  each `ahGalAhead` walk stops the last one's `g.otok`. A slot dropped by a stop must not set `tok.cancelled`: that
+  would kill the run's in-flight `galResolve`.
 - **`hqTried` only on a found original** (v0.395.0): a run (`galHqAll`) probes without `fresh`, so it reuses a cached
   miss (`probeMiss`, `PROBE_RETRY_MS`); marking every picture tried made one bad patch permanent — no run ever
   loaded those pictures again and each hover fetched its own (user, LibreWolf, girlstop; Chrome's run: 37/37,

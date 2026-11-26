@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.413.0
+// @version      0.414.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -801,7 +801,7 @@
 
     function actSecs(ms) { return ms >= 1000 ? (ms / 1000).toFixed(1) + ' s' : Math.round(ms) + ' ms'; }
 
-    const ACT_WHY = { main: 'for the page', gal: 'for the next galleries', galo: 'for the open gallery', count: 'to count it', shown: 'for the open gallery' };
+    const ACT_WHY = { main: 'for the page', gal: 'for the next galleries', galo: 'for the open gallery', galn: 'for the next gallery', count: 'to count it', shown: 'for the open gallery' };
 
     // A loading-ahead trace event as a line.
     function actTrace(ev, o) {
@@ -13955,7 +13955,7 @@
             if (g.origs) dbg('loading ahead: pages skipped, thumbnails only until the next preview');
             g.origs = false;
             if (set.hqTok) set.hqTok.cancelled = true;
-            ahDrop('galo');
+            ahDrop('galo'); ahDrop('galn');
             ahGalAhead();
         } else if (set.pages && set.pages[set.page]) g.back = set.pages[set.page][0];
     }
@@ -14078,9 +14078,12 @@
                 if (!live()) return;
             }
             if (g.origs && near && i === c.at + 1) {
-                act('job', 'Next gallery: loading the full-size pictures of its first page — ' + actGal(h));
-                const tok = { cancelled: false, fresh: false };
-                await Promise.all(list.slice(0, per).map(function (it) { return ahOrig(it, 'galo', tok); }));
+                const todo = list.slice(0, per).filter(function (it) { return it && !(it.hqTried && it.hit); });
+                if (g.otok) g.otok.stop = true;     // the last walk's waiters leave the line
+                if (!todo.length) continue;
+                act('job', 'Next gallery: loading the full-size pictures of its first page (' + todo.length + ' left) — ' + actGal(h));
+                const tok = g.otok = { cancelled: false, fresh: false };
+                await Promise.all(todo.map(function (it) { return ahOrig(it, 'galn', tok); }));
                 if (!live()) return;
             }
         }
@@ -14264,7 +14267,7 @@
         if (!g || !set) return;
         g.origs = on;
         if (on) galHqAhead(set);
-        else { if (set.hqTok) set.hqTok.cancelled = true; ahDrop('galo'); }
+        else { if (set.hqTok) set.hqTok.cancelled = true; ahDrop('galo'); ahDrop('galn'); }
     }
 
     // Where ⛶ starts: the gallery picture in the preview, else the first picture of the page on screen.
@@ -14893,9 +14896,9 @@
             while (running < GAL_HQ_PAR && i < imgs.length) {
                 const img = imgs[i++];
                 running++;
-                ahSlot(ahPics, 'galo').then(function (free) {
+                ahSlot(ahPics, 'galo', tok).then(function (free) {
                     const it = img.__hzItem;
-                    if (!free || tok.cancelled || tok.stop || (it && (it.hqTried || it.hqBusy))) { if (free) free(); if (!free) tok.cancelled = true; running--; next(); return; }
+                    if (!free || tok.cancelled || tok.stop || (it && (it.hqTried || it.hqBusy))) { if (free) free(); if (!free && !tok.stop) tok.cancelled = true; running--; next(); return; }     // !tok.stop: a stop lets in-flight land
                     if (it) it.hqBusy = true;
                     const r = lg && lg.req(), live = { t: performance.now(), mine: tok }, t0 = performance.now();
                     galHqLive.add(live);
@@ -17193,6 +17196,7 @@
         g.pump = function () {
             clearTimeout(g.timer);
             if (document.visibilityState === 'hidden') return;
+            g.wait = g.wait.filter(function (w) { if (!w.tok || !(w.tok.stop || w.tok.cancelled)) return true; w.resolve(null); return false; });     // a stopped run's waiters leave the line
             while (g.wait.length && g.live < max) {
                 const now = performance.now();
                 if (now < g.at) { g.timer = setTimeout(g.pump, g.at - now); return; }
@@ -17212,32 +17216,35 @@
         };
         return g;
     }
-    function ahPri(tag) { return tag === 'gal' || tag === 'galo' ? 0 : tag === 'count' ? 1 : 2; }
+    function ahPri(tag) { return tag === 'gal' || tag === 'galo' ? 0 : tag === 'galn' ? 0.5 : tag === 'count' ? 1 : 2; }
 
-    // A start slot: resolves to its release, or to null once its tag is dropped.
-    function ahSlot(g, tag) { return new Promise(function (resolve) { g.wait.push({ tag: tag, resolve: resolve }); g.pump(); }); }
+    // A start slot: resolves to its release, or to null once its tag is dropped or its run (tok) stopped.
+    function ahSlot(g, tag, tok) { return new Promise(function (resolve) { g.wait.push({ tag: tag, tok: tok, resolve: resolve }); g.pump(); }); }
     function ahDrop(tag) {
         if (tag === 'main') ahGen++;
         [ahPics, ahPages].forEach(function (g) {
             g.wait = g.wait.filter(function (w) { if (w.tag !== tag) return true; w.resolve(null); return false; });
         });
     }
-    async function ahRun(g, tag, fn) {
-        const free = await ahSlot(g, tag);
+    async function ahRun(g, tag, fn, tok) {
+        const free = await ahSlot(g, tag, tok);
         if (!free) return null;
         try { return await fn(); } finally { free(); }
     }
     function ahImg(item, tag) { return ahRun(ahPics, tag, function () { return galImg(item, tag); }); }
     // An item's original, loaded through the hover's own probe, so a preview finds it.
     function ahOrig(item, tag, tok) {
+        if (item.hqTried && item.hit) return Promise.resolve(item.hit);     // found already: no slot, no line
         return ahRun(ahPics, tag, function () {
+            if (item.hqBusy || (item.hqTried && item.hit)) return null;
+            item.hqBusy = true;
             const t0 = performance.now();
             return galResolve({ __hzItem: item, naturalWidth: 0, naturalHeight: 0, src: item.thumb, currentSrc: item.thumb }, tok).then(function (hit) {
                 ahT('orig', { tag: tag, u: item.thumb, s: Math.round(t0), ms: Math.round(performance.now() - t0), ok: hit ? 1 : 0 });
                 if (hit && !tok.cancelled) item.hqTried = true;     // as galHqAll: a run skips it
                 return hit;
-            });
-        }).then(function (hit) { if (hit && !hit.video && hit.url !== item.thumb) { plKeepImage(hit, item); ahFiles.add(hit.url); } return hit; });
+            }).finally(function () { item.hqBusy = false; });
+        }, tok).then(function (hit) { if (hit && !hit.video && hit.url !== item.thumb) { plKeepImage(hit, item); ahFiles.add(hit.url); } return hit; });
     }
 
     // The trace with each load's gallery (page order, 1-based) and picture, and the loader's state now.
@@ -17473,7 +17480,7 @@
         ahT('act', { a: 'close' });
         ahG = null;
         ahDrop('gal');
-        ahDrop('galo');
+        ahDrop('galo'); ahDrop('galn');
         ahAnchor = null;
         ahWarmReport();
     }

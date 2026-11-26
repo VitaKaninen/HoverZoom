@@ -1459,13 +1459,17 @@ const galPH = function (min) {
     eq('ahead: third on = 10', [ahAheadN(2, 0), ahAheadN(7, 3)], [10, 10]);
     const pS = src.indexOf('    function ahPri'), pE = src.indexOf('    // A start slot');
     const ahPri = new Function(src.slice(pS, pE) + '\nreturn ahPri;')();
-    eq('gate: open gallery before counts before the main page', [ahPri('gal'), ahPri('galo'), ahPri('count'), ahPri('main')], [0, 0, 1, 2]);
+    eq('gate: open gallery before counts before the main page', [ahPri('gal'), ahPri('galo'), ahPri('galn'), ahPri('count'), ahPri('main')], [0, 0, 0.5, 1, 2]);
     const gS = src.indexOf('    function ahGate'), gE = src.indexOf('    // A start slot');
     const ahGate = new Function('document', 'performance', 'setTimeout', 'clearTimeout', src.slice(gS, gE) + '\nreturn ahGate;')({ visibilityState: 'visible' }, { now: function () { return 1e9; } }, function () {}, function () {});
     const gt = ahGate([0, 0], 1), order = [];
     ['gal', 'gal', 'gal', 'galo', 'galo', 'main', 'gal'].forEach(function (t) { gt.wait.push({ tag: t, resolve: function (free) { order.push(t); free(); } }); });
     gt.pump();
     eq('gate: equal priority takes turns, main last (v0.399.0)', order, ['gal', 'galo', 'gal', 'galo', 'gal', 'gal', 'main']);
+    const gs = ahGate([0, 0], 1), got = [], old = { stop: true }, cur = {};
+    [['galo', old], ['galo', old], ['galn', null], ['galo', cur]].forEach(function (w) { gs.wait.push({ tag: w[0], tok: w[1], resolve: function (free) { got.push(free ? w[0] + (w[1] === cur ? '+' : '') : 'dropped'); if (free) free(); } }); });
+    gs.pump();
+    eq('gate: a stopped run\'s waiters leave the line; the open gallery before the next one (v0.414.0)', got, ['dropped', 'dropped', 'galo+', 'galn']);
 }
 // ---- the open gallery's thumbnail ramp: 1 page ahead on page 1, GAL_AHEAD_ON once the user steps on, then the page's number.
 const srcLf = src.split(String.fromCharCode(13)).join('');     // the checkout may be CRLF
