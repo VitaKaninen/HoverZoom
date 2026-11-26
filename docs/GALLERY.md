@@ -22,6 +22,10 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   end (`galGrown`, or sessionStorage `hzGalCounts` {href: [n, at]}, 3000, written by `galKeep` — the kept lists
   hold only 20, too few for a 99-gallery page), `N+` from the HTML only, nothing when unknown. `galChipsCount(href)`
   restyles after `galLoad`, `galMore` and `galGrow`'s end.
+- **Grey chip until its first page is in** (user, v0.388.0): `[data-hz-door].wait` (icon `#a6adc8`, blue `#89b4fa`
+  once ready). `galThumbsReady(href)` = the first `galPer(null)` items of `galLists` all in `galThumbDone` (thumbnail
+  URLs settled, load or error, recorded in `galImg`), so a broken thumbnail cannot keep it grey. `galThumbSettled`
+  restyles every chip 150 ms after a batch. No list yet = grey. The open ✕ is never grey.
 - **Reads to the end only when idle** (v0.387.0 reverses v0.350.0's "scroll fast → read further ahead", user). The
   old reason — pornpics chips sat at `19+` until opened — is answered by counts, which still run for every door
   at all times; only the frame reads (`galGrow`) moved to idle (`ahIdleGrow`). See "Loading ahead". Counts
@@ -266,7 +270,8 @@ What loads ahead follows what the user does. Code: the `ah*` functions after `ga
   thumbnails around it, the door left in place as the hole (`galHole` = its rect, `galBars` → hole only). Inert:
   the set never gets `live` (no cell events), no strip (`galLayout` skips `galPageNote`/`galFeed`), never marked
   seen (seen shapes the endless queue), no originals, upgrades or frame. Closes on leaving the door (`galMove`), a
-  page scroll, a left press (the link is followed), or any other hover (`onOver` — it ran `return` for an open
+  page scroll, the pointer leaving the window (the document `mouseout` with no `relatedTarget`; a fast exit
+  sends no `galMove` outside the door), a left press (the link is followed), or any other hover (`onOver` — it ran `return` for an open
   gallery and swallowed the next door's mouseover). Middle press / chip from it opens the gallery (`galMiddle`
   closes it first; `galChipOpen` ignores it). Wheel and keys stay the page's.
 - **Gallery, endless** (`ahG`, made in `galMiddle` unless a queue switch, dropped in `galHide`): thumbnails

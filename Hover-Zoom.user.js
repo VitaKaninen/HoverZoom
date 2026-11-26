@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.387.0
+// @version      0.388.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -7869,7 +7869,7 @@
     document.addEventListener('mousemove', perfWrap(onMove, 'event'), true);
     document.addEventListener('mouseover', perfWrap(onOver, 'event'), true);
     document.addEventListener('mouseout', perfWrap(onOut, 'event'), true);
-    document.addEventListener('mouseout', function (e) { if (!e.relatedTarget) twLeave(); }, true);   // left the window (or into a frame)
+    document.addEventListener('mouseout', function (e) { if (!e.relatedTarget) { twLeave(); if (galLook) galHide('look'); } }, true);   // left the window (or into a frame)
 
     // Middle-click on the window (in fullscreen: anywhere but the gallery's own pieces) saves the original to the download folder. See E76.
     function midInFull(x, y) { return fullActive() && placed && !!box && box.classList.contains('on') && !galTopAt(x, y); }
@@ -11840,6 +11840,8 @@
     const GAL_CARD_DEPTH = 4;           // levels of the ancestor chain that make a card's shape
     const GAL_DOOR_MARK = 'data-hz-door';      // the ▦ chip, in the card like the marks
     const GAL_PILL = 'data-hz-marks';          // one dark pill per picture holding chip, tick, disc
+    const galThumbDone = new Set();            // thumbnail URLs loaded or failed; a chip is grey until its first page is all here
+    let galThumbT = 0;
     let galPeek = false, galPeekTapAt = 0, galGrowing = null, galGrowEnd = null, galChipHot = null, galLeftAt = 0;
     const galGrown = new Set(), galLists = new Map();
     const galGrowWhy = new Map();       // href -> why reading its page stopped short of the end, or 'html' when only its HTML could be read
@@ -13818,12 +13820,32 @@
             if (noReferrerHere()) img.referrerPolicy = 'no-referrer';
             img.onload = function () {
                 img.onload = img.onerror = null;
+                galThumbSettled(item.thumb);
                 const nw = img.naturalWidth, nh = img.naturalHeight;
                 resolve(nw && nh ? { img: img, item: item, nw: nw, asp: nw / nh } : null);
             };
-            img.onerror = function () { img.onload = img.onerror = null; resolve(null); };
+            img.onerror = function () { img.onload = img.onerror = null; galThumbSettled(item.thumb); resolve(null); };
             img.src = item.thumb;
         });
+    }
+
+    // A thumbnail finished loading (or failed): chips whose first page is now in turn blue.
+    function galThumbSettled(u) {
+        if (!u || galThumbDone.has(u)) return;
+        galThumbDone.add(u);
+        if (!galThumbT) galThumbT = setTimeout(function () {
+            galThumbT = 0;
+            galPillMarks(GAL_DOOR_MARK).forEach(galChipStyle);
+        }, 150);
+    }
+
+    // A door's first page of thumbnails has loaded.
+    function galThumbsReady(href) {
+        const list = href && galLists.get(href);
+        if (!list || !list.length) return false;
+        const n = Math.min(list.length, Math.max(1, galPer(null)));
+        for (let i = 0; i < n; i++) if (!galThumbDone.has(list[i].thumb)) return false;
+        return true;
     }
 
     // Swap in the first bigger file that loads; the drawn size stays put.
@@ -15818,7 +15840,7 @@
             if (n) { const b = document.createElement('b'); b.textContent = n; m.appendChild(b); }
             setTip(m, open ? 'Close this gallery' : 'Show this gallery’s pictures' + (n ? ' (' + (n.slice(-1) === '+' ? 'at least ' + n.slice(0, -1) : n) + ')' : ''));
         }
-        m.className = (open ? 'open' : shown ? '' : 'off') + (n ? ' n' : '');
+        m.className = (open ? 'open' : shown ? '' : 'off') + (n ? ' n' : '') + (open || galThumbsReady(m.__hzHref) ? '' : ' wait');
     }
 
     function galChipRefresh(img) {
@@ -16164,7 +16186,7 @@
         'background:rgba(30,30,46,.92);border:1px solid #45475a;box-shadow:0 2px 8px rgba(0,0,0,.5)}' +
         '.p>*{display:block;flex:none;cursor:pointer}svg{display:block}' +
         '[data-hz-door]{order:1;display:flex;align-items:center;justify-content:center;width:20px;height:20px}' +
-        '[data-hz-door].off{display:none}[data-hz-door] svg{width:13px;height:13px;fill:#89b4fa}' +
+        '[data-hz-door].off{display:none}[data-hz-door] svg{width:13px;height:13px;fill:#89b4fa}[data-hz-door].wait svg{fill:#a6adc8}' +
         '[data-hz-door].open svg{width:15px;height:15px;fill:#f9e2af}' +
         '[data-hz-door].n{width:auto;min-width:20px;gap:3px;padding:0 2px;box-sizing:border-box}' +
         '[data-hz-door] b{font:600 11px/1 system-ui,sans-serif;color:#cdd6f4;font-variant-numeric:tabular-nums}' +
