@@ -304,6 +304,8 @@ picture is above the cut (`tour.postOnly` — begun in the comments, the comment
 Past the post's last picture (`tourSeam` → `tourPastPost()`: pictures at or after the cut) a user step stops once with
 "End of post — more below" (user, 2026-11-26), skipping `tourWall`'s ask-the-page wait; the next step sets
 `postOnly = false` and steps on into the replies. This is how an imageboard thread (4chan: OP alone, widget hidden) reaches its replies.
+Blocking the post's last picture (a signature gif, user 2026-11-26) → `tourBlockedAtPostEnd()`: back to the new last
+picture with the note shown and the seam armed. Without it the position fallback in `tourTarget` lands there silently.
 The user's pass mark: **the line may land anywhere between the end of the post and the first
 reply's first picture** — exact placement and consistency between sites do not matter.
 

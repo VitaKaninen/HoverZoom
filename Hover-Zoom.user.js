@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.408.0
+// @version      0.409.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -5858,7 +5858,7 @@
         plReset();                  // buffered answers may have been reached through this URL
         refreshPanel();             // the Exceptions list is on screen behind this window
         // Mid-tour, blocking is "not this one" — it moves on rather than tearing the window down.
-        if (tourActive()) { tourNav(scrubDir, false); return; }
+        if (tourActive()) { if (!tourBlockedAtPostEnd()) tourNav(scrubDir, false); return; }
         dismiss();
     }
 
@@ -11582,6 +11582,22 @@
         let pics = tourPics(tourFloor());
         if (tour.mainOnly) pics = mainPics(pics);
         return pics.some(function (p) { return atOrAfter(pe.cut, p); });
+    }
+
+    // Blocking the post's last picture: back to the one before it, with the post-end note armed.
+    function tourBlockedAtPostEnd() {
+        if (!tour || !tour.postOnly || tour.gal || !placed) return false;
+        const list = tourEntries();
+        if (!list.length || tourAt(list) >= 0 || !tourPastPost()) return false;
+        let k = 0;
+        while (k < list.length && tourBefore(list[k])) k++;
+        if (k < list.length) return false;
+        tour.total = list.length;
+        tourGo(list, list.length - 1, -1, false);
+        seamDir = 1;
+        seamHoldUntil = Date.now() + SEAM_HOLD_MS;
+        seamNote('End of post — more below');
+        return true;
     }
 
     // White text over the picture, faded out after SEAM_NOTE_MS.
