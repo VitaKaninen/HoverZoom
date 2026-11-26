@@ -183,3 +183,6 @@ python make-test-images.py          # regenerate fixtures into test-images/
 
 Browser test: `python test-server.py`, then `http://localhost:8899/test-page.html`. What each case
 is for, the counts, and the Browser pane's behaviours: [`docs/TESTING.md`](docs/TESTING.md).
+
+Manual test plan for loading ahead / gallery preview / galleries, run by the user: [`TEST-PLAN.md`](TEST-PLAN.md).
+**Update its test in the same commit as any change to a behaviour it tests.**
