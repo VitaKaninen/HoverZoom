@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.398.0
+// @version      0.399.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -16726,7 +16726,12 @@
                 if (now < g.at) { g.timer = setTimeout(g.pump, g.at - now); return; }
                 let k = 0;
                 g.wait.forEach(function (w, i) { if (ahPri(w.tag) < ahPri(g.wait[k].tag)) k = i; });
+                if (g.wait[k].tag === g.last) {     // equal priority takes turns: originals alongside the queue's thumbnails
+                    const p = ahPri(g.wait[k].tag), o = g.wait.findIndex(function (w) { return w.tag !== g.last && ahPri(w.tag) === p; });
+                    if (o >= 0) k = o;
+                }
                 const w = g.wait.splice(k, 1)[0];
+                g.last = w.tag;
                 g.live++;
                 g.at = now + gap[0] + Math.random() * (gap[1] - gap[0]);
                 let freed = false;

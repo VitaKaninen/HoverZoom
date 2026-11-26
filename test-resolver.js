@@ -1435,6 +1435,12 @@ const galPH = function (min) {
     const pS = src.indexOf('    function ahPri'), pE = src.indexOf('    // A start slot');
     const ahPri = new Function(src.slice(pS, pE) + '\nreturn ahPri;')();
     eq('gate: open gallery before counts before the main page', [ahPri('gal'), ahPri('galo'), ahPri('count'), ahPri('main')], [0, 0, 1, 2]);
+    const gS = src.indexOf('    function ahGate'), gE = src.indexOf('    // A start slot');
+    const ahGate = new Function('document', 'performance', 'setTimeout', 'clearTimeout', src.slice(gS, gE) + '\nreturn ahGate;')({ visibilityState: 'visible' }, { now: function () { return 1e9; } }, function () {}, function () {});
+    const gt = ahGate([0, 0], 1), order = [];
+    ['gal', 'gal', 'gal', 'galo', 'galo', 'main', 'gal'].forEach(function (t) { gt.wait.push({ tag: t, resolve: function (free) { order.push(t); free(); } }); });
+    gt.pump();
+    eq('gate: equal priority takes turns, main last (v0.399.0)', order, ['gal', 'galo', 'gal', 'galo', 'gal', 'gal', 'main']);
 }
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);
