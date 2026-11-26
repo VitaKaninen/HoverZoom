@@ -1,3 +1,29 @@
+# Handoff 2026-11-26 #5: TEST-PLAN on eporner + girlstop, basic run on 11 other sites (v0.398.0–v0.404.0, all pushed)
+
+User asked: run TEST-PLAN.md in Claude in Chrome on eporner/girlstop, then a basic check (hover, best quality, galleries)
+on every other site discussed. **Last asked the user:** nothing open.
+
+Fixed (each verified live in Chrome after the push):
+- v0.398.0 chips 1–7 stayed grey forever: `galPer` grows once the thumb shape is learned (28 → 30), so
+  `galThumbsReady` asked early galleries for more than pass 1 loaded. `galFirstIn` = pass 1 finished. Also a replaced
+  originals run logs `restarted`, not `cut`.
+- v0.399.0 Load all (7.0) waited ~16 s behind the queue's 124 thumbnails (same priority, FIFO): `ahGate` alternates
+  equal-priority tags. Unit test in test-resolver.js.
+- v0.400.0 Flickr showed `_b` (1024) where `_k`/`_3k`/`_o` exist: those have their own secrets → `flickrSizes`.
+- v0.401.0 Behance covers never previewed: the `<img>` has `pointer-events:none` → `deafMedia` in `coveredMedia`.
+- v0.402.0 ArtStation `/4k/` rule. v0.403.0 DeviantArt file without `/v1/` (827 → 1600 px). v0.404.0 wallhaven full
+  wallpaper via `/w/<id>` (`same: true` skips the shape test; the thumbnail is a 3:2 crop).
+
+TEST-PLAN results (eporner, Chrome 1511×927): pass 1.1, 1.3, 2.1, 2.2 (after fix), 3.1, 3.1b, 3.3, 4.2, 4.4, 5.1, 5.3,
+5.5, 5.6, 5.7, 5.9, 6.1 (eporner refuses frames, so counts go exact from HTML), 7.0 (after fix), 7.5, 7.8, 7.12, 10.1
+(3/3), 11.1, 11.2. Untestable: 1.4 (Claude's tabs stay `visible`). Not run: 3.2, 4.1, 4.3, 4.5, 5.4, 5.8, 5.10, 5.11,
+7.1–7.4, 7.6, 7.7, 7.9–7.11, 7.13 on eporner, 8.x, 9.2, 9.3. girlstop: main page, Load all (80/80 found, none missed,
+so 7.13's report does not reproduce) and hover previews pass.
+Sites: sexygirlspics, nsfw.xxx, sxypix, Imgur pass. xmoviesforyou and porntrex are refused by Chrome's safety list.
+**Open, user's call:** Flickr album lists get nothing. Covers are background `div`s with the title on them, so
+`backgroundGate` ("the page's own text sits on it") refuses them, and doors are `<img>`-only, so there are no chips.
+A look-through for background covers was tried and reverted (it reached the gate and gained nothing).
+
 # Handoff 2026-11-26 #4 (~360k tokens): loading ahead made to match the user's goals (v0.396.0–v0.397.0), all pushed
 
 **Next:** run TEST-PLAN.md in full in Claude in Chrome on eporner / girlstop, expected vs measured per test, using the

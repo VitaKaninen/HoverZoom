@@ -411,7 +411,7 @@ logs `retrying` ×3 — an artefact of the stub, not of the manager. The pane wo
   memory (sessionStorage, Maps) but not Chrome's HTTP cache — thumbnails at 2–4 ms are cache hits; for a cold run use
   listing pages / galleries not visited before.
 
-The user's Chrome HAS Tampermonkey with Hover Zoom tracking the file on disk, and it runs in Claude in
+The user's Chrome HAS Tampermonkey with Hover Zoom updating from the pushed GitHub copy (a pushed version shows up 1–3 min after the push, on a reload; an unpushed edit never does — 2026-11-26), and it runs in Claude in
 Chrome's tabs. Never tell the user it is not installed; "no widget" is not "not running". Prove it alive
 from the page: dispatch `hover-zoom:perf` with detail `'report'` and count `hover-zoom:perf-report`
 answers (one per copy), then `hover-zoom:debug` true and a synthetic `mouseover` on a thumbnail — a
