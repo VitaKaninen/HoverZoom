@@ -1,3 +1,15 @@
+# Handoff 2026-11-26 #10 (~300k tokens): v0.415.0 → v0.417.0, all pushed
+
+User asked, all done and verified in Chrome on eporner (the user's Chrome runs the disk copy):
+- Activity log grouped: one header per job with live count, ✓/⏹ + time + note, click to expand files
+  (docs/ACTIVITY.md). Gallery finding logged (area check, counts).
+- Log window survives a page reload and Clear works (window runs its own code, BroadcastChannel; ACTIVITY.md).
+- Main page loads in rounds: 10 thumbnails + 1 original per gallery, all galleries, then next round (3 rounds;
+  GALLERY.md "Loading ahead"; TEST-PLAN §3 rewritten). User expects to retune the numbers.
+Open, offered to the user, unanswered: turn the ▦ chip blue after round 1 instead of at 30 thumbnails; give the
+idle "count every picture" job a header. The user must reopen their log window once (old window code).
+**Last asked the user:** nothing.
+
 # 2026-11-26 #9: eporner repro run by Claude in Chrome → v0.414.0 (pushed)
 
 #8's open question answered without the user: the repro still failed on v0.413.0 (gallery 83, 2 PageDowns: no
