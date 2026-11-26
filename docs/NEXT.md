@@ -1,9 +1,10 @@
-# Next: keep pictures on disk (user 2026-11-26; not built, waiting on the user's answer to the numbers)
+# Shelved: keep pictures on disk (user 2026-11-26: not needed)
 
-Spec so far (user): galleries — keep thumbnails + originals on the previous 2 pages and everything ahead; nothing
-older than 5 min that is behind; cap 1 GB (setting). Everything else (search results, ordinary hovers) — a plain MB
-cap, 512 MB suggested (setting). Extend the v0.342.0 IndexedDB store (`HELD_DB`), don't write a second one.
-Lists and link kinds are already kept per tab (v0.390.0, GALLERY.md "Lists kept per tab").
+Asked because every reload/Back re-downloaded every picture in LibreWolf. Cause: LibreWolf's
+`browser.cache.disk.enable` false (its `librewolf.cfg`); the user enlarged the memory cache in about:config and it
+was fixed. User: no script changes to adapt to one browser. If revived, the spec was: galleries keep thumbnails +
+originals 2 pages back and all ahead, nothing behind older than 5 min, cap 1 GB; elsewhere a 512 MB cap; both
+settings; extend `HELD_DB`. The measurements below stand.
 
 Measured 2026-11-26 in Chrome (window 1314×826, screen 1920×1080), bytes from `fetch` → `blob.size`:
 - Google Images, "4k landscape photography", 10 screens: 200 results, originals 638 MP in all (Google's `imgurl`
@@ -16,7 +17,7 @@ Measured 2026-11-26 in Chrome (window 1314×826, screen 1920×1080), bytes from 
   `hover-zoom:fetch-speed`, removed v0.393.0), Chrome + Tampermonkey, eporner, 15 files each:
   thumbnails 31 KB: `<img>` median 293 ms, GM 410 ms (+117 ms, +40 %); originals 2.0 MB: 523 vs 658 ms (+135 ms,
   +26 %; GM faster on 3/15). **A fixed ~120–135 ms per request**, not per byte. Not measured: with 6 in flight.
-- Back/Forward: v0.391.0 adds `beforeunload` only while downloads are queued (bfcache); user to confirm in Gecko.
+- Back/Forward: v0.391.0 adds `beforeunload` only while downloads are queued; Back then restored from bfcache in Chrome.
 - So 2 back + current + 2 ahead of eporner originals at 1920×970 = 5 × 84 × 2.8 MB ≈ 1.2 GB: the 1 GB cap binds.
   Thumbnails are noise (10 galleries × 2 pages × 84 × 27 KB ≈ 45 MB).
 

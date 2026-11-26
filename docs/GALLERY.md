@@ -506,8 +506,9 @@ What loads ahead follows what the user does. Code: the `ah*` functions after `ga
     saving page (bfcache after Back/Forward, another tab) fell back to the host label — live: 134 of 400 files in
     `Hover Zoom/Eporner/` named `Eporner - …` instead of `Hover Zoom/EPORNER.COM/<gallery>/`.
   - **`beforeunload` is registered only while this site has downloads left** (`dlqLeaveSync` from `dlqTick`, v0.391.0):
-    a page with that listener can be refused the back-forward cache (Gecko, believed, not verified), so Back reloaded
-    and re-downloaded every picture. User reported Back re-downloading on 2026-11-26; whether this fixes it is unconfirmed.
+    a page with that listener can be refused the back-forward cache. Confirmed in Chrome (Back restored at once). A
+    reload or Back re-downloading every picture in LibreWolf is its disabled disk cache (`browser.cache.disk.enable`
+    false), fixed in the browser's settings, not here (user: no per-browser workarounds).
   - **`pagehide` halts this page's run** (`dlqHalt`, v0.341.0): a save in flight never calls back after a bfcache
     freeze (user: "it stalls when I hit back"); on return the ticks claim it again and `1`s are redone.
   - **In the gallery's strip while a gallery is open** (user, v0.339.0: it moved round the page as the unit
