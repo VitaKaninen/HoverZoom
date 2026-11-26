@@ -301,6 +301,9 @@ Known blind spot: a change that keeps the element count and height (a class swap
 Applied: idle start and the widget count always (`idlePics`); a pinned start only when the start
 picture is above the cut (`tour.postOnly` — begun in the comments, the comments are the tour).
 `}` at the whole page lifts it. A post-only tour is confined: no harvest, no next page.
+Past the post's last picture (`tourSeam` → `tourPastPost()`: pictures at or after the cut) a user step stops once with
+"End of post — more below" (user, 2026-11-26), skipping `tourWall`'s ask-the-page wait; the next step sets
+`postOnly = false` and steps on into the replies. This is how an imageboard thread (4chan: OP alone, widget hidden) reaches its replies.
 The user's pass mark: **the line may land anywhere between the end of the post and the first
 reply's first picture** — exact placement and consistency between sites do not matter.
 

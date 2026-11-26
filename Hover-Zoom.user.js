@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.407.0
+// @version      0.408.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -10975,7 +10975,7 @@
             if (wallBusy) return;
             if (dir < 0 && tour.gal && galSeam(-1, user, 'last')) return;
             // A press past either end wraps; forward asks the page for more first.
-            if (dir < 0 || seamDir === dir) tourSeam(dir, user);
+            if (dir < 0 || seamDir === dir || (tour.postOnly && !tour.gal && tourPastPost())) tourSeam(dir, user);
             else tourWall(user);
             return;
         }
@@ -11544,6 +11544,21 @@
     function tourSeam(dir, user) {
         if (!tour || !placed) return;
         if (tour.gal && galEndless()) { galSeam(dir, user, dir > 0 ? 'first' : 'last'); return; }     // endless never wraps
+        if (dir > 0 && tour.postOnly && !tour.gal && tourPastPost()) {
+            if (user && seamDir !== dir) {
+                seamDir = dir;
+                seamHoldUntil = Date.now() + SEAM_HOLD_MS;
+                seamNote('End of post — more below');
+                return;
+            }
+            seamDir = 0;
+            tour.postOnly = false;
+            dbg('slideshow: past the post end, on into the replies');
+            const all = tourSync();
+            twSync();
+            const to = tourTarget(all, 1);
+            if (to >= 0) { tourGo(all, to, 1, false); return; }
+        }
         if (user && seamDir !== dir) {
             seamDir = dir;
             seamHoldUntil = Date.now() + SEAM_HOLD_MS;
@@ -11558,6 +11573,15 @@
         dbg('tour wrapped to ' + (dir > 0 ? 'the first picture' : 'the last picture'), { of: list.length });
         seamNote(dir > 0 ? 'Wrapped to the first picture' : 'Wrapped to the last picture');
         tourGo(list, to, dir, false);
+    }
+
+    // A post-only slideshow has pictures after the post end to go on to.
+    function tourPastPost() {
+        const pe = postEnd();
+        if (!pe || !pe.cut) return false;
+        let pics = tourPics(tourFloor());
+        if (tour.mainOnly) pics = mainPics(pics);
+        return pics.some(function (p) { return atOrAfter(pe.cut, p); });
     }
 
     // White text over the picture, faded out after SEAM_NOTE_MS.
