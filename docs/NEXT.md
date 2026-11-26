@@ -1,3 +1,11 @@
+# 2026-11-26 #9: eporner repro run by Claude in Chrome → v0.414.0 (pushed)
+
+#8's open question answered without the user: the repro still failed on v0.413.0 (gallery 83, 2 PageDowns: no
+open-gallery original for ~2 min). Cause and fix: GALLERY.md "Stopped runs leave the queue". Verified live on v0.414.0,
+cold gallery 25 (Lexi Belle, 169): 2 page steps, open gallery 168/169 in ~55 s, then the next gallery (`galn`).
+Not checked: slideshow steps showing the small picture first (#8's last line) — the `Slideshow:` activity lines say.
+**Last asked the user:** nothing open.
+
 # Handoff 2026-11-26 #8 (~377k tokens): v0.407.0 → v0.413.0, all pushed
 
 User asked, in order, all done:
