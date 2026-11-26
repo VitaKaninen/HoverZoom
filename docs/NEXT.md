@@ -1,3 +1,23 @@
+# Build in progress 2026-11-26 — loading ahead, by what the user is doing (user's spec, "Build it")
+
+Replaces the scroll-pace preload (`galPreNext`/`galPaceNote`, v0.350.0 "fast → further ahead" — reversed by the user)
+and `galChainWarm`. Terms: **gallery** = the middle-click view (code: peek); **gallery preview** = the new hover view.
+
+- **Main page:** counts (HTML, cheap) → thumbnails → first 2 originals per gallery, from the first gallery on screen.
+  Slow scroll: keep going. Scrolling faster than thumbnails finish: thumbnails/originals stop (counts go on). Scroll
+  stops: 1 s for a hover → that gallery first; no hover → restart from the first gallery on screen. Expensive counts
+  (frame, `galGrow`) only when nothing else waits. Cover originals (`hoverPreload`) wait behind counts (revisit later).
+- **Gallery preview:** hover a door 500 ms → its thumbnails laid out as the gallery, cover left in place, no bars, no
+  controls; closes on leaving the cover or a page scroll.
+- **Gallery, endless:** thumbnails 2 galleries ahead; stepping forward → 5, then 10. A hover / slideshow → originals:
+  this page + next 2, slideshow: as far ahead as it runs; ahead galleries first page only until next. Backward step →
+  next 5 originals that way, followed, then forward resumes. Closing the preview: originals go on until pages are
+  skipped (→ thumbnails) or a new preview. Closing the gallery drops its queue → main-page rules.
+- **Endless off:** originals of the first gallery, thumbnails of the next few, more originals only once ≥ 40 % of the
+  page's galleries were opened. Endless default on.
+- **Pacing:** pictures random 50–200 ms between starts, ≤ 6 in flight; page reads 300–800 ms (Forum Stumbler's gap).
+  Hidden tab pauses, 429 stops. Log every load; on arrival log whether loaded-ahead files were still cached.
+
 # Handoff 2026-11-19 (~355k tokens, v0.367.0–v0.374.0) — read this first
 
 **Asked, in order (all built, pushed):** (1) wheel on fullscreen black space left fullscreen after a page
