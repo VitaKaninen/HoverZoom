@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.395.0
+// @version      0.396.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -634,8 +634,26 @@
 
     function debugOn() { return pageDebug || !!cfg.debug; }
 
+    // Loading-ahead trace, debug only: `hover-zoom:ahead-trace` (detail {since, max, urls, clear}, or that as JSON) prints it as one JSON line.
+    const ahTraceBuf = [];
+    function ahT(ev, o) {
+        if (!debugOn()) return;
+        const e = { t: Math.round(performance.now()), ev: ev };
+        if (o) for (const k in o) e[k] = o[k];
+        ahTraceBuf.push(e);
+        if (ahTraceBuf.length > 20000) ahTraceBuf.splice(0, 5000);
+    }
+    document.addEventListener('hover-zoom:ahead-trace', function (e) {
+        let d = e && e.detail;
+        if (typeof d === 'string') { try { d = JSON.parse(d); } catch (x) { d = {}; } }
+        d = d || {};
+        try { console.log('[HoverZoom ' + version() + '] ahead trace ' + JSON.stringify(ahTraceDump(d))); } catch (x) { try { console.log('[HoverZoom] ahead trace failed: ' + x); } catch (y) { /* no console */ } }
+        if (d.clear) ahTraceBuf.length = 0;
+    });
+
     function dbg(label, data) {
         if (!debugOn()) return;
+        if (/^(loading ahead|gallery originals|gallery preload stopped|endless: queue)/.test(label)) ahT('note', data === undefined ? { m: label } : { m: label, d: data });
         try {
             // Page debug is read by a tool, not a person: one flat string, no collapsed Object.
             const head = '[HoverZoom ' + version() + '] ' + label;
@@ -13372,6 +13390,7 @@
     function ahPageStep(set, dir) {
         const g = ahG;
         if (!g) return;
+        ahT('act', { a: 'page', dir: dir, page: (set.page || 0) + 1 });
         if (dir > 0) {
             g.fwd++;
             g.back = null;
@@ -13822,18 +13841,19 @@
     }
 
     // Load one thumbnail; resolves {img, item, asp} once it has a size, or null.
-    function galImg(item) {
+    function galImg(item, tag) {
         return new Promise(function (resolve) {
-            const img = document.createElement('img');
+            const img = document.createElement('img'), t0 = performance.now();
             img.decoding = 'async';
             if (noReferrerHere()) img.referrerPolicy = 'no-referrer';
             img.onload = function () {
                 img.onload = img.onerror = null;
                 galThumbSettled(item.thumb);
+                ahT('thumb', { tag: tag || 'shown', u: item.thumb, s: Math.round(t0), ms: Math.round(performance.now() - t0), ok: 1 });
                 const nw = img.naturalWidth, nh = img.naturalHeight;
                 resolve(nw && nh ? { img: img, item: item, nw: nw, asp: nw / nh } : null);
             };
-            img.onerror = function () { img.onload = img.onerror = null; galThumbSettled(item.thumb); resolve(null); };
+            img.onerror = function () { img.onload = img.onerror = null; galThumbSettled(item.thumb); ahT('thumb', { tag: tag || 'shown', u: item.thumb, s: Math.round(t0), ms: Math.round(performance.now() - t0), ok: 0 }); resolve(null); };
             img.src = item.thumb;
         });
     }
@@ -14281,6 +14301,7 @@
                     const r = lg && lg.req(), live = { t: performance.now(), mine: tok }, t0 = performance.now();
                     galHqLive.add(live);
                     galResolve(img, tok).then(function (hit) {
+                        ahT('orig', { tag: 'galo', u: (img.__hzItem && img.__hzItem.thumb) || img.src, s: Math.round(t0), ms: Math.round(performance.now() - t0), ok: hit ? 1 : 0 });
                         if (hit) { got++; if (!hit.video) { plKeepImage(hit); ahFiles.add(hit.url); } size(hit); nextWarmSeen(hit.url, performance.now() - t0); }
                         if (hit && !tok.cancelled && img.__hzItem) img.__hzItem.hqTried = true;     // a miss is asked again by the next run
                         if (r) r.done({ status: hit ? 200 : 0 });
@@ -16597,12 +16618,47 @@
         if (!free) return null;
         try { return await fn(); } finally { free(); }
     }
-    function ahImg(item, tag) { return ahRun(ahPics, tag, function () { return galImg(item); }); }
+    function ahImg(item, tag) { return ahRun(ahPics, tag, function () { return galImg(item, tag); }); }
     // An item's original, loaded through the hover's own probe, so a preview finds it.
     function ahOrig(item, tag, tok) {
         return ahRun(ahPics, tag, function () {
-            return galResolve({ __hzItem: item, naturalWidth: 0, naturalHeight: 0, src: item.thumb, currentSrc: item.thumb }, tok);
+            const t0 = performance.now();
+            return galResolve({ __hzItem: item, naturalWidth: 0, naturalHeight: 0, src: item.thumb, currentSrc: item.thumb }, tok).then(function (hit) {
+                ahT('orig', { tag: tag, u: item.thumb, s: Math.round(t0), ms: Math.round(performance.now() - t0), ok: hit ? 1 : 0 });
+                return hit;
+            });
         }).then(function (hit) { if (hit && !hit.video && hit.url !== item.thumb) { plKeepImage(hit); ahFiles.add(hit.url); } return hit; });
+    }
+
+    // The trace with each load's gallery (page order, 1-based) and picture, and the loader's state now.
+    function ahTraceDump(d) {
+        const since = +d.since || 0, max = +d.max || 400, doors = galDoorList().map(function (x) { return x.h; });
+        const where = new Map();
+        galLists.forEach(function (list, h) {
+            if (!Array.isArray(list)) return;
+            const gi = doors.indexOf(h) + 1;
+            list.forEach(function (it, i) { if (it && it.thumb && !where.has(it.thumb)) where.set(it.thumb, [gi || h, i + 1]); });
+        });
+        const all = ahTraceBuf.filter(function (e) { return e.t > since; }), ev = all.slice(0, max).map(function (e) {
+            const o = Object.assign({}, e);
+            if (o.u) { const w = where.get(o.u); if (w) { o.g = w[0]; o.p = w[1]; } if (!d.urls && w) delete o.u; }
+            if (o.h) { const gi = doors.indexOf(o.h) + 1; if (gi) { o.g = gi; if (!d.urls) delete o.h; } }
+            return o;
+        });
+        const waits = function (g) { const n = {}; g.wait.forEach(function (w) { n[w.tag] = (n[w.tag] || 0) + 1; }); return { live: g.live, wait: n }; };
+        const c = galChain, cur = galCur;
+        return {
+            now: Math.round(performance.now()), events: ev, more: all.length - ev.length,
+            state: {
+                hidden: document.visibilityState === 'hidden', stop: galPreStop, doors: doors.length, lists: galLists.size,
+                main: { anchor: ahAnchor ? doors.indexOf(ahAnchor) + 1 : null, behind: ahBehind, busy: galPre ? doors.indexOf(galPre) + 1 : null, counts: galCnt, done: ahDone.size, growing: !!galGrowing },
+                look: galLook ? doors.indexOf(galLook.href) + 1 || true : null,
+                gallery: cur ? { g: doors.indexOf(cur.href) + 1, page: (cur.page || 0) + 1, pages: (cur.pages || []).length, queueAt: c ? c.at + 1 : null, queue: c ? c.hrefs.length : null,
+                    ahead: ahG && c ? ahAheadN(c.at, ahG.fwd) : null, origs: ahG ? ahG.origs : null, fwd: ahG ? ahG.fwd : null, from: ahG ? ahG.from + 1 : null, end: ahG ? ahG.end : null, back: ahG && ahG.back != null ? ahG.back + 1 : null } : null,
+                pics: waits(ahPics), pages: waits(ahPages),
+                keep: { n: plKeep.length, mb: Math.round(plKeepBytes / 1048576), budgetMb: Math.round(plBudget() / 1048576) }, heldMb: Math.round(heldBytes / 1048576), held: heldBlobs.size,
+            },
+        };
     }
 
     // Counts in flight (the covers' originals wait for them). Safe at boot.
@@ -16632,7 +16688,7 @@
     function galCountLoad(href, tag) {
         if (galNoFrame(href) || galKept(href)) return galLoad(href, galPreLog);
         return ahRun(ahPages, tag || 'count', function () {
-            const req = galPreLog && !pageTextHeld(href) && galPreLog.req();
+            const req = galPreLog && !pageTextHeld(href) && galPreLog.req(), t0 = performance.now();
             let refused = null;
             return fetchDoc(href, function (res) {
                 refused = res;
@@ -16642,6 +16698,7 @@
                 if (req) req.done(refused ? { status: refused.status, limited: busy, signal: 'hard', retryAfter: busy ? usLog.retryAfterOf(refused.headers) : null } : { status: doc ? 200 : 0 });
                 if (doc) keepDocInfo(href, doc);
                 const got = doc ? galPick(doc, href) : null;
+                ahT('page', { tag: tag || 'count', h: href, s: Math.round(t0), ms: Math.round(performance.now() - t0), ok: doc ? 1 : 0, st: refused ? refused.status : undefined, n: got ? got.length : 0 });
                 dbg('gallery count from its page', { href: href, pictures: got ? got.length : null, why: refused ? 'status ' + refused.status : !doc ? 'no page' : got && got.length < GAL_HTML_ENOUGH ? 'too few, the frame decides' : null, shared: pageTextHits });
                 if (got && got.length >= GAL_HTML_ENOUGH && !galLists.has(href)) { galLists.set(href, got); galFromHtml.add(href); galChipsCount(href); galWholeTake(href); galKeep(href, false); }
             });
@@ -16769,6 +16826,7 @@
 
     // A gallery opened (middle press, chip): its own loading ahead starts; the main page's waits.
     function ahGalOpen() {
+        ahT('act', { a: 'open' });
         ahDrop('main');
         ahG = { fwd: 0, origs: false, at: null, back: null, from: 0, end: 0, run: 0, warm: null };
     }
@@ -16776,6 +16834,7 @@
     // The gallery closed: what it queued is dropped, and the main page starts again from the first door on screen.
     function ahGalClose() {
         if (!ahG) return;
+        ahT('act', { a: 'close' });
         ahG = null;
         ahDrop('gal');
         ahDrop('galo');
@@ -16789,6 +16848,7 @@
         if (!g || !set || galLook || !img) return;
         const k = set.pics.findIndex(function (p) { return p.img === img; });
         if (k < 0) return;
+        ahT('act', { a: tour ? 'slide' : 'preview', pic: k + 1, dir: dir });
         const was = g.origs;
         g.origs = true;
         if (dir < 0) { if (g.back === k) return; g.back = k; }
@@ -16825,6 +16885,7 @@
         const hr = galHoleRect(pic || el);
         if (!hr.width || !hr.height || !holds(hr, galPt.x, galPt.y)) return;
         galLook = { el: el, href: href };
+        ahT('act', { a: 'look', h: href });
         galOn = true;
         galHole = { x: hr.left, y: hr.top, w: hr.width, h: hr.height };
         galWant = href;

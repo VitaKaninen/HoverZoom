@@ -300,6 +300,8 @@ What loads ahead follows what the user does. Code: the `ah*` functions after `ga
 - **Cache check**: originals loaded ahead (`ahFiles`) that a slideshow paints are timed in `swapViewer`;
   `ahWarmReport` writes us-log `aheadwarm` (ok = under `PL_COLD_MS`) when the gallery closes. Hover previews are
   not timed.
+- Trace: `hover-zoom:ahead-trace` (v0.396.0) — every paced load and user step with timings; usage in `docs/TESTING.md`
+  "Live sites in Claude in Chrome".
 - Debug lines: `loading ahead: …` (thumbnails [and first originals] {href, cut}, scrolled past…, scroll stopped…,
   a preview; originals from picture N, pages skipped…, thumbnails of gallery N of the queue {ahead}, idle,
   reading a count to its end).

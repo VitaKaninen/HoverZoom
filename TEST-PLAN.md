@@ -360,6 +360,8 @@ Turn Endless back on afterwards.
   from just before the problem until just after it.
 - For a gallery problem: run `document.dispatchEvent(new CustomEvent('hover-zoom:gallery-state'))` in the
   console, then copy the single line it prints.
+- For loading ahead (v0.396.0+): `document.dispatchEvent(new CustomEvent('hover-zoom:ahead-trace', {detail: '{"max":2000}'}))`
+  with debug on, then copy the `ahead trace` line. It lists every load and step with times.
 - For traffic or timing: the 0.7 snippet's output, or a description of the Network waterfall: how many
   requests start at once, and what kind they are.
 - Browser (LibreWolf or Chrome), window size, site.

@@ -38,7 +38,7 @@ only — no URLs, no page function names — so the user can paste it from a pri
   (`twRecount` ~0.15 ms an event); Flickr's own scripts blocked ~1 s during the same scroll. Commons (120 px
   thumbs) and Lemmy list pages show no widget — under the 128 px `tourMinDisplayed` floor, by design.
   Harness: dispatch `WheelEvent`s at the ⇅ button's centre from `javascript_tool`; listen for
-  `hover-zoom:perf-report`. Never take screenshots (user's global rule).
+  `hover-zoom:perf-report`. Screenshots of Claude's own tabs (pane, Claude in Chrome) are allowed since 2026-11-26.
 - **Everyone's side:** a `long-animation-frame` observer (Chrome/Edge 123+; the Browser pane lacks it)
   buckets script time in frames >50 ms by source — Hover Zoom (matched against our own stack URL),
   other extension (Tampermonkey's `name=`), page, unattributed — with forced-layout time per bucket.
@@ -396,6 +396,14 @@ logs `retrying` ×3 — an artefact of the stub, not of the manager. The pane wo
   ("Saving N / M"), site-wide, in any tab of that site. A ⤓ on a fully saved gallery calls `confirm()`.
 - Do not `Escape` after opening the settings panel with a gallery open: it closes the gallery too.
 - Each `javascript_tool` call dies at 45 s: poll in calls of ≤ 30 s.
+- **Loading-ahead trace** (v0.396.0, `ahT`/`ahTraceDump`, debug only — records nothing until `hover-zoom:debug` true
+  or Settings debug): `document.dispatchEvent(new CustomEvent('hover-zoom:ahead-trace', {detail: JSON.stringify({since, max, urls, clear})}))`
+  prints one `ahead trace {…}` console line: `events` (`thumb`/`orig`/`page` loads with `tag` main|count|gal|galo|shown,
+  `s` start, `ms`, `ok`, `g` = door in page order, `p` = picture; `act` = open/close/page/preview/slide/look; `note` = the
+  `loading ahead:` dbg lines) and `state` (anchor, behind, queue position, `ahead`, gate waits by tag, plKeep/held MB).
+  Page with `since` = the last `now`. Detail goes as a JSON string (sandbox). **Cache:** a new tab clears the script's
+  memory (sessionStorage, Maps) but not Chrome's HTTP cache — thumbnails at 2–4 ms are cache hits; for a cold run use
+  listing pages / galleries not visited before.
 
 The user's Chrome HAS Tampermonkey with Hover Zoom tracking the file on disk, and it runs in Claude in
 Chrome's tabs. Never tell the user it is not installed; "no widget" is not "not running". Prove it alive
