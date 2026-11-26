@@ -14,13 +14,16 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
 
 ## Peek, pages, reading on (v0.282.0; INTERACTION.md `G1`, `G6`, `G7`)
 
-- **Lists kept per tab** (user, v0.341.0: "it does not remember any of the links"): a gallery read to its end
-  (`galGrown`) is written to sessionStorage `hzGalLists` (`galKeep`; again when its originals are found, with each
-  item's `hit` minus `display`); `galLoad` takes it (`galKept`, 1 h, 20 galleries) before any fetch, and marks the
-  href grown, so ⤓ is ready at once and no frame reads it again.
+- **Lists kept per tab** (user, v0.341.0; every list, v0.390.0: "no need to recheck a link"): every list read in
+  the tab — to its end or from its HTML alone (`whole` false → `N+`, not marked grown) — goes to sessionStorage
+  `hzGalLists` (`galKeep`, written 1 s later by `galKeptWrite` and on `pagehide`; each item's `hit` minus
+  `display`). No age or count limit: when full, the oldest tenth is dropped and the write retried (user: overwrite
+  the oldest). `galLoad` and the preload's `galCountLoad` take it (`galKept`) before any fetch. ~18 KB per 40-picture
+  gallery on `door-long`, so ~250 galleries fit. A door's kind (`galKindRead`: gallery / results) is kept the same
+  way in `hzDoorKinds`. Measured: after a reload of `door-long` (150 kept), 0 gallery pages fetched.
 - **The chip shows the count** (user, v0.342.0; open chip too, v0.343.0): `galCountText` — `N` when read to its
-  end (`galGrown`, or sessionStorage `hzGalCounts` {href: [n, at]}, 3000, written by `galKeep` — the kept lists
-  hold only 20, too few for a 99-gallery page), `N+` from the HTML only, nothing when unknown. `galChipsCount(href)`
+  end, `N+` from the HTML only, nothing when unknown; `galKnownN(href)` reads memory, then the kept list, then
+  sessionStorage `hzGalCounts` {href: [n, at]}, 3000, whole galleries only, written by `galKeep`. `galChipsCount(href)`
   restyles after `galLoad`, `galMore` and `galGrow`'s end.
 - **Grey chip until its first page is in** (user, v0.388.0): `[data-hz-door].wait` (icon `#a6adc8`, blue `#89b4fa`
   once ready). `galThumbsReady(href)` = the first `galPer(null)` items of `galLists` all in `galThumbDone` (thumbnail

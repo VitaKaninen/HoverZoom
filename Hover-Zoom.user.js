@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.389.0
+// @version      0.390.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -11789,9 +11789,9 @@
     const GAL_FADE_MS = 200;
     const GAL_UPGRADE = 1.3;            // drawn this much larger than the thumbnail's file -> fetch the next size
     const GAL_CACHE = 300;              // fetched pages kept by URL
-    const GAL_KEPT_KEY = 'hzGalLists';  // sessionStorage: {href: {items, html, at}}, galleries read to their end, for Back and Forward
-    const GAL_KEPT_MAX = 20;
-    const GAL_KEPT_MS = 3600000;
+    const GAL_KEPT_KEY = 'hzGalLists';  // sessionStorage: {href: {items, html, whole, at}}, every gallery read in this tab; oldest dropped when full
+    const GAL_KEPT_MS = Infinity;
+    const GAL_KINDS_KEY = 'hzDoorKinds';  // sessionStorage: {href: kind}, a link read once as gallery or results is not read again in this tab
     const GAL_TRIES = 4;                // bigger sizes tried per thumbnail
     const GAL_LAZY = ['data-src', 'data-lazy-src', 'data-original', 'data-lazy', 'data-echo', 'data-defer-src', 'data-url'];
     const GAL_MAX = Infinity;           // every picture the page has
@@ -12026,6 +12026,14 @@
     }
 
     async function galKindRead(href) {
+        const kept = galKindsKept()[href];
+        if (kept) return kept;
+        const k = await galKindFetch(href);
+        if (k) galKindKeep(href, k);
+        return k;
+    }
+
+    async function galKindFetch(href) {
         const doc = await fetchDoc(href);
         if (!doc) return null;
         const pics = galGroup(doc, href), pages = [];
@@ -13426,10 +13434,7 @@
 
     // A queued gallery's pictures known so far: [count, final].
     function galChainN(h) {
-        const l = galLists.get(h);
-        if (l) return [l.length, galGrown.has(h)];
-        const c = galCountsAll()[h];
-        return c && Date.now() - c[1] <= GAL_KEPT_MS ? [c[0], true] : [0, false];
+        return galKnownN(h);
     }
 
     // A queued gallery's pages: the open one's own, another's from its count at this page size, 1 when unknown.
@@ -14125,24 +14130,61 @@
     function galKeep(href, html) {
         const list = galLists.get(href);
         if (!list || !list.length) return;
-        const all = Object.assign({}, galKeptAll()), now = Date.now(), info = pageInfos.get(href.split('#')[0]) || (all[href] && all[href].info) || null;
-        galKeptMemo = null;
-        galCountKeep(href, list.length);
-        all[href] = { items: list.map(function (it) { const x = Object.assign({}, it); delete x.hqTried; if (x.hit) x.hit = { url: x.hit.url, w: x.hit.w, h: x.hit.h, video: !!x.hit.video }; return x; }), html: !!html, at: now, info: info };
-        const keys = Object.keys(all).filter(function (k) { return now - all[k].at < GAL_KEPT_MS; }).sort(function (a, b) { return all[a].at - all[b].at; });
-        const out = {};
-        keys.slice(-GAL_KEPT_MAX).forEach(function (k) { out[k] = all[k]; });
-        for (let n = Object.keys(out).length; n > 0; n--) {
-            try { sessionStorage.setItem(GAL_KEPT_KEY, JSON.stringify(out)); return; }
-            catch (e) { delete out[Object.keys(out)[0]]; }      // full: drop the oldest and try again
+        const all = galKeptAll(), now = Date.now(), info = pageInfos.get(href.split('#')[0]) || (all[href] && all[href].info) || null;
+        const whole = galGrown.has(href);
+        if (whole) galCountKeep(href, list.length);
+        delete all[href];       // re-added last: the order is the age
+        all[href] = { items: list.map(function (it) { const x = Object.assign({}, it); delete x.hqTried; delete x.el; if (x.hit) x.hit = { url: x.hit.url, w: x.hit.w, h: x.hit.h, video: !!x.hit.video }; return x; }), html: !!html, whole: whole, at: now, info: info };
+        if (!galKeptT) galKeptT = setTimeout(galKeptWrite, 1000);
+    }
+
+    // The kept lists to sessionStorage, oldest dropped until they fit.
+    let galKeptT = 0;
+    function galKeptWrite() {
+        clearTimeout(galKeptT);
+        galKeptT = 0;
+        const all = galKeptAll(), keys = Object.keys(all).sort(function (a, b) { return all[a].at - all[b].at; });
+        let json = JSON.stringify(all);
+        while (keys.length) {
+            try { sessionStorage.setItem(GAL_KEPT_KEY, json); return; }
+            catch (e) { const drop = keys.splice(0, Math.max(1, Math.ceil(keys.length / 10))); drop.forEach(function (k) { delete all[k]; }); json = JSON.stringify(all); }     // full: drop the oldest tenth and try again
+        }
+        try { sessionStorage.removeItem(GAL_KEPT_KEY); } catch (e) { /* nothing kept */ }
+    }
+
+    // A gallery's known picture count: [n, whole] from memory, the kept list, or the kept count.
+    function galKnownN(href) {
+        const l = galLists.get(href);
+        if (l && l.length) return [l.length, galGrown.has(href)];
+        const k = galKeptAll()[href];
+        if (k && Array.isArray(k.items) && k.items.length) return [k.items.length, k.whole !== false];
+        const c = galCountsAll()[href];
+        return c ? [c[0], true] : [0, false];
+    }
+
+    let galKindsMemo = null;
+    function galKindsKept() {
+        if (galKindsMemo) return galKindsMemo;
+        try { galKindsMemo = JSON.parse(sessionStorage.getItem(GAL_KINDS_KEY) || '{}') || {}; } catch (e) { galKindsMemo = {}; }
+        return galKindsMemo;
+    }
+    function galKindKeep(href, k) {
+        const all = galKindsKept();
+        if (all[href] === k) return;
+        delete all[href];
+        all[href] = k;
+        const keys = Object.keys(all);
+        for (let i = 0; i < keys.length; i++) {
+            try { sessionStorage.setItem(GAL_KINDS_KEY, JSON.stringify(all)); return; }
+            catch (e) { delete all[keys[i]]; }      // full: drop the oldest and try again
         }
     }
 
     // A kept list for href, still fresh: read already, nothing to read again.
     function galKept(href) {
         const k = galKeptAll()[href];
-        if (!k || !Array.isArray(k.items) || !k.items.length || Date.now() - k.at > GAL_KEPT_MS) return null;
-        galGrown.add(href);
+        if (!k || !Array.isArray(k.items) || !k.items.length) return null;
+        if (k.whole !== false) galGrown.add(href);
         if (k.html) galGrowWhy.set(href, 'html');
         if (k.info && k.info.title && !pageInfos.has(href.split('#')[0])) keepPageInfo(href, k.info.title, k.info.site);
         return k.items;
@@ -15856,10 +15898,8 @@
     // A door's picture count for its chip: '' unknown, 'N+' read from its HTML only, 'N' read to its end.
     function galCountText(href) {
         if (!href) return '';
-        const list = galLists.get(href);
-        let n = list ? list.length : 0;
-        if (!n) { const c = galCountsAll()[href]; if (c && Date.now() - c[1] <= GAL_KEPT_MS) return String(c[0]); }
-        return n ? n + (galGrown.has(href) ? '' : '+') : '';
+        const k = galKnownN(href);
+        return k[0] ? k[0] + (k[1] ? '' : '+') : '';
     }
 
     // The chips of one door, after its count changed.
@@ -16522,7 +16562,7 @@
             const h = galLinkOf(img);
             if (!h || seen.has(h)) return;
             seen.add(h);
-            if (galCountTried.has(h) || galCache.has(h) || galLists.has(h) || !!galCountsAll()[h]) return;
+            if (galCountTried.has(h) || galCache.has(h) || galLists.has(h) || !!galCountsAll()[h] || !!galKeptAll()[h]) return;
             const key = domChain(img);
             if (!galKindDone.has(key) || galResultsAt(img, h) || !doorReason(img)) return;     // where a chip shows
             try { if (new URL(h).origin !== location.origin) return; } catch (e) { return; }
@@ -16536,7 +16576,7 @@
 
     // A door's list from its HTML alone, for its chip's count; where frames are refused that is the whole read.
     function galCountLoad(href, tag) {
-        if (galNoFrame(href)) return galLoad(href, galPreLog);
+        if (galNoFrame(href) || galKept(href)) return galLoad(href, galPreLog);
         return ahRun(ahPages, tag || 'count', function () {
             const req = galPreLog && !pageTextHeld(href) && galPreLog.req();
             let refused = null;
@@ -16549,7 +16589,7 @@
                 if (doc) keepDocInfo(href, doc);
                 const got = doc ? galPick(doc, href) : null;
                 dbg('gallery count from its page', { href: href, pictures: got ? got.length : null, why: refused ? 'status ' + refused.status : !doc ? 'no page' : got && got.length < GAL_HTML_ENOUGH ? 'too few, the frame decides' : null, shared: pageTextHits });
-                if (got && got.length >= GAL_HTML_ENOUGH && !galLists.has(href)) { galLists.set(href, got); galFromHtml.add(href); galChipsCount(href); galWholeTake(href); }
+                if (got && got.length >= GAL_HTML_ENOUGH && !galLists.has(href)) { galLists.set(href, got); galFromHtml.add(href); galChipsCount(href); galWholeTake(href); galKeep(href, false); }
             });
         });
     }
@@ -16903,7 +16943,7 @@
 
     if (isTopFrame) {
         document.addEventListener('scroll', galScroll, { capture: true, passive: true });
-        window.addEventListener('pagehide', function () { if (galPreLog) { galPreLog.end('cut'); galPreLog = null; } dlqHalt(); dlqPresence(false); });     // a save in flight never calls back after a bfcache freeze: its picture is redone
+        window.addEventListener('pagehide', function () { if (galKeptT) galKeptWrite(); if (galPreLog) { galPreLog.end('cut'); galPreLog = null; } dlqHalt(); dlqPresence(false); });     // a save in flight never calls back after a bfcache freeze: its picture is redone
         setTimeout(function () { dlqTick(); setInterval(dlqTick, DLQ_TICK_MS); dlqFindHere(); }, 800);
         window.addEventListener('beforeunload', function (e) {     // the site's last tab with downloads left: the browser asks whether to leave (they pause)
             if (Date.now() - dlqNavAt < 3000 || !dlqBusyHere() || dlqOtherTabs()) return;
