@@ -16,14 +16,25 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
 
 - **Lists kept per tab** (user, v0.341.0; every list, v0.390.0: "no need to recheck a link"): every list read in
   the tab — to its end or from its HTML alone (`whole` false → `N+`, not marked grown) — goes to sessionStorage
-  `hzGalLists` (`galKeep`, written 1 s later by `galKeptWrite` and on `pagehide`; each item's `hit` minus
+  `hzGalLists2` (`galKeep`, written 1 s later by `galKeptWrite` and on `pagehide`; each item's `hit` minus
   `display`). No age or count limit: when full, the oldest tenth is dropped and the write retried (user: overwrite
   the oldest). `galLoad` and the preload's `galCountLoad` take it (`galKept`) before any fetch. ~18 KB per 40-picture
-  gallery on `door-long`, so ~250 galleries fit. A door's kind (`galKindRead`: gallery / results) is kept the same
-  way in `hzDoorKinds`. Measured: after a reload of `door-long` (150 kept), 0 gallery pages fetched.
+  gallery on `door-long`, so ~250 galleries fit. A door's kind is kept the same way in `hzDoorKinds2`, **'gallery'
+  only** (v0.405.0). Measured: after a reload of `door-long` (150 kept), 0 gallery pages fetched.
+- **A kept verdict must be able to come undone** (user 2026-11-26, v0.405.0: "wrongly learning things … no way to try
+  again with a new hover"). A 'results' read is never kept for the tab, and a per-door 'results'/unknown is re-read
+  by a hover `GAL_DOOR_REREAD_MS` (20 s) later (`galDoorKindRead`). **Rename the three keys (`GAL_OLD_KEYS` gets the
+  old names) whenever the picker changes so old lists are wrong** — sessionStorage outlives a cache clear and a reload.
+- **The HTML read skips site furniture** (`galSiteFurniture`: `nav`/`header`/`footer`/banner roles outside
+  `main`/`article`). eporner's header menu holds 8 category tiles in one group; a 5-picture gallery lost to them
+  (`galChoose`: its 20 related-gallery cards are `sib`, so the biggest non-sib group won), the tiles linked to
+  `/cat/` pages, and the door was then judged 'results'. The frame read never had it (hidden menu, `widgetEntries`).
+- **`galLeafAt` matches by a shared 6+ digit id too** (`sameFileId`, dates excluded). eporner's gallery list drops a
+  title's apostrophe (`standing-dp-s-…`) where the photo page writes `-039-`, so `sameStem` failed on both pages
+  checked and the gallery read as 'results'.
 - **The chip shows the count** (user, v0.342.0; open chip too, v0.343.0): `galCountText` — `N` when read to its
   end, `N+` from the HTML only, nothing when unknown; `galKnownN(href)` reads memory, then the kept list, then
-  sessionStorage `hzGalCounts` {href: [n, at]}, 3000, whole galleries only, written by `galKeep`. `galChipsCount(href)`
+  sessionStorage `hzGalCounts2` {href: [n, at]}, 3000, whole galleries only, written by `galKeep`. `galChipsCount(href)`
   restyles after `galLoad`, `galMore` and `galGrow`'s end.
 - **Grey chip until its first page is in** (user, v0.388.0): `[data-hz-door].wait` (icon `#a6adc8`, blue `#89b4fa`
   once ready). `galThumbsReady(href)` = the first `galPer(null)` items of `galLists` all in `galThumbDone` (thumbnail

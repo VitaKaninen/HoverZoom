@@ -1,3 +1,18 @@
+# Handoff 2026-11-26 #7: wrong gallery verdicts fixed (v0.405.0); TEST-PLAN 7.10, 8.x, 9.2
+
+User asked: run 7.10, 7.13, 8.x, 9.2; time detection/counting on eporner `/search-photos/standing/`; fix galleries
+that showed the wrong 8 pictures (`PzRdoVKzNwD`, 5 real) or lost their chip after hovers (`Woq5tDLi910`).
+Fixed in v0.405.0, verified live (reasons: GALLERY.md "Peek, pages, reading on"). New TEST-PLAN 2.3.
+Pass: 7.10, 8.1, 8.2, 9.2. 7.13 not run: eporner found every original.
+**Last asked the user (open):**
+- The page widget on that search page: the page holds 27 galleries and 73 single photos (`/photo/`, from card 30
+  down, plus 2 at the top). The widget counts the 73. The user wants no widget on a page that is "mostly galleries".
+  Asked whether galleries on screen, or any gallery on the page, should hide it.
+- What they meant by "notice the widget in the bottom corner" during the GIF gallery (`3KkpMJGNr0g`) open.
+  Its first GIF originals took 19-35 s each; the user saw a "took more than 10 seconds" message on an earlier open
+  of it (`GAL_DIAG_MS`).
+Found: the widget looking half-transparent in Chrome is Dark Reader (TESTING.md), not the script.
+
 # Handoff 2026-11-26 #6: the rest of TEST-PLAN on eporner (v0.404.0, no code change)
 
 User asked: continue #5. Run in Chrome on eporner searches (forest/lake/river/waterfall/garden/pool), window 1610×927.

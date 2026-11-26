@@ -112,6 +112,15 @@ Test pages:
     - **Fail:** a chip that stays grey after its gallery's thumbnails are visibly in (open the preview
       to check), or a chip that turns blue before any thumbnail request.
 
+2.3 **The count is the gallery's own, and stays a gallery** (v0.405.0). eporner `/search-photos/standing/`:
+    `standing-pose` (`PzRdoVKzNwD`) and `Standing DP's` (`Woq5tDLi910`).
+    - **Expect:** their chips read 5 and 19, as the site's own badges do. The preview and the open gallery show the
+      gallery's own pictures. Hover, leave and hover again 4+ times: the chip stays and the preview keeps opening.
+    - **Fail:** 8 (the site menu's category tiles), or the chip vanishing after a hover (`door leads to: results`
+      in the log). Before v0.405.0 both happened and stuck for the tab, even across a cache clear.
+    - eporner, Chrome, v0.405.0: verified. Door kinds settled ~3 s after load; counts were read about one page every 0.5 s,
+      done by ~14 s; thumbnails 30 per gallery (whole galleries under 30), ~110 ms each from a warm cache.
+
 ---
 
 ## 3. Main page: thumbnails for every gallery, then 2 originals each (v0.397.0)
@@ -304,6 +313,8 @@ Test pages:
 7.10 **Reaching the end of a gallery.** In the slideshow, run to within 2 pages of a gallery's end.
      **Expect:** the next gallery's first page of originals starts loading, so the step across galleries
      (`G12`) shows full size at once.
+     - eporner, Chrome (v0.405.0): verified. In a 19-picture gallery the next gallery's originals were loading from its
+       picture 1, and its picture 1 came from the preload buffer at 1280x1920.
 
 7.11 **Closing the preview doesn't stop originals.** Hover a picture (7.2), then move the pointer between
      pictures so no preview is up. **Expect:** the originals run carries on.
@@ -319,6 +330,7 @@ Test pages:
      - **Expect:** the second run's `found` is equal or higher; the misses were tried again, not skipped
        for good.
      - **Fail:** each hover fetches its own original one at a time (the girlstop report).
+     - Not run: on eporner every run found all its originals (5/5, 7/7), so there was nothing to retry.
 
 ---
 
@@ -330,12 +342,13 @@ tab.
 8.1 **Main page.**
     - **Expect:** originals only for the first gallery on screen, and thumbnails for the 3 galleries after
       it. Then loading stops (no more `thumbnails…` lines).
+    - eporner, Chrome (v0.405.0): verified. Thumbnails for g1–g4, 2 originals for g1, then idle.
 
 8.2 **The 40 % rule.** Open (middle-click) galleries until 40 % of the page's galleries carry the seen
     tick, closing each one.
     - **Expect:** once you're past 40 %, the main page goes on loading thumbnails and 2 originals for
       every gallery below, as in 3.1.
-    - Not verified by Claude.
+    - eporner, Chrome (v0.405.0): verified. With 11 of 27 seen, thumbnails loaded for g12 with the anchor at g5.
 
 Turn Endless back on afterwards.
 
@@ -354,6 +367,9 @@ Turn Endless back on afterwards.
 9.2 **Nothing overlaps at the smallest size.** Drag a corner of the clicked picture to make it as small as it goes,
     then hover it. **Expect:** it stops at 196×130 (the picture, without the strip); ⓘ, ⤓ ✕ ⛶, ☐ Load all, ☐ Endless
     and the readout (raised on hover) all clear of each other and clickable.
+    - Without Ctrl the drag snaps, and stopped at 239x157 here; hold Ctrl to reach the minimum.
+    - eporner, Chrome (v0.405.0): verified. The frame is 196x130 (picture 190x124 inside the border); each control
+      hit-tests as itself, and the gaps are 3 px or more.
 
 9.3 **Behind is dropped, ahead kept.** With debug on, open a long gallery with Load all on and page forward 4+ pages.
     **Expect:** `memory keep: dropped N` lines once pictures are more than 2 pages behind you; RAM stops growing
