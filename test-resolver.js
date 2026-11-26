@@ -1476,5 +1476,18 @@ const galPH = function (min) {
     eq('gallery ramp: after a forward step, 5 ahead', [2, 3, 4, 5].map(ga), [5, 5, 5, 5]);
     eq('gallery ramp: page 6 on, as many as its number', [6, 9].map(ga), [6, 9]);
 }
+// ---- arrival check: what a pressed link was taken for against the page it opened.
+{
+    const at = src.indexOf('    function arrivalFix(');
+    const af = new Function(src.slice(at, src.indexOf('\n    }\n', at) + 7) + NL + 'return arrivalFix;')();
+    eq('arrival: an unrecognised gallery link teaches a door', af('none', 'gallery'), 'learn door');
+    eq('arrival: an unrecognised results link teaches a door', af('none', 'results'), 'learn door');
+    eq('arrival: a previewed photo link that is a photo page agrees', af('none', 'leaf'), null);
+    eq('arrival: a gallery link that opens a photo page drops the door', af('gallery', 'leaf'), 'drop door');
+    eq('arrival: a results verdict that opens a photo page drops the door', af('results', 'leaf'), 'drop door');
+    eq('arrival: a gallery that is a results page unkeeps it', af('gallery', 'results'), 'unkeep gallery');
+    eq('arrival: a results verdict that is a gallery keeps it', af('results', 'gallery'), 'keep gallery');
+    eq('arrival: agreement and unknown change nothing', [af('gallery', 'gallery'), af('results', 'results'), af('none', null)], [null, null, null]);
+}
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.410.0
+// @version      0.411.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -330,6 +330,7 @@
         debug: false,               // log every hover decision to the console
         showPostEnd: false,         // draw the slideshow's post end (red) and sidebars (orange)
         logRequests: true,          // keep the shared request log (us-log): refusals and climb-downs only
+        missLog: false,             // keep a log of gallery links judged wrong, found out on arrival (addresses included)
     };
 
     const KEY = 'hoverZoomSettings';
@@ -8017,6 +8018,7 @@
         e.stopImmediatePropagation();
     }
     CAP_TARGET.addEventListener('mousedown', function (e) { galInfoPress(e); }, true);      // first of all: a press that closes the ⓘ box reaches nothing else
+    CAP_TARGET.addEventListener('mousedown', function (e) { missPress(e); }, true);       // records only: never stops or prevents
     ['mouseup', 'click', 'auxclick', 'dblclick', 'contextmenu'].forEach(function (t) { CAP_TARGET.addEventListener(t, function (e) { galInfoAfter(e); }, true); });
     CAP_TARGET.addEventListener('auxclick', midSaveClick, true);
     CAP_TARGET.addEventListener('click', midSaveClick, true);
@@ -12311,8 +12313,8 @@
         return k;
     }
 
-    async function galKindFetch(href) {
-        const doc = await fetchDoc(href);
+    async function galKindFetch(href, live) {
+        const doc = live || await fetchDoc(href);
         if (!doc) return null;
         const pics = galGroup(doc, href), pages = [];
         const k = { pics: pics.length, linked: 0, images: 0, checked: 0, leaves: 0 };
@@ -12328,7 +12330,7 @@
             if (looksLikeImage(u.href)) k.images++;
             else if (u.origin === location.origin && !went.has(u.href)) { went.add(u.href); pages.push({ u: u, thumb: x.thumb }); }     // a slider's slides share one page
         });
-        if (!doorKindVerdict(k) && k.pics < GAL_HTML_ENOUGH) {       // a script-built page: judge the rendered read the gallery itself uses
+        if (!live && !doorKindVerdict(k) && k.pics < GAL_HTML_ENOUGH) {       // a script-built page: judge the rendered read the gallery itself uses
             const items = await galLoad(href);
             if (Array.isArray(items) && items.length) {
                 galLinksPick(items);
@@ -12356,6 +12358,103 @@
         dbg('door leads to: ' + (v || 'unknown'), { href: href, pictures: k.pics, linked: k.linked,
             toImages: k.images, pagesChecked: k.checked, leaves: k.leaves });
         return v;
+    }
+
+    // ---- arrival check: what a pressed thumbnail link was taken for, checked on the page it opens. See GALLERY.md "Arrival check".
+    const MISS_PEND_KEY = 'hoverZoomPressed', MISS_LOG_KEY = 'hoverZoomMissLog';
+    const MISS_PEND_MS = 120000, MISS_PEND_MAX = 12, MISS_LOG_MAX = 300, MISS_SETTLE_MS = 2500;
+
+    // Pure: what was thought at the press ('gallery' | 'results' | 'none') against what the page is ('gallery' | 'results' | 'leaf' | null) → the fix, or null when they agree.
+    function arrivalFix(thought, truth) {
+        if (!truth) return null;
+        const door = truth !== 'leaf';
+        if (thought === 'none') return door ? 'learn door' : null;
+        if (!door) return 'drop door';
+        if (thought === 'gallery' && truth === 'results') return 'unkeep gallery';
+        if (thought === 'results' && truth === 'gallery') return 'keep gallery';
+        return null;
+    }
+
+    function missRead(key, dflt) {
+        try { const v = JSON.parse(GM_getValue(key, '') || 'null'); return v && typeof v === 'object' ? v : dflt; } catch (e) { return dflt; }
+    }
+
+    // A press on a linked thumbnail: what this page takes the link for, for the page it opens to check.
+    function missPress(e) {
+        if (!isTopFrame || (e.button !== 0 && e.button !== 1) || !siteEnabled() || CAPTCHA_HERE) return;
+        try {
+            const t = e.composedPath ? e.composedPath()[0] : e.target;
+            if (!t || t.nodeType !== 1 || t.getRootNode() !== document) return;
+            const img = t.tagName === 'IMG' ? t : t.closest('a[href]') ? coveredMedia(t, e.clientX, e.clientY) : null;
+            if (!img || img.tagName !== 'IMG') return;
+            const h = galLinkOf(img);
+            if (!h || new URL(h).origin !== location.origin) return;
+            const r = img.getBoundingClientRect();
+            if (Math.max(r.width, r.height) < 50) return;
+            const rec = { h: h, at: Date.now(), from: location.href.split('#')[0], path: pagePath(), chain: doorChainOf(domChain(img), h),
+                thumb: pictureUrl(img) || '', w: Math.round(r.width), ht: Math.round(r.height),
+                thought: galResultsAt(img, h) ? 'results' : doorReason(img) ? 'gallery' : 'none' };
+            const now = Date.now(), all = missRead(MISS_PEND_KEY, []).filter(function (p) { return p && now - p.at < MISS_PEND_MS && p.h !== h; });
+            all.push(rec);
+            GM_setValue(MISS_PEND_KEY, JSON.stringify(all.slice(-MISS_PEND_MAX)));
+        } catch (x) { /* nothing recorded */ }
+    }
+
+    // On load: was this page opened by a recorded press? Then judge it once it has settled.
+    function missArrive() {
+        if (!isTopFrame || /^hz-gallery-probe:/.test(String(window.name || ''))) return;
+        const here = location.href.split('#')[0], same = function (a) { return a === here || a.replace(/\/$/, '') === here.replace(/\/$/, ''); };
+        const now = Date.now(), all = missRead(MISS_PEND_KEY, []);
+        const rec = all.find(function (p) { return p && now - p.at < MISS_PEND_MS && same(p.h) && p.from !== here; });
+        if (!rec) return;
+        GM_setValue(MISS_PEND_KEY, JSON.stringify(all.filter(function (p) { return p !== rec && now - p.at < MISS_PEND_MS; })));
+        const go = function () { setTimeout(function () { missJudge(rec).catch(function (e) { dbg('arrival check failed', String(e)); }); }, MISS_SETTLE_MS); };
+        if (document.readyState === 'complete') go(); else window.addEventListener('load', go, { once: true });
+    }
+
+    // This page, as the pressed link's ground truth: the pressed picture drawn bigger here → 'leaf'; else its pictures' kind.
+    async function missLeafHere(rec) {
+        const imgs = document.images;
+        for (let i = 0; i < imgs.length; i++) {
+            const u = pictureUrl(imgs[i]) || '', r = imgs[i].getBoundingClientRect();
+            if (!u || !rec.thumb || !(u === rec.thumb || sameStem(u, rec.thumb) || sameFileId(u, rec.thumb))) continue;
+            if (r.width > rec.w * DOOR_BIGGER || r.height > rec.ht * DOOR_BIGGER) return true;
+        }
+        return false;
+    }
+
+    async function missJudge(rec) {
+        const truth = (await missLeafHere(rec)) ? 'leaf' : await galKindFetch(location.href.split('#')[0], document);
+        const fix = arrivalFix(rec.thought, truth);
+        dbg('arrival check: the link was taken for ' + rec.thought + ', the page is ' + (truth || 'unknown') + (fix ? ' → ' + fix : ''), { from: rec.from, chain: rec.chain });
+        if (fix === 'learn door') doorLearn('door', rec.chain, rec.path, rec.h);
+        else if (fix === 'drop door') doorLearn('leaf', rec.chain, rec.path);
+        else if (fix === 'keep gallery') galKindKeep(rec.h, 'gallery');
+        else if (fix === 'unkeep gallery') { const k = galKindsKept(); if (k[rec.h]) { delete k[rec.h]; try { sessionStorage.setItem(GAL_KINDS_KEY, JSON.stringify(k)); } catch (e) { /* tab only */ } } }
+        if (!truth) return;
+        reloadSettings();
+        if (!cfg.missLog) return;
+        const log = missRead(MISS_LOG_KEY, {});
+        const hosts = log.hosts && typeof log.hosts === 'object' ? log.hosts : {}, rows = Array.isArray(log.rows) ? log.rows : [];
+        const hs = hosts[pageHost()] || (hosts[pageHost()] = { ok: 0, miss: 0 });
+        if (fix) {
+            hs.miss++;
+            rows.push({ t: new Date().toISOString().slice(0, 16).replace('T', ' '), host: pageHost(), from: rec.from, to: location.href.split('#')[0],
+                thought: rec.thought, was: truth, fix: fix, chain: rec.chain, v: version() });
+        } else hs.ok++;
+        GM_setValue(MISS_LOG_KEY, JSON.stringify({ hosts: hosts, rows: rows.slice(-MISS_LOG_MAX) }));
+    }
+
+    // The miss log as text: a line per host, then a block per miss.
+    function missLogText() {
+        const log = missRead(MISS_LOG_KEY, {}), hosts = log.hosts || {}, rows = log.rows || [];
+        const out = ['Hover Zoom gallery-link misses (' + version() + ')', '', 'host: right / wrong'];
+        Object.keys(hosts).sort().forEach(function (h) { out.push('  ' + h + ': ' + hosts[h].ok + ' / ' + hosts[h].miss); });
+        rows.forEach(function (r) {
+            out.push('', r.t + '  ' + r.host + '  taken for ' + r.thought + ', was ' + r.was + ' → ' + r.fix + '  (' + r.v + ')',
+                '  from ' + r.from, '  to   ' + r.to, '  ' + r.chain);
+        });
+        return out.join('\n');
     }
 
     // Does this page hold a bigger copy of thumb? null = it could not be read.
@@ -18076,6 +18175,61 @@
             refresh();
         }
 
+        // The miss log's count, copy, show and clear.
+        function missLogRow() {
+            const count = document.createElement('span');
+            count.className = 'hint';
+            const btns = document.createElement('div');
+            btns.style.cssText = 'display:flex;gap:6px;flex:none';
+            const mk = function (label, tip) {
+                const b = document.createElement('button');
+                b.type = 'button';
+                b.textContent = label;
+                setTip(b, tip);
+                btns.appendChild(b);
+                return b;
+            };
+            const copyBtn = mk('Copy', 'Copy the whole log, addresses included');
+            const showBtn = mk('Show', 'Show the log here');
+            const clearBtn = mk('Clear', 'Empty the log');
+            const ta = document.createElement('textarea');
+            ta.readOnly = true;
+            ta.hidden = true;
+            ta.spellcheck = false;
+            ta.style.cssText = 'height:160px;font-size:10px;white-space:pre';
+            const r = document.createElement('div');
+            r.className = 'row';
+            r.appendChild(count);
+            r.appendChild(btns);
+            mount.appendChild(r);
+            mount.appendChild(ta);
+            function refresh() {
+                const log = missRead(MISS_LOG_KEY, {}), n = Array.isArray(log.rows) ? log.rows.length : 0;
+                const ok = Object.keys(log.hosts || {}).reduce(function (a, h) { return a + (log.hosts[h].ok || 0); }, 0);
+                count.textContent = n + ' wrong' + (ok ? ' · ' + ok + ' right' : '');
+                btns.style.display = n || ok ? 'flex' : 'none';
+            }
+            function shown(text) { ta.value = text; ta.hidden = false; showBtn.textContent = 'Hide'; }
+            function hidden() { ta.value = ''; ta.hidden = true; showBtn.textContent = 'Show'; }
+            copyBtn.addEventListener('click', function () {
+                const text = missLogText();
+                const done = function () { copyBtn.textContent = 'Copied'; };
+                const fallback = function () {
+                    shown(text);
+                    try { ta.focus(); ta.select(); if (document.execCommand('copy')) done(); } catch (e) { /* left selected */ }
+                };
+                try { navigator.clipboard.writeText(text).then(done, fallback); } catch (e) { fallback(); }
+            });
+            showBtn.addEventListener('click', function () { if (ta.hidden) shown(missLogText()); else hidden(); });
+            clearBtn.addEventListener('click', function () {
+                if (!confirm('Empty the gallery-link miss log?')) return;
+                GM_setValue(MISS_LOG_KEY, '');
+                hidden();
+                refresh();
+            });
+            refresh();
+        }
+
         function check(key, labelText, hintText) {
             const el = document.createElement('input');
             el.type = 'checkbox';
@@ -18976,6 +19130,11 @@
             'one at a time. Hostnames only — no addresses, pages or pictures.');
         reqLog.el.addEventListener('change', function () { usLog.enable(reqLog.el.checked); });
         requestLogRow();
+        check('missLog', 'Log gallery links judged wrong',
+            'When a thumbnail link opens a page that shows the script took it for the wrong thing (a gallery it did not ' +
+            'recognise, or a gallery that is really a photo or a results page), note the two addresses, what it thought and what ' +
+            'it was. Fixed on the spot either way; the log is for fixing sites in bulk. Holds addresses of pages you visited.');
+        missLogRow();
         brokenRulesNotice();
 
         section('Per-site fixes');
@@ -19097,6 +19256,7 @@
     }
 
     if (isTopFrame) setTimeout(areaAgeAll, 0);
+    if (isTopFrame) setTimeout(missArrive, 0);
 
     if (isTopFrame && typeof GM_registerMenuCommand === 'function') {
         GM_registerMenuCommand('Hover Zoom settings', showPanel);

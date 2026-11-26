@@ -346,6 +346,25 @@ What loads ahead follows what the user does. Code: the `ah*` functions after `ga
 - Not verified (2026-11-26): the slideshow backward rule, endless off, LibreWolf, pornpics (refused by both
   browsers' safety lists — needs the user's run).
 
+## Arrival check (v0.411.0, user 2026-11-26; INTERACTION.md `G15`)
+
+The page a door opens is the ground truth for the press that opened it. Hovers could correct a door verdict; arriving could not.
+- **Press** (`missPress`, `CAP_TARGET` mousedown capture, records only — never stops or prevents): left or middle press on
+  a same-origin linked `<img>` ≥ 50 px (or one under a cover) → `hoverZoomPressed` (GM, cross-tab: middle-click and
+  OLINT open new tabs, which get no sessionStorage) `{h, from, path, chain (doorChainOf), thumb, w, ht, thought}`;
+  `thought` = `results` (`galResultsAt`) / `gallery` (`doorReason`) / `none`. ≤ 12 kept, each 2 min.
+- **Arrival** (`missArrive` at boot, top frame, not a probe frame): a pending press whose `h` is this URL (trailing `/`
+  ignored) is consumed, judged `MISS_SETTLE_MS` 2.5 s after `load` (`missJudge`): the pressed picture drawn
+  `DOOR_BIGGER` × bigger here (same URL, `sameStem` or `sameFileId`) → `leaf`; else `galKindFetch(href, document)` on the
+  live page (no `galLoad` fallback: the page is already rendered; may fetch 2 cells' pages for the leaf test).
+- **Fix** (`arrivalFix`, pure, tested): none→door = `doorLearn('door')` (a sample; 3 make a rule, as hovers); a door →
+  leaf = `doorLearn('leaf')` (`areaDrop`, at once); gallery↔results = the tab's `hzDoorKinds2` entry set/removed (per tab only).
+- **Log** (`missLog`, default **off**: it holds page addresses — a slice of browsing history, unlike us-log; the user asked
+  for it): GM `hoverZoomMissLog` `{hosts: {h: {ok, miss}}, rows}` (300 rows), Settings → Diagnostics: Copy / Show / Clear.
+  An unknown verdict (`truth` null) counts neither way.
+- Risk, unmeasured: a photo page drawing its picture under 1.5× the thumbnail reads as its related strip's kind and teaches a
+  door; hover rechecks (10 %) drop such a rule. Verified on door-whole → gallery-whole (none → learn door, logged).
+
 ## Behaviour (user's numbers, 2026-11-09)
 
 - Every picture the page has (`GAL_MAX` = Infinity, user v0.251.0: galleries run 10-100 and a cap
