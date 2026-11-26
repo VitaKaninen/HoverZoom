@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.421.0
+// @version      0.422.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -13599,8 +13599,8 @@
     }
 
     // Rows of one height spread over the viewport, split around the hole: the largest height that fits every shape,
-    // or, when that is under GAL_MIN_H, pages of GAL_MIN_H rows. {out: slots by index for `page`, pages: [[from, to]], page}.
-    function galRows(asp, hole, page) {
+    // or, when that is under GAL_MIN_H, pages of GAL_MIN_H rows (`even`: shared out over those pages). {out: slots by index for `page`, pages: [[from, to]], page}.
+    function galRows(asp, hole, page, even) {
         const G = GAL_GAP, W = vpW(), H = vpH(), bars = [].concat(hole);
         const free = function (y, h) {
             let segs = [[G, W - G]];
@@ -13616,8 +13616,9 @@
             });
             return segs;
         };
-        const place = function (h, from, top) {
+        const place = function (h, from, top, f) {
             top = top || G;
+            f = f || 1;
             const n = Math.max(1, Math.floor((H - top) / (h + G)));
             const pitch = n > 1 ? (H - top - G - h) / (n - 1) : 0;
             const out = [];
@@ -13626,16 +13627,18 @@
                 const y = top + k * pitch;
                 free(y, h).forEach(function (s) {
                     const row = [];
-                    let used = 0;
+                    let used = 0, real = 0;
                     while (i < asp.length) {
-                        const add = (row.length ? G : 0) + asp[i] * h;
+                        const add = (row.length ? G : 0) + asp[i] * h * f;
                         if (used + add > s[1] - s[0]) break;
+                        real += (row.length ? G : 0) + asp[i] * h;
                         row.push(i);
                         used += add;
                         i++;
                     }
-                    const spare = row.length > 1 && i < asp.length ? (s[1] - s[0] - used) / (row.length - 1) : 0;     // the margins keep G; the rest goes between pictures
-                    let x = s[0];
+                    const room = s[1] - s[0] - real, more = i < asp.length;
+                    const spare = row.length > 1 && more ? room / (row.length - 1) : 0;     // the margins keep G; the rest goes between pictures
+                    let x = s[0] + (row.length === 1 && more && f > 1 ? room / 2 : 0);
                     row.forEach(function (j) {
                         out[j] = { x: x, y: y, w: asp[j] * h, h: h };
                         x += asp[j] * h + G + spare;
@@ -13653,14 +13656,26 @@
             }
             return { out: best.out, pages: [[0, asp.length]], page: 0 };
         }
-        const top = G, pages = [], ph = galPagedH(H).h;
-        for (let s = 0; s < asp.length;) {
-            const e = Math.max(place(ph, s, top).next, s + 1);
-            pages.push([s, e]);
-            s = e;
+        const top = G, ph = galPagedH(H).h;
+        const split = function (f) {
+            const pages = [];
+            for (let s = 0; s < asp.length;) {
+                const e = Math.max(place(ph, s, top, f).next, s + 1);
+                pages.push([s, e]);
+                s = e;
+            }
+            return pages;
+        };
+        let pages = split(1), f = 1;
+        if (even && pages.length > 1) {     // the whole set known: each picture counted wider, as far as the page count allows
+            let lo = 1, hi = 4;
+            for (let k = 0; k < 16; k++) {
+                const mid = (lo + hi) / 2, p = split(mid);
+                if (p.length <= pages.length) { lo = mid; f = mid; pages = p; } else hi = mid;
+            }
         }
         const k = Math.min(Math.max(0, page | 0), pages.length - 1);
-        return { out: place(ph, pages[k][0], top).out, pages: pages, page: k };
+        return { out: place(ph, pages[k][0], top, f).out, pages: pages, page: k };
     }
 
     // The shading: the page dark and blurred, except the corner where the clicked picture waits.
@@ -13692,7 +13707,7 @@
     // Lay the set out around one hole; returns the slots.
     function galLayout(set, hole) {
         galLaidAt = performance.now();
-        const R = galRows(set.asp, galBars(hole), set.want != null ? set.want : set.page || 0), L = R.out;
+        const R = galRows(set.asp, galBars(hole), set.want != null ? set.want : set.page || 0, galWhole(set)), L = R.out;
         set.pages = R.pages;
         set.page = R.page;
         if (set.want != null && (R.page >= set.want || galWhole(set) || (set.want >= 1e9 && galFedAll(set)))) set.want = null;     // the last page: every picture known so far, not the read's end (user: back into a gallery stalled)
@@ -15110,7 +15125,7 @@
             ahGrowEnd(href, why === 'grown' || why === 'reported' ? '' : why);
             dlqGrowEnd(href, why, galGrown.has(href));
             dbg('gallery read to its end: ' + why, { href: href, from: from, pictures: (galLists.get(href) || []).length, final: galGrown.has(href), ms: Math.round(performance.now() - t0), open: !!galCur && galCur.href === href });
-            if (galCur && galCur.href === href) galPageNote(galCur);
+            if (galCur && galCur.href === href) { galPageNote(galCur); if (galWhole(galCur) && galCur.pages && galCur.pages.length > 1 && !galLook) galPageWork(galCur, galLayout(galCur, galCur.open)); }     // the end known: pages share it out
             galChipsCount(href);
             galDlShow();
         }).then(function (v) { if (Array.isArray(v)) galMore(href, v); });

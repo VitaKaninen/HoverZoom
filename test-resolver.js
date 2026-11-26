@@ -1353,6 +1353,22 @@ const galPH = function (min) {
     const nextTo = big.out.filter(function (r) { return r && r.y > hole.y && r.y < hole.y + hole.h && r.x > hole.x; }).sort(function (a, b) { return a.x - b.x; });
     eq('  the picture right of the hole sits one gap from it', Math.round(nextTo[0].x), hole.x + hole.w + 12);
     console.log('  (683 pictures: ' + big.pages.length + ' pages of about ' + (big.pages[0][1] - big.pages[0][0]) + ')');
+    const sizes = function (P) { return P.map(function (p) { return p[1] - p[0]; }); };
+    [190, 683, 100].forEach(function (n) {
+        const asp = n === 100 ? Array.from({ length: n }, function (_, i) { return [0.6, 4 / 3, 1, 1.8][i % 4]; }) : four3(n);
+        const greedy = rows(asp, hole, 0), even = rows(asp, hole, 0, true), sz = sizes(even.pages), gs = sizes(greedy.pages);
+        eq('gallery even (' + n + '): same page count as packed', even.pages.length, greedy.pages.length);
+        eq('  covers every picture once', sz.reduce(function (a, b) { return a + b; }, 0), n);
+        eq('  last page at least as full as packed', sz[sz.length - 1] >= gs[gs.length - 1], true);
+        eq('  pages within 25% of each other', Math.min.apply(null, sz) >= 0.75 * Math.max.apply(null, sz), true);
+        for (let p = 0; p < even.pages.length; p++) {
+            const out = rows(asp, hole, p, true).out.filter(Boolean);
+            const ok = out.length === sz[p] && out.every(function (r) { return r.x >= 11.5 && r.x + r.w <= 1908.5 &&
+                (r.x + r.w <= hole.x || r.x >= hole.x + hole.w || r.y + r.h <= hole.y || r.y >= hole.y + hole.h); });
+            if (!ok) { eq('  page ' + p + ' places its own, inside the window, clear of the hole', false, true); break; }
+        }
+        console.log('  (even ' + n + ': ' + sz.join(' ') + ' — packed ' + gs.join(' ') + ')');
+    });
 }
 // ---- resizing the clicked picture: snaps to row edges, gap middles and the window's centre lines; Alt (not here) is free.
 {

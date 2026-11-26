@@ -121,7 +121,12 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   `cfg.galleryRowMin` (user v0.301.0, default 120, never under 48). If everything fits at the floor
   the binary search grows the rows from there; else pages, whose rows also grow to fill the height
   (`galPagedH`: as many rows as fit at the floor, then the spare height shared out; user: "any extra
-  room is taken up by expanding the images, they never go smaller"). A settings change while a
+  room is taken up by expanding the images, they never go smaller"). **Shared out once the set is whole**
+  (`galRows(…, even)` = `galWhole(set)`, user v0.422.0: packed pages left a last page of a few): each picture
+  counts `f`× wider when packing, `f` the largest (binary search, ≤ 4) that keeps the packed page count; drawn at
+  its real width, spare spread between, a lone picture centred. Row height and row lines are unchanged —
+  growing the rows instead would move `galPagedRows`, which the clicked picture's snapping and memory sit on.
+  Not while growing: pages would reshuffle on every append. The grow-end callback relays once. A settings change while a
   gallery is open runs `galRefit`. A bar (the clicked picture, a detached strip) cuts only the rows
   it overlaps vertically: one touching a row, e.g. snapped to its bottom line, leaves that row whole
   (user v0.304.0; the old `G` margin cut it and left a gap above the picture). `galRows` takes several bars (the clicked picture and its strip). Tested in `test-resolver.js`.
