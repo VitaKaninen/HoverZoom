@@ -1,5 +1,10 @@
 # Built 2026-11-26 (v0.387.0) — loading ahead, by what the user is doing. Reference: GALLERY.md "Loading ahead"
 
+**Unreproduced (user, v0.388.0, Endless on):** once, the main page loaded counts + thumbnails for the screen, then
+all traffic stopped for minutes; the galleries below stayed grey until a small scroll restarted it. Not seen again;
+the fixture (`door-long`) keeps going down the page at ~1.8 galleries/s. Suspect a stuck gate in `galPreNext`
+(`galPre`, `galGrowing`, `ahBehind`, or `ahMainPick` returning null) — ask for the `loading ahead:` debug lines.
+
 **Last asked:** user to try v0.387.0 on pornpics (both browsers refuse it to Claude). Not answered yet.
 
 The spec as agreed (kept until the user confirms it works):
