@@ -1414,19 +1414,25 @@ const galPH = function (min) {
     const a = src.indexOf('    // Pure: entries {y, h} in reading order');
     const b = src.indexOf('    // The slideshow\'s list cut into pages');
     if (a < 0 || b < 0) { console.error('pageSplit markers not found'); process.exit(1); }
-    const P = new Function('const TW_PAGE_TOP = 8, TW_PAGE_MIN_PER = 4;' + src.slice(a, b) +
+    const P = new Function('const TW_PAGE_TOP = 8, TW_WALL_PAGES = 3, TW_WALL_COVER = 0.5, TW_WALL_GAP = 80;' + src.slice(a, b) +
         '\nreturn {pageSplit, pageOfIndex, pagesWorth};')();
-    const col = [0, 900, 1800, 2700].map(function (y) { return { y: y, h: 700 }; });
+    const pw = function (list) { return P.pagesWorth({ list: list, starts: P.pageSplit(list, 1000) }, 1600, 1000); };
+    const col = [0, 900, 1800, 2700].map(function (y) { return { x: 200, y: y, w: 1200, h: 700 }; });
     eq('pages: a column of big pictures is a page each', P.pageSplit(col, 1000), [0, 1, 2, 3]);
-    eq('pages: one per page is not worth a row', P.pagesWorth(4, 4), false);
+    eq('pages: a column of big pictures (a forum post) is not a wall', pw(col), false);
     const grid = [];
-    for (let r = 0; r < 9; r++) for (let c = 0; c < 4; c++) grid.push({ y: 100 + r * 260, h: 240 });
+    for (let r = 0; r < 9; r++) for (let c = 0; c < 4; c++) grid.push({ x: 20 + c * 395, y: 100 + r * 260, w: 380, h: 240 });
     const gs = P.pageSplit(grid, 1000);
     eq('pages: a grid of 4 across, 3 rows a screen', gs, [0, 12, 24]);
-    eq('pages: the grid is worth a row', P.pagesWorth(grid.length, gs.length), true);
+    eq('pages: the grid is a wall worth a row', pw(grid), true);
+    eq('pages: two screens of grid are too few', pw(grid.slice(0, 24)), false);
+    const sparse = grid.map(function (r, i) { return { x: r.x, y: 100 + Math.floor(i / 4) * 560, w: 380, h: 240 }; });
+    eq('pages: text bands between the rows (300 px) break the wall', pw(sparse), false);
+    const small = grid.map(function (r) { return { x: r.x, y: r.y, w: 120, h: 240 }; });
+    eq('pages: pictures filling under half the screen are not a wall (Wikipedia)', pw(small), false);
     eq('pages: a picture cut by the screen\'s bottom starts the next page', P.pageSplit([{ y: 0, h: 500 }, { y: 600, h: 500 }], 1000), [0, 1]);
     eq('pages: page of index', [P.pageOfIndex(gs, 0), P.pageOfIndex(gs, 13), P.pageOfIndex(gs, 35)], [0, 1, 2]);
-    eq('pages: a single page is never worth a row', P.pagesWorth(30, 1), false);
+    eq('pages: a single page is never worth a row', pw(grid.slice(0, 8)), false);
 }
 {   // nsfw.xxx multi-picture post: thumbnails[i] pairs with urls[i]; the file names share nothing
     const s = src.indexOf('    // Every list of 2+ picture URLs'), e = src.indexOf('    // The same-origin page this picture links to');

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.405.0
+// @version      0.406.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -9672,10 +9672,12 @@
     let tw = null;              // { host, box, prev, count, next, dock, rect, near }
     let twPics = 0;             // pictures on the page by the cheap count, capped at 2
     let twStartAt = 0;          // the index the idle widget shows and the wheel / ⇅ open at: the first picture on screen
+    let twDoorN = 0;            // gallery covers on the page (settled doors); at TW_GAL_SHARE of all the widget hides
+    const TW_GAL_SHARE = 0.3;
     let twTotal = -1;          // the real count: at load, when scrolling stops, and when the pointer nears the widget
     let twPg = { list: [], starts: [] };    // the idle widget's pages ({y, h} only), taken with each count
     const TW_PAGE_TOP = 8;          // px left above a page's first picture (boot runs twRefresh: keep above it)
-    const TW_PAGE_MIN_PER = 4;      // the page row shows only when a page holds this many pictures on average
+    const TW_WALL_PAGES = 3, TW_WALL_COVER = 0.5, TW_WALL_GAP = 80;     // the page row: 3+ screens that are half pictures or more, side by side, no gap over 80 px
     let twStarting = null;      // the token of a tour being opened from the widget
     let dlqFinding = false;     // a failed download's Page is scrolling this page to find it
     let twRecountTimer = 0;
@@ -9831,8 +9833,11 @@
     }
 
     function twWanted() {
-        return !!cfg.tourButtons && isTopFrame && siteEnabled() && !CAPTCHA_HERE && !twGalOpen && (!!tour || (twPics >= 2 && twTotal >= 2));
+        return !!cfg.tourButtons && isTopFrame && siteEnabled() && !CAPTCHA_HERE && !twGalOpen && (!!tour || (twPics >= 2 && twTotal >= 2 && !twGalleryPage()));
     }
+
+    // A page of galleries: covers are TW_GAL_SHARE or more of the covers and pictures together (user 2026-11-26).
+    function twGalleryPage() { return twDoorN > 0 && twDoorN >= (twDoorN + Math.max(0, twTotal)) * TW_GAL_SHARE; }
 
     function twRefresh() {
         if (!isTopFrame || !document.body) return;
@@ -9846,7 +9851,8 @@
         twPics = twCount();
         const was = twTotal;
         if (!tour) { const l = twPics >= 2 ? widgetEntries() : []; twTotal = l.length; twStartAt = twStartOf(l); twPg = twPagesOf(l); }
-        if (!tour && twTotal !== was && debugOn()) dbg('widget count ' + twTotal, twReport());
+        try { twDoorN = galDoorList().length; } catch (e) { twDoorN = 0; }     // at boot the gallery state below is not declared yet
+        if (!tour && twTotal !== was && debugOn()) dbg('widget count ' + twTotal, { doors: twDoorN, galleryPage: twGalleryPage(), pictures: twReport() });
         const on = twWanted();
         if (on) twTheme();
         if (on) setTimeout(twWarmFirst, 0);     // never during boot: it reads `let`s declared further down
@@ -9901,8 +9907,11 @@
     }
     function twPaint(el, scheme) {
         const p = twPalette(scheme);
-        TW_COLOR_KEYS.forEach(function (k) { el.style.setProperty('--' + k, p[k]); });
-        el.style.setProperty('--shadow', usDock.THEME[scheme].shadow);
+        p.shadow = usDock.THEME[scheme].shadow;
+        TW_COLOR_KEYS.concat('shadow').forEach(function (k) {
+            el.style.setProperty('--' + k, p[k]);
+            ['bg', 'text', 'border'].forEach(function (t) { el.style.setProperty('--darkreader-' + t + '--' + k, p[k]); });     // Dark Reader's copy of our sheet reads these: our colours, not its
+        });
         el.style.colorScheme = scheme;
     }
     function twTheme() { if (tw) twPaint(tw.box, usDock.theme().scheme); }
@@ -10005,15 +10014,43 @@
         while (p + 1 < starts.length && starts[p + 1] <= k) p++;
         return p;
     }
-    // Pure: does a page press save enough presses to be worth a row?
-    function pagesWorth(n, pages) { return pages >= 2 && n / pages >= TW_PAGE_MIN_PER; }
+    // Pure: is this a wall of pictures worth a page row? {list: [{x, y, w, h}], starts}, the window's size. See TOUR.md "The page row".
+    function pagesWorth(pg, vw, vh) {
+        const st = pg.starts, l = pg.list, GX = 64, GY = 48;
+        if (st.length < TW_WALL_PAGES || !vw || !vh) return false;
+        let walls = 0;
+        for (let p = 0; p < st.length; p++) {
+            const top = l[st[p]].y, g = new Uint8Array(GX * GY);
+            let side = false;
+            const band = l.filter(function (r) { return r.y < top + vh && r.y + r.h > top; });
+            band.forEach(function (r, i) {
+                const x0 = Math.max(0, Math.floor(r.x / vw * GX)), x1 = Math.min(GX, Math.ceil((r.x + r.w) / vw * GX));
+                const y0 = Math.max(0, Math.floor((r.y - top) / vh * GY)), y1 = Math.min(GY, Math.ceil((r.y + r.h - top) / vh * GY));
+                for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) g[y * GX + x] = 1;
+                if (!side) side = band.some(function (q, j) {
+                    return j !== i && (q.x >= r.x + r.w || q.x + q.w <= r.x) && Math.min(q.y + q.h, r.y + r.h) - Math.max(q.y, r.y) >= Math.min(q.h, r.h) / 2;
+                });
+            });
+            let cover = 0, gap = 0, run = 0, first = -1, last = -1;
+            const rows = [];
+            for (let y = 0; y < GY; y++) {
+                let any = 0;
+                for (let x = 0; x < GX; x++) { cover += g[y * GX + x]; any |= g[y * GX + x]; }
+                rows.push(any);
+                if (any) { if (first < 0) first = y; last = y; }
+            }
+            for (let y = first; y >= 0 && y <= last; y++) { if (rows[y]) run = 0; else gap = Math.max(gap, ++run); }     // between picture rows only
+            if (side && cover / (GX * GY) >= TW_WALL_COVER && gap * vh / GY <= TW_WALL_GAP) walls++;
+        }
+        return walls >= TW_WALL_PAGES && walls * 2 >= st.length;
+    }
 
     // The slideshow's list cut into pages: pictures on this document only (a fetched page's come last and have no place).
     function twPagesOf(list) {
         let n = 0;
         while (n < list.length && !(list[n].el && list[n].el.ownerDocument !== document)) n++;
         const live = [];
-        for (let i = 0; i < n; i++) live.push({ y: list[i].y, h: list[i].h });
+        for (let i = 0; i < n; i++) live.push({ x: list[i].x || 0, y: list[i].y, w: list[i].w || 0, h: list[i].h });
         return { list: live, starts: pageSplit(live, vpH()) };
     }
 
@@ -10083,7 +10120,9 @@
         tw.wheel.classList.toggle('faint', !n);
         tw.wheel.classList.toggle('armed', !!(tour && tour.on && placed));
         const pg = twPagesNow() || twPg, np = pg.starts.length;
-        tw.pageRow.classList.toggle('on', pagesWorth(pg.list.length, np));
+        const vk = vpW() + 'x' + vpH();
+        if (pg.worthAt !== vk) { pg.worthAt = vk; pg.worth = pagesWorth(pg, vpW(), vpH()); }     // the list is retaken on every count, so this is fresh
+        tw.pageRow.classList.toggle('on', pg.worth);
         tw.pgNum.textContent = 'Page ' + (np ? (on && tour.index >= 0 ? pageOfIndex(pg.starts, tour.index) : twPageNow(pg)) + 1 : 1) + ' / ' + Math.max(1, np);
         twOpacity();
         if (tw.host.style.display !== 'none') tw.dock.sizeChanged();     // the counter's width
@@ -12205,6 +12244,7 @@
                 if (k2 && k2 !== 'results') k = k2;
             }
             galKindDone.set(key, k);
+            setTimeout(twRecount, 0);       // a settled area may make this a page of galleries
             return k;
         });
         galKinds.set(key, p);
@@ -16320,6 +16360,8 @@
         b.textContent = 'Gallery did not open - copy this for Claude';
         ta.readOnly = true;
         ta.value = galDiagText(p, why);
+        try { console.warn('[HoverZoom ' + version() + '] gallery did not open: ' + why + '\n' + ta.value); } catch (e) { /* no console */ }     // always, debug or not: a tool reading the console must see it
+        if (debugOn()) ahT('note', { m: 'gallery did not open: ' + why, d: { href: p.href } });
         copy.textContent = 'Copy';
         close.textContent = 'Close';
         copy.addEventListener('click', function () {
