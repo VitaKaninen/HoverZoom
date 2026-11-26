@@ -1468,9 +1468,10 @@ const galPH = function (min) {
     eq('gate: equal priority takes turns, main last (v0.399.0)', order, ['gal', 'galo', 'gal', 'galo', 'gal', 'gal', 'main']);
 }
 // ---- the open gallery's thumbnail ramp: 1 page ahead on page 1, GAL_AHEAD_ON once the user steps on, then the page's number.
+const srcLf = src.split(String.fromCharCode(13)).join('');     // the checkout may be CRLF
 {
-    const at = src.indexOf('    function galAhead(at)'), k = src.indexOf('const GAL_AHEAD_ON');
-    const body = src.slice(at, src.indexOf('\n    }\n', at) + 7), c = src.slice(k, src.indexOf(';', k) + 1);
+    const at = srcLf.indexOf('    function galAhead(at)'), k = srcLf.indexOf('const GAL_AHEAD_ON');
+    const body = srcLf.slice(at, srcLf.indexOf('\n    }\n', at) + 7), c = srcLf.slice(k, srcLf.indexOf(';', k) + 1);
     const ga = new Function(c + NL + body + NL + 'return galAhead;')();
     eq('gallery ramp: page 1 keeps 1 page ahead', ga(1), 1);
     eq('gallery ramp: after a forward step, 5 ahead', [2, 3, 4, 5].map(ga), [5, 5, 5, 5]);
@@ -1478,8 +1479,8 @@ const galPH = function (min) {
 }
 // ---- arrival check: what a pressed link was taken for against the page it opened.
 {
-    const at = src.indexOf('    function arrivalFix(');
-    const af = new Function(src.slice(at, src.indexOf('\n    }\n', at) + 7) + NL + 'return arrivalFix;')();
+    const at = srcLf.indexOf('    function arrivalFix(');
+    const af = new Function(srcLf.slice(at, srcLf.indexOf('\n    }\n', at) + 7) + NL + 'return arrivalFix;')();
     eq('arrival: an unrecognised gallery link teaches a door', af('none', 'gallery'), 'learn door');
     eq('arrival: an unrecognised results link teaches a door', af('none', 'results'), 'learn door');
     eq('arrival: a previewed photo link that is a photo page agrees', af('none', 'leaf'), null);

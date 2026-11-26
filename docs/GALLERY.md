@@ -331,6 +331,11 @@ What loads ahead follows what the user does. Code: the `ah*` functions after `ga
   forward page step outside a slideshow = skipping: originals stop (`galo` dropped) until the next preview. A
   backward step puts the `AH_BACK` 5 before it first; forward resumes after. Closing the gallery drops `gal`
   and `galo` and the main page restarts from the first door on screen.
+- **A restart never cancels what is in flight** (v0.412.0, user: after 2 page steps nothing loaded but the hovered
+  picture). `galHqAhead` runs on every thumbnail append (`set.pv`) and every preview, and it used to set `hqTok.cancelled`,
+  which `galResolve` honours: each restart killed the run's 6 in-flight originals, so few ever finished. Now it sets
+  `hqTok.stop` (start nothing more); in-flight ones land and set `hqTried`, and `hqBusy` keeps the new run from
+  starting them twice. Real cancels stay: gallery closed (`galDrop`), Load all turned off, a skip with Load all off.
 - **`hqTried` only on a found original** (v0.395.0): a run (`galHqAll`) probes without `fresh`, so it reuses a cached
   miss (`probeMiss`, `PROBE_RETRY_MS`); marking every picture tried made one bad patch permanent — no run ever
   loaded those pictures again and each hover fetched its own (user, LibreWolf, girlstop; Chrome's run: 37/37,

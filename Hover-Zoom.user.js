@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.411.0
+// @version      0.412.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -640,9 +640,190 @@
 
     function debugOn() { return pageDebug || !!cfg.debug; }
 
+    // ---- activity window: what loads in the background and why, in plain words, in a window of its own. See docs/ACTIVITY.md.
+    const ACT_NAME = 'hzActivity', ACT_KEEP = 3000, ACT_DOM_MAX = 6000;
+    const actBuf = [];          // this page's lines, kept so a window opened later shows them
+    let actWin = null, actList = null, actArmed = false, actIdx = null, actIdxAt = 0;
+
+    // One line: kind 'job' (what starts), 'ok'/'bad' (a file done), 'you' (what the user did), 'warn', 'info'.
+    function act(kind, text) {
+        const now = new Date();
+        const line = { t: now.toTimeString().slice(0, 8) + '.' + String(now.getMilliseconds()).padStart(3, '0').slice(0, 1), kind: kind, text: text };
+        actBuf.push(line);
+        if (actBuf.length > ACT_KEEP) actBuf.splice(0, actBuf.length - ACT_KEEP);
+        if (actWin) actDraw(line);
+    }
+
+    const ACT_COLORS = { job: '#cdd6f4', ok: '#a6adc8', bad: '#f38ba8', you: '#89b4fa', warn: '#f9e2af', info: '#9399b2', page: '#a6e3a1' };
+    function actDraw(line) {
+        try {
+            if (!actWin || actWin.closed || !actList || !actList.isConnected) { actWin = null; return; }
+            const d = actWin.document, row = d.createElement('div'), sc = d.scrollingElement || d.documentElement;
+            const stick = sc.scrollHeight - sc.scrollTop - sc.clientHeight < 40;
+            row.style.cssText = 'white-space:pre-wrap;padding:1px 0;color:' + (ACT_COLORS[line.kind] || '#cdd6f4') +
+                (line.kind === 'job' || line.kind === 'you' || line.kind === 'page' ? ';font-weight:600;margin-top:4px' : '');
+            const tm = d.createElement('span');
+            tm.style.cssText = 'color:#6c7086';
+            tm.textContent = line.t + '  ';
+            row.appendChild(tm);
+            row.appendChild(d.createTextNode((line.kind === 'ok' || line.kind === 'bad' ? '    ' : '') + line.text));
+            actList.appendChild(row);
+            while (actList.childElementCount > ACT_DOM_MAX) actList.firstElementChild.remove();
+            if (stick) sc.scrollTop = sc.scrollHeight;
+        } catch (e) { actWin = null; }
+    }
+
+    // The window: opened (or found again by name) and filled with this page's lines so far.
+    function actOpen() {
+        if (!isTopFrame) return;
+        let w = null;
+        try { w = window.open('', ACT_NAME, 'popup=yes,width=620,height=720'); } catch (e) { w = null; }
+        if (!w) {
+            actArmed = true;
+            toast('Pop-up blocked: click anywhere on the page to open the activity window', 5000);
+            return;
+        }
+        actArmed = false;
+        const d = w.document;
+        let list = d.getElementById('hz-act');
+        if (!list) {
+            d.title = 'Hover Zoom activity';
+            d.body.style.cssText = 'margin:0;background:#1e1e2e;color:#cdd6f4;font:12px/1.45 ui-monospace,Consolas,monospace';
+            const bar = d.createElement('div');
+            bar.style.cssText = 'position:sticky;top:0;display:flex;gap:8px;align-items:center;padding:6px 10px;background:#313244;border-bottom:1px solid #45475a;font:12px system-ui,sans-serif';
+            const title = d.createElement('span');
+            title.style.cssText = 'flex:1;color:#cdd6f4';
+            title.textContent = 'Hover Zoom — what it is loading, and why';
+            bar.appendChild(title);
+            const btn = function (label, fn) {
+                const b = d.createElement('button');
+                b.textContent = label;
+                b.style.cssText = 'font:12px system-ui,sans-serif;color:#cdd6f4;background:#45475a;border:1px solid #585b70;border-radius:4px;padding:2px 10px;cursor:pointer';
+                b.addEventListener('click', function () { fn(b); });
+                bar.appendChild(b);
+            };
+            btn('Copy', function (b) {
+                const text = Array.prototype.map.call(d.getElementById('hz-act').children, function (r) { return r.textContent; }).join('\n');
+                const ok = function () { b.textContent = 'Copied'; setTimeout(function () { b.textContent = 'Copy'; }, 1500); };
+                try { w.navigator.clipboard.writeText(text).then(ok, function () {}); } catch (e) { /* no clipboard */ }
+            });
+            btn('Clear', function () { const l = d.getElementById('hz-act'); while (l.firstChild) l.firstChild.remove(); });
+            d.body.appendChild(bar);
+            list = d.createElement('div');
+            list.id = 'hz-act';
+            list.style.cssText = 'padding:6px 10px 24px';
+            d.body.appendChild(list);
+        }
+        actWin = w;
+        actList = list;
+        actDraw({ t: new Date().toTimeString().slice(0, 8) + '.0', kind: 'page', text: '── this page: ' + location.href.split('#')[0] + ' (' + version() + ') — the lines since it opened ──' });
+        actBuf.forEach(actDraw);
+        try { w.focus(); } catch (e) { /* focus refused */ }
+    }
+
+    // A blocked pop-up waits for a real click on the page, which may open one.
+    function actPress() { if (actArmed) actOpen(); }
+
+    // Where a gallery link sits, in words: the open one, its place in the queue, or its number on the page; and its title.
+    function actGal(href) {
+        if (!href) return 'a gallery';
+        const doors = actDoors(), i = doors.h.indexOf(href);
+        let where = i >= 0 ? 'gallery ' + (i + 1) + ' on the page' : 'a gallery not on the page';
+        try {
+            if (galCur && galCur.href === href) where = 'the open gallery';
+            else if (galChain && galChain.hrefs.indexOf(href) > galChain.at) {
+                const q = galChain.hrefs.indexOf(href) - galChain.at;
+                where = q === 1 ? 'the next gallery' : q + ' galleries ahead';
+            }
+        } catch (e) { /* gallery state not declared yet */ }
+        return where + ' “' + actTitle(href, i >= 0 ? doors.img[i] : null) + '”';
+    }
+
+    // The page's gallery links, re-read at most once a second.
+    function actDoors() {
+        if (actIdx && Date.now() - actIdxAt < 1000) return actIdx;
+        const h = [], img = [];
+        try { galDoorList().forEach(function (d) { h.push(d.h); img.push(d.img); }); } catch (e) { /* not ready */ }
+        actIdx = { h: h, img: img };
+        actIdxAt = Date.now();
+        return actIdx;
+    }
+
+    // A gallery's title: its picture's alt or the link's title, else its address's last words.
+    function actTitle(href, img) {
+        let t = (img && (img.getAttribute('alt') || (img.closest('a[title]') || { title: '' }).title)) || '';
+        if (!t) {
+            try {
+                const segs = new URL(href).pathname.split('/').filter(Boolean);
+                t = segs.filter(function (s) { return /[a-z].*-.*[a-z]/i.test(s); }).pop() || segs.pop() || href;
+                t = decodeURIComponent(t).replace(/[-_]+/g, ' ');
+            } catch (e) { t = href; }
+        }
+        t = t.replace(/\s+/g, ' ').trim();
+        return t.length > 60 ? t.slice(0, 57) + '…' : t;
+    }
+
+    // A picture in words: its gallery and number when known, and its file name.
+    const actPicAt = new Map(), actListsSeen = new WeakSet();
+    function actPic(url) {
+        const f = actFile(url);
+        try {
+            const open = galCur && galLists.get(galCur.href);
+            const k = Array.isArray(open) ? open.findIndex(function (it) { return it && it.thumb === url; }) : -1;
+            if (k >= 0) return 'open gallery, picture ' + (k + 1) + ' — ' + f;
+            let w = actPicAt.get(url);
+            if (!w) {
+                galLists.forEach(function (list, h) {
+                    if (!Array.isArray(list) || actListsSeen.has(list)) return;
+                    actListsSeen.add(list);
+                    list.forEach(function (it, i) { if (it && it.thumb) actPicAt.set(it.thumb, [h, i]); });
+                });
+                w = actPicAt.get(url);
+            }
+            if (w) return (galCur && galCur.href === w[0] ? 'open gallery' : actGalShort(w[0])) + ', picture ' + (w[1] + 1) + ' — ' + f;
+        } catch (e) { /* gallery state not declared yet */ }
+        return f;
+    }
+
+    function actGalShort(href) {
+        const i = actDoors().h.indexOf(href);
+        return i >= 0 ? 'gallery ' + (i + 1) : 'gallery “' + actTitle(href, null) + '”';
+    }
+
+    // A file's name from its address: the last part, with the folder before it when the name alone is short.
+    function actFile(url) {
+        try {
+            const segs = new URL(url, location.href).pathname.split('/').filter(Boolean).map(function (s) { try { return decodeURIComponent(s); } catch (e) { return s; } });
+            const last = segs.pop() || url;
+            return last.length < 10 && segs.length ? segs.pop() + '/' + last : last;
+        } catch (e) { return String(url).slice(-60); }
+    }
+
+    function actSecs(ms) { return ms >= 1000 ? (ms / 1000).toFixed(1) + ' s' : Math.round(ms) + ' ms'; }
+
+    const ACT_WHY = { main: 'for the page', gal: 'for the next galleries', galo: 'for the open gallery', count: 'to count it', shown: 'for the open gallery' };
+
+    // A loading-ahead trace event as a line.
+    function actTrace(ev, o) {
+        if (ev === 'thumb') act(o.ok ? 'ok' : 'bad', (o.ok ? '✓ thumbnail ' : '✗ thumbnail failed ') + actPic(o.u) + ' · ' + actSecs(o.ms) + ' · ' + (ACT_WHY[o.tag] || o.tag));
+        else if (ev === 'orig') act(o.ok ? 'ok' : 'bad', (o.ok ? '✓ full size ' : '✗ no full size found ') + actPic(o.u) + ' · ' + actSecs(o.ms) + ' · ' + (ACT_WHY[o.tag] || o.tag));
+        else if (ev === 'page') act(o.ok ? 'ok' : 'bad', (o.ok ? '✓ read the page of ' : '✗ could not read the page of ') + actGal(o.h) + (o.ok ? ': ' + o.n + ' pictures' : o.st ? ': status ' + o.st : '') + ' · ' + actSecs(o.ms) + ' · ' + (ACT_WHY[o.tag] || o.tag));
+        else if (ev === 'act') {
+            if (o.a === 'page') act('you', 'You went ' + (o.dir > 0 ? 'forward' : 'back') + ' a page');
+            else if (o.a === 'close') act('you', 'You closed the gallery — the page\'s own loading starts again from the first gallery on screen');
+            else if (o.a === 'look') act('you', 'Gallery preview (hover) of ' + actGal(o.h));
+        }
+    }
+
+    // `hover-zoom:activity`: the activity lines as text on <html data-hz-activity>, for a tool.
+    document.addEventListener('hover-zoom:activity', function () {
+        try { document.documentElement.setAttribute('data-hz-activity', actBuf.map(function (l) { return l.t + ' ' + l.kind + ' ' + l.text; }).join('\n')); } catch (x) { /* none */ }
+    });
+
     // Loading-ahead trace, debug only: `hover-zoom:ahead-trace` (detail {since, max, urls, clear}, or that as JSON) prints it as one JSON line.
     const ahTraceBuf = [];
     function ahT(ev, o) {
+        try { actTrace(ev, o || {}); } catch (e) { /* a line lost, never the load */ }
         if (!debugOn()) return;
         const e = { t: Math.round(performance.now()), ev: ev };
         if (o) for (const k in o) e[k] = o[k];
@@ -8018,7 +8199,7 @@
         e.stopImmediatePropagation();
     }
     CAP_TARGET.addEventListener('mousedown', function (e) { galInfoPress(e); }, true);      // first of all: a press that closes the ⓘ box reaches nothing else
-    CAP_TARGET.addEventListener('mousedown', function (e) { missPress(e); }, true);       // records only: never stops or prevents
+    CAP_TARGET.addEventListener('mousedown', function (e) { missPress(e); actPress(); }, true);       // records only: never stops or prevents
     ['mouseup', 'click', 'auxclick', 'dblclick', 'contextmenu'].forEach(function (t) { CAP_TARGET.addEventListener(t, function (e) { galInfoAfter(e); }, true); });
     CAP_TARGET.addEventListener('auxclick', midSaveClick, true);
     CAP_TARGET.addEventListener('click', midSaveClick, true);
@@ -11018,7 +11199,10 @@
         const myToken = token = { cancelled: false, fresh: true };
         primeLink(el);
         const pre = plGet(el);
-        if (preFits(pre, displayed)) {
+        const ready = preFits(pre, displayed);
+        act(ready ? 'you' : 'warn', 'Slideshow: ' + actPic((el.__hzItem && el.__hzItem.thumb) || pictureUrl(el)) +
+            (ready ? ' — its full size was already loaded' : ' — full size NOT loaded yet: showing the small picture, finding the full size now'));
+        if (ready) {
             dbg('tour: from the preload buffer', pre.res);
             swapViewer(pre.res, true);
             // The preload spent one guess, or the page has offered more since (Google fills a
@@ -11095,8 +11279,10 @@
             showSpinner();
             dockSpinner();
             let hit = null;
+            const t0 = performance.now();
             try {
                 hit = await resolve(el, displayed, myToken, null);
+                if (!myToken.cancelled && !had) act(hit ? 'ok' : 'bad', (hit ? '✓ full size found ' : '✗ no full size found ') + actFile(hit ? hit.url : pictureUrl(el) || '') + ' · ' + actSecs(performance.now() - t0) + ' · the slideshow was waiting on it');
             } finally {
                 plPaused = false;
                 plPump();
@@ -11750,6 +11936,7 @@
         plLive = plLive.filter(function (t) { return t !== token; });
         if (job.gen !== plGen || token.cancelled) return;
         plSet(job.el, { res: hit, displayed: displayed, sig: candSig(job.el, PL_GUESSES), warm: plWarmGen });
+        act(hit ? 'ok' : 'bad', (hit ? '✓ full size ' : '✗ no full size found ') + actFile(hit ? hit.url : pictureUrl(job.el) || '') + ' · ' + (job.page ? 'for the pictures on screen' : 'for the slideshow, ' + job.dist + ' ahead'));
         dbg('preloaded', { ahead: job.dist, buffered: plDone.size, queued: plQueue.length,
             workers: plWorkers(), got: hit ? hit.w + '×' + hit.h + ' ' + hit.url.slice(-48)
                                           : 'nothing (the full search runs on arrival)' });
@@ -11762,6 +11949,7 @@
 
     // Queue every entry not yet answered, nearest first and ahead before behind. Nothing running
     // is cancelled: a picture passed at speed is still wanted when the user comes back.
+    let plFillLast = -1;
     function plFill(list, at, dir) {
         if (at < 0 || (tour && tour.gal)) return;      // a gallery loads its pages' originals itself (galHqAll)
         const depth = plDepth();
@@ -11784,6 +11972,7 @@
             if (pre && pre.res && pre.res.video) plWarmVideo(pre.res.url);
         }
         jobs.sort(function (x, y) { return x.dist - y.dist; });
+        if (jobs.length !== plFillLast) { plFillLast = jobs.length; if (jobs.length) act('job', 'Slideshow: ' + jobs.length + ' pictures still to load at full size, nearest first'); }
         plQueue = jobs;
         plSerial = list.some(function (e) { return noRush(hostOf(e.url)); });
         plPump();
@@ -12033,6 +12222,7 @@
             added++;
         });
         if (added) dbg('loading ' + added + ' more ahead', { queued: plQueue.length });
+        if (added) act('job', 'Page: loading the full size of ' + added + ' pictures ' + (level >= 3 ? 'on the page' : 'on and near the screen'));
         plPump();
     }
 
@@ -13708,7 +13898,7 @@
         const back = g.back != null ? set.pics.slice(Math.max(0, g.back - AH_BACK), g.back).reverse() : [];
         g.from = from;
         g.end = end;
-        if (set.hqTok) set.hqTok.cancelled = true;
+        if (set.hqTok) set.hqTok.stop = true;      // the old run starts nothing more; what it has in flight still lands
         const list = galLists.get(set.href), rest = all && Array.isArray(list) ? list.slice(set.pics.length).map(function (it) {
             return { __hzItem: it, naturalWidth: 0, naturalHeight: 0, src: it.thumb, currentSrc: it.thumb };     // not built yet: a stand-in, as ahOrig
         }) : [];
@@ -13883,10 +14073,12 @@
             if (!g.warm.has(h)) {
                 g.warm.add(h);
                 dbg('loading ahead: thumbnails of gallery ' + (i + 1) + ' of the queue', { href: h, ahead: n });
+                act('job', 'Next galleries: loading the first 2 pages of thumbnails of ' + actGal(h) + ' (keeping ' + n + ' galleries ready)');
                 await Promise.all(list.slice(0, 2 * per).map(function (it) { return ahImg(it, 'gal'); }));
                 if (!live()) return;
             }
             if (g.origs && near && i === c.at + 1) {
+                act('job', 'Next gallery: loading the full-size pictures of its first page — ' + actGal(h));
                 const tok = { cancelled: false, fresh: false };
                 await Promise.all(list.slice(0, per).map(function (it) { return ahOrig(it, 'galo', tok); }));
                 if (!live()) return;
@@ -14306,6 +14498,7 @@
         let timer = 0, failed = 0;
         const got = [], t0 = performance.now();
         galTrace(href, 'thumbnails: loading ' + list.length + ' (' + galHostMix(list.map(function (it) { return it.thumb; })) + ')');
+        act('job', (galLook ? 'Gallery preview: loading the thumbnails of its first page' : 'Open gallery: loading the thumbnails of its first 2 pages') + ' (' + list.length + ' pictures)');
         const all = Promise.all(list.map(function (item, i) {
             return galImg(item).then(function (v) { got[i] = v; if (!v) failed++; return v; });
         }));
@@ -14493,6 +14686,7 @@
 
     // New pictures for an open set: their thumbnails load (up to GAL_WAIT_MS), then one relayout on the same page.
     function galAppend(set, items) {
+        act('job', 'Open gallery: loading ' + items.length + ' more thumbnails — keeping ' + galAhead((set.far || 0) + 1) + ' pages ahead of page ' + ((set.far || 0) + 1));
         let pending = [], timer = 0;
         const flush = function () {
             timer = 0;
@@ -14666,8 +14860,10 @@
 
     // Every cell's original, GAL_HQ_PAR at a time, through the hover's own probe, so a hover finds it loaded.
     function galHqAll(set, imgs) {
-        imgs = imgs.filter(function (img) { return !(img.__hzItem && img.__hzItem.hqTried); });
+        imgs = imgs.filter(function (img) { return !(img.__hzItem && (img.__hzItem.hqTried || img.__hzItem.hqBusy)); });
         if (!imgs.length) return;
+        act('job', 'Open gallery: loading ' + imgs.length + ' full-size pictures, starting with ' + actPic((imgs[0].__hzItem && imgs[0].__hzItem.thumb) || imgs[0].src) +
+            (cfg.galleryLoadAll ? ' (Load all)' : ' (from the picture you previewed)'));
         imgs.forEach(function (img) { galBytesHosts(img.__hzItem); });
         usLog.enable(cfg.logRequests !== false);
         const lg = usLog.start('origs', { host: pageHost(), pace: version().replace(/\?/g, '') + ' ' + AH_PIC_GAP.join('-') + 'ms, ' + GAL_HQ_PAR + ' max', slowed: noRush(pageHost()) });
@@ -14681,22 +14877,26 @@
             if (galGrown.has(set.href)) galKeep(set.href, galGrowWhy.get(set.href) === 'html');     // with the originals found, a return skips the guessing
             nextWarmReport();
             dbg('gallery originals: ' + why, { href: set.href, pictures: imgs.length, found: got, bytes: humanBytes(bytes) });
+            act(why === 'done' ? 'info' : 'warn', 'Open gallery: full-size loading ' + ({ done: 'finished', cut: 'stopped', restarted: 'restarted from a new place', 'memory full': 'stopped — memory full (Settings → Galleries memory)' }[why] || why) +
+                ' — ' + got + ' of ' + imgs.length + ' found, ' + humanBytes(bytes));
         };
         const size = function (hit) {
             sizing++;
             const held = heldBlobs.get(hit.url);
             (held ? Promise.resolve(held.blob.size) : galBytes(hit.url)).then(function (n) { bytes += n; })
-                .then(function () { sizing--; if (!running && (tok.cancelled || i >= imgs.length)) end(tok.cancelled ? cutWhy() : full ? 'memory full' : 'done'); });
+                .then(function () { sizing--; if (!running && (tok.cancelled || tok.stop || i >= imgs.length)) end(tok.cancelled || tok.stop ? cutWhy() : full ? 'memory full' : 'done'); });
         };
         const next = function () {
-            if (tok.cancelled) { if (!running) end(cutWhy()); return; }
+            if (tok.cancelled || tok.stop) { if (!running) end(cutWhy()); return; }
             if (i >= imgs.length) { if (!running) end(full ? 'memory full' : 'done'); return; }
             if (Date.now() - keepFullAt < 3000) { i = imgs.length; full = true; if (!running) end('memory full'); return; }     // a later page step or preview resumes it
             while (running < GAL_HQ_PAR && i < imgs.length) {
                 const img = imgs[i++];
                 running++;
                 ahSlot(ahPics, 'galo').then(function (free) {
-                    if (!free || tok.cancelled) { if (free) free(); if (!free) tok.cancelled = true; running--; next(); return; }
+                    const it = img.__hzItem;
+                    if (!free || tok.cancelled || tok.stop || (it && (it.hqTried || it.hqBusy))) { if (free) free(); if (!free) tok.cancelled = true; running--; next(); return; }
+                    if (it) it.hqBusy = true;
                     const r = lg && lg.req(), live = { t: performance.now(), mine: tok }, t0 = performance.now();
                     galHqLive.add(live);
                     galResolve(img, tok).then(function (hit) {
@@ -14704,7 +14904,7 @@
                         if (hit) { got++; if (!hit.video) { plKeepImage(hit, img.__hzItem); ahFiles.add(hit.url); } size(hit); nextWarmSeen(hit.url, performance.now() - t0); }
                         if (hit && !tok.cancelled && img.__hzItem) img.__hzItem.hqTried = true;     // a miss is asked again by the next run
                         if (r) r.done({ status: hit ? 200 : 0 });
-                    }, function () { if (r) r.done({ status: 0 }); }).then(function () { free(); galHqLive.delete(live); running--; next(); });
+                    }, function () { if (r) r.done({ status: 0 }); }).then(function () { if (it) it.hqBusy = false; free(); galHqLive.delete(live); running--; next(); });
                 });
             }
         };
@@ -15659,6 +15859,7 @@
         galHole = (sw && galBoxKept(asp)) || galCornerRect(asp, pic && galStripM.m !== 'out' ? galStripH() : 0);
         if (!sw) { galBoxKeep = null; galKeepNow(galHole, asp); }
         galWant = href;
+        act('you', (sw ? 'Endless moved on to ' : 'You opened ') + actGal(href) + (sw ? '' : ' — the page\'s own loading pauses while it is open'));
         if (!sw) ahGalOpen();
         clearTimeout(galHoverTimer);
         galFlyBack();
@@ -17193,6 +17394,8 @@
         const href = job.door.h, gen = ahGen, done = [null, ahDone, ahODone, ahNextDone][job.stage];
         galPre = href;
         done.add(href);
+        act('job', ['', 'Page: loading the first thumbnails of ', 'Page: loading the first 2 full-size pictures of ', 'Page: loading the whole first page of thumbnails of '][job.stage] +
+            actGal(href) + (job.stage === 3 ? ' (you previewed the gallery before it)' : ''));
         (async function () {
             const list = await galPreRead(href);
             if (!Array.isArray(list) || !list.length) { if (list === 'cancel') done.delete(href); return; }
@@ -17225,6 +17428,7 @@
         if (!h) return false;
         ahGrowTried.add(h);
         dbg('loading ahead: idle, reading a count to its end', { href: h });
+        act('job', 'Idle: counting every picture of ' + actGal(h) + ' in a hidden copy of its page');
         galGrow(h);
         return true;
     }
@@ -17239,6 +17443,7 @@
                 ahBehind = true;
                 ahDrop('main');
                 dbg('loading ahead: scrolled past what was loading; waiting for the scroll to stop');
+                act('info', 'You scrolled past what was loading — the page\'s loading waits for the scroll to stop');
             }
         }
         if (!ahBehind) return;
@@ -17249,6 +17454,7 @@
                 const hot = galChipHot && galLinkOf(galChipHot);
                 ahAnchor = hot || null;
                 dbg('loading ahead: scroll stopped; from ' + (hot ? 'the hovered gallery' : 'the first gallery on screen'));
+                act('info', 'Scroll stopped — loading starts again from ' + (hot ? 'the gallery under the pointer' : 'the first gallery on screen'));
                 galPreNext();
             }, AH_HOVER_WAIT_MS);
         }, AH_STILL_MS);
@@ -19260,6 +19466,7 @@
 
     if (isTopFrame && typeof GM_registerMenuCommand === 'function') {
         GM_registerMenuCommand('Hover Zoom settings', showPanel);
+        GM_registerMenuCommand('Hover Zoom activity window', actOpen);
         refreshSiteMenu();
     }
 
