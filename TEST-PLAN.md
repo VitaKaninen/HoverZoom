@@ -105,8 +105,8 @@ Test pages:
       read to its end (test 6.1).
     - Doors to another site (a different origin) get no count. That's by design.
 
-2.2 **Grey until the first 30 are in** (v0.388.0; 30 since v0.397.0).
-    - **Expect:** a chip's ▦ icon is grey until that gallery's first 30 thumbnails (or its whole first page, if
+2.2 **Grey until round 1 is in** (v0.388.0; round 1 = 10 since v0.418.0).
+    - **Expect:** a chip's ▦ icon is grey until that gallery's first 10 thumbnails (round 1, or its whole first page, if
       smaller) have loaded, then it turns blue. A gallery with a broken thumbnail still turns blue. The open gallery's yellow ✕ is
       never grey.
     - **Fail:** a chip that stays grey after its gallery's thumbnails are visibly in (open the preview

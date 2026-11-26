@@ -36,8 +36,8 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   end, `N+` from the HTML only, nothing when unknown; `galKnownN(href)` reads memory, then the kept list, then
   sessionStorage `hzGalCounts2` {href: [n, at]}, 3000, whole galleries only, written by `galKeep`. `galChipsCount(href)`
   restyles after `galLoad`, `galMore` and `galGrow`'s end.
-- **Grey chip until its first page is in** (user, v0.388.0): `[data-hz-door].wait` (icon `#a6adc8`, blue `#89b4fa`
-  once ready). `galThumbsReady(href)` = the first `galPer(null)` items of `galLists` all in `galThumbDone` (thumbnail
+- **Grey chip until its first round is in** (user, v0.388.0; round 1 since v0.418.0): `[data-hz-door].wait` (icon `#a6adc8`, blue `#89b4fa`
+  once ready). `galThumbsReady(href)` = the first `AH_THUMBS_STEP` (10, or `galPer(null)` if fewer) items of `galLists` all in `galThumbDone` (thumbnail
   URLs settled, load or error, recorded in `galImg`), so a broken thumbnail cannot keep it grey. `galThumbSettled`
   restyles every chip 150 ms after a batch. No list yet = grey. The open ✕ is never grey.
 - **Reads to the end only when idle** (v0.387.0 reverses v0.350.0's "scroll fast → read further ahead", user). The
@@ -272,15 +272,16 @@ What loads ahead follows what the user does. Code: the `ah*` functions after `ga
   picture starts 58 / 141 / 453 ms (min / median / max).
 - **Main page** (`galPreNext` → `ahMainPick`, no gallery or preview up; v0.397.0, user 2026-11-26): page reads for every
   door all the time (`galCountNext`, HTML only, nearest the middle first — the read *is* the count and the thumbnail
-  list, there is no separate count). From `ahAnchor` (the hovered door, else the first on screen) on in page order,
+  list, there is no separate count). From `ahAnchor` (the hovered door, else the first on screen — read at every pick, never stored: a stored one
+  skipped doors recognised later above it, v0.418.0) on in page order,
   one job at a time, in **rounds** (v0.415.0, user: "28 galleries of thumbnails over 2 minutes before any full size
   is not how a person uses a site"; numbers expected to change with testing): round r = for each door in page
   order, its next `AH_THUMBS_STEP` 10 thumbnails then its original r+1 (`ahRound` = rounds done per door; `ahOrig` →
   `galResolve` on a stand-in, `plKeepImage`), until `AH_THUMBS_MAIN` 30 thumbnails = 3 rounds (so 3 originals). The
-  ▦ chip still turns blue only once the last round's thumbnails are in (`galFirstIn`).
+  ▦ chip turns blue once round 1's thumbnails are in (`galFirstIn`, v0.418.0, user; it was the last round's).
   Then, after a gallery preview, the door after it gets its whole first page of thumbnails (`ahLookLast`,
   `ahNextDone`); then frame reads to the end (`galGrow`, the expensive `19+` → `40`) last of all (`ahIdleGrow`, once
-  per door). Thumbnails already settled are skipped. The ▦ chip turns blue at the 30 (`galThumbsReady`); a preview
+  per door). Thumbnails already settled are skipped. A preview
   loads the rest of its page itself. Endless off: thumbnails for the first door + `AH_THUMBS_OFF` 3, originals for
   the first only, the rest once ≥ `AH_SHARE` 40 % of the page's doors are seen. Measured on eporner (Chrome, cold):
   page reads ~0.4 s, 30 thumbnails ≈ 4 s a door, an original ≈ 1.1 s with 6 in flight. The covers' own originals

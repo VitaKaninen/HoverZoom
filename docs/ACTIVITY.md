@@ -8,13 +8,13 @@ reads it for **what changes and how long each piece takes**, not file names. Cod
   Its file lines sit in a collapsed box under it; a click on the header (▸/▾) opens it; Open all / Close all. A load
   reaches its job through `ahT(ev, o, job)` (`galImg(…, job)`, `ahImg(…, job)`, `tok.job` for `ahOrig`/`galHqAll`,
   `galCountLoad(…, job)`). With no job the line stands alone with its reason (`ACT_WHY`). Plain `act(kind, text)`
-  lines remain for what the user did (`you`), notes (`info`/`warn`) and work with no traced files (`job`: page
-  covers' full size, slideshow queue, idle count).
+  lines remain for what the user did (`you`) and notes (`info`/`warn`); every background job has a header.
 - Jobs today: area check (`galKindOf`: "are pictures like this links to galleries", ends yes/no/unknown with how
   many on the page), counts (`galCountNext`, one job per burst, `actCountJob`; ends N galleries / too few / failed),
   each main-page round, the open gallery's first thumbnails (`galShow`), more thumbnails (`galAppend`), full-size
   run (`galHqAll`, ends with found + bytes or why it stopped), next galleries' thumbnails and next gallery's
-  full-size first page (`ahGalAhead`).
+  full-size first page (`ahGalAhead`), idle count to the end (`ahIdleGrow` → `ahGrowJob`; its count is pictures known,
+  `actCount` from `galMore`; `ahGrowEnd` from `galGrow`'s end: N in all / stopped, not to the end).
 - **The window runs its own code** (`actPopup(win, own)`, injected as a string by `actInject`: `GM_addElement`
   first — it passes the page's CSP — else a `<script>` with the page's nonce and a Trusted Types policy). Listeners
   made by the page's script die with a reload of the page (that was "stops updating, Clear does nothing"), so the

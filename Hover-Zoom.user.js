@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.417.0
+// @version      0.418.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -693,6 +693,7 @@
         actSend(actJobMsg(j));
     }
     function actTotal(j, n) { if (j && j.total !== n) { j.total = n; actSend(actJobMsg(j)); } }
+    function actCount(j, n) { if (j && j.state === 'run' && j.done !== n) { j.done = n; actSend(actJobMsg(j)); } }
     function actEnd(j, state, note) {
         if (!j || j.state !== 'run') return;
         if (!j.done && (state || 'done') === 'done') {     // nothing was needed after all: the header goes
@@ -12477,8 +12478,9 @@
     const AH_THUMBS_OFF = 3;            // endless off: galleries after the first whose thumbnails load before that share
     const AH_THUMBS_MAIN = 30;          // main page: thumbnails per gallery in the first pass (the preview loads the rest)
     const ahPics = ahGate(AH_PIC_GAP, GAL_HQ_PAR), ahPages = ahGate(AH_PAGE_GAP, 4);
-    let ahAnchor = null;                // the door the main page loads from: the hovered one, else the first on screen
+    let ahAnchor = null;                // the hovered door the main page loads from; null = the first on screen, read at each pick
     const ahRound = new Map(), ahNextDone = new Set(), ahGrowTried = new Set();     // main page: thumbnails, first originals, the next gallery's whole first page
+    let ahGrowJob = null;     // the idle count's activity header: { href, job }
     let ahLookLast = null;              // the last gallery preview's door: the one after it is filled when idle
     const ahFiles = new Set();          // originals loaded ahead, checked when shown
     const ahWarm = { n: 0, kept: 0 };
@@ -14683,12 +14685,12 @@
         }, 150);
     }
 
-    // A door's first page of thumbnails has loaded.
+    // A door's first round of thumbnails has loaded.
     function galThumbsReady(href) {
         const list = href && galLists.get(href);
         if (!list || !list.length) return false;
         if (galFirstIn.has(href)) return true;
-        const n = Math.min(list.length, Math.max(1, galPer(null)), AH_THUMBS_MAIN);     // what the main page's first pass loads
+        const n = Math.min(list.length, Math.max(1, galPer(null)), AH_THUMBS_STEP);     // what the main page's first round loads
         for (let i = 0; i < n; i++) if (!galThumbDone.has(list[i].thumb)) return false;
         return true;
     }
@@ -15054,6 +15056,7 @@
             else if (!galGrown.has(href)) galGrowWhy.set(href, why);
             if (!html && galGrown.has(href)) galWholeSeen(href, from, (galLists.get(href) || []).length);
             galTrace(href, 'reading on: ' + why);
+            ahGrowEnd(href, why === 'grown' || why === 'reported' ? '' : why);
             dlqGrowEnd(href, why, galGrown.has(href));
             dbg('gallery read to its end: ' + why, { href: href, from: from, pictures: (galLists.get(href) || []).length, final: galGrown.has(href), ms: Math.round(performance.now() - t0), open: !!galCur && galCur.href === href });
             if (galCur && galCur.href === href) galPageNote(galCur);
@@ -15074,6 +15077,7 @@
         });
         if (!add.length) return;
         add.forEach(function (it) { base.push(it); });
+        if (ahGrowJob && ahGrowJob.href === href) actCount(ahGrowJob.job, base.length);
         galTrace(href, 'reading on: +' + add.length + ' (' + base.length + ' known)');
         if (galCur && galCur.href === href) { galFeed(galCur); galPageNote(galCur); }
         galChipsCount(href);
@@ -17609,8 +17613,7 @@
         if (i < 0) {
             const H = vpH();
             i = doors.findIndex(function (d) { const r = galHoleRect(d.img); return r.height > 0 && r.bottom > 0 && r.top < H; });
-            if (i < 0) return null;
-            ahAnchor = doors[i].h;
+            if (i < 0) return null;     // not stored: doors recognised later above it must still load
         }
         const seen = galList(GAL_SEEN_KEY), wide = cfg.galleryEndless || doors.filter(function (d) { return seen.has(d.h); }).length >= doors.length * AH_SHARE;
         const rounds = Math.ceil(AH_THUMBS_MAIN / AH_THUMBS_STEP);
@@ -17655,11 +17658,11 @@
                 const from = job.round * AH_THUMBS_STEP, to = Math.min(cap, from + AH_THUMBS_STEP);
                 const th = from < to ? list.slice(from, to).filter(notDone) : [];
                 const one = list[job.round], o = job.orig && one && !(one.hqTried && one.hit) ? one : null;
-                if (!th.length && !o) { if (to >= cap) galFirstIn.add(href); return; }
+                if (!th.length && !o) { galFirstIn.add(href); return; }
                 aj = actJob('Page: ' + actGal(href) + ' — round ' + (job.round + 1) + ': ' +
                     (th.length ? 'thumbnails ' + (from + 1) + '–' + to : '') + (th.length && o ? ' + ' : '') + (o ? 'full-size picture ' + (job.round + 1) : ''), th.length + (o ? 1 : 0));
                 await Promise.all(th.map(function (it) { return ahImg(it, 'main', aj); }));
-                if (to >= cap && gen === ahGen) { galFirstIn.add(href); galPillMarks(GAL_DOOR_MARK).forEach(galChipStyle); }
+                if (gen === ahGen) { galFirstIn.add(href); galPillMarks(GAL_DOOR_MARK).forEach(galChipStyle); }
                 if (o && gen === ahGen) await ahOrig(o, 'main', { cancelled: false, fresh: false, job: aj });
                 dbg('loading ahead: round', { href: href, round: job.round + 1, thumbs: th.length, orig: !!o, cut: gen !== ahGen });
             } else {
@@ -17686,9 +17689,21 @@
         if (!h) return false;
         ahGrowTried.add(h);
         dbg('loading ahead: idle, reading a count to its end', { href: h });
-        act('job', 'Idle: counting every picture of ' + actGal(h) + ' in a hidden copy of its page');
+        const j = actJob('Idle: counting every picture of ' + actGal(h) + ' in a hidden copy of its page (pictures found so far)', 0);
+        actCount(j, (galLists.get(h) || []).length);
+        ahGrowJob = { href: h, job: j };
         galGrow(h);
+        if (galGrowing !== h) ahGrowEnd(h, galGrown.has(h) ? 'its page is all there is' : '');
         return true;
+    }
+
+    // The idle count of href ended: close its activity header with what it found.
+    function ahGrowEnd(href, why) {
+        if (!ahGrowJob || ahGrowJob.href !== href) return;
+        const j = ahGrowJob.job, n = (galLists.get(href) || []).length;
+        ahGrowJob = null;
+        actCount(j, n);
+        actEnd(j, galGrown.has(href) ? 'done' : 'stopped', (galGrown.has(href) ? n + ' pictures in all' : 'not to the end') + (why ? '; ' + why : ''));
     }
 
     // A user scroll past the next door to load stops the main page's loading; once still, a second for a hover, else from the first door on screen.
