@@ -396,6 +396,9 @@ has('reddit bare form still works',
     'https://i.redd.it/abc123def.png');
 eq('i.redd.it is already the direct host',
     upgradeCandidates('https://i.redd.it/sw0xl9lxexnh1.jpg').filter(u => /redd\.it/.test(u)), []);
+has('deviantart wixmp offers the file without its /v1/ transform, token kept (v0.403.0)',
+    upgradeCandidates('https://images-wixmp-ed30a86b8c4ca887773594c2.wixmp.com/f/ae8620e9-ca02-45f5-826d-4b77f48bf2b5/dfqcp84-08c8afb4-a401-4827-88e9-d4c79f42e5b4.jpg/v1/fit/w_414,h_276,q_70,strp/dissolve_by_unkopierbar_dfqcp84-414w.jpg?token=abc'),
+    'https://images-wixmp-ed30a86b8c4ca887773594c2.wixmp.com/f/ae8620e9-ca02-45f5-826d-4b77f48bf2b5/dfqcp84-08c8afb4-a401-4827-88e9-d4c79f42e5b4.jpg?token=abc');
 has('artstation large offers 4k (v0.402.0)',
     upgradeCandidates('https://cdna.artstation.com/p/assets/images/images/104/358/364/large/biikhan-aibashev-untitled-019-2.jpg?1795681441'),
     'https://cdna.artstation.com/p/assets/images/images/104/358/364/4k/biikhan-aibashev-untitled-019-2.jpg');

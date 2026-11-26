@@ -621,8 +621,9 @@ Rules added, each measured:
 
 Two that were looked at and deliberately left alone:
 
-- **DeviantArt** carries a 4-entry `srcset`, which the existing srcset path already mines; its
-  `/v1/fit/w_…,h_…` segment is Cloudinary-shaped and the existing rule reaches it.
+- **DeviantArt** carries a 4-entry `srcset`, which the srcset path mines, but no rule reached the file itself
+  (measured 2026-11-26: the srcset top was 827 px, the file 1600). `DeviantArt original` (v0.403.0) drops the
+  `/v1/…` transform and keeps `?token=`; the token refuses it for some pictures (3 of 8), hence optional.
 - **Wikimedia** exposes `data-file-width`/`data-file-height` on the thumbnail — the original's true
   size, free and site-agnostic. Not used: nothing in the resolver wants a declared size it has not
   measured, and trusting one would weaken `samePicture()`. Noted because it looks useful and is not.
