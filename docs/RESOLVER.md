@@ -615,7 +615,7 @@ Rules added, each measured:
 | Site | Was | Now |
 |---|---|---|
 | Reddit | `preview.redd.it/<slug>-<id>.jpg`; the old rule wanted a path of *only* alphanumerics and the modern slug form never matched | `i.redd.it/<id>.jpg` — 529×706 → **3024×4032** |
-| Flickr | `…/<id>_<secret>_n.jpg`, 320 px | `_b` (1024) and `_k` (2048, a 410 where absent) — 240×177 → **1023×759** |
+| Flickr | `…/<id>_<secret>_n.jpg`, 320 px | `_b` (1024) by rule; bigger sizes via `flickrSizes` (see siteLookup below) — 240×177 → **1023×759** |
 | Gelbooru family (safebooru, rule34, konachan) | `/thumbnails/<dir>/thumbnail_<sha1>.jpg?<post>` | `/images/<dir>/<sha1>.jpg` — 455 KB original |
 | anywhere | a thumbnail marker was only stripped as a *suffix* | `thumbnail_<name>.jpg` → `<name>.jpg`; a marker leads as often as it trails |
 
@@ -694,7 +694,7 @@ under the same id.
 |---|---|---|---|
 | Instagram `/explore/` (logged in) | 788 KB | 109 | **0** — all 24 matched, every match the *same* URL |
 | Pinterest search | 524 KB | **0** | 0 |
-| Flickr search | 421 KB | 352 | 0 — and Flickr is already solved by the `_b`/`_k` suffix rules |
+| Flickr search | 421 KB | 352 | 0 — Flickr's bigger sizes come from the photo page (`flickrSizes`, v0.400.0) |
 | Facebook feed | 277 KB | 2 | inconclusive: only one fbcdn `<img>` had rendered, and FB also paints into SVG `<image>`, which `document.images` does not return |
 
 **Instagram is the case that killed it.** Every grid thumbnail *does* appear in the inline JSON,
@@ -1044,6 +1044,12 @@ named, largest wins). Gallery-mode cells never reach `resolve()`: `galResolve` c
 item.base)`, which reads the ids from the fetched gallery page (`pageText`), then `galPageBest` (v0.376.0–
 v0.377.0). `data-ow` under-reports (525 for a 1600 file): never trust it over the probe.
 pemsrv.com on that site is an ad network (`popunder1000.js`), not an image host.
+
+**Flickr (v0.400.0, `flickrSizes`):** `_h`, `_k`, `_3k`–`_6k` and `_o` each carry their own secret, so the
+`Flickr 2048` rule (same secret, `_k`) never hits on current photos; `_b` (1024) is the largest guessable size.
+On flickr.com `siteLookup` reads `/photo.gne?id=<id>` (same-origin) and declares its largest listed size
+(`o` > `6k` … `k` > `h` > `b`); it runs even when the thumbnail has a link, because the photo page's `og:image`
+is `_b`. Measured 2026-11-26 on Explore: 9 of 10 photos list `_k` or larger; one owner allows only up to `_b`.
 
 ## Known limits
 

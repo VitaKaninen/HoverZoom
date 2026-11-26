@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.399.0
+// @version      0.400.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -2206,7 +2206,10 @@
 
     // sxypix: thumbnails carry signed URLs; one POST to the gallery's viewer returns every picture's original and medium copy.
     // pageHref: the gallery page a gallery-mode cell came from, read for its ids; else this document's.
-    function siteLookup(el, shown, pageHref) {
+    function siteLookup(el, shown, pageHref, linked) {
+        const fm = /(^|\.)flickr\.com$/.test(pageHost()) && (shown || '').match(/\/\/live\.staticflickr\.com\/\d+\/(\d+)_[0-9a-f]+(?:_[a-z0-9]{1,2})?\.(?:jpg|png)/i);
+        if (fm) return flickrSizes(fm[1]);
+        if (linked) return null;
         if (!/(^|\.)sxypix\.com$/.test(pageHost()) || !/\/\/x\.sxypix\.com\/pixiw?\/[^/]+\/\d+\/s\//.test(shown || '')) return null;
         const sel = '.gallgrid[data-aid][data-ghash]';
         if (!pageHref) {
@@ -2241,6 +2244,24 @@
                 return body.length ? { body: body, declared: null } : null;
             } catch (e) { return null; }
         })();
+        pageCache.set(key, p);
+        p.then(function (r) { if (!r && pageCache.get(key) === p) pageCache.delete(key); });
+        return p;
+    }
+
+    // Flickr: _h, _k, _3k… and _o each have their own secret, so only the photo page names them; its largest is the original.
+    const FLICKR_RANK = ['o', '6k', '5k', '4k', '3k', 'k', 'h', 'b'];
+    function flickrSizes(id) {
+        const key = 'flickr|' + id;
+        if (pageCache.has(key)) return pageCache.get(key);
+        const p = pageText('https://www.flickr.com/photo.gne?id=' + id).p.then(function (r) {
+            if (!r || !r.text) return null;
+            const re = new RegExp('live\\.staticflickr\\.com/\\d+/' + id + '_[0-9a-f]+_([a-z0-9]{1,2})\\.(?:jpg|png)', 'g'), got = {};
+            r.text.replace(/\\\//g, '/').replace(re, function (m, k) { if (!got[k]) got[k] = 'https://' + m; return m; });
+            const k = FLICKR_RANK.find(function (x) { return got[x]; });
+            dbg('flickr sizes', { id: id, sizes: Object.keys(got).join(' '), best: k || null });
+            return k ? { body: [], declared: { url: got[k] } } : null;
+        }, function () { return null; });
         pageCache.set(key, p);
         p.then(function (r) { if (!r && pageCache.get(key) === p) pageCache.delete(key); });
         return p;
@@ -2302,7 +2323,7 @@
         let lfetched = false, lpage = null;
         const lskip =lt && !token.recheck && areaRule('linkAreas', lchain, lpath) && Math.random() >= LINK_RECHECK;
         if (lskip) dbg('linked page skipped — pages linked from here have never held the original', { link: lt.href });
-        const look = lt ? null : siteLookup(el, shown);
+        const look = siteLookup(el, shown, null, !!lt);
         const linked = (look || (!lt || lskip ? Promise.resolve(null) : linkedMedia(lt))).then(async function (page) {
             if (!page || token.cancelled) return null;
             lfetched = true;
