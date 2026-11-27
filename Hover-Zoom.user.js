@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.442.0
+// @version      0.443.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -1992,6 +1992,7 @@
     const BYTES_MAX = 12;           // enough for a tour's window; the oldest is revoked
     const heldBlobs = new Map();    // url -> {blob, objUrl}: a gallery's originals, fetched once for the preview and the save
     let galCellMarksT = 0;          // galCellMarksSoon's pending paint (above: holdBlob may run at boot)
+    let galPvWait = null;           // {img, at}: a rested gallery hover whose own original is loading; the gallery's other loads wait (M8 line 1)
     let heldBytes = 0;
     const bytesHosts = new Set();   // hosts of an opened gallery's pictures: fetched as bytes (this page only)
     const bytesNoHosts = new Set(); // ...that would not serve the bytes but did serve the picture
@@ -7947,6 +7948,7 @@
 
     function cancel() {
         if (placed) return;         // a placed viewer outlives hover entirely
+        if (galPvWait) { galPvWait = null; ahPump(); }
         pinOnShow = null;
         saveOnShow = null;
         picZoomOn = '';
@@ -12644,6 +12646,7 @@
     const AH_BACK = 5;                  // slideshow: originals loaded the other way on a backward step
     const AH_NEAR = 3;                  // a hover in a gallery: the originals this many either side first (PRELOAD.md L22)
     const AH_THUMB_STALL_MS = 3000;     // the open gallery's thumbnails hold its other loads until none has settled this long
+    const AH_PV_HOLD_MS = 8000;         // a rested hover's own original holds the gallery's other loads at most this long
     const AH_SHARE = 0.4;               // endless off: originals past the first gallery once this share of the page's galleries was opened
     const AH_THUMBS_OFF = 3;            // endless off: galleries after the first whose thumbnails load before that share
     const AH_THUMBS_MAIN = 30;          // main page: thumbnails per gallery in the first pass (the preview loads the rest)
@@ -15742,7 +15745,6 @@
     // Hovering a thumbnail: the ordinary preview of its best original, after the hover delay.
     function galPv(img) {
         if (placed || !img.__hzItem || typingOurs()) return;
-        ahSaw(img, 1);
         cancel();
         if (img.__hzItem.hit && !img.__hzItem.hit.video) preDecode(img.__hzItem.hit.url);
         active = img;
@@ -15753,12 +15755,15 @@
             if (myToken.cancelled || active !== img) return;
             showSpinner();
             const t1 = performance.now(), known = !!img.__hzItem.hit;
+            if (!known) galPvWait = { img: img, at: t1 };     // the pointer rested: this one alone loads until it shows
             const hit = await galResolve(img, myToken);
+            if (galPvWait && galPvWait.img === img) { galPvWait = null; ahPump(); }
             if (myToken.cancelled || active !== img) return;
             hideSpinner();
             dbg('gallery preview found', { ms: Math.round(performance.now() - t1), remembered: known, size: hit ? hit.w + 'x' + hit.h : null });
             if (!hit) return;
             showViewer(hit, pointer);
+            ahSaw(img, 1);      // a hover counts once its preview shows, not for every cell the pointer crosses
             if (pinOnShow === img) { pinOnShow = null; place(); }
             if (saveOnShow === img && view && view.url) { saveOnShow = null; midSaveUrl(view.url); }
         }, cfg.hoverDelay);
@@ -18019,6 +18024,7 @@
 
     // Paused in moment m: no gallery open, the page's lines below L1 while it loads; a gallery open, the main page, and its own lines below its thumbnails while they arrive.
     function ahHeld(tag, m, busy) {
+        if (m && galPvWait && performance.now() - galPvWait.at < AH_PV_HOLD_MS) return true;      // M8 line 1: the rested hover's own original first
         if (!m) return ((tag === 'count' || tag === 'main' || tag === 'next') && ahL1Busy()) || ((tag === 'main' || tag === 'next') && galCnt > 0);     // M1: L1, then L3, then the rounds
         if (tag === 'count' || tag === 'main' || tag === 'next') return true;
         if (tag === 'galo' && ahG && ahG.walk && m !== 'open' && m !== 'slide') return true;     // M7-M9: L17's walk first

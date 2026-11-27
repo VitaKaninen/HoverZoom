@@ -24,7 +24,7 @@ Queues (each kind below names its own). They do not know about each other; all s
 | L7 | Frame read of a gallery past what its HTML lists | last, once per door (`ahIdleGrow`) | frame |
 | L8 | Next results page: its first 3 unseen galleries — list, thumbnails, all full size (≤ 3 clips each) | at the bottom, idle, ≥ 20 % of this page's galleries opened (`nextCheck`) | direct (6 at once) |
 | **On a hover (asked for, not ahead)** ||||
-| L9 | The hovered picture's full size | on hover | direct |
+| L9 | The hovered picture's full size | the pointer rests `hoverDelay`; in a gallery every AH line waits for it (`galPvWait`, ≤ `AH_PV_HOLD_MS` 8 s) | direct |
 | L10 | The section the hover is in: its on-screen pictures' full size | after a preview (`hwFill`); scrolled-away ones dropped | PL |
 | L11 | Gallery preview: the hovered door's first page of thumbnails | door hovered 500 ms (`galLookOpen`) | direct |
 | **A gallery open (middle-click)** ||||
@@ -32,7 +32,7 @@ Queues (each kind below names its own). They do not know about each other; all s
 | L20 | Thumbnails of the next page | with L12 (`galFeed`, 1 page ahead on page 1) | direct |
 | L21 | Thumbnails of pages further ahead (up to 5 once stepped on) | with L12 (`galFeed`) | direct |
 | L13 | Frame read for the rest of this gallery's list | when its HTML lists fewer than it has (`galGrow`, `galTourMore` on a step past it) | frame |
-| L22 | Full size of the pictures around the one just hovered, ±3 nearest first | a hover (`ahSaw` → `ahG.near`), any setting; the head of the run (`galHqAhead`) | AH-pic `galh` |
+| L22 | Full size of the pictures around the one just hovered, ±3 nearest first | its preview shown (`ahSaw` after `showViewer`; cells the pointer only crosses never count, v0.443.0), any setting; the head of the run (`galHqAhead`) | AH-pic `galh` |
 | L23 | Full size of the page on screen (M9: from its end backward) | Load all: after the thumbnails, each open, step, landing | AH-pic `galp` |
 | L14 | This gallery's full size after the page on screen: → end → 2 pages behind | Load all: after L23 (M6) or after L17 (M7–M9); G: waits for a hover | AH-pic `galo` |
 | L15 | Bigger thumbnail files for cells drawn large | page laid out (`galUpgrade`) | direct |

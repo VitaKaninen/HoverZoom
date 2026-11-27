@@ -21,7 +21,7 @@ of (random salt + host), the salt stored with the log; a gallery is its door's n
   or null} once per page load · `open` {g, sw: 1 = the queue switched to it, land, th, q} · `look` {g, th} ·
   `page` {g, dir, p: page stepped to, th, q} · `more` {g, p, q}: a step past the list read so far (waits on
   `galTourMore`) · `ready` {g, p, ms, first, n}: that page's thumbnails all in, ms from the press; `cut: 1` +
-  `th` when the user moved on first · `mode` {m: P|G} · `gstep` {dir, q} · `pv` / `slide` {g, i, pre, q} · `save` {g, i, p: its page, on: the page on screen} (a middle-press save of a gallery picture) ·
+  `th` when the user moved on first · `mode` {m: P|G} · `gstep` {dir, q} · `pv` / `slide` {g, i, pre, q} (`pv` = a preview shown, v0.443.0; before that every cell the pointer crossed) · `save` {g, i, p: its page, on: the page on screen} (a middle-press save of a gallery picture) ·
   `set` {k: endless|last|loadall, v} · `list` {g, from, n, ms, end}: a frame read of the open or a queued gallery
   ended · `halt` {why: limited|memory, g, or} · `close` {g, p} · `gsum` {g, n, th, or, dr}: a gallery left
   (closed or the queue moved on) · `sum` {why: leave|export, g: [{gs, th, or, dr}]}: the page, galleries with

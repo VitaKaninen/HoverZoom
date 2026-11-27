@@ -263,8 +263,11 @@ Test pages:
     - **No empty page:** open a big gallery and PageDown at once, several times. **Expect:** each page's thumbnails
       fill before any original or next-gallery thumbnail starts (`hover-zoom:ahead-trace`: no `orig` or `thumb gal`
       start while that page's `thumb shown` loads are open, unless one hangs for 3 s).
-    - **A hover jumps the queue:** hover a picture far down that hasn't loaded yet. **Expect:** `a preview;
-      originals around picture N`: `orig galh` for the 3 either side, before anything else.
+    - **A hover jumps the queue:** hover a picture far down that hasn't loaded yet. **Expect** (v0.443.0, M8): no
+      new `orig` starts between the pointer resting on it and its preview showing; then `a preview; originals around
+      picture N`: `orig galh` for the 3 either side, before anything else.
+    - **Crossing cells is not a hover** (v0.443.0): sweep the pointer across a row and stop on one. **Expect:** one
+      `act preview` (the one stopped on), not one per cell crossed; the prediction log shows one `pv`.
     - **Page steps re-queue it:** PageDown. **Expect:** `orig galp` for the new page first, then the next galleries'
       thumbnails, then `orig galo` for the rest (M7). PageUp: the page's originals from its last picture backward (M9).
     - **Next gallery:** step past the last page into the next gallery. **Expect:** its originals start from its

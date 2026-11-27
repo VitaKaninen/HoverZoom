@@ -1481,9 +1481,9 @@ const galPH = function (min) {
     eq('gate: open gallery before counts before the main page', [ahPri('gal'), ahPri('galo'), ahPri('galn'), ahPri('count'), ahPri('main')], [0, 0, 0.5, 1, 2]);
     const gS = src.indexOf('    function ahGate'), gE = src.indexOf('    // A start slot');
     const ctx = { ahG: null, galCur: null }, testPlQueue = [], testPlL1 = { live: 0, at: 0 };
-    const mkGate = new Function('document', 'performance', 'setTimeout', 'clearTimeout', 'ctx', 'tour', 'galLook', 'galShownAt', 'AH_THUMB_STALL_MS', 'galEarlyLeft', 'plQueue', 'plL1', 'galCnt',
-        'var ahG, galCur; function sync() { ahG = ctx.ahG; galCur = ctx.galCur; }\n' + src.slice(gS, gE).replace('const m = ahMoment()', 'sync(); const m = ahMoment()') + '\nreturn ahGate;');
-    const ahGate = mkGate({ visibilityState: 'visible' }, { now: function () { return 1e9; } }, function () {}, function () {}, ctx, null, null, function () { return -1; }, 3000, new Map(), testPlQueue, testPlL1, 0);
+    const mkGate = new Function('document', 'performance', 'setTimeout', 'clearTimeout', 'ctx', 'tour', 'galLook', 'galShownAt', 'AH_THUMB_STALL_MS', 'galEarlyLeft', 'plQueue', 'plL1', 'galCnt', 'AH_PV_HOLD_MS',
+        'var ahG, galCur, galPvWait; function sync() { ahG = ctx.ahG; galCur = ctx.galCur; galPvWait = ctx.galPvWait; }\n' + src.slice(gS, gE).replace('const m = ahMoment()', 'sync(); const m = ahMoment()') + '\nreturn ahGate;');
+    const ahGate = mkGate({ visibilityState: 'visible' }, { now: function () { return 1e9; } }, function () {}, function () {}, ctx, null, null, function () { return -1; }, 3000, new Map(), testPlQueue, testPlL1, 0, 8000);
     const gt = ahGate([0, 0], 1), order = [];
     ['gal', 'gal', 'gal', 'galo', 'galo', 'main', 'gal'].forEach(function (t) { gt.wait.push({ tag: t, resolve: function (free) { order.push(t); free(); } }); });
     gt.pump();
@@ -1508,6 +1508,11 @@ const galPH = function (min) {
     held.g.wait.length && (ctx.galCur.inflight = 0, held.g.pump());
     eq('gate: thumbnails in, the rest goes in order', held.seen, ['galh', 'galp', 'gal', 'galo', 'galn']);
     eq('gate: a thumbnail stalled past AH_THUMB_STALL_MS stops holding', run('fwd', { inflight: 4, thumbAt: 1e9 - 5000 }, ['galo', 'galh']).seen, ['galh', 'galo']);
+    ctx.galPvWait = { at: 1e9 - 1000 };
+    eq('gate M8 line 1: a rested hover\'s own original holds every line (v0.443.0)', run('fwd', { inflight: 0 }, all5).seen, []);
+    ctx.galPvWait = { at: 1e9 - 9000 };
+    eq('gate: the hover hold lets go after AH_PV_HOLD_MS', run('fwd', { inflight: 0 }, ['galo', 'galh']).seen, ['galh', 'galo']);
+    ctx.galPvWait = null;
     const walkRun = function (m) { const r = run(m, { inflight: 0 }, []); ctx.ahG.walk = 1; ['galo', 'gal'].forEach(function (t) { r.g.wait.push({ tag: t, resolve: function (free) { r.seen.push(t); if (free) free(); } }); }); r.g.pump(); return r.seen; };
     eq('gate M7: L14 waits for the L17 walk', walkRun('fwd'), ['gal']);
     eq('gate M6: L14 does not wait for the walk', walkRun('open'), ['galo', 'gal']);
