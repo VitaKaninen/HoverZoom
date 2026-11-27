@@ -44,6 +44,17 @@ This session also did (user asked): gallery cell marks (v0.441.0–v0.442.0: one
 cover in place of blue = original held, a setting each); a gallery hover counts only once its preview shows
 (v0.443.0, the user's diagnosis from their logs). User said "no" to ready marks on the results page.
 **Last asked:** nothing open — the user already said yes to all three items above; build them without asking again.
+**Handoff (2026-11-27, v0.445.0, pushed).** Built all three above, plus the user's new asks this session: a
+results-page gallery preview pauses the page's queue and goes first (M3); "pause, not drop" everywhere we may come
+back, flush where we won't (PRELOAD.md "Pause, not drop"); red corner + red activity lines + a diagnosis under each
+failure (ACTIVITY.md); ↗ tip shows the page title, right-click copies its address; cover = a blue border inside the
+cell (corner back to blue); the next gallery's thumbnails paint at once (`galThumbKeep`, GALLERY.md "Cell marks").
+The user's eporner ✗ lines (pictures 35–39) were cuts mislabelled as misses — those files load fine (checked live).
+Verified in Chrome on eporner: moments M1→M3→M6→M7→M11→M8, cover border, ↗ tip, next gallery's 144 thumbnails in one
+instant. Window drawing checked on a scratch page. **Not live-tested:** the ⤓ pause/resume (Chrome's `prompt()`
+trap, TESTING.md), a real red corner (no failing site found), the page-step thumbnail cut. Known roughness: lines
+served by one job per gallery (rounds, L17) flip ✓ → … as the next gallery's job starts.
+**Next, in order:** M5 live check, M13, L24, L13 (from the list above). Nothing asked of the user is open.
 
 ---
 

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.444.0
+// @version      0.445.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -262,7 +262,7 @@
         galleryChips: true,         // the ▦ chip on every gallery thumbnail; off: only on the one under the pointer
         galleryTicks: true,         // seen / visited ticks on results
         gallerySavedMarks: true,    // saved discs on results and in galleries
-        galleryCoverMark: true,     // a yellow corner on the cover's picture in its gallery
+        galleryCoverMark: true,     // a blue border, inside the cell, on the cover's picture in its gallery
         galleryReadyMark: true,     // a blue corner on gallery pictures whose full size is held
         galleryPreload: true,       // read the first page of every gallery on screen ahead of a click
         galleryRowMin: 120,         // px: gallery rows never shorter; spare room grows them; past that, pages
@@ -661,11 +661,12 @@
         if (actRecv) { try { actRecv(m); return; } catch (e) { actRecv = null; } }
         if (actLive && actChan) { try { actChan.postMessage(m); } catch (e) { /* channel gone */ } }
     }
-    function actJobMsg(j) { return { t: 'job', id: j.id, at: j.t, text: j.text, total: j.total, done: j.done, bad: j.bad, ms: j.ms, state: j.state, note: j.note }; }
+    function actJobMsg(j) { return { t: 'job', id: j.id, mom: j.mom || 0, at: j.t, text: j.text, total: j.total, done: j.done, bad: j.bad, cut: j.cut || 0, warn: j.warn || 0, ms: j.ms, state: j.state, note: j.note }; }
     function actReplay() {
         actSend({ t: 'hello', at: actNow(), ver: version() });
         actBuf.forEach(function (b) {
-            if (!b.job) { actSend({ t: 'line', at: b.t, kind: b.kind, text: b.text }); return; }
+            if (b.mom) { actSend(actMomMsg(b.mom)); b.mom.lines.forEach(function (ln, n) { actSend(actLineMsg(b.mom, n)); }); return; }
+            if (!b.job) { actSend({ t: 'line', mom: b.mom0 || 0, at: b.t, kind: b.kind, text: b.text }); return; }
             actSend(actJobMsg(b.job));
             b.job.kids.forEach(function (k) { actSend({ t: 'kid', id: b.job.id, at: k.t, kind: k.kind, text: k.text }); });
         });
@@ -674,23 +675,30 @@
 
     // One plain line: 'you' (what the user did), 'warn', 'info', 'job' (work with no files to count), 'ok'/'bad'.
     function act(kind, text) {
-        const b = { t: actNow(), kind: kind, text: text };
+        const top = actMs[actMs.length - 1], b = { t: actNow(), kind: kind, text: text, mom0: top ? top.id : 0 };
         actKeep(b);
-        actSend({ t: 'line', at: b.t, kind: kind, text: text });
+        actSend({ t: 'line', mom: b.mom0, at: b.t, kind: kind, text: text });
     }
 
     // A piece of work: a header with a live count; its files go under it (actKid), actEnd closes it with its time.
-    function actJob(text, total) {
-        const j = { id: ++actJobN, t: actNow(), t0: performance.now(), text: text, total: total || 0, done: 0, bad: 0, ms: null, state: 'run', note: '', kids: [] };
+    // L: the moment's line it serves (PRELOAD.md L-number; round keys L4r1, L5r1, r2, r3), so the checklist ticks it.
+    function actJob(text, total, L) {
+        if (!actMs.length) actMoment('M1');
+        const at = L ? actLineFor(L) : null, top = actMs[actMs.length - 1];
+        const j = { id: ++actJobN, t: actNow(), t0: performance.now(), text: text, total: total || 0, done: 0, bad: 0, ms: null, state: 'run', note: '', kids: [], L: L || '', mom: at ? at[0].id : top ? top.id : 0, tags: null };
+        if (at) { const ln = at[0].lines[at[1]]; ln.live = (ln.live || 0) + 1; actLineSet(L, 'run'); }
         actKeep({ job: j });
         actSend(actJobMsg(j));
         return j;
     }
+    // ok: true, false (a failure: red), or a kind of its own ('cut' paused, 'warn'), counted apart from done.
     function actKid(j, ok, text) {
-        if (!j) { act(ok ? 'ok' : 'bad', text); return; }
-        j.done++;
-        if (!ok) j.bad++;
-        const k = { t: actNow(), kind: ok ? 'ok' : 'bad', text: text };
+        const kind = ok === true || ok === 1 ? 'ok' : !ok ? 'bad' : ok;
+        if (!j) { act(kind, text); return; }
+        if (kind === 'cut') j.cut = (j.cut || 0) + 1; else j.done++;
+        if (kind === 'bad') { j.bad++; actMomentBad(j); }
+        if (kind === 'warn') j.warn = (j.warn || 0) + 1;
+        const k = { t: actNow(), kind: kind, text: text };
         if (j.kids.length < ACT_KIDS) j.kids.push(k);
         actSend({ t: 'kid', id: j.id, at: k.t, kind: k.kind, text: text });
         actSend(actJobMsg(j));
@@ -699,8 +707,9 @@
     function actCount(j, n) { if (j && j.state === 'run' && j.done !== n) { j.done = n; actSend(actJobMsg(j)); } }
     function actEnd(j, state, note) {
         if (!j || j.state !== 'run') return;
-        if (!j.done && (state || 'done') === 'done') {     // nothing was needed after all: the header goes
+        if (!j.done && !j.cut && (state || 'done') === 'done') {     // nothing was needed after all: the header goes
             j.state = 'skip';
+            actJobLines(j);
             const k = actBuf.findIndex(function (b) { return b.job === j; });
             if (k >= 0) actBuf.splice(k, 1);
             actSend(actJobMsg(j));
@@ -710,6 +719,129 @@
         j.ms = performance.now() - j.t0;
         j.note = note || '';
         actSend(actJobMsg(j));
+        actJobLines(j);
+    }
+
+    // ---- the checklist: one block per moment (PRELOAD.md M1-M14), its lines (L-numbers) ticked as their loads finish. docs/ACTIVITY.md.
+    const ACT_L = {
+        L1: 'HQ singles, on screen + next screen(s)', L2: 'HQ singles, rest of page', L3: 'Gallery lists', L4r1: 'Gallery thumbs, round 1 (10 per gallery)',
+        L5r1: 'Gallery HQ, round 1 (1 per gallery)', r2: 'Gallery thumbs + HQ, round 2', r3: 'Gallery thumbs + HQ, round 3', L6: 'Next gallery\'s p1 thumbs',
+        L7: 'Full list of long galleries (slow)', L8: 'Next results page', L9: 'HQ of hovered img', L10: 'HQ ±3 around it, then rest on screen',
+        L11: 'Hovered gallery\'s p1 thumbs', L12: 'Thumbs, page on screen', L13: 'Rest of gallery list (slow)', L14: 'HQ, rest of gallery',
+        L16: 'HQ of clicked picture (corner)', L17: 'Next galleries\' thumbs p1–2', L18: 'Next gallery\'s p1 HQ', L19: 'Slideshow HQ',
+        L20: 'Thumbs, next page', L21: 'Thumbs, page after that', L22: 'HQ ±3 around hovered gallery img', L23: 'HQ, page on screen', UC: 'Upgrade clips on the page on screen',
+    };
+    const ACT_GAL = 'L12 L16 L20 UC:A L21 L23:A L14:A L17:E L18:EA L13', ACT_STEP = 'L12 L20 UC:A L21 L23:A L17:E L14:A L18:EA L13', ACT_PAGE = 'L1 L3 L4r1 L5r1 r2 r3 L2 L7';
+    const ACT_M = {
+        M1: ['Landed on a results page', ACT_PAGE], M2: ['You hovered a picture', 'L9 L10'], M3: ['Gallery preview — you hovered a gallery', 'L11 L6'],
+        M4: ['You scrolled the results page', 'L1 L3 L4r1'], M5: ['Reached the bottom of the results page', 'L8'],
+        M6: ['You opened a gallery', ACT_GAL], M7: ['You went forward a page', ACT_STEP], M8: ['You hovered a picture in the gallery', 'L9 L22 ' + ACT_STEP],
+        M9: ['You went back a page', ACT_STEP], M11: ['Endless landed on the next gallery', ACT_GAL], M12: ['Slideshow on a results page', 'L19'],
+        M13: ['Slideshow in a gallery (its own order is not built: the old one runs)', 'L23:A L14:A L17:E L18:EA'], M14: ['You closed the gallery — the results page again', ACT_PAGE],
+    };
+    const ACT_NB = { UC: 1 }, ACT_NT = { L10: 1, L13: 1 };       // not built; built but with no job to watch
+    const ACT_TAG = { galh: 'L22', galp: 'L23', galo: 'L14', galn: 'L18' };
+    let actMs = [];             // the moments in force, the last on top (a results-page hover's sits over the page's)
+
+    // A new moment: the ones in force end (a temporary one, M2/M3, ends only the temporary one under it).
+    function actMoment(id, temp) {
+        const def = ACT_M[id];
+        if (!def) return null;
+        if (!temp) while (actMs.length) actMomentEnd(actMs.pop(), def[0]);
+        else if (actMs.length && actMs[actMs.length - 1].temp) actMomentEnd(actMs.pop(), def[0]);
+        let A = false, E = false;
+        try { A = ahAll(); E = galEndless() && !galLast; } catch (e) { /* booting: not declared yet */ }
+        const m = { id: ++actJobN, mid: id, t: actNow(), t0: performance.now(), text: id + ' – ' + def[0], temp: !!temp, state: 'run', note: '', bad: 0, ms: null, lines: [] };
+        def[1].split(' ').forEach(function (w) {
+            const k = w.split(':')[0], f = w.split(':')[1] || '';
+            const ln = { k: k, st: 'wait', why: '', bad: 0, live: 0 };
+            if (ACT_NB[k]) { ln.st = 'skip'; ln.why = 'not built yet'; }
+            else if (f.indexOf('A') >= 0 && !A) { ln.st = 'skip'; ln.why = 'Load all is off'; }
+            else if (f.indexOf('E') >= 0 && !E) { ln.st = 'skip'; ln.why = 'Endless is off, or Last'; }
+            else if (ACT_NT[k]) { ln.st = 'nt'; ln.why = 'runs, but not tracked here'; }
+            m.lines.push(ln);
+        });
+        actMs.push(m);
+        actKeep({ mom: m });
+        actSend(actMomMsg(m));
+        m.lines.forEach(function (ln, n) { actSend(actLineMsg(m, n)); });
+        return m;
+    }
+    function actMomMsg(m) { return { t: 'mom', id: m.id, at: m.t, text: m.text, state: m.state, note: m.note, bad: m.bad, ms: m.ms }; }
+    function actLineMsg(m, n) {
+        const ln = m.lines[n];
+        return { t: 'mline', id: m.id, n: n, st: ln.st, bad: ln.bad, text: (n + 1) + '. ' + (ACT_L[ln.k] || ln.k) + ' (' + ln.k.replace(/r1$/, '') + ')' + (ln.bad ? ' — ' + ln.bad + ' failed' : '') + (ln.why ? ' — ' + ln.why : '') };
+    }
+    // A moment ends: lines started and unfinished are interrupted by `by`; lines never started say so.
+    function actMomentEnd(m, by) {
+        let cut = 0;
+        m.lines.forEach(function (ln, n) {
+            if (ln.st === 'run') { ln.st = 'cut'; ln.why = 'interrupted: ' + by; cut++; }
+            else if (ln.st === 'wait') { ln.st = 'none'; ln.why = by ? 'not started before: ' + by + ' (already loaded, or not reached)' : 'not needed (already loaded)'; }
+            else return;
+            actSend(actLineMsg(m, n));
+        });
+        m.state = cut ? 'stopped' : 'done';
+        m.note = cut && by ? 'interrupted: ' + by : '';
+        m.ms = performance.now() - m.t0;
+        actSend(actMomMsg(m));
+    }
+    // A temporary moment (M2, M3) ends: the page's own moment under it carries on.
+    function actMomentPop(id) {
+        const m = actMs[actMs.length - 1];
+        if (m && m.temp && m.mid === id) actMomentEnd(actMs.pop(), '');
+    }
+    // The line `k` of the topmost moment that has it (and does not skip it): [moment, index].
+    function actLineFor(k) {
+        for (let i = actMs.length - 1; i >= 0; i--) {
+            const n = actMs[i].lines.findIndex(function (ln) { return ln.k === k; });
+            if (n >= 0 && actMs[i].lines[n].st !== 'skip' && actMs[i].lines[n].st !== 'nt') return [actMs[i], n];
+        }
+        return null;
+    }
+    // The first of these lines not done yet (the last when all are): which one more of the same work serves.
+    function actFirstOpen(keys) {
+        for (let i = 0; i < keys.length; i++) { const at = actLineFor(keys[i]); if (at && at[0].lines[at[1]].st !== 'done') return keys[i]; }
+        return keys[keys.length - 1];
+    }
+    function actLineSet(k, st) {
+        const at = actLineFor(k);
+        if (!at) return;
+        const ln = at[0].lines[at[1]];
+        if (ln.st === st || ln.st === 'cut' || ln.st === 'none') return;
+        if (st === 'done' && ln.live > 0) return;      // another job of this line still runs
+        ln.st = st;
+        actSend(actLineMsg(at[0], at[1]));
+        if (st === 'done' && at[0].lines.every(function (x) { return x.st !== 'wait' && x.st !== 'run'; }) && at[0].state === 'run') {
+            at[0].state = 'done'; at[0].ms = performance.now() - at[0].t0; actSend(actMomMsg(at[0]));
+        }
+    }
+    // A job ended: its line (and, for a full-size run, each line its pictures served) is done when nothing else of it runs.
+    function actJobLines(j) {
+        const ok = j.state === 'done' || j.state === 'skip';
+        if (j.L) {
+            const at = actLineFor(j.L);
+            if (at) { const ln = at[0].lines[at[1]]; ln.live = Math.max(0, (ln.live || 0) - 1); if (ok) actLineSet(j.L, 'done'); }
+        }
+        if (j.tags && ok) j.tags.forEach(function (t) { if (ACT_TAG[t]) actLineSet(ACT_TAG[t], 'done'); });
+    }
+    // A loading-ahead picture of a tagged line (L22, L23, L14, L18) landed: its line runs, and is done once none of that tag waits or loads.
+    function actTagEv(tag, job) {
+        const k = ACT_TAG[tag];
+        if (!k) return;
+        if (job) (job.tags || (job.tags = new Set())).add(tag);
+        actLineSet(k, 'run');
+        try { if ((ahPics.on[tag] || 0) <= 1 && !ahPics.wait.some(function (w) { return w.tag === tag; })) actLineSet(k, 'done'); } catch (e) { /* gates not built yet */ }
+    }
+    // A failure inside a job: its moment's header and its line say so.
+    function actMomentBad(j) {
+        const m = actMs.find(function (x) { return x.id === j.mom; });
+        if (!m) return;
+        m.bad++;
+        actSend(actMomMsg(m));
+        const k = j.L || (j.tags && j.tags.size ? ACT_TAG[Array.from(j.tags).pop()] : '');
+        const n = k ? m.lines.findIndex(function (ln) { return ln.k === k; }) : -1;
+        if (n >= 0) { m.lines[n].bad++; actSend(actLineMsg(m, n)); }
     }
 
     // The window's own code, run inside it (own) so it outlives a reload of this page; else run from here, drawing into it.
@@ -717,7 +849,7 @@
         const d = win.document, de = d.documentElement;
         if (own && de.getAttribute('data-hz-act') === 'live' && de.getAttribute('data-hz-act-ver') === ver) return null;
         if (own && win.__hzActCh) { try { win.__hzActCh.close(); } catch (e) { /* gone */ } }     // a newer copy of this code takes over
-        const C = { job: '#cdd6f4', ok: '#a6adc8', bad: '#f38ba8', you: '#89b4fa', warn: '#f9e2af', info: '#9399b2', page: '#a6e3a1' };
+        const C = { job: '#cdd6f4', ok: '#a6adc8', bad: '#f38ba8', you: '#89b4fa', warn: '#f9e2af', info: '#9399b2', page: '#a6e3a1', cut: '#7f849c' };
         const S = { run: '#cdd6f4', done: '#a6e3a1', stopped: '#f9e2af', failed: '#f38ba8' };
         const MAX = 1500, KIDS = 1000;
         d.title = 'Hover Zoom activity';
@@ -751,21 +883,21 @@
             return g;
         };
         const textOf = function (r) { return r.textContent.replace(/^(\S+)\s+[▸▾]\s*/, '$1  '); };
-        btn('Copy', function (b) {
-            const out = [];
-            Array.prototype.forEach.call(list.children, function (r) {
-                if (r.getAttribute('data-box')) { if (!r.hidden) Array.prototype.forEach.call(r.children, function (k) { out.push('    ' + k.textContent); }); }
-                else out.push(textOf(r));
+        const walk = function (node, pad, all, out) {      // a box's lines indented under its header; closed boxes only with all (Export)
+            Array.prototype.forEach.call(node.children, function (r) {
+                if (r.getAttribute('data-box')) { if (all || !r.hidden) walk(r, pad + '    ', all, out); }
+                else if (r.getAttribute('data-cl')) walk(r, pad + '  ', all, out);
+                else out.push(pad + textOf(r).replace(/\n/g, '\n' + pad));
             });
-            const text = out.join('\n'), ok = function () { b.textContent = 'Copied'; setTimeout(function () { b.textContent = 'Copy'; }, 1500); };
+            return out;
+        };
+        const arrowOf = function (box) { let h = box.previousElementSibling; if (h && h.getAttribute('data-cl')) h = h.previousElementSibling; return h && h.children[1]; };
+        btn('Copy', function (b) {
+            const text = walk(list, '', false, []).join('\n'), ok = function () { b.textContent = 'Copied'; setTimeout(function () { b.textContent = 'Copy'; }, 1500); };
             try { win.navigator.clipboard.writeText(text).then(ok, function () {}); } catch (e) { /* no clipboard */ }
         });
         btn('Export', function (b) {      // every line, collapsed groups included, as a .txt file
-            const out = [];
-            Array.prototype.forEach.call(list.children, function (r) {
-                if (r.getAttribute('data-box')) Array.prototype.forEach.call(r.children, function (k) { out.push('    ' + k.textContent); });
-                else out.push(textOf(r));
-            });
+            const out = walk(list, '', true, []);
             const t = new Date(), p2 = function (n) { return String(n).padStart(2, '0'); };
             const a = d.createElement('a'), u = win.URL.createObjectURL(new win.Blob([out.join('\n') + '\n'], { type: 'text/plain' }));
             a.href = u;
@@ -775,14 +907,15 @@
             setTimeout(function () { win.URL.revokeObjectURL(u); }, 60000);
             b.textContent = 'Saved'; setTimeout(function () { b.textContent = 'Export'; }, 1500);
         });
-        btn('Open all', function () { list.querySelectorAll('[data-box]').forEach(function (x) { x.hidden = false; if (x.previousElementSibling) x.previousElementSibling.children[1].textContent = '▾ '; }); });
-        btn('Close all', function () { list.querySelectorAll('[data-box]').forEach(function (x) { x.hidden = true; if (x.previousElementSibling) x.previousElementSibling.children[1].textContent = '▸ '; }); });
+        btn('Open all', function () { list.querySelectorAll('[data-box]').forEach(function (x) { x.hidden = false; const a = arrowOf(x); if (a) a.textContent = '▾ '; }); });
+        btn('Close all', function () { list.querySelectorAll('[data-box]').forEach(function (x) { x.hidden = true; const a = arrowOf(x); if (a) a.textContent = '▸ '; }); });
         btn('Clear', function () { while (list.firstChild) list.firstChild.remove(); groups.clear(); });
         d.body.insertBefore(bar, list);
         list.addEventListener('click', function (e) {
-            const r = e.target.closest && e.target.closest('[data-g]');
+            const r = e.target.closest && e.target.closest('[data-g],[data-mg]');
             if (!r || !r.nextElementSibling) return;
-            const box = r.nextElementSibling;
+            const box = r.getAttribute('data-mg') ? r.nextElementSibling.nextElementSibling : r.nextElementSibling;
+            if (!box) return;
             box.hidden = !box.hidden;
             r.children[1].textContent = box.hidden ? '▸ ' : '▾ ';
         });
@@ -797,13 +930,25 @@
             row.appendChild(d.createTextNode(text));
             return row;
         };
-        const put = function (el, box) {
+        const moms = new Map();
+        const mom = function (key) {
+            let g = moms.get(key);
+            if (!g) {
+                const row = list.querySelector('[data-mg="' + key + '"]');
+                if (row) { g = { row: row, ar: row.children[1], hd: row.lastChild, cl: row.nextElementSibling, box: row.nextElementSibling.nextElementSibling }; moms.set(key, g); }
+            }
+            return g;
+        };
+        const put = function (el, box, into, box2) {
             const sc = d.scrollingElement || de, stick = sc.scrollHeight - sc.scrollTop - sc.clientHeight < 40;
-            list.appendChild(el);
-            if (box) list.appendChild(box);
+            const at = into || list;
+            at.appendChild(el);
+            if (box) at.appendChild(box);
+            if (box2) at.appendChild(box2);
             while (list.childElementCount > MAX) {
                 const f = list.firstElementChild;
                 if (f.getAttribute('data-g')) groups.delete(f.getAttribute('data-g'));
+                if (f.getAttribute('data-mg')) moms.delete(f.getAttribute('data-mg'));
                 f.remove();
             }
             if (stick) sc.scrollTop = sc.scrollHeight;
@@ -811,14 +956,14 @@
         const head = function (m) {
             const sym = m.state === 'run' ? '…' : m.state === 'done' ? '✓' : m.state === 'stopped' ? '⏹' : m.state === 'failed' ? '✗' : '·';
             const n = m.total || m.done ? ' · ' + m.done + (m.total ? '/' + m.total : '') : '';
-            return sym + ' ' + m.text + n + (m.bad ? ' (' + m.bad + ' failed)' : '') + (m.ms != null ? ' · ' + secs(m.ms) : '') + (m.note ? ' — ' + m.note : '');
+            return sym + ' ' + m.text + n + (m.bad ? ' (' + m.bad + ' failed)' : '') + (m.warn ? ' (' + m.warn + ' only the thumbnail)' : '') + (m.cut ? ' (' + m.cut + ' stopped mid-way, again later)' : '') + (m.ms != null ? ' · ' + secs(m.ms) : '') + (m.note ? ' — ' + m.note : '');
         };
         const receive = function (m) {
             if (!m || !m.t) return;
             if (m.t === 'hello') {
                 if (pids.has(m.pid)) return;
                 list.querySelectorAll('[data-s="run"]').forEach(function (r) {     // the page before was left mid-way
-                    if (r.getAttribute('data-g').split('-')[0] === m.pid) return;
+                    if ((r.getAttribute('data-g') || r.getAttribute('data-mg') || '').split('-')[0] === m.pid) return;
                     r.setAttribute('data-s', 'stopped');
                     r.style.color = S.stopped;
                     r.lastChild.textContent = r.lastChild.textContent.replace(/^…/, '⏹') + ' — cut off: the page was left';
@@ -826,7 +971,44 @@
                 pids.add(m.pid);
                 list.setAttribute('data-pids', Array.from(pids).slice(-50).join(','));
                 put(line(m.at, 'page', '── page: ' + m.url + ' (' + m.ver + ') ──', true));
-            } else if (m.t === 'line') put(line(m.at, m.kind, (m.kind === 'ok' || m.kind === 'bad' ? '    ' : '') + m.text, m.kind === 'job' || m.kind === 'you'));
+            } else if (m.t === 'mom') {      // a moment: its header, its checklist (always shown), its detail box (the jobs)
+                const key = m.pid + '-m' + m.id;
+                let g = mom(key);
+                if (!g) {
+                    const row = line(m.at, 'job', '', true), ar = d.createElement('span'), hd = d.createElement('span');
+                    row.lastChild.remove();
+                    row.setAttribute('data-mg', key);
+                    row.style.cssText += ';cursor:pointer;margin-top:10px;border-top:1px solid #45475a;padding-top:4px';
+                    ar.textContent = '▸ ';
+                    row.appendChild(ar);
+                    row.appendChild(hd);
+                    const cl = d.createElement('div');
+                    cl.setAttribute('data-cl', '1');
+                    cl.style.cssText = 'padding-left:18px';
+                    const box = d.createElement('div');
+                    box.setAttribute('data-box', '1');
+                    box.hidden = true;
+                    box.style.cssText = 'padding-left:24px;border-left:1px solid #45475a;margin-left:6px';
+                    g = { row: row, ar: ar, hd: hd, cl: cl, box: box };
+                    moms.set(key, g);
+                    put(row, cl, null, box);
+                }
+                const sym = m.state === 'run' ? '▶' : m.state === 'done' ? '✓' : '⏹';
+                g.hd.textContent = sym + ' ' + m.text + (m.bad ? ' — ' + m.bad + ' failed, see the lines in red' : '') + (m.ms != null ? ' · ' + secs(m.ms) : '') + (m.note ? ' — ' + m.note : '');
+                g.row.setAttribute('data-s', m.state);
+                g.row.style.color = m.bad ? S.failed : m.state === 'run' ? '#89b4fa' : S[m.state] || '#cdd6f4';
+            } else if (m.t === 'mline') {
+                const g = mom(m.pid + '-m' + m.id);
+                if (!g) return;
+                let r = g.cl.querySelector('[data-n="' + m.n + '"]');
+                if (!r) { r = d.createElement('div'); r.setAttribute('data-n', String(m.n)); r.style.cssText = 'white-space:pre-wrap;padding:0'; g.cl.appendChild(r); }
+                const L = { wait: ['•', '#9399b2'], run: ['…', '#cdd6f4'], done: ['✓', '#a6e3a1'], skip: ['–', '#6c7086'], nt: ['·', '#7f849c'], cut: ['⏹', '#f9e2af'], none: ['–', '#7f849c'] }[m.st] || ['·', '#cdd6f4'];
+                r.textContent = L[0] + ' ' + m.text;
+                r.style.color = m.bad ? S.failed : L[1];
+            } else if (m.t === 'line') {
+                const g = m.mom ? mom(m.pid + '-m' + m.mom) : null;
+                put(line(m.at, m.kind, (m.kind === 'ok' || m.kind === 'bad' ? '    ' : '') + m.text, m.kind === 'job' || m.kind === 'you'), null, g ? g.box : null);
+            }
             else if (m.t === 'job') {
                 const key = m.pid + '-' + m.id;
                 let g = grp(key);
@@ -845,11 +1027,12 @@
                     box.style.cssText = 'padding-left:24px;border-left:1px solid #45475a;margin-left:6px';
                     g = { row: row, hd: hd, ar: ar, box: box };
                     groups.set(key, g);
-                    put(row, box);
+                    const mg = m.mom ? mom(m.pid + '-m' + m.mom) : null;
+                    put(row, box, mg ? mg.box : null);
                 }
                 g.hd.textContent = head(m);
                 g.row.setAttribute('data-s', m.state);
-                g.row.style.color = S[m.state] || '#cdd6f4';
+                g.row.style.color = m.bad ? S.failed : m.warn ? S.stopped : S[m.state] || '#cdd6f4';     // a failure inside shows on the closed header
             } else if (m.t === 'kid') {
                 const g = grp(m.pid + '-' + m.id);
                 if (!g || g.box.childElementCount >= KIDS) return;
@@ -999,6 +1182,18 @@
         } catch (e) { return String(url).slice(-60); }
     }
 
+    // A failure's diagnosis, indented under its line, so a copy of the box carries everything needed to look into it.
+    function actDiag(o) {
+        const out = [];
+        if (o.thumb) out.push('thumbnail: ' + o.thumb);
+        if (o.link) out.push('its link: ' + o.link);
+        if (o.page) out.push('gallery page: ' + o.page + (o.st ? ' (status ' + o.st + ')' : ''));
+        (o.tries || []).forEach(function (t, i) { out.push((i ? '       ' : 'tried: ') + t); });
+        if (o.tries && !o.tries.length) out.push('tried: nothing (no candidate to probe)');
+        out.push('on: ' + actUrl() + ' · Hover Zoom ' + version() + ' · ' + navigator.userAgent.replace(/^.*\) /, ''));
+        return '\n        ' + out.join('\n        ');
+    }
+
     function actSecs(ms) { return ms >= 1000 ? (ms / 1000).toFixed(1) + ' s' : Math.round(ms) + ' ms'; }
 
     const ACT_WHY = { main: 'for the page', gal: 'for the next galleries', galo: 'for the open gallery', galn: 'for the next gallery', count: 'to count it', shown: 'for the open gallery' };
@@ -1006,9 +1201,17 @@
     // A loading-ahead trace event as a line: under its job when it has one, else on its own with the reason.
     function actTrace(ev, o, job) {
         const why = job ? '' : ' · ' + (ACT_WHY[o.tag] || o.tag);
-        if (ev === 'thumb') actKid(job, o.ok, (o.ok ? '✓ thumbnail ' : '✗ thumbnail failed ') + actPic(o.u) + ' · ' + actSecs(o.ms) + why);
-        else if (ev === 'orig') actKid(job, o.ok, (o.ok ? '✓ full size ' : '✗ no full size found ') + actPic(o.u) + ' · ' + actSecs(o.ms) + why);
-        else if (ev === 'page') actKid(job, o.ok, (o.ok ? '✓ read the page of ' : '✗ could not read the page of ') + actGal(o.h) + (o.ok ? ': ' + o.n + ' pictures' : o.st ? ': status ' + o.st : '') + ' · ' + actSecs(o.ms) + why);
+        if (ev === 'thumb') {
+            if (o.cut) actKid(job, 'cut', '⏸ thumbnail stopped (' + o.cut + '), loads again when its page shows: ' + actPic(o.u) + why);
+            else actKid(job, !!o.ok, (o.ok ? '✓ thumbnail ' : '✗ thumbnail failed ') + actPic(o.u) + ' · ' + actSecs(o.ms) + why + (o.ok ? '' : actDiag({ thumb: o.u })));
+        }
+        else if (ev === 'orig') {
+            if (!o.cut) actTagEv(o.tag, job);
+            if (o.cut) actKid(job, 'cut', '⏸ stopped mid-way (' + o.cut + '), loads again later: ' + actPic(o.u) + ' · ' + actSecs(o.ms) + why);
+            else if (o.ok && o.only) actKid(job, 'warn', '⚠ only the thumbnail found, nothing bigger: ' + actPic(o.u) + ' · ' + actSecs(o.ms) + why + actDiag(o));
+            else actKid(job, !!o.ok, (o.ok ? '✓ full size ' : '✗ no full size found ') + actPic(o.u) + ' · ' + actSecs(o.ms) + why + (o.ok ? '' : actDiag(o)));
+        }
+        else if (ev === 'page') actKid(job, o.ok, (o.ok ? '✓ read the page of ' : '✗ could not read the page of ') + actGal(o.h) + (o.ok ? ': ' + o.n + ' pictures' : o.st ? ': status ' + o.st : '') + ' · ' + actSecs(o.ms) + why + (o.ok ? '' : actDiag({ page: o.h, st: o.st })));
         else if (ev === 'act') {
             if (o.a === 'page') act('you', 'You went ' + (o.dir > 0 ? 'forward' : 'back') + ' a page');
             else if (o.a === 'close') act(o.you ? 'you' : 'info', (o.you ? 'You closed the gallery' : 'The gallery closed') + (o.why ? ' (' + o.why + ')' : '') + ' — the page\'s own loading starts again from the first gallery on screen');
@@ -1021,6 +1224,7 @@
         try {
             const out = [];
             actBuf.forEach(function (b) {
+                if (b.mom) { out.push(b.mom.t + ' moment[' + b.mom.state + '] ' + b.mom.text + (b.mom.bad ? ' (' + b.mom.bad + ' failed)' : '') + (b.mom.note ? ' — ' + b.mom.note : '')); b.mom.lines.forEach(function (ln, n) { out.push('  ' + ln.st + ' ' + actLineMsg(b.mom, n).text); }); return; }
                 if (!b.job) { out.push(b.t + ' ' + b.kind + ' ' + b.text); return; }
                 const j = b.job;
                 out.push(j.t + ' job[' + j.state + '] ' + j.text + ' · ' + j.done + (j.total ? '/' + j.total : '') + (j.bad ? ' (' + j.bad + ' failed)' : '') + (j.ms != null ? ' · ' + actSecs(j.ms) : '') + (j.note ? ' — ' + j.note : ''));
@@ -2312,11 +2516,11 @@
     }
 
     // Cancel every load in flight whose owners are all background jobs matching cut(owner): stopped mid-download.
-    function netCutWhere(cut) {
+    function netCutWhere(cut, why) {
         let n = 0;
         netLive.forEach(function (e, url) {
             for (const o of e.owners) if (!o || !o.bg || !cut(o)) return;
-            e.owners.forEach(function (o) { o.cutNow = true; });
+            e.owners.forEach(function (o) { o.cutNow = true; o.cutWhy = why || ''; o.cancelled = true; });     // o: the job's own owner (netJob), never its run's token
             netLive.delete(url);
             netCut.add(url);
             n++;
@@ -2329,6 +2533,33 @@
     function galCutNote(why, n) { if (!n) return; act('info', 'Stopped ' + n + ' download' + (n === 1 ? '' : 's') + ' mid-way: ' + why); dbg('cancelled in flight: ' + n + ' (' + why + ')'); }
     // A background job's owner: reads its run's token (cancelled, fresh), carries its own item and tag.
     function netJob(tok, it, tag) { const o = Object.create(tok); o.bg = true; o.it = it; o.tag = tag; o.cutNow = false; return o; }
+
+    // A rested hover (its preview about to load): every background download stops and goes back to the front of its queue, the ⤓ queue pauses; hoverDone resumes them.
+    let hoverHold = null;               // {l9: the hover's own original is in, t: backstop}
+    function hoverFirst(why) {
+        const n = netCutWhere(function () { return true; }, why);
+        const k = dlqRun && dlqRun.dl ? dlqRun.dl.pause() : 0;
+        galCutNote(why, n + k);
+        if (hoverHold) clearTimeout(hoverHold.t);
+        hoverHold = { l9: false, by: why, t: setTimeout(function () { hoverResume('it took too long'); }, 2 * AH_PV_HOLD_MS) };
+        return n;
+    }
+    // The hover's own original is in (or failed): its gallery's ±3 next, then everything resumes.
+    function hoverDone() { if (hoverHold) { hoverHold.l9 = true; hoverResumeCheck(); } }
+    function hoverResumeCheck() {
+        if (!hoverHold || !hoverHold.l9) return;
+        if (ahPics.wait.some(function (w) { return w.tag === 'galh'; }) || (ahPics.on.galh || 0) > 0) return;     // M8: L22 first
+        hoverResume('');
+    }
+    function hoverResume(why) {
+        if (!hoverHold) return;
+        clearTimeout(hoverHold.t);
+        hoverHold = null;
+        if (why) dbg('hover hold released: ' + why);
+        if (dlqRun && dlqRun.dl) dlqRun.dl.resume();
+        plPump();
+        ahPump();
+    }
 
     const MAX_PROBES = 8;
 
@@ -2821,7 +3052,7 @@
             for (const t of tries.slice(0, LINKED_TRIES)) {
                 if (token.cancelled) break;
                 if (blocked(t.url)) continue;
-                const dim = await probe(t.url, token.fresh);
+                const dim = await probe(t.url, token.fresh, token);
                 leads.tried++;
                 if (dim) leads.ok = true;
                 if (!dim) { failure = failure || failureText(t.url); lfailed = true; continue; }
@@ -2858,7 +3089,7 @@
             const url = c.url;
             if (token.cancelled) return trusted || best;
             if (trusted) break;             // the authoritative answer landed; stop guessing
-            const dim = await probe(url, token.fresh);
+            const dim = await probe(url, token.fresh, token);
             if (c.rule) ruleOutcome(c, dim);
             if (c.lead && url !== shown) { leads.tried++; if (dim) leads.ok = true; }
             if (!dim) { failure = failure || failureText(url); continue; }
@@ -2909,7 +3140,7 @@
             displayed: displayed, failed: lfailed }), doorChainOf(lchain, lt.href), lpath, lt.href, !trusted && linksOnward(el, lpage));
         if (trusted) {
             // The linked page names the picture, but the page's own copy of it may be bigger.
-            const own = shown && !trusted.video && !token.cancelled && !unstable.has(shown) ? await probe(shown, false) : null;
+            const own = shown && !trusted.video && !token.cancelled && !unstable.has(shown) ? await probe(shown, false, token) : null;
             if (own && !own.video && own.w * own.h > trusted.w * trusted.h && sameShape(native, own)) {
                 const hit = { url: shown, w: own.w, h: own.h, display: own.display, from: 'the page\'s own picture, bigger than the linked page\'s' };
                 dbg('hit', hit);
@@ -6014,20 +6245,33 @@
         return fmt.fmt === 'avif';
     }
 
-    function fetchForSave(url) {
+    function fetchForSave(url, ctl) {
         return new Promise(function (res) {
             let settled = false;
             const fin = function (v) { if (!settled) { settled = true; res(v); } };
             setTimeout(function () { fin(null); }, SAVE_FETCH_MS);
             try {
-                GM_xmlhttpRequest({
+                saveCtlKeep(ctl, GM_xmlhttpRequest({
                     method: 'GET', url: url, responseType: 'arraybuffer', timeout: SAVE_FETCH_MS,
                     onload: function (r) { fin(r.status && (r.status < 200 || r.status >= 300) ? null : r.response || null); },
                     onerror: function () { fin(null); },
                     ontimeout: function () { fin(null); },
-                });
+                }));
             } catch (e) { fin(null); }
         });
+    }
+
+    // A save in flight that a hover may stop (the ⤓ queue's): its request handles, aborted at once if it was stopped first.
+    function saveCtlKeep(ctl, h) {
+        if (!ctl || !h || typeof h.abort !== 'function') return h;
+        if (ctl.cut) { try { h.abort(); } catch (e) { /* settled */ } } else ctl.h.push(h);
+        return h;
+    }
+    function saveCtlCut(ctl) {
+        ctl.cut = true;
+        ctl.h.forEach(function (h) { try { h.abort(); } catch (e) { /* settled */ } });
+        ctl.h.length = 0;
+        if (ctl.wake) ctl.wake();
     }
 
     // The bytes decoded and re-encoded as cfg.saveConvert; null when the browser cannot decode them.
@@ -6052,7 +6296,7 @@
     }
 
     // A converted file to the download folder: the manager's download, else a plain link download.
-    function saveBlob(blob, name, quiet, done, url, page, fail) {
+    function saveBlob(blob, name, quiet, done, url, page, fail, ctl) {
         const obj = URL.createObjectURL(blob);
         const viaLink = function () {
             try {
@@ -6064,61 +6308,66 @@
                 a.click();
                 a.remove();
                 if (done) done();
-            } catch (e) { dbg('saving the converted file failed', String(e)); saveAsServed(url, quiet, done, page, fail); }
+            } catch (e) { dbg('saving the converted file failed', String(e)); saveAsServed(url, quiet, done, page, fail, ctl); }
             setTimeout(function () { URL.revokeObjectURL(obj); }, 60000);
         };
         try {
-            GM_download({ url: obj, name: saveFolderFor(page) + name, saveAs: !quiet,
+            saveCtlKeep(ctl, GM_download({ url: obj, name: saveFolderFor(page) + name, saveAs: !quiet,
                 onload: function () { setTimeout(function () { URL.revokeObjectURL(obj); }, 60000); if (done) done(); },
-                onerror: function (r) { dbg('manager refused the converted file', { error: r && r.error }); if (!(r && r.error === 'not_succeeded')) viaLink(); else if (fail) fail(r.error); } });
+                onerror: function (r) { if (ctl && ctl.cut) return; dbg('manager refused the converted file', { error: r && r.error }); if (!(r && r.error === 'not_succeeded')) viaLink(); else if (fail) fail(r.error); } }));
         } catch (e) { viaLink(); }
     }
 
     // Saving: converted when the setting covers the file's real format, else exactly as served.
-    async function saveOriginal(url, quiet, done, page, fail) {
+    async function saveOriginal(url, quiet, done, page, fail, ctl) {
         if (quiet) saveFolderAsk();
         let held = heldBlobs.get(url);
         if (!held && quiet && !/^(data|blob):/.test(url)) { const b = await heldGet(url); if (b) { held = { blob: b }; dbg('saving kept bytes from disk', url); } }
-        const asServed = function () { if (held) saveHeld(held.blob, url, quiet, done, page, fail); else saveAsServed(url, quiet, done, page, fail); };
+        const asServed = function () { if (held) saveHeld(held.blob, url, quiet, done, page, fail, ctl); else saveAsServed(url, quiet, done, page, fail, ctl); };
         if (cfg.saveConvert === 'off' || (!held && typeof GM_xmlhttpRequest !== 'function') || /^(data|blob):/.test(url)) { asServed(); return; }
         if (!fail) toast('Saving…', 60000);
-        const buf = held ? await held.blob.arrayBuffer().catch(function () { return null; }) : await fetchForSave(url);
+        const buf = held ? await held.blob.arrayBuffer().catch(function () { return null; }) : await fetchForSave(url, ctl);
+        if (ctl && ctl.cut) return;
         const fmt = buf ? sniffFormat(new Uint8Array(buf, 0, Math.min(4096, buf.byteLength))) : null;
         if (!convertWanted(fmt)) { if (!fail) hideTip(); asServed(); return; }
         if (!fail) toast('Converting ' + fmt.fmt.toUpperCase() + ' to ' + cfg.saveConvert.toUpperCase() + '…', 60000);
         const out = await convertBytes(buf, fmt);
-        if (!out) { if (!fail) toast('Could not convert this ' + fmt.fmt.toUpperCase() + '; saved as it is', 3000); saveAsServed(url, quiet, done, page, fail); return; }
+        if (ctl && ctl.cut) return;
+        if (!out) { if (!fail) toast('Could not convert this ' + fmt.fmt.toUpperCase() + '; saved as it is', 3000); saveAsServed(url, quiet, done, page, fail, ctl); return; }
         if (!fail) hideTip();
-        saveBlob(out, saveName(url, page, cfg.saveConvert), quiet, done, url, page, fail);
+        saveBlob(out, saveName(url, page, cfg.saveConvert), quiet, done, url, page, fail, ctl);
     }
 
     // Kept bytes saved into the folder; refused, the file is fetched and saved as usual.
-    function saveHeld(blob, url, quiet, done, page, fail) {
-        if (typeof GM_download !== 'function') { saveAsServed(url, quiet, done, page, fail); return; }
+    function saveHeld(blob, url, quiet, done, page, fail, ctl) {
+        if (typeof GM_download !== 'function') { saveAsServed(url, quiet, done, page, fail, ctl); return; }
         const obj = URL.createObjectURL(blob);
         const back = function (why) {
             URL.revokeObjectURL(obj);
+            if (ctl && ctl.cut) return;
             dbg('saving the kept bytes was refused; fetching the file', { url: url, error: why });
-            saveAsServed(url, quiet, done, page, fail);
+            saveAsServed(url, quiet, done, page, fail, ctl);
         };
         try {
-            GM_download({ url: obj, name: saveFolderFor(page) + saveName(url, page), saveAs: !quiet,
+            saveCtlKeep(ctl, GM_download({ url: obj, name: saveFolderFor(page) + saveName(url, page), saveAs: !quiet,
                 onload: function () { setTimeout(function () { URL.revokeObjectURL(obj); }, 60000); if (done) done(); },
-                onerror: function (r) { back(r && r.error); } });
+                onerror: function (r) { back(r && r.error); } }));
         } catch (e) { back(String(e)); }
     }
 
-    function saveAsServed(url, quiet, done, page, fail) {
+    function saveAsServed(url, quiet, done, page, fail, ctl) {
         if (typeof GM_download !== 'function') { if (fail) fail('no GM_download'); else openOriginal(url); return; }
+        if (ctl && ctl.cut) return;
         try {
-            GM_download({ url: url, name: saveFolderFor(page) + saveName(url, page), saveAs: !quiet,
+            saveCtlKeep(ctl, GM_download({ url: url, name: saveFolderFor(page) + saveName(url, page), saveAs: !quiet,
                 onload: function () { if (done) done(); },
                 onerror: function (r) {
+                    if (ctl && ctl.cut) return;
                     const why = r && r.error;
                     dbg('saving the original failed', { url: url, error: why, details: r && r.details });
                     if (fail) fail(why || 'failed');
                     else if (why && why !== 'not_succeeded') openOriginal(url);   // refused outright: save it from the tab
-                } });
+                } }));
         } catch (e) { dbg('saving the original threw', String(e)); if (fail) fail(String(e)); else openOriginal(url); }
     }
 
@@ -8213,6 +8462,7 @@
             if (sheet) { dbg('spriteGate: ' + sheet); dismiss(); return; }
             resolving = true;
             if (!holding) showSpinner();
+            if (!plGet(el)) { actMoment('M2', true); actLineSet('L9', 'run'); hoverFirst('a hover came first'); }     // M2: its own original before anything loading ahead
             let got = false;
             try {
                 await resolve(el, displayed, myToken,
@@ -8228,6 +8478,7 @@
                         paint(hit);
                     });
                 myToken.done = true;
+                if (myToken === token) { hoverDone(); actLineSet('L9', 'done'); actMomentPop('M2'); }
                 if (avArea && !myToken.cancelled && !avSeen) areaApply('avatarAreas', vdForget, chain, path);
                 if (holding) return;            // the wait's timer paints, or shows the failure
                 if (!got && !myToken.cancelled && active === el && myToken.small && cfg.bigChip) bigChipShow(el, myToken.small);
@@ -12286,7 +12537,7 @@
     function plSet(el, v) { plDone.set(plKey(el), v); }
 
     function plPump() {
-        if (plPaused) return;
+        if (plPaused || (hoverHold && !hoverHold.l9)) return;
         while (plRunning < plWorkers() && plQueue.length) {
             const job = plQueue.shift();
             if (job.gen !== plGen) { plActLeft(job); continue; }
@@ -12309,6 +12560,7 @@
     // A queue entry gone, loaded or not: its header's total drops if nothing was said for it; the header ends with its last entry.
     function plActLeft(job) {
         const j = job.aj;
+        if (job.back) { job.back = false; return; }     // put back in the queue: not gone
         if (!j || j.state !== 'run') return;
         if (!job.told) actTotal(j, Math.max(j.done, j.total - 1));
         if (!j.live && !plQueue.some(function (q) { return q.aj === j; })) actEnd(j);
@@ -12321,13 +12573,19 @@
         if (job.rewarm) { job.rewarm.warm = plWarmGen; plKeepImage(job.rewarm.res); return; }
         primeLink(job.el);
         if (plHas(job.el)) return;
-        const token = { cancelled: false, fresh: false };
+        const token = { cancelled: false, fresh: false, bg: true, it: job.el, tag: 'pl', cutNow: false };
         plLive.push(token);
         let hit = null;
         const displayed = sizeOf(job.el);
         try { hit = await resolve(job.el, displayed, token, null, PL_GUESSES); }
         catch (e) { hit = null; }
         plLive = plLive.filter(function (t) { return t !== token; });
+        if (token.cutNow && job.gen === plGen) {      // stopped for a hover: back to the front, asked again
+            job.back = true;
+            plQueue.unshift(job);
+            actKid(job.aj, 'cut', '⏸ stopped mid-way (' + (token.cutWhy || 'stopped') + '), loads again later: ' + actFile(pictureUrl(job.el) || ''));
+            return;
+        }
         if (job.gen !== plGen || token.cancelled) return;
         plSet(job.el, { res: hit, displayed: displayed, sig: candSig(job.el, PL_GUESSES), warm: plWarmGen });
         job.told = true;
@@ -12369,7 +12627,7 @@
         jobs.sort(function (x, y) { return x.dist - y.dist; });
         const real = jobs.filter(function (j) { return !j.rewarm; });
         if (real.length) {
-            if (!plAct || plAct.state !== 'run') plAct = actJob('Slideshow: full size of the pictures ahead and behind, nearest first', 0);
+            if (!plAct || plAct.state !== 'run') { const tp = actMs[actMs.length - 1]; if (!tp || tp.mid !== 'M12') actMoment('M12'); plAct = actJob('Slideshow: full size of the pictures ahead and behind, nearest first', 0, 'L19'); }
             actTotal(plAct, plAct.done + (plAct.live || 0) + real.length);
             real.forEach(function (j) { j.aj = plAct; });
         }
@@ -12656,7 +12914,7 @@
         const added = fresh.length;
         if (added) {
             dbg('loading ' + added + ' more ahead', { queued: plQueue.length + added });
-            const aj = actJob('Page: full size of the pictures ' + (level >= 3 ? 'on the page' : 'on and near the screen'), added);
+            const aj = actJob('Page: full size of the pictures ' + (level >= 3 ? 'on the page' : 'on and near the screen'), added, level >= 3 ? 'L2' : 'L1');
             fresh.forEach(function (j) { j.aj = aj; plQueue.push(j); });
         }
         plPump();
@@ -13682,8 +13940,9 @@
             'padding:6px 12px;border-radius:8px;background:#1e1e2e;border:1px solid #f9e2af;color:#f9e2af;font:13px/1.3 system-ui,sans-serif;' +
             'pointer-events:none;box-shadow:0 4px 14px rgba(0,0,0,.6)}' +
             '.svd{position:absolute;left:4px;top:4px;width:22px;height:22px;pointer-events:none}' +
-            '.cvr,.rdy{position:absolute;right:0;bottom:0;width:14px;height:14px;pointer-events:none;border-bottom-right-radius:6px;clip-path:polygon(100% 0,100% 100%,0 100%)}' +
-            '.cvr{background:#f9e2af}.rdy{background:#89b4fa}' +
+            '.cvr,.rdy,.hqx{position:absolute;right:0;bottom:0;width:14px;height:14px;pointer-events:none;border-bottom-right-radius:6px;clip-path:polygon(100% 0,100% 100%,0 100%)}' +
+            '.rdy{background:#89b4fa}.hqx{background:#f38ba8}' +
+            '.cvr{position:absolute;inset:0;width:auto;height:auto;clip-path:none;border-radius:6px;box-shadow:inset 0 0 0 3px #89b4fa;background:none;pointer-events:none;z-index:1}' +
             '.strip[hidden]{display:none}' +
             '.strip{position:fixed;z-index:4;display:flex;flex-direction:column;justify-content:space-evenly;padding:0 4px;box-sizing:border-box;cursor:move;' +
             'background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);' +
@@ -14487,6 +14746,7 @@
         const p = set.pages[set.page] || [0, set.pics.length];
         for (let k = p[0]; k < p[1]; k++) {
             const pic = set.pics[k], r = L[k];
+            if (pic && pic.cut) { pic.cut = false; galImg(pic.item, null, null).then(function (v) { if (galCur === set) galEarlyDone(set, pic, v); }); }     // stopped when its page was left
             if (pic && r && !pic.up && r.w > pic.nw * GAL_UPGRADE) { pic.up = true; galUpgrade(pic.item, pic.img, pic.nw, r.w); }
         }
         galHqAhead(set);
@@ -14547,7 +14807,8 @@
         set.want = null;
         const L0 = set.pages[set.page] || [0, 0], left = new Set(set.pics.slice(L0[0], L0[1]).map(function (p) { return p.item; }));
         set.page = to;
-        galCutNote('a page step', netCutWhere(function (o) { return left.has(o.it); }));     // the page left: its originals stop mid-download
+        galCutNote('a page step', netCutWhere(function (o) { return left.has(o.it); }, 'you left its page') +
+            galThumbCut(function (r) { return left.has(r.item); }, 'you left its page'));     // the page left: its originals and unfinished thumbnails stop mid-download
         galPageWork(set, galLayout(set, set.open));
         predWatch(set.href, to);
         return true;
@@ -14574,6 +14835,8 @@
         const g = ahG;
         if (!g) return;
         ahT('act', { a: 'page', dir: dir, page: (set.page || 0) + 1 });
+        actMoment(dir > 0 ? 'M7' : 'M9');
+        if (!ahThumbsBusy()) actLineSet('L12', 'done');      // the page stepped to is already drawn
         predNote('page', { g: predGal(set.href), dir: dir, p: (set.page || 0) + dir + 1, th: predTh(set.href, (set.page || 0) + dir), q: predQ() });     // the page stepped to, before the flip
         g.m = dir > 0 ? 'fwd' : 'back';
         g.near = g.back = null;
@@ -14699,7 +14962,7 @@
                 if (!Array.isArray(list) || !list.length || g.warm.has(h)) continue;
                 g.warm.add(h);
                 dbg('loading ahead: thumbnails of gallery ' + (i + 1) + ' of the queue', { href: h, ahead: n });
-                const tl = list.slice(0, 2 * per), job = actJob('Next galleries: thumbnails of the first 2 pages of ' + actGal(h) + ' (keeping ' + n + ' galleries ready)', tl.length);
+                const tl = list.slice(0, 2 * per), job = actJob('Next galleries: thumbnails of the first 2 pages of ' + actGal(h) + ' (keeping ' + n + ' galleries ready)', tl.length, 'L17');
                 await Promise.all(tl.map(function (it) { return ahImg(it, 'gal', job); }));
                 actEnd(job, live() ? 'done' : 'stopped');
                 if (!live()) return;
@@ -14710,7 +14973,7 @@
         const todo = list1.slice(0, per).filter(function (it) { return it && !(it.hqTried && it.hit); });
         if (g.otok) g.otok.stop = true;     // the last walk's waiters leave the line
         if (!todo.length) return;
-        const tok = g.otok = { cancelled: false, fresh: false, job: actJob('Next gallery: full-size pictures of its first page — ' + actGal(h1), todo.length) };
+        const tok = g.otok = { cancelled: false, fresh: false, job: actJob('Next gallery: full-size pictures of its first page — ' + actGal(h1), todo.length, 'L18') };
         await Promise.all(todo.map(function (it) { return ahOrig(it, 'galn', tok); }));
         actEnd(tok.job, tok.stop ? 'stopped' : 'done', tok.stop ? 'a newer pass took over' : '');
     }
@@ -14997,11 +15260,16 @@
         setTip(info, 'What the buttons and numbers mean');
         const tab = document.createElement('span');
         tab.textContent = '↗';
-        setTip(tab, 'Open this gallery\'s page in a new tab');
+        const tabTip = function () {     // the page's title once it is known; read at each hover
+            const inf = pageInfos.get(href.split('#')[0]);
+            setTip(tab, (inf && inf.title ? inf.title + '\n' : '') + 'Click: open this gallery\'s page in a new tab · right-click: copy its address\n' + href);
+        };
+        tab.addEventListener('mouseenter', tabTip);
+        tabTip();
         const eat = function (e) { e.preventDefault(); e.stopPropagation(); };
         lb.addEventListener('mousedown', function (e) { eat(e); if (e.button === 0) galEndlessCycle(); });
         info.addEventListener('mousedown', function (e) { eat(e); if (e.button === 0) galInfoShow(info); });
-        tab.addEventListener('mousedown', function (e) { eat(e); if (e.button === 0) openOriginal(href); });
+        tab.addEventListener('mousedown', function (e) { eat(e); if (e.button === 0) openOriginal(href); else if (e.button === 2) copyText(href, null); });
         [lb, info, tab].forEach(function (b) {
             ['mouseup', 'click', 'auxclick', 'dblclick', 'contextmenu'].forEach(function (t) { b.addEventListener(t, eat); });
         });
@@ -15114,20 +15382,56 @@
     }
 
     // Load one thumbnail; resolves {img, item, asp} once it has a size, or null.
+    // Thumbnails loading now (galImg), so a page step or a close can stop them mid-download: img -> {item, tag, job, resolve}.
+    const galThumbLive = new Map();
+    // Stop the thumbnails in flight that match: resolved as null with item.__cut set, never a failure; asked again when wanted.
+    function galThumbCut(match, why) {
+        let n = 0;
+        galThumbLive.forEach(function (r, img) {
+            if (!match(r)) return;
+            galThumbLive.delete(img);
+            img.onload = img.onerror = null;
+            img.removeAttribute('src');
+            r.item.__cut = why;
+            ahT('thumb', { tag: r.tag || 'shown', u: r.item.thumb, cut: why }, r.job);
+            r.resolve(null);
+            n++;
+        });
+        return n;
+    }
+
+    // The next galleries' thumbnails as loaded pictures (L17), handed to the cells when that gallery opens, so it paints at once.
+    const galThumbKeep = new Map(), GAL_THUMB_KEEP = 600;
     function galImg(item, tag, job, early) {
+        const kept = galThumbKeep.get(item.thumb);
+        if (kept && kept.complete && kept.naturalWidth && tag !== 'gal') {
+            galThumbKeep.delete(item.thumb);
+            const nw = kept.naturalWidth, nh = kept.naturalHeight, a = early ? galDeclAsp(item) : 0;
+            if (a) early({ img: kept, item: item, nw: item.dw, asp: a, early: true });
+            galSizeCheck(item, nw / nh);
+            return Promise.resolve({ img: kept, item: item, nw: nw, asp: nw / nh });
+        }
+        if (kept && tag === 'gal') return Promise.resolve({ img: kept, item: item, nw: kept.naturalWidth, asp: kept.naturalWidth / (kept.naturalHeight || 1) });
         return new Promise(function (resolve) {
             const img = document.createElement('img'), t0 = performance.now();
             img.decoding = 'async';
             if (noReferrerHere()) img.referrerPolicy = 'no-referrer';
+            delete item.__cut;
+            galThumbLive.set(img, { item: item, tag: tag, job: job, resolve: resolve });
             img.onload = function () {
+                galThumbLive.delete(img);
                 img.onload = img.onerror = null;
                 galThumbSettled(item.thumb);
                 ahT('thumb', { tag: tag || 'shown', u: item.thumb, s: Math.round(t0), ms: Math.round(performance.now() - t0), ok: 1 }, job);
                 const nw = img.naturalWidth, nh = img.naturalHeight;
                 if (nw && nh) galSizeCheck(item, nw / nh);
+                if (tag === 'gal' && nw && nh) {
+                    galThumbKeep.set(item.thumb, img);
+                    if (galThumbKeep.size > GAL_THUMB_KEEP) galThumbKeep.delete(galThumbKeep.keys().next().value);
+                }
                 resolve(nw && nh ? { img: img, item: item, nw: nw, asp: nw / nh } : null);
             };
-            img.onerror = function () { img.onload = img.onerror = null; galThumbSettled(item.thumb); ahT('thumb', { tag: tag || 'shown', u: item.thumb, s: Math.round(t0), ms: Math.round(performance.now() - t0), ok: 0 }, job); resolve(null); };
+            img.onerror = function () { galThumbLive.delete(img); img.onload = img.onerror = null; galThumbSettled(item.thumb); ahT('thumb', { tag: tag || 'shown', u: item.thumb, s: Math.round(t0), ms: Math.round(performance.now() - t0), ok: 0 }, job); resolve(null); };
             img.src = item.thumb;
             const a = early ? galDeclAsp(item) : 0;
             if (a) early({ img: img, item: item, nw: item.dw, asp: a, early: true });     // placed now by the site's size; shown when it loads
@@ -15161,6 +15465,7 @@
     // A cell placed by the site's size got its file (or none): shown, its shape corrected if the size was wrong.
     function galEarlyDone(set, e, p) {
         const cell = e.img.parentNode;
+        if (!p && e.item.__cut) { e.cut = true; return; }     // stopped by a page step: its place kept, loaded when its page shows
         if (!p) { e.bad = true; if (cell) cell.classList.add('gone'); return; }
         if (p.img !== e.img) e.img.src = p.img.src;
         e.nw = p.nw;
@@ -15226,7 +15531,7 @@
         let timer = 0, failed = 0;
         const got = [], t0 = performance.now();
         galTrace(href, 'thumbnails: loading ' + list.length + ' (' + galHostMix(list.map(function (it) { return it.thumb; })) + ')');
-        const job = actJob((galLook ? 'Gallery preview: thumbnails of its first page' : 'Open gallery: thumbnails of its first 2 pages') + ' — ' + actGal(href), list.length);
+        const job = actJob((galLook ? 'Gallery preview: thumbnails of its first page' : 'Open gallery: thumbnails of its first 2 pages') + ' — ' + actGal(href), list.length, galLook ? 'L11' : 'L12');
         if (list.every(galDeclAsp)) {      // every size declared: placed at once, each shown as it loads
             const early = [], left = { n: list.length, at: performance.now() };
             if (!galLook) galEarlyLeft.set(href, left);     // before galBuild: its layout queues the originals that wait for these
@@ -15236,7 +15541,7 @@
                     if (!left.n) { if (galEarlyLeft.get(href) === left) galEarlyLeft.delete(href); ahPump(); }
                     const set = galCur; if (set && set.href === href && early[i]) galEarlyDone(set, early[i], p);
                 });
-            })).then(function () { actEnd(job); });
+            })).then(function () { actEnd(job); if (galLook && galLook.href === href) lookDone(); });
             galTrace(href, 'thumbnails: placed by the sizes the site declares');
             galBuild(href, early.filter(Boolean), list.length);
             return;
@@ -15248,7 +15553,7 @@
             return q;
         }));
         galShowPend = pend;      // the ones still loading when the set goes up join through galAppend without a second request
-        all.then(function () { actEnd(job); });
+        all.then(function () { actEnd(job); if (galLook && galLook.href === href) lookDone(); });
         const cap = new Promise(function (r) { timer = setTimeout(r, GAL_WAIT_MS, null); });
         Promise.race([all, cap]).then(function (v) {
             clearTimeout(timer);
@@ -15364,9 +15669,11 @@
         set.pics.forEach(function (p, k) {
             const cell = set.cells[k];
             if (!cell) return;
+            const bad = !!cfg.galleryReadyMark && !!p.item && !!p.item.hqFail && !held.has(p.item);     // its original failed: red in place of either
             const cover = !!cfg.galleryCoverMark && p.item === set.coverItem;
-            mark(cell, 'cvr', cover);
-            mark(cell, 'rdy', !cover && held.has(p.item));     // the cover's corner takes the ready one's place
+            mark(cell, 'hqx', bad);
+            mark(cell, 'cvr', cover);     // a border inside the cell: no size change
+            mark(cell, 'rdy', !bad && held.has(p.item));
         });
     }
 
@@ -15390,7 +15697,7 @@
         const root = galLayer();
         if (!galHost.isConnected) galSlot(galHost);
         const page = galCur && galCur.href === href ? galCur.page : 0;
-        if (ahG && !galLook && galCur && galCur.href !== href) { ahG.at = ahG.back = ahG.near = null; ahG.from = ahG.end = 0; ahG.saw = ahG.slide = false; ahG.m = 'open'; }     // a queue switch: M11, as M6
+        if (ahG && !galLook && galCur && galCur.href !== href) { actMoment('M11'); ahG.at = ahG.back = ahG.near = null; ahG.from = ahG.end = 0; ahG.saw = ahG.slide = false; ahG.m = 'open'; }     // a queue switch: M11, as M6
         if (galCur) galDrop(galCur);
         const set = { href: href, el: document.createElement('div'), shade: document.createElement('div'),
             cells: [], asp: [], pics: [], page: page, fed: fed || 0, far: page, pend: galShowPend, cover: galCoverSrc(href) };
@@ -15474,7 +15781,7 @@
 
     // New pictures for an open set: their thumbnails load (up to GAL_WAIT_MS), then one relayout on the same page.
     function galAppend(set, items) {
-        const job = actJob('Open gallery: more thumbnails — keeping ' + galAhead((set.far || 0) + 1) + ' pages ahead of page ' + ((set.far || 0) + 1), items.length);
+        const job = actJob('Open gallery: more thumbnails — keeping ' + galAhead((set.far || 0) + 1) + ' pages ahead of page ' + ((set.far || 0) + 1), items.length, actFirstOpen(['L12', 'L20', 'L21']));
         let left = items.length;
         if (!set.q) { set.q = new Map(); set.qIn = set.qOut = 0; }
         set.inflight = (set.inflight || 0) + items.length;
@@ -15484,7 +15791,7 @@
             let early = null;
             const was = set.pend && set.pend.get(it.thumb);
             (was || galImg(it, null, job, function (e) { early = e; galQPut(set, n, e); })).then(function (p) {
-                if (p || early) return p;
+                if (p || early || it.__cut) return p;
                 return sleep(GAL_RETRY_GAP_MS).then(function () { return galCur === set ? galImg(it, null, job) : null; });     // a failed thumbnail is tried once more, its place held
             }).then(function (p) {
                 if (!--left) actEnd(job);
@@ -15708,8 +16015,10 @@
                     if (it) it.hqBusy = true;
                     const r = lg && lg.req(), live = { t: performance.now(), mine: tok }, t0 = performance.now();
                     galHqLive.add(live);
-                    galResolve(img, netJob(tok, it, tag)).then(function (hit) {
-                        ahT('orig', { tag: tag, u: (img.__hzItem && img.__hzItem.thumb) || img.src, s: Math.round(t0), ms: Math.round(performance.now() - t0), ok: hit ? 1 : 0 }, job);
+                    const own = netJob(tok, it, tag);
+                    galResolve(img, own).then(function (hit) {
+                        galOrigNote(it, hit, own);
+                        ahT('orig', galOrigEv(tag, (img.__hzItem && img.__hzItem.thumb) || img.src, t0, hit, own, it), job);
                         if (hit) { got++; if (!hit.video) { plKeepImage(hit, img.__hzItem); ahFiles.add(hit.url); } size(hit); nextWarmSeen(hit.url, performance.now() - t0); }
                         if (hit && !tok.cancelled && img.__hzItem) img.__hzItem.hqTried = img.__hzItem.predOr = true;     // a miss is asked again by the next run
                         if (r) r.done({ status: hit ? 200 : 0 });
@@ -15728,10 +16037,12 @@
         return diagnose(url).then(function (d) { return (d && d.total) || 0; }, function () { return 0; });
     }
 
-    function galDrop(set) {
+    // A gallery leaves the screen: its loads in flight are flushed; closed (not an Endless switch), the next galleries' too.
+    function galDrop(set, closed) {
         if (set.hqTok) set.hqTok.cancelled = true;
         const its = new Set(set.pics.map(function (p) { return p.item; }));
-        galCutNote('leaving the gallery', netCutWhere(function (o) { return its.has(o.it); }));
+        galCutNote('leaving the gallery', netCutWhere(function (o) { return its.has(o.it) || (closed && (o.tag === 'gal' || o.tag === 'galn')); }, 'you left the gallery') +
+            galThumbCut(function (r) { return r.tag !== 'main' && (its.has(r.item) || (closed && r.tag === 'gal')); }, 'you left the gallery'));     // the results page's rounds keep theirs
         set.el.classList.remove('on');
         setTimeout(function () { set.el.remove(); }, GAL_FADE_MS + 50);
     }
@@ -15750,6 +16061,7 @@
         clearTimeout(galHoverTimer);
         const look = !!galLook;
         galLook = null;
+        if (look) { lookDone(); actMomentPop('M3'); }
         if (!look) ahGalClose(why);
         galWant = null;
         galOn = false;
@@ -15757,7 +16069,7 @@
         galBoxKeep = null;
         const mine = galOwns(active) || !!(tour && tour.gal);       // a switch drops the old gallery's cells while its picture is still up
         if (mine) cancel();
-        if (galCur) { galDrop(galCur); galCur = null; plVidsDrop(); }
+        if (galCur) { galDrop(galCur, true); galCur = null; plVidsDrop(); galThumbKeep.clear(); }
         if (mine && placed) { unplace(); cancel(); }
         if (galBlur) galBlur.classList.remove('on');
         galVeil(false);
@@ -15805,23 +16117,29 @@
         active = img;
         activeShown = img.__hzItem.thumb;
         hoverAt = Date.now();
-        const myToken = token = { cancelled: false, fresh: true };
+        const myToken = token = { cancelled: false, fresh: true, diag: true };
         timer = setTimeout(async function () {
             if (myToken.cancelled || active !== img) return;
             showSpinner();
             const t1 = performance.now(), known = !!img.__hzItem.hit;
             if (!known) {      // the pointer rested: this one alone loads until it shows; every background download stops
                 galPvWait = { img: img, at: t1 };
-                const n = netCutWhere(function () { return true; });
-                if (n && galCur) galCur.hqCut = true;
-                galCutNote('a hover', n);
+                if (hoverFirst('a hover came first') && galCur) galCur.hqCut = true;
             }
             const hit = await galResolve(img, myToken);
             if (galPvWait && galPvWait.img === img) { galPvWait = null; ahPump(); }
+            if (myToken === token) hoverDone();
             if (myToken.cancelled || active !== img) return;
             hideSpinner();
             dbg('gallery preview found', { ms: Math.round(performance.now() - t1), remembered: known, size: hit ? hit.w + 'x' + hit.h : null });
-            if (!hit) return;
+            const it = img.__hzItem;
+            if (!hit) {
+                it.hqFail = true; it.hqWhy = (myToken.tries || []).slice();
+                galCellMarksSoon();
+                act('bad', '✗ no full size found for the picture you hovered: ' + actPic(it.thumb) + ' · ' + actSecs(performance.now() - t1) + actDiag({ thumb: it.thumb, link: it.link, tries: it.hqWhy }));
+                return;
+            }
+            if (it.hqFail) { it.hqFail = false; galCellMarksSoon(); }
             showViewer(hit, pointer);
             ahSaw(img, 1);      // a hover counts once its preview shows, not for every cell the pointer crosses
             if (pinOnShow === img) { pinOnShow = null; place(); }
@@ -15837,8 +16155,10 @@
         (item.ss || []).forEach(function (v) { list = list.concat(parseSrcset(v).map(abs)); });
         list = list.filter(function (u, i) { return u && list.indexOf(u) === i && !blocked(u); });
         const hitOf = function (u, d) { return { url: u, w: d.w, h: d.h, video: !!d.video, duration: d.duration, display: d.display }; };
+        if (tok.bg || tok.diag) tok.tries = [];
         if (item.hit) {             // found before: the misses ahead of it are not asked again
             const d = await probe(item.hit.url, false, tok);
+            galTry(tok, 'found before', item.hit.url, d);
             if (d) return (item.hit = Object.assign({}, item.hit, { display: d.display }));
             item.hit = null;
         }
@@ -15851,13 +16171,37 @@
         for (let i = 0; i < list.length; i++) {
             if (tok.cancelled) return null;
             const d = await probe(list[i], tok.fresh, tok);
+            galTry(tok, 'guess', list[i], d);
             if (tok.bg && netCutOf(tok)) return null;
             if (d && d.w > nw) return (item.hit = hitOf(list[i], d));
         }
         const own = img.currentSrc || img.src;
         if (tok.bg && netCutOf(tok)) return null;
         const d = own ? await probe(own, false, tok) : null;
+        if (own) galTry(tok, 'the thumbnail itself', own, d);
         return d ? hitOf(own, d) : null;
+    }
+
+    // A background original's outcome on its item: a real miss marks it (the red corner), a cut leaves it as it was.
+    function galOrigNote(it, hit, own) {
+        if (!it || own.cutNow) return;
+        const was = !!it.hqFail;
+        it.hqFail = !hit;
+        it.hqWhy = hit ? null : (own.tries || []).slice();
+        if (was !== it.hqFail) galCellMarksSoon();
+    }
+    // The trace event of a background original: a cut is its own outcome, a miss carries what was tried.
+    function galOrigEv(tag, u, t0, hit, own, it) {
+        const e = { tag: tag, u: u, s: Math.round(t0), ms: Math.round(performance.now() - t0), ok: hit ? 1 : 0 };
+        if (own.cutNow) e.cut = own.cutWhy || 'stopped';
+        else if (hit && it && hit.url === it.thumb) { e.only = 1; e.tries = (own.tries || []).slice(); e.link = it.link; e.thumb = it.thumb; }
+        else if (!hit) { e.tries = (own.tries || []).slice(); e.link = it && it.link; e.thumb = it && it.thumb; }
+        return e;
+    }
+
+    // A background lookup's tries, for the activity window's diagnosis of a miss.
+    function galTry(tok, how, u, d) {
+        if (tok && tok.tries && tok.tries.length < 14) tok.tries.push(how + ': ' + u + ' → ' + (d ? d.w + '×' + d.h + (d.video ? ' clip' : '') : failureText(u)) + (tok.cutNow ? ' (stopped mid-way)' : ''));
     }
 
     // The page a gallery picture links to: what it declares (same shape) or a copy of the same name, the biggest one larger than the thumbnail.
@@ -15866,6 +16210,7 @@
         try { u = item.link ? new URL(item.link) : null; } catch (e) { u = null; }
         if (!u || u.origin !== location.origin || looksLikeImage(u.href) || isVideoUrl(u.href)) return null;
         const page = await linkedMedia(u);
+        if (tok && tok.tries) tok.tries.push('its own page: ' + u.href + ' → ' + (page ? 'declares ' + (page.declared ? page.declared.url : 'nothing') + ', ' + (page.body || []).length + ' pictures in it' : 'could not be read'));
         const best = await galPageBest(page, item, img, tok);
         dbg('gallery preview: the picture\'s own page', { link: u.href, declared: page && page.declared && page.declared.url, hit: best && best.url });
         return best;
@@ -15884,6 +16229,7 @@
         for (const t of tries.slice(0, LINKED_TRIES)) {
             if (tok.cancelled || blocked(t.url) || t.url === item.thumb) continue;
             const d = await probe(t.url, tok.fresh, tok);
+            galTry(tok, t.named ? 'same name on its page' : 'its page\'s picture', t.url, d);
             if (tok.bg && netCutOf(tok)) return null;
             if (!d || d.w <= nat.w || (!t.named && nat.w && !sameShape(nat, d))) continue;
             if (best && d.w * d.h <= best.w * best.h) continue;
@@ -16303,15 +16649,23 @@
             save(c !== '1');
         };
         const d = run.dl = {
-            id: job.id,
-            stop: function () { tok.cancelled = true; if (run.dl === d) run.dl = null; },
+            id: job.id, live: new Set(), gate: null,
+            stop: function () { tok.cancelled = true; d.live.forEach(saveCtlCut); if (d.gate) d.gate.open(); if (run.dl === d) run.dl = null; },
             retry: function (idx) { idx.forEach(function (i) { if (st[i] === '3') st = st.slice(0, i) + '0' + st.slice(i + 1); }); save(false); },
+            pause: function () {      // a hover: what is in flight stops and goes back to the front; nothing starts until resume
+                if (!d.gate) { let open; const p = new Promise(function (r) { open = r; }); d.gate = { p: p, open: open }; }
+                const n = d.live.size;
+                d.live.forEach(saveCtlCut);
+                return n;
+            },
+            resume: function () { const g = d.gate; d.gate = null; if (g) g.open(); },
         };
         usLog.enable(cfg.logRequests !== false);
         const lg = usLog.start('saveall', { host: pageHost(), pace: version().replace(/\?/g, '') + ' ' + DLQ_WORKERS + ' at once, ' + DLQ_GAP_MIN + '-' + DLQ_GAP_MAX + 'ms apart' });
         const worker = async function () {
             for (;;) {
                 if (tok.cancelled) return;
+                if (d.gate) { await d.gate.p; continue; }
                 if (!dlqMine(run.origin)) { dbg('download queue: another tab took this site\'s queue'); d.stop(); return; }
                 const i = st.indexOf('0');
                 if (i < 0) return;
@@ -16320,26 +16674,31 @@
                 run.nextAt = at + DLQ_GAP_MIN + Math.floor(Math.random() * (DLQ_GAP_MAX - DLQ_GAP_MIN + 1));
                 if (at > Date.now()) await new Promise(function (res) { setTimeout(res, at - Date.now()); });
                 if (tok.cancelled || !dlqMine(run.origin)) { d.stop(); return; }
-                const item = job.items[i], q = lg && lg.req();
+                if (d.gate) { mark(i, '0'); continue; }     // paused while it waited its turn
+                const item = job.items[i], q = lg && lg.req(), ctl = { cut: false, h: [], wake: null }, own = netJob(tok, item, 'save');
+                d.live.add(ctl);
                 let hit = null, why = '', ok = false;
                 try {       // a throw here would end this worker with its picture left in flight, and the queue would never restart
                     try {       // a deadline, or one lookup that never answers holds the gallery at N-1 forever
                         let tm = 0;
-                        hit = await Promise.race([galBestOf(item, tok), new Promise(function (res) {
+                        hit = await Promise.race([galBestOf(item, own), new Promise(function (res) {
                             tm = setTimeout(function () { why = 'finding its full-size file took over ' + Math.round(SAVE_FETCH_MS / 1000) + ' s'; res(null); }, SAVE_FETCH_MS);
                         })]);
                         clearTimeout(tm);
                     } catch (e) { hit = null; why = String(e); }
                     if (!hit || !hit.url) why = why || 'no full-size file was found for it';
-                    ok = hit && hit.url && !tok.cancelled ? await new Promise(function (res) {
+                    ok = hit && hit.url && !tok.cancelled && !ctl.cut ? await new Promise(function (res) {
                         const t = setTimeout(function () { why = 'no answer in ' + Math.round(SAVE_FETCH_MS / 1000) + ' s'; res(false); }, SAVE_FETCH_MS);
+                        ctl.wake = function () { clearTimeout(t); res(false); };
                         Promise.resolve(saveOriginal(hit.url, true, function () { clearTimeout(t); res(true); }, job.href,
-                            function (w) { clearTimeout(t); why = 'the download failed: ' + w; dbg('download all: a picture failed', { url: hit.url, error: w }); res(false); }))
+                            function (w) { clearTimeout(t); why = 'the download failed: ' + w; dbg('download all: a picture failed', { url: hit.url, error: w }); res(false); }, ctl))
                             .catch(function (e) { clearTimeout(t); why = 'saving threw: ' + e; res(false); });
                     }) : false;
                 } catch (e) { ok = false; why = 'threw: ' + e; dbg('download all: a picture threw', String(e)); }
+                d.live.delete(ctl);
                 if (q) q.done({ status: ok ? 200 : 0 });
                 if (tok.cancelled) return;
+                if (!ok && (ctl.cut || own.cutNow)) { mark(i, '0'); continue; }     // stopped for a hover: back to the front, not a failure
                 if (ok) { galSavedItem(job.href, item); heldDel(hit.url); }
                 mark(i, ok ? '2' : '3', why, hit && hit.url);
             }
@@ -17299,7 +17658,7 @@
         if (!hit || hit.video || galFly !== f) return;
         const big = new Image();
         const src2 = hit.display || hit.url;
-        big.onload = function () { if (galFly === f || f.el.isConnected) f.img.src = src2; };
+        big.onload = function () { actLineSet('L16', 'done'); if (galFly === f || f.el.isConnected) f.img.src = src2; };
         big.src = src2;
         dbg('gallery: the clicked picture at full size', { from: src, to: hit.url });
     }
@@ -18053,7 +18412,7 @@
                 g.on[w.tag] = (g.on[w.tag] || 0) + 1;
                 g.at = now + gap[0] + Math.random() * (gap[1] - gap[0]);
                 let freed = false;
-                w.resolve(function () { if (freed) return; freed = true; g.live--; g.on[w.tag]--; g.pump(); });
+                w.resolve(function () { if (freed) return; freed = true; g.live--; g.on[w.tag]--; g.pump(); if (hoverHold) hoverResumeCheck(); });
             }
         };
         return g;
@@ -18088,6 +18447,7 @@
 
     // Paused in moment m: no gallery open, the page's lines below L1 while it loads; a gallery open, the main page, and its own lines below its thumbnails while they arrive.
     function ahHeld(tag, m, busy) {
+        if (hoverHold && !hoverHold.l9) return true;     // a hover's own original first, everywhere
         if (m && galPvWait && performance.now() - galPvWait.at < AH_PV_HOLD_MS) return true;      // M8 line 1: the rested hover's own original first
         if (!m) return ((tag === 'count' || tag === 'main' || tag === 'next') && ahL1Busy()) || ((tag === 'main' || tag === 'next') && galCnt > 0);     // M1: L1, then L3, then the rounds
         if (tag === 'count' || tag === 'main' || tag === 'next') return true;
@@ -18119,9 +18479,10 @@
             if (item.hqBusy || (item.hqTried && item.hit)) return null;
             if (tag === 'galn' && !keepRoomFor(item)) return null;      // past the memory horizon: it would only push out nearer pictures
             item.hqBusy = true;
-            const t0 = performance.now();
-            return galResolve({ __hzItem: item, naturalWidth: 0, naturalHeight: 0, src: item.thumb, currentSrc: item.thumb }, netJob(tok, item, tag)).then(function (hit) {
-                ahT('orig', { tag: tag, u: item.thumb, s: Math.round(t0), ms: Math.round(performance.now() - t0), ok: hit ? 1 : 0 }, tok.job);
+            const t0 = performance.now(), own = netJob(tok, item, tag);
+            return galResolve({ __hzItem: item, naturalWidth: 0, naturalHeight: 0, src: item.thumb, currentSrc: item.thumb }, own).then(function (hit) {
+                galOrigNote(item, hit, own);
+                ahT('orig', galOrigEv(tag, item.thumb, t0, hit, own, item), tok.job);
                 if (hit && !tok.cancelled) item.hqTried = item.predOr = true;     // as galHqAll: a run skips it
                 return hit;
             }).finally(function () { item.hqBusy = false; });
@@ -18243,7 +18604,7 @@
             }
             galCnt++;
             galCountTried.add(href);
-            if (!actCountJob) actCountJob = actJob('Finding galleries: reading each gallery\'s page to count its pictures', 0);
+            if (!actCountJob) actCountJob = actJob('Finding galleries: reading each gallery\'s page to count its pictures', 0, 'L3');
             actTotal(actCountJob, actCountJob.total + 1);
             Promise.resolve(galCountLoad(href, 'count', actCountJob)).catch(function () { /* counted nothing */ }).then(function () {
                 galCnt--;
@@ -18327,26 +18688,26 @@
                     const from = round * AH_THUMBS_STEP, to = Math.min(cap, from + AH_THUMBS_STEP);
                     const th = from < to ? list.slice(from, to).filter(notDone) : [];
                     if (!th.length) { if (!round) galFirstIn.add(href); return; }
-                    aj = actJob('Page: ' + actGal(href) + ' — round ' + (round + 1) + ': thumbnails ' + (from + 1) + '–' + to, th.length);
+                    aj = actJob('Page: ' + actGal(href) + ' — round ' + (round + 1) + ': thumbnails ' + (from + 1) + '–' + to, th.length, round ? 'r' + (round + 1) : 'L4r1');
                     await Promise.all(th.map(function (it) { return ahImg(it, 'main', aj); }));
                     if (gen === ahGen && !round) { galFirstIn.add(href); galPillMarks(GAL_DOOR_MARK).forEach(galChipStyle); }
                     dbg('loading ahead: round', { href: href, round: round + 1, thumbs: th.length, cut: gen !== ahGen });
                 } else {
                     const one = list[round], o = job.orig && one && !(one.hqTried && one.hit) ? one : null;
                     if (!o) return;
-                    aj = actJob('Page: ' + actGal(href) + ' — round ' + (round + 1) + ': full-size picture ' + (round + 1), 1);
+                    aj = actJob('Page: ' + actGal(href) + ' — round ' + (round + 1) + ': full-size picture ' + (round + 1), 1, round ? 'r' + (round + 1) : 'L5r1');
                     await ahOrig(o, 'main', { cancelled: false, fresh: false, job: aj });
                     dbg('loading ahead: round', { href: href, round: round + 1, orig: true, cut: gen !== ahGen });
                 }
             } else {
                 const th = list.slice(0, per).filter(notDone);
                 if (!th.length) return;
-                aj = actJob('Page: the whole first page of thumbnails of ' + actGal(href) + ' (you previewed the gallery before it)', th.length);
+                aj = actJob('Page: the whole first page of thumbnails of ' + actGal(href) + ' (you previewed the gallery before it)', th.length, 'L6');
                 await Promise.all(th.map(function (it) { return ahImg(it, 'main', aj); }));
                 dbg('loading ahead: the next gallery\'s first page, after a preview', { href: href, cut: gen !== ahGen });
             }
         })().catch(function () { /* the next door */ }).then(function () {
-            actEnd(aj, gen === ahGen ? 'done' : 'stopped', gen === ahGen ? '' : 'it left the screen; it loads again later');
+            actEnd(aj, gen === ahGen ? 'done' : 'stopped', gen === ahGen ? '' : 'paused (scrolled away, or a gallery preview came first); it loads again later');
             if (gen !== ahGen) undo();     // cut short by a scroll: done again later
             galPre = null;
             setTimeout(galPreNext, 0);
@@ -18362,7 +18723,7 @@
         if (!h) return false;
         ahGrowTried.add(h);
         dbg('loading ahead: idle, reading a count to its end', { href: h });
-        const j = actJob('Idle: counting every picture of ' + actGal(h) + ' in a hidden copy of its page (pictures found so far)', 0);
+        const j = actJob('Idle: counting every picture of ' + actGal(h) + ' in a hidden copy of its page (pictures found so far)', 0, 'L7');
         actCount(j, (galLists.get(h) || []).length);
         ahGrowJob = { href: h, job: j };
         galGrow(h);
@@ -18382,7 +18743,7 @@
     // A user scroll of the results page (M4): only what is on and near the screen loads; a door that leaves it loses its waiting loads; once still, a second for a hover, then M1 from there.
     function ahScrollNote() {
         if (performance.now() - galSelfScrollAt < 1000 || galWant || galCur) return;
-        if (!ahBehind) { ahBehind = true; ahCut = false; dbg('loading ahead: scrolling; only what is on and near the screen'); }
+        if (!ahBehind) { ahBehind = true; ahCut = false; actMoment('M4'); dbg('loading ahead: scrolling; only what is on and near the screen'); }
         if (performance.now() - ahCheckAt > 200) {
             ahCheckAt = performance.now();
             const H = vpH(), d = galPre ? galDoorList().find(function (x) { return x.h === galPre; }) : null, r = d && galHoleRect(d.img);
@@ -18400,6 +18761,7 @@
         ahStillT = setTimeout(function () {
             ahStillT = setTimeout(function () {
                 ahBehind = false;
+                actMoment('M1');
                 const hot = galChipHot && galLinkOf(galChipHot);
                 ahAnchor = hot || null;
                 dbg('loading ahead: scroll stopped; from ' + (hot ? 'the hovered gallery' : 'the first gallery on screen'));
@@ -18412,6 +18774,7 @@
     // A gallery opened (middle press, chip): its own loading ahead starts; the main page's waits.
     function ahGalOpen() {
         galPageY = window.scrollY;
+        actMoment('M6');
         ahT('act', { a: 'open' });
         ahDrop('main');
         ahG = { fwd: 0, m: 'open', saw: false, slide: false, at: null, back: null, near: null, from: 0, end: 0, run: 0, walk: 0, warm: null };
@@ -18422,6 +18785,7 @@
         if (!ahG) return;
         ahT('act', { a: 'close', why: why || 'pointer left', you: GAL_USER_HIDE.indexOf(why) >= 0 });
         ahG = null;
+        actMoment('M14');
         ahDrop('gal');
         ahDropOrigs();
         ahAnchor = null;
@@ -18440,6 +18804,7 @@
         if (tour && tour.gal === set) { const p = galPageOf(set, k); if (p > (set.far || 0)) { set.far = p; galFeed(set); } }     // the slideshow's page and those ahead get their thumbnails
         const fresh = !g.saw;
         g.saw = true;
+        { const tp = actMs[actMs.length - 1]; if (tour && tour.gal === set) { if (!tp || tp.mid !== 'M13') actMoment('M13'); } else if (!tp || tp.mid !== 'M8' || g.near !== k) { actMoment('M8'); actLineSet('L9', 'done'); if (!ahThumbsBusy()) actLineSet('L12', 'done'); } }
         if (tour && tour.gal === set) {      // M13 not built: the slideshow's old order
             const was = g.slide || ahAll();
             g.slide = true;
@@ -18458,7 +18823,7 @@
         for (let d = 1; d <= AH_NEAR; d++) if (!done(set.pics[k + d]) || !done(set.pics[k - d])) ready = false;
         const keep = new Set();
         for (let d = 1; d <= AH_NEAR; d++) [set.pics[k + d], set.pics[k - d]].forEach(function (q) { if (q) keep.add(q.item); });
-        if (g.near != null && g.near !== k) galCutNote('a new hover', netCutWhere(function (o) { return o.tag === 'galh' && !keep.has(o.it); }));     // the last hover's L22: dropped, not re-queued
+        if (g.near != null && g.near !== k) galCutNote('a new hover', netCutWhere(function (o) { return o.tag === 'galh' && !keep.has(o.it); }, 'a newer hover'));     // the last hover's L22: dropped, not re-queued
         g.near = k;
         if (ready && !set.hqHorizon && !set.hqCut && !(fresh && galStepG && ahAll())) return;      // M8: its L22 is in; the run under way goes on in the hover's order (G: held it: this first hover starts it)
         dbg('loading ahead: a preview; originals around picture ' + (k + 1));
@@ -18669,6 +19034,8 @@
     function predClear() { predBuf = []; predPage = null; predSaltMemo = null; predWait = null; try { GM_setValue(PRED_KEY, ''); } catch (e) { /* storage unavailable */ } }
 
     // The gallery preview: a hovered door's first page of thumbnails laid out around it, nothing active; leaving the door closes it.
+    const LOOK_FIRST = 'a gallery preview came first';
+    function lookDone() { if (hoverHold && hoverHold.by === LOOK_FIRST) hoverDone(); }
     function galLookOpen(el, href) {
         if (galPtOut || galCur || galWant || placed || tour || !isTopFrame) return;
         const pic = el.tagName === 'IMG' ? el : el.querySelector('img');
@@ -18683,6 +19050,10 @@
         galWant = href;
         galTrace(href, 'gallery preview');
         galStoreTick();
+        if (galPre) { ahDrop('main'); dbg('loading ahead: a gallery preview; the page\'s rounds paused, done again later from it'); }     // M3: the round under way is undone (redone later), not lost
+        actMoment('M3', true);
+        galThumbCut(function (r) { return r.tag === 'main'; }, LOOK_FIRST);
+        hoverFirst(LOOK_FIRST);      // M3 line 1: its first page of thumbnails before anything else; hoverDone once they are in
         galLoad(href).then(function (list) {
             if (!galLook || galLook.href !== href) return;
             galShow(href, list);
@@ -18789,6 +19160,7 @@
         }
         const per = Math.max(1, galPer(null)), tok = { cancelled: false, fresh: false }, rounds = Math.ceil(AH_THUMBS_MAIN / AH_THUMBS_STEP);
         for (let r = 0; r < rounds && !galPreStop; r++) {
+            if (r === 0) { const tp = actMs[actMs.length - 1]; if (!tp || tp.mid !== 'M5') actMoment('M5'); }
             const aj = actJob('Next page: round ' + (r + 1) + ' — thumbnails ' + (r * AH_THUMBS_STEP + 1) + '–' + ((r + 1) * AH_THUMBS_STEP) + ' of ' + lists.length + ' galleries, then one full-size picture each', 0);
             for (const list of lists) {     // L4: round r's thumbnails, every door
                 await nextWait();
@@ -20528,7 +20900,7 @@
         check('gallerySavedMarks', 'Mark results something was saved from',
             'A blue disc on the result, and on each saved picture in its gallery.').el.addEventListener('change', galMarkSoon);
         check('galleryCoverMark', 'Mark the cover\'s picture in its gallery',
-            'A yellow corner, bottom-right, on the picture the gallery\'s cover shows (in place of the blue one).').el.addEventListener('change', galCellMarksSoon);
+            'A blue border on the picture the gallery\'s cover shows, drawn inside it (no space taken).').el.addEventListener('change', galCellMarksSoon);
         check('galleryReadyMark', 'Mark pictures whose full size is ready',
             'A blue corner, bottom-right, on each gallery picture whose full size is loaded: a hover shows it at once.').el.addEventListener('change', galCellMarksSoon);
         check('galleryPreload', 'Read the galleries on screen ahead of a click',

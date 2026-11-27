@@ -433,15 +433,21 @@ moves** except on a resize, a hole move, or a declared size proving wrong.
 In the open gallery and the gallery preview (`galCellMarks`, painted 120 ms after any cell or keep change via
 `galCellMarksSoon`). One 14 px corner triangle, bottom-right, clipped to the cell's 6 px rounding (user: a dot never
 sat centred on its dark ring; a star was replaced by a corner):
-- **Yellow** (`.cvr`, `#f9e2af`, setting `galleryCoverMark`) on the cell that is the door's own picture — the user
-  looks for it first. **In place of** the blue one, never both (user). `set.cover` = `galCoverSrc(href)` read at
+- **Cover: a blue border inside the cell** (`.cvr`, `inset:0` + `inset` box-shadow, setting `galleryCoverMark`; user
+  v0.445.0: the yellow corner was still hard to find; the border must not change row height or picture size, so it
+  is an overlay, never a CSS border). The cover keeps its own blue/red corner. `set.cover` = `galCoverSrc(href)` read at
   `galBuild`: the corner picture's page door (`galFly.pic`; Endless always opens from a door on the live page, so it
   has one), else its first src (`galFly.src0`), the previewed door, else the page's door linking there. Matched by
   `galCoverItem` (same URL, `sameStem`, `galSameFile`), retried as cells join; `galFlyUpgrade` also sets it.
 - **Blue** (`.rdy`, `#89b4fa`, setting `galleryReadyMark`) where the original is held in the memory keep (`plKeep` or
   `heldBlobs` via `keepItem`) — the honest "a hover shows it at once". Recomputed from the keep every paint, so a
   dropped original loses it. Clips get none (not kept).
+- **Red** (`.hqx`, `#f38ba8`, under `galleryReadyMark`) where the original genuinely failed (`it.hqFail`, set by
+  `galOrigNote` / a hover's miss; a cut never sets it), in place of blue. Its activity line carries the diagnosis.
 - `galFlyUpgrade` stores the cover's original (`it.hit`, `plKeepImage`).
+- **The next gallery paints at once** (v0.445.0): L17's loaded thumbnails are kept as `<img>`s (`galThumbKeep`, 600,
+  cleared on close) and handed to the new gallery's cells by `galImg`. Before, the cells refetched them (user saw the
+  blue corners first — originals held — then thumbnails filling left to right, the browser's 6 per host).
 - Both settings: settings panel (Galleries) and the gallery right-click menu, beside the saved-disc one.
 - Verified in Chrome on eporner 2026-11-27: cover on the right cell (5-picture gallery: picture 4; Endless into the
   next gallery: its picture 15 = its door's src); ready 12 → 144 over 23 s with Load all; both menu toggles.

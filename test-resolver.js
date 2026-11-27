@@ -1482,7 +1482,7 @@ const galPH = function (min) {
     const gS = src.indexOf('    function ahGate'), gE = src.indexOf('    // A start slot');
     const ctx = { ahG: null, galCur: null }, testPlQueue = [], testPlL1 = { live: 0, at: 0 };
     const mkGate = new Function('document', 'performance', 'setTimeout', 'clearTimeout', 'ctx', 'tour', 'galLook', 'galShownAt', 'AH_THUMB_STALL_MS', 'galEarlyLeft', 'plQueue', 'plL1', 'galCnt', 'AH_PV_HOLD_MS',
-        'var ahG, galCur, galPvWait; function sync() { ahG = ctx.ahG; galCur = ctx.galCur; galPvWait = ctx.galPvWait; }\n' + src.slice(gS, gE).replace('const m = ahMoment()', 'sync(); const m = ahMoment()') + '\nreturn ahGate;');
+        'var ahG, galCur, galPvWait, hoverHold = null; function hoverResumeCheck() {} function sync() { ahG = ctx.ahG; galCur = ctx.galCur; galPvWait = ctx.galPvWait; }\n' + src.slice(gS, gE).replace('const m = ahMoment()', 'sync(); const m = ahMoment()') + '\nreturn ahGate;');
     const ahGate = mkGate({ visibilityState: 'visible' }, { now: function () { return 1e9; } }, function () {}, function () {}, ctx, null, null, function () { return -1; }, 3000, new Map(), testPlQueue, testPlL1, 0, 8000);
     const gt = ahGate([0, 0], 1), order = [];
     ['gal', 'gal', 'gal', 'galo', 'galo', 'main', 'gal'].forEach(function (t) { gt.wait.push({ tag: t, resolve: function (free) { order.push(t); free(); } }); });

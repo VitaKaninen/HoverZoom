@@ -38,6 +38,22 @@ reads it for **what changes and how long each piece takes**, not file names. Cod
 - **Names**: `actGal(href)` = "the open gallery" / "the next gallery" / "N galleries ahead" / "gallery N on the page", plus
   a title. `actPic(thumb)` = the open gallery's picture number first, else the first known list holding it, plus the
   file name (`actFile`).
+- **Checklist** (user, v0.445.0): one block per moment (PRELOAD.md M1–M14), `actMoment(id, temp)`; its lines are
+  the moment's L-numbers with the user's short labels (`ACT_L`, `ACT_M` — keep them in step with PRELOAD.md). Line
+  states: wait • / run … / done ✓ / skip – (why: Load all off, Endless off, not built) / nt · (built, no job to
+  watch: L10, L13) / cut ⏹ (started, then the next moment came: named) / none – (never started: already loaded or not
+  reached). A job names its line (`actJob(text, total, L)`; rounds are `L4r1`, `L5r1`, `r2`, `r3`); a full-size run
+  (`galHqAll`) has no single line, so its pictures' tags tick L22/L23/L14/L18 (`ACT_TAG`, `actTagEv`). A line is done
+  when its jobs end with none of it left running — lines served by one job per gallery (rounds, L17) flip ✓ → … as the
+  next gallery's job starts; the last state is right. M2/M3 are temporary: they sit over M1 (`actMs` stack) and pop
+  (`actMomentPop`) without ending it. Window: moment row `data-mg`, checklist `data-cl` (always shown, lines
+  `data-n`), detail box after it; jobs/lines carry `mom` and are drawn in that box. Copy/Export walk nested boxes.
+- **Failures are red where they can be seen closed:** a job header with any `bad` kid, and the moment over it, are
+  red; a failed line carries its diagnosis under it (`actDiag`: thumbnail, its link, every try with its answer from
+  `galTry`/`tok.tries`, the page, version, browser). **A download stopped mid-way is kind `cut` (⏸, grey), never ✗**:
+  before v0.445.0 a hover's cut was written `✗ no full size found` (the user's eporner report: pictures 35–39 at one
+  instant; all load fine). `⚠ only the thumbnail found` is `warn` (yellow), no red corner (a site whose thumbnails are
+  the files would turn all red).
 - Tool read-out: `document.dispatchEvent(new CustomEvent('hover-zoom:activity'))` → `<html data-hz-activity>`: lines,
   and each job as `job[state] text · done/total · time — note` with its files indented.
 - Fixture trap: `gallery-a.html`'s 40 pictures differ only by query (`?g1`), and `galItemKeys` keys by host + path, so

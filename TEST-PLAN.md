@@ -268,7 +268,18 @@ Test pages:
       picture N`: `orig galh` for the 3 either side, before anything else.
     - **A hover or page step stops downloads mid-way** (v0.444.0): with Load all running on a big gallery, rest on an
       unloaded picture, then PageDown. **Expect** (debug): `cancelled in flight: N (a hover)`, then `(a page step)`;
-      the activity window says `Stopped N downloads mid-way`; later every picture still gets its blue corner.
+      the activity window says `Stopped N downloads mid-way`; under the full-size job those pictures read `⏸ stopped
+      mid-way (a hover came first), loads again later` — **never** `✗ no full size found` (v0.445.0); later every
+      picture still gets its blue corner. A page step also stops the left page's unfinished thumbnails (`⏸ thumbnail
+      stopped`); stepping back to that page draws them.
+    - **Saving pauses for a hover** (v0.445.0): ⤓ a big gallery, then rest on an unloaded picture. **Expect:** the
+      saving count stops rising until that picture (and its ±3) are in, then goes on; no file is saved twice and none
+      is listed as failed for it.
+    - **A gallery preview on the results page comes first** (v0.445.0, M3): while the page's rounds load, hover a
+      door until its preview opens. **Expect:** activity `M3 – Gallery preview` over `M1`; the round under way ends
+      `stopped`, and is done again later; the preview's thumbnails load before any other round or count starts.
+    - **Next gallery paints at once** (v0.445.0): with Endless, let the next galleries load, then step past the last
+      page. **Expect:** every thumbnail of the new gallery appears in the same moment, not one by one.
     - **Crossing cells is not a hover** (v0.443.0): sweep the pointer across a row and stop on one. **Expect:** one
       `act preview` (the one stopped on), not one per cell crossed; the prediction log shows one `pv`.
     - **Page steps re-queue it:** PageDown. **Expect:** `orig galp` for the new page first, then the next galleries'
@@ -351,13 +362,25 @@ Test pages:
      - If the slideshow showed pictures loaded ahead, you'll see
        `loading ahead: originals shown that the browser kept {kept, of}` (test 10.1).
 
-7.12b **Cover and ready corners** (v0.442.0). Open a gallery from its cover, then let Endless move to the next one.
-     - **Expect:** a small yellow corner bottom-right on the picture the cover shows (any page it is on, and in each
-       gallery Endless moves to); a blue corner in the same spot on each other picture whose full size has loaded,
-       growing as loading goes on. Hover a blue-cornered one: the full size shows at once, no ring. Right-click menu
-       → the two "Mark …" items turn each off and on at once.
-     - **Fail:** yellow on a picture that is not the cover, yellow and blue on one picture, or a blue-cornered
+7.12b **Cover border and ready corners** (v0.445.0). Open a gallery from its cover, then let Endless move to the next one.
+     - **Expect:** a blue border inside the picture the cover shows (any page it is on, and in each gallery Endless
+       moves to), the same size as its row's other pictures; a blue corner bottom-right on each picture whose full
+       size has loaded, the cover's too, growing as loading goes on. Hover a blue-cornered one: the full size shows at
+       once, no ring. Right-click menu → the two "Mark …" items turn each off and on at once.
+     - **Red corner:** a picture whose full size genuinely failed (not one stopped mid-way) gets a red corner, and its
+       activity line is red with `thumbnail:`, `its link:`, `tried:` and `on:` lines under it; the job and moment
+       headers above it turn red while closed.
+     - **Fail:** a border on a picture that is not the cover, a row taller with the cover in it, or a blue-cornered
        picture that still shows the loading ring.
+
+7.12c **↗ on the corner card** (v0.445.0). Hover ↗. **Expect:** its tip names the gallery page's title (once read),
+     says click opens / right-click copies, and shows the address. Right-click it: `Copied`, and the address pastes.
+
+7.12d **Activity checklist** (v0.445.0). Open the activity window, open a gallery, step a page, hover a picture,
+     close it. **Expect:** one block per moment (`M6 – You opened a gallery`, `M7 …`, `M8 …`, `M14 …`), each with its
+     numbered lines: ✓ done, … running, – skipped (with why: Load all off, Endless off, not built), ⏹ interrupted by the
+     next moment (named), · not tracked. ▸ on the header shows the jobs that ran in it. Copy / Export include the
+     checklist and every open (Copy) or every (Export) box.
 
 7.13 **A missed original is tried again** (v0.395.0). On a site where some originals fail (`found` lower
      than `pictures` in 7.2's `done` line), close the gallery and open it again, then hover.

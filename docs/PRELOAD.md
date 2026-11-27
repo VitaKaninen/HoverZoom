@@ -73,10 +73,22 @@ Endless they run on into the next gallery's first pages when this gallery ends.
 - **A page step** cancels, mid-download, the left page's originals and its unfinished thumbnails: leaving a page
   says the user will not look at it.
 A cancelled load is not a failure: it is never cached as a miss, never marked tried, and a later run asks again.
+**Pause, not drop (user, 2026-11-27):** where we may come back, a cut is a pause — every queue re-derives what is
+unloaded, so a cut picture is asked again first when its moment resumes; only leaving for good flushes. A real
+mid-stream pause is not possible from a userscript (an `<img>` or GM request can only be aborted; the browser may keep
+the partial bytes in its cache and resume them — unverified). Flushed: closing a gallery (`galDrop(set, true)`: its
+originals and thumbnails, and the next galleries' L17/L18); an Endless switch flushes only the left gallery's own.
+**Built v0.445.0:** `hoverFirst(why)` for every rested hover (gallery `galPv`, results page M2, a gallery preview
+M3): `netCutWhere(all)`; the ⤓ queue `dl.pause()` aborts its saves in flight (`saveCtl*`: GM_download / GM_xhr
+handles) and marks them `0` again — the front, since workers take the first `0`; PL jobs are cuttable owners and go
+back to the front of `plQueue`; the gates and `plPump` hold until `hoverDone()` (its own original in), then
+`hoverResumeCheck` waits for L22 (`galh`) to drain and resumes all; 16 s backstop. A gallery preview (M3) also undoes
+the round under way (`ahDrop('main')`) and cuts the rounds' thumbnails in flight (`galThumbCut`), held until its L11
+thumbnails are in (`lookDone`). A page step cuts the left page's placed-but-unloaded thumbnails (`e.cut`, kept in
+place, reloaded by `galPageWork` when that page shows).
 **Built v0.444.0** for originals (`netLive`/`netCut`/`netCutWhere`; owner per background job `netJob(tok, it, tag)`,
 a hover's token is never an owner that can be cut; `galDrop` cuts a left gallery's too). Chrome, eporner: a page step
-cut 6, a hover cut 4 (its original in 2.1 s), all 92 loaded later. **Not built:** the ⤓ save queue's cut + resume,
-the left page's unfinished thumbnails, results-page (PL) preloads on a hover.
+cut 6, a hover cut 4 (its original in 2.1 s), all 92 loaded later. (The ⤓ queue, the left page's thumbnails and PL on a hover: built v0.445.0, above.)
 
 **Rules for every moment.** Each line waits for the one above. Not listed = paused. The latest action wins: a new
 moment drops what is still *waiting* and re-queues in its order; in flight lands. A drop loses nothing (the next moment
