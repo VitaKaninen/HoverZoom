@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.443.0
+// @version      0.444.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -759,6 +759,21 @@
             });
             const text = out.join('\n'), ok = function () { b.textContent = 'Copied'; setTimeout(function () { b.textContent = 'Copy'; }, 1500); };
             try { win.navigator.clipboard.writeText(text).then(ok, function () {}); } catch (e) { /* no clipboard */ }
+        });
+        btn('Export', function (b) {      // every line, collapsed groups included, as a .txt file
+            const out = [];
+            Array.prototype.forEach.call(list.children, function (r) {
+                if (r.getAttribute('data-box')) Array.prototype.forEach.call(r.children, function (k) { out.push('    ' + k.textContent); });
+                else out.push(textOf(r));
+            });
+            const t = new Date(), p2 = function (n) { return String(n).padStart(2, '0'); };
+            const a = d.createElement('a'), u = win.URL.createObjectURL(new win.Blob([out.join('\n') + '\n'], { type: 'text/plain' }));
+            a.href = u;
+            a.download = 'hover-zoom-activity-' + t.getFullYear() + '-' + p2(t.getMonth() + 1) + '-' + p2(t.getDate()) + '_' + p2(t.getHours()) + '-' + p2(t.getMinutes()) + '-' + p2(t.getSeconds()) + '.txt';
+            a.style.display = 'none';
+            d.body.appendChild(a); a.click(); a.remove();
+            setTimeout(function () { win.URL.revokeObjectURL(u); }, 60000);
+            b.textContent = 'Saved'; setTimeout(function () { b.textContent = 'Export'; }, 1500);
         });
         btn('Open all', function () { list.querySelectorAll('[data-box]').forEach(function (x) { x.hidden = false; if (x.previousElementSibling) x.previousElementSibling.children[1].textContent = '▾ '; }); });
         btn('Close all', function () { list.querySelectorAll('[data-box]').forEach(function (x) { x.hidden = true; if (x.previousElementSibling) x.previousElementSibling.children[1].textContent = '▸ '; }); });
@@ -1955,14 +1970,15 @@
     // GM_xhr is not subject to the page's CSP, so the bytes are always reachable.
     function fetchBlob(url) {
         return new Promise(function (res) {
-            if (typeof GM_xmlhttpRequest !== 'function') { res(null); return; }
+            if (typeof GM_xmlhttpRequest !== 'function' || netCut.has(url)) { res(null); return; }
             let settled = false;
             const fin = function (v) { if (!settled) { settled = true; res(v); } };
             // GM_xhr's own timeout does not cover a pending permission dialog, and a request that
             // never calls back parks the whole candidate loop on this URL.
             setTimeout(function () { fin(null); }, IMAGE_PROBE_MS);
             try {
-                GM_xmlhttpRequest({
+                const live = netLive.get(url);
+                const h = GM_xmlhttpRequest({
                     method: 'GET', url: url, responseType: 'blob', timeout: IMAGE_PROBE_MS,
                     onload: function (r) {
                         if (r.status && (r.status < 200 || r.status >= 300)) { fin(null); return; }
@@ -1971,6 +1987,7 @@
                     onerror: function () { fin(null); },
                     ontimeout: function () { fin(null); },
                 });
+                if (live) live.abort = function () { try { if (h && h.abort) h.abort(); } catch (e) { /* gone */ } fin(null); };
             } catch (e) { fin(null); }
         });
     }
@@ -1993,6 +2010,8 @@
     const heldBlobs = new Map();    // url -> {blob, objUrl}: a gallery's originals, fetched once for the preview and the save
     let galCellMarksT = 0;          // galCellMarksSoon's pending paint (above: holdBlob may run at boot)
     let galPvWait = null;           // {img, at}: a rested gallery hover whose own original is loading; the gallery's other loads wait (M8 line 1)
+    const netLive = new Map();      // url -> {abort, owners}: a probe in flight and who wants it (netCutWhere)
+    const netCut = new Set();       // urls cancelled mid-download: settle as null, never cached as a miss
     let heldBytes = 0;
     const bytesHosts = new Set();   // hosts of an opened gallery's pictures: fetched as bytes (this page only)
     const bytesNoHosts = new Set(); // ...that would not serve the bytes but did serve the picture
@@ -2228,6 +2247,9 @@
                     arm(Math.max(ATTEMPT_FLOOR_MS, Math.min(want, ATTEMPT_CEIL_MS)));
                 });
             }, LIVENESS_MS);
+            if (netCut.has(url)) { fin({ stop: true, cut: true }); return; }
+            const nl = netLive.get(url);
+            if (nl) nl.abort = function () { fin({ stop: true, cut: true }); };
             img.src = url;
             if (img.complete && img.naturalWidth > 0) fin({ dim: { w: img.naturalWidth, h: img.naturalHeight } });
         });
@@ -2240,11 +2262,14 @@
             const b = await bytesFor(url, true);
             if (b) return b;
             bytesCache.delete(url);
+            if (netCut.has(url)) return null;
             noBytes = true;
         }
         const deadlineAt = Date.now() + PROBE_TOTAL_MS;
         for (let i = 0; i < IMAGE_TRIES; i++) {
+            if (netCut.has(url)) return null;
             const r = await imageAttempt(url, deadlineAt);
+            if (r.cut) return null;
             if (r.dim) { if (noBytes) { bytesNoHosts.add(host); dbg('bytes refused, the picture served: ' + host); } return r.dim; }
             // A refusal is not a failure: the bytes are still reachable. See E49.
             if (r.csp) { dbg('refused by the page CSP — fetching the bytes instead', url); return bytesFor(url); }
@@ -2261,16 +2286,22 @@
 
     const probeMiss = new Set();    // URLs whose cached promise settled as a failure
 
-    function probe(url, fresh) {
+    // owner: who wants it (a background job {bg, it}, cuttable; a hover's token or none, never cut). See PRELOAD.md "direct actions".
+    function probe(url, fresh, owner) {
         // A user gesture always retries: only a settled miss is evicted, never a probe in flight.
         if (fresh && probeMiss.has(url)) {
             probeCache.delete(url); probeMiss.delete(url);
             diagCache.delete(url); diagValue.delete(url);
         }
-        if (probeCache.has(url)) return probeCache.get(url);
+        if (probeCache.has(url)) { const e = netLive.get(url); if (e) e.owners.add(owner || null); return probeCache.get(url); }
+        netCut.delete(url);
+        const live = { abort: null, owners: new Set([owner || null]) };
+        netLive.set(url, live);
         const p = isVideoUrl(url) ? probeVideo(url) : probeImage(url);
         probeCache.set(url, p);
         p.then(function (dim) {
+            if (netLive.get(url) === live) netLive.delete(url);
+            if (netCut.delete(url)) { if (probeCache.get(url) === p) probeCache.delete(url); bytesCache.delete(url); return; }     // cancelled: not a miss, asked again later
             if (dim) return;
             probeMiss.add(url);
             setTimeout(function () {
@@ -2279,6 +2310,25 @@
         });
         return p;
     }
+
+    // Cancel every load in flight whose owners are all background jobs matching cut(owner): stopped mid-download.
+    function netCutWhere(cut) {
+        let n = 0;
+        netLive.forEach(function (e, url) {
+            for (const o of e.owners) if (!o || !o.bg || !cut(o)) return;
+            e.owners.forEach(function (o) { o.cutNow = true; });
+            netLive.delete(url);
+            netCut.add(url);
+            n++;
+            if (e.abort) try { e.abort(); } catch (x) { /* already settled */ }
+        });
+        return n;
+    }
+
+    function netCutOf(own) { return !!own.cutNow; }
+    function galCutNote(why, n) { if (!n) return; act('info', 'Stopped ' + n + ' download' + (n === 1 ? '' : 's') + ' mid-way: ' + why); dbg('cancelled in flight: ' + n + ' (' + why + ')'); }
+    // A background job's owner: reads its run's token (cancelled, fresh), carries its own item and tag.
+    function netJob(tok, it, tag) { const o = Object.create(tok); o.bg = true; o.it = it; o.tag = tag; o.cutNow = false; return o; }
 
     const MAX_PROBES = 8;
 
@@ -14463,6 +14513,7 @@
         g.from = a;
         g.end = all ? set.pics.length : b;
         if (set.hqTok) set.hqTok.stop = true;      // the old run starts nothing more; what it has in flight still lands
+        set.hqCut = false;
         galHqAll(set, out, tags);
         if (all) ahGalAhead();
     }
@@ -14494,7 +14545,9 @@
         if (to === set.page) return false;
         if (galOwns(active) && !placed) cancel();
         set.want = null;
+        const L0 = set.pages[set.page] || [0, 0], left = new Set(set.pics.slice(L0[0], L0[1]).map(function (p) { return p.item; }));
         set.page = to;
+        galCutNote('a page step', netCutWhere(function (o) { return left.has(o.it); }));     // the page left: its originals stop mid-download
         galPageWork(set, galLayout(set, set.open));
         predWatch(set.href, to);
         return true;
@@ -15655,7 +15708,7 @@
                     if (it) it.hqBusy = true;
                     const r = lg && lg.req(), live = { t: performance.now(), mine: tok }, t0 = performance.now();
                     galHqLive.add(live);
-                    galResolve(img, tok).then(function (hit) {
+                    galResolve(img, netJob(tok, it, tag)).then(function (hit) {
                         ahT('orig', { tag: tag, u: (img.__hzItem && img.__hzItem.thumb) || img.src, s: Math.round(t0), ms: Math.round(performance.now() - t0), ok: hit ? 1 : 0 }, job);
                         if (hit) { got++; if (!hit.video) { plKeepImage(hit, img.__hzItem); ahFiles.add(hit.url); } size(hit); nextWarmSeen(hit.url, performance.now() - t0); }
                         if (hit && !tok.cancelled && img.__hzItem) img.__hzItem.hqTried = img.__hzItem.predOr = true;     // a miss is asked again by the next run
@@ -15677,6 +15730,8 @@
 
     function galDrop(set) {
         if (set.hqTok) set.hqTok.cancelled = true;
+        const its = new Set(set.pics.map(function (p) { return p.item; }));
+        galCutNote('leaving the gallery', netCutWhere(function (o) { return its.has(o.it); }));
         set.el.classList.remove('on');
         setTimeout(function () { set.el.remove(); }, GAL_FADE_MS + 50);
     }
@@ -15755,7 +15810,12 @@
             if (myToken.cancelled || active !== img) return;
             showSpinner();
             const t1 = performance.now(), known = !!img.__hzItem.hit;
-            if (!known) galPvWait = { img: img, at: t1 };     // the pointer rested: this one alone loads until it shows
+            if (!known) {      // the pointer rested: this one alone loads until it shows; every background download stops
+                galPvWait = { img: img, at: t1 };
+                const n = netCutWhere(function () { return true; });
+                if (n && galCur) galCur.hqCut = true;
+                galCutNote('a hover', n);
+            }
             const hit = await galResolve(img, myToken);
             if (galPvWait && galPvWait.img === img) { galPvWait = null; ahPump(); }
             if (myToken.cancelled || active !== img) return;
@@ -15778,22 +15838,25 @@
         list = list.filter(function (u, i) { return u && list.indexOf(u) === i && !blocked(u); });
         const hitOf = function (u, d) { return { url: u, w: d.w, h: d.h, video: !!d.video, duration: d.duration, display: d.display }; };
         if (item.hit) {             // found before: the misses ahead of it are not asked again
-            const d = await probe(item.hit.url);
+            const d = await probe(item.hit.url, false, tok);
             if (d) return (item.hit = Object.assign({}, item.hit, { display: d.display }));
             item.hit = null;
         }
         const linked = await galLinkedHit(item, img, tok);
+        if (tok.bg && netCutOf(tok)) return null;
         if (linked) return (item.hit = linked);
         const look = siteLookup(img, item.thumb, item.base);
         const viewer = look ? await galPageBest(await look, item, img, tok) : null;
         if (viewer) return (item.hit = viewer);
         for (let i = 0; i < list.length; i++) {
             if (tok.cancelled) return null;
-            const d = await probe(list[i], tok.fresh);
+            const d = await probe(list[i], tok.fresh, tok);
+            if (tok.bg && netCutOf(tok)) return null;
             if (d && d.w > nw) return (item.hit = hitOf(list[i], d));
         }
         const own = img.currentSrc || img.src;
-        const d = own ? await probe(own) : null;
+        if (tok.bg && netCutOf(tok)) return null;
+        const d = own ? await probe(own, false, tok) : null;
         return d ? hitOf(own, d) : null;
     }
 
@@ -15820,7 +15883,8 @@
         let best = null;
         for (const t of tries.slice(0, LINKED_TRIES)) {
             if (tok.cancelled || blocked(t.url) || t.url === item.thumb) continue;
-            const d = await probe(t.url, tok.fresh);
+            const d = await probe(t.url, tok.fresh, tok);
+            if (tok.bg && netCutOf(tok)) return null;
             if (!d || d.w <= nat.w || (!t.named && nat.w && !sameShape(nat, d))) continue;
             if (best && d.w * d.h <= best.w * best.h) continue;
             best = { url: t.url, w: d.w, h: d.h, video: !!d.video, duration: d.duration, display: d.display };
@@ -18056,7 +18120,7 @@
             if (tag === 'galn' && !keepRoomFor(item)) return null;      // past the memory horizon: it would only push out nearer pictures
             item.hqBusy = true;
             const t0 = performance.now();
-            return galResolve({ __hzItem: item, naturalWidth: 0, naturalHeight: 0, src: item.thumb, currentSrc: item.thumb }, tok).then(function (hit) {
+            return galResolve({ __hzItem: item, naturalWidth: 0, naturalHeight: 0, src: item.thumb, currentSrc: item.thumb }, netJob(tok, item, tag)).then(function (hit) {
                 ahT('orig', { tag: tag, u: item.thumb, s: Math.round(t0), ms: Math.round(performance.now() - t0), ok: hit ? 1 : 0 }, tok.job);
                 if (hit && !tok.cancelled) item.hqTried = item.predOr = true;     // as galHqAll: a run skips it
                 return hit;
@@ -18392,8 +18456,11 @@
         const done = function (q) { return !q || !q.item || (q.item.hqTried && q.item.hit) || q.item.hqBusy; };
         let ready = true;
         for (let d = 1; d <= AH_NEAR; d++) if (!done(set.pics[k + d]) || !done(set.pics[k - d])) ready = false;
+        const keep = new Set();
+        for (let d = 1; d <= AH_NEAR; d++) [set.pics[k + d], set.pics[k - d]].forEach(function (q) { if (q) keep.add(q.item); });
+        if (g.near != null && g.near !== k) galCutNote('a new hover', netCutWhere(function (o) { return o.tag === 'galh' && !keep.has(o.it); }));     // the last hover's L22: dropped, not re-queued
         g.near = k;
-        if (ready && !set.hqHorizon && !(fresh && galStepG && ahAll())) return;      // M8: its L22 is in; the run under way goes on in the hover's order (G: held it: this first hover starts it)
+        if (ready && !set.hqHorizon && !set.hqCut && !(fresh && galStepG && ahAll())) return;      // M8: its L22 is in; the run under way goes on in the hover's order (G: held it: this first hover starts it)
         dbg('loading ahead: a preview; originals around picture ' + (k + 1));
         galHqAhead(set);
     }
@@ -18733,7 +18800,7 @@
                 const item = lists[k][r];
                 if (!item) continue;
                 await nextWait();
-                const hit = await ahRun(ahPics, 'next', function () { return galResolve({ __hzItem: item, naturalWidth: 0, naturalHeight: 0, src: item.thumb, currentSrc: item.thumb }, tok); });
+                const hit = await ahRun(ahPics, 'next', function () { return galResolve({ __hzItem: item, naturalWidth: 0, naturalHeight: 0, src: item.thumb, currentSrc: item.thumb }, netJob(tok, item, 'next')); });
                 if (!hit || hit.video || hit.url === item.thumb) continue;
                 store.files.push(hit.url);
                 bytes += await galBytes(hit.url);

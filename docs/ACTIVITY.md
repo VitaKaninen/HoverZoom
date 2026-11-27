@@ -5,7 +5,8 @@ reads it for **what changes and how long each piece takes**, not file names. Cod
 
 - **Jobs** (`actJob(text, total)` → `actKid(job, ok, text)` per file → `actEnd(job, state, note)`): one bold header
   per piece of work with a live `done/total`, `(N failed)`, and on end ✓ / ⏹ stopped / ✗ plus its time and a note.
-  Its file lines sit in a collapsed box under it; a click on the header (▸/▾) opens it; Open all / Close all. A load
+  Its file lines sit in a collapsed box under it; a click on the header (▸/▾) opens it; Open all / Close all. **Export** (user, v0.444.0) saves every line, collapsed boxes
+  included, as `hover-zoom-activity-<date>_<time>.txt` (a blob link in the window; Copy takes only open boxes). A load
   reaches its job through `ahT(ev, o, job)` (`galImg(…, job)`, `ahImg(…, job)`, `tok.job` for `ahOrig`/`galHqAll`,
   `galCountLoad(…, job)`). With no job the line stands alone with its reason (`ACT_WHY`). Plain `act(kind, text)`
   lines remain for what the user did (`you`) and notes (`info`/`warn`); every background job has a header.

@@ -64,6 +64,20 @@ New kinds in the plan (not in code): **L24** clip/GIF still + ▶ icon, from a p
 M1 lines 1–6 (no 20 % rule, user). L20/L21 = the next page / the page after, relative to the page on screen; under
 Endless they run on into the next gallery's first pages when this gallery ends.
 
+**The user's direct actions come first (user, 2026-11-27; replaces "in flight lands" for these three):**
+- **A hover** (its preview about to load) cancels every other download in flight — loading ahead and the ⤓ save
+  queue alike — except the previous hovered picture's own original, which finishes. The save queue's cancelled files
+  go back to the front of its queue and resume once the hover's own loads (L9, L22) are in.
+- **A second hover** drops the first hover's L22 (±3) entirely, waiting and in flight — no re-queue; Load all
+  picks them up later in its own order.
+- **A page step** cancels, mid-download, the left page's originals and its unfinished thumbnails: leaving a page
+  says the user will not look at it.
+A cancelled load is not a failure: it is never cached as a miss, never marked tried, and a later run asks again.
+**Built v0.444.0** for originals (`netLive`/`netCut`/`netCutWhere`; owner per background job `netJob(tok, it, tag)`,
+a hover's token is never an owner that can be cut; `galDrop` cuts a left gallery's too). Chrome, eporner: a page step
+cut 6, a hover cut 4 (its original in 2.1 s), all 92 loaded later. **Not built:** the ⤓ save queue's cut + resume,
+the left page's unfinished thumbnails, results-page (PL) preloads on a hover.
+
 **Rules for every moment.** Each line waits for the one above. Not listed = paused. The latest action wins: a new
 moment drops what is still *waiting* and re-queues in its order; in flight lands. A drop loses nothing (the next moment
 re-derives what is unloaded from the page). Hovers (M2, M3, M8) and scrolling (M4) are temporary: when they end, the

@@ -266,6 +266,9 @@ Test pages:
     - **A hover jumps the queue:** hover a picture far down that hasn't loaded yet. **Expect** (v0.443.0, M8): no
       new `orig` starts between the pointer resting on it and its preview showing; then `a preview; originals around
       picture N`: `orig galh` for the 3 either side, before anything else.
+    - **A hover or page step stops downloads mid-way** (v0.444.0): with Load all running on a big gallery, rest on an
+      unloaded picture, then PageDown. **Expect** (debug): `cancelled in flight: N (a hover)`, then `(a page step)`;
+      the activity window says `Stopped N downloads mid-way`; later every picture still gets its blue corner.
     - **Crossing cells is not a hover** (v0.443.0): sweep the pointer across a row and stop on one. **Expect:** one
       `act preview` (the one stopped on), not one per cell crossed; the prediction log shows one `pv`.
     - **Page steps re-queue it:** PageDown. **Expect:** `orig galp` for the new page first, then the next galleries'

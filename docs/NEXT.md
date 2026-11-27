@@ -28,10 +28,19 @@ gallery cells as bottom-right corners, yellow (cover) in place of blue (ready), 
 (singles and covers)? Not built — it means drawing over every site's thumbnails. User: no.
 **v0.443.0 (2026-11-27):** a gallery hover counts only once its preview shows (was every cell crossed: the user's
 logs showed 5–6 `pv` per 0.4 s sweep, each restarting L22), and its own original holds the AH lines (`galPvWait`).
-**Proposed to the user, waiting for a yes:** (a) abort in-flight originals a new moment no longer wants (the plan's
-"in flight lands" rule is why a page step or hover waits behind ~6 × 4 MB files on eporner); (b) the activity window
-as one collapsed block per moment (M8 heading, its numbered lines from PRELOAD.md as • → ✓ / ✗, ✗ + "interrupted by
-<action>" when a new moment takes over; expanded = today's detailed lines).
+**Handoff (2026-11-27, v0.441.0–v0.444.0, all pushed).** User said yes to both: (a) direct actions cancel downloads
+mid-way — rules in PRELOAD.md "The user's direct actions come first"; built for originals in v0.444.0 (verified in
+Chrome); (b) the checklist activity log; plus (c) an Export button on the activity window — built v0.444.0, **not
+live-tested** (the popup could not be driven from Claude in Chrome; check the file it saves).
+**Next, in order:** (1) the ⤓ save queue: a hover cancels its in-flight files and puts them back at the front, resumed
+once the hover's L9 + L22 are in; (2) a page step cancels the left page's unfinished thumbnails (`galImg` <img>s:
+`removeAttribute('src')`, and the stable-layout queue `qIn/qOut` must treat a cut as "not loaded yet", not a
+failure — GALLERY.md "Stable layout"); (3) the checklist log: one collapsed block per moment (heading "M8 – You hovered
+a picture in the gallery", its lines from PRELOAD.md with the user's short labels, e.g. "1. HQ of hovered img –
+<name>", "2. HQ of 1, 2, then 3 before and after it"), each line • → ✓ when done, the rest ✗ when a new moment takes
+over, expanded = today's detail lines + "interrupted: you went forward a page"; lines that do not apply ([Load all]
+/ [Endless] off, not built) shown as skipped. Then the older list: M5 live check, M13, L24, L13.
+**Last asked:** "Build the save-queue cut, thumbs cut and the checklist log next?" — not answered yet.
 
 ---
 
