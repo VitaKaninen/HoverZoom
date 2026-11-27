@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.432.0
+// @version      0.433.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -3570,9 +3570,17 @@
     // Above the control, below only when there is no room.
     function showTip(el) {
         const text = el.__tip;
-        if (!text) return;
+        if (!text || !el.isConnected) return;       // a strip part rebuilt under the pointer
         const h = tipBox();
-        h.__text.textContent = text;
+        h.__text.textContent = '';
+        if (Array.isArray(text)) text.forEach(function (p) {       // parts: strings, or [text, colour]
+            if (typeof p === 'string') { h.__text.appendChild(document.createTextNode(p)); return; }
+            const c = document.createElement('span');
+            c.style.color = p[1];
+            c.textContent = p[0];
+            h.__text.appendChild(c);
+        });
+        else h.__text.textContent = text;
         h.style.cssText = 'all:initial;display:block;position:fixed;left:0;top:0;width:max-content;max-width:320px;margin:0;padding:0;border:0;' +
             'background:none;overflow:visible;z-index:2147483647;pointer-events:none';
         document.documentElement.appendChild(h);
@@ -14115,6 +14123,7 @@
     function galStripText(set) {
         const s = galSt;
         if (!s || !set) return;
+        if (galChain && galChain.land && galChain.land.href !== set.href && s.nums && s.nums.gal) { galPadFit(); return; }     // endless switching: the old numbers stay up, or the box narrows and the rows reshuffle (user)
         const reading = galGrowing === set.href, base = galLists.get(set.href), n = Math.max(set.cells.length, base ? base.length : 0);
         galStripRows(set);
         const page = set.page || 0, at = set.pics.length ? galStartAt(set) : -1;
@@ -14124,7 +14133,11 @@
         s.nums = ch ? ch.nums : { page: [page + 1, total + (reading ? '+' : '')], gal: null, pic: [Math.max(0, at) + 1, n + (reading ? '+' : '')] };
         const N = s.nums;
         if (Date.now() < galNoMoreUntil) galStripPg(s, [[galNoMoreText, true]], '');
-        else if (ch) galStripPg(s, [{ seg: 'p', text: 'P:' + (page + 1) + '/' + total + (reading ? '+' : ''), more: '(' + N.page[1] + ')', on: !byG }, { seg: 'g', text: 'G:' + N.gal[0] + '/' + N.gal[1], on: byG }], '');
+        else if (ch) galStripPg(s, [
+            { seg: 'p', text: 'P:' + (page + 1) + '/' + total + (reading ? '+' : ''), more: '(' + N.page[1] + ')', on: !byG,
+                tip: [['Page', GAL_TIP_P], ' ' + (page + 1) + ' of ' + total + (reading ? '+' : '') + ' in this gallery · ' + N.page[1] + ' pages in all the galleries Endless has lined up'] },
+            { seg: 'g', text: 'G:' + N.gal[0] + '/' + N.gal[1], on: byG,
+                tip: [['Gallery', GAL_TIP_G], ' ' + N.gal[0] + ' of the ' + N.gal[1] + ' Endless has lined up from the page'] }], '');
         else galStripPg(s, [(page + 1) + ' / ' + total + (reading ? '+' : '')], 'Page ');
         if (galNoMoreSet === set && (ch ? (byG ? ch.galOn : ch.on) : page + 1 < total)) galNoMoreSet = null;
         s.gx.hidden = galNoMoreSet !== set;
@@ -14169,7 +14182,12 @@
             if (p.seg) {
                 const g = document.createElement('span');
                 g.className = 'sg ' + p.seg + (i ? ' z' : ' a') + (p.on ? ' on' : '');
-                g.textContent = p.text;
+                const k = document.createElement('span');       // the letter, coloured as its word in the tip
+                k.style.color = p.seg === 'g' ? GAL_TIP_G : GAL_TIP_P;
+                k.textContent = p.text.charAt(0);
+                g.appendChild(k);
+                g.appendChild(document.createTextNode(p.text.slice(1)));
+                if (p.tip) setTip(g, p.tip);
                 if (p.more) { const m = document.createElement('span'); m.className = 'gr'; m.textContent = ' ' + p.more; g.appendChild(m); }
                 t.appendChild(g);
                 return;
@@ -14196,8 +14214,12 @@
             r.textContent = ' (' + ch.tot + ')';
             t.appendChild(r);
         }
-        s.picW = fmt(n) + ' / ' + fmt(n) + '+' + (ch ? ' (' + ch.tot.replace(/\+$/, '') + '+)' : '');      // galFullW measures this: the widest the row gets in this gallery
+        setTip(t, 'Picture ' + (at >= 0 ? fmt(at + 1) : '–') + ' of ' + N + ' in this gallery' + (ch ? ' · ' + ch.tot + ' pictures in all the galleries Endless has lined up' : '') + (reading || (ch && /\+$/.test(ch.tot)) ? ' (+ = still counting)' : ''));
+        s.picW = N + ' / ' + N + (ch ? ' (' + ch.tot + ')' : '');      // galFullW measures this: the widest the row gets in this gallery
     }
+
+    const GAL_TIP_P = '#89b4fa', GAL_TIP_G = '#a6e3a1';     // P: and G: on the page row, and Page / Gallery in their tips
+    const GAL_ALL_TIP = 'Endless also opens galleries you have already viewed. Off by default: Endless loads galleries ahead of you, so including viewed ones can use a lot of network traffic on pictures you may not look at again.';
 
     // ▶ on the last page: "No more pages" in red for GAL_NOMORE_MS, and ✕ beside ▶ until the page changes.
     let galNoMoreUntil = 0, galNoMoreT = 0, galNoMoreSet = null, galNoMoreText = 'No more pages';
@@ -14754,8 +14776,6 @@
     function galEndlessPaint() {
         const lb = galFly && galFly.el.querySelector('.endl .ek');
         if (lb) galEndlessLook(lb);
-        const ev = galFly && galFly.el.querySelector('.endl .ev input');
-        if (ev) ev.checked = !!cfg.galleryEndlessViewed;
     }
 
     // The Endless box's look: ticked blue (Endless), ticked yellow "Last", or empty (off).
@@ -14808,7 +14828,7 @@
         tourFromStart(1, true, at).then(full, full);
     }
 
-    // The clicked picture's top-left ⓘ ↗ and bottom-left ☐ Endless ☐ All (one word, spelled out on hover).
+    // The clicked picture's top-left ⓘ ↗ and bottom-left ☐ Endless (one word, spelled out on hover).
     function galEndlessBuild(pw, href) {
         const bar = document.createElement('div');
         bar.className = 'endl';
@@ -14829,7 +14849,6 @@
         };
         const lb = box('ek', !!cfg.galleryEndless, 'Endless', 'Endless mode', 'Click: Endless → Last (stop after this gallery) → off');
         galEndlessLook(lb);
-        const lv = box('ev', !!cfg.galleryEndlessViewed, 'All', 'Show all galleries', 'Includes galleries already viewed');
         const info = document.createElement('span');
         info.textContent = 'ⓘ';
         setTip(info, 'What the buttons and numbers mean');
@@ -14838,14 +14857,12 @@
         setTip(tab, 'Open this gallery\'s page in a new tab');
         const eat = function (e) { e.preventDefault(); e.stopPropagation(); };
         lb.addEventListener('mousedown', function (e) { eat(e); if (e.button === 0) galEndlessCycle(); });
-        lv.addEventListener('mousedown', function (e) { eat(e); if (e.button === 0) galEndlessViewedSet(!cfg.galleryEndlessViewed); });
         info.addEventListener('mousedown', function (e) { eat(e); if (e.button === 0) galInfoShow(info); });
         tab.addEventListener('mousedown', function (e) { eat(e); if (e.button === 0) openOriginal(href); });
-        [lb, lv, info, tab].forEach(function (b) {
+        [lb, info, tab].forEach(function (b) {
             ['mouseup', 'click', 'auxclick', 'dblclick', 'contextmenu'].forEach(function (t) { b.addEventListener(t, eat); });
         });
         bar.appendChild(lb);
-        bar.appendChild(lv);
         pw.appendChild(bar);
         const top = document.createElement('div');
         top.className = 'endl top';
@@ -14854,7 +14871,7 @@
         pw.appendChild(top);
     }
 
-    // ☐ All on the clicked picture, or the menu: endless includes galleries already viewed.
+    // The menu or Settings: endless includes galleries already viewed.
     function galEndlessViewedSet(on) {
         reloadSettings();
         cfg.galleryEndlessViewed = on;
@@ -14879,7 +14896,7 @@
             ['Picture row ◀ ▶', 'the slideshow, one picture back or on · also ← →, the wheel over the widget or the picture · hold to repeat'],
             ['Numbers', 'click one to type where to go: a page, a gallery (endless: click P: or G: to press it, click the pressed one to type), a picture on the picture row · Enter or a click away goes there if you changed it; Esc, or a click away with nothing changed, does nothing · + = still being read'],
             ['Endless mode', 'click the box: Endless → Last → off · Endless: at the end of this gallery the next one on the page opens, and back from its first page goes to the one before · Last (yellow): stop at the end of the gallery on screen, until you close the gallery · galleries already seen or visited are left out unless Show all galleries is on, judged once when queued · a step past a gallery\'s end stops there once, the next goes on (right-click to turn that off) · the last gallery\'s last picture stops for good'],
-            ['Show all galleries', 'endless shows ALL galleries, including the ones you already viewed or visited'],
+            ['Show all galleries', 'right-click menu or Settings: endless shows ALL galleries, including the ones you already viewed or visited'],
             ['P:2/5 (248)', 'endless: page 2 of this gallery\'s 5; in grey, the pages of every queued gallery (one not read yet counts as one) · a typed page counts across them all'],
             ['G:10/16', 'endless: gallery 10 of the 16 queued'],
             ['41 / 90 (12,574)', 'picture row: picture 41 of this gallery\'s 90 (yellow while Last is on); in grey, every queued gallery\'s pictures known so far (+ = some not counted yet) · a typed picture counts across them all'],
@@ -16423,12 +16440,12 @@
         return galPlace(galAnchorDefault(), asp || 1, sh, W, H, galPagedRows(H), { w: w, h: Math.round(ph + sh) });
     }
 
-    // The strip's width for its widest line as it will grow: every "n/N" counted as "N/N+", digits as 8.
+    // The strip's width for its widest line in this gallery: every "n/N" counted as "N/N", digits as 8 (no slack beside ◀ ▶: user).
     function galFullW() {
         const s = galSt;
         if (!s || !galCur) return GAL_STRIP_W;
         const ahead = function (t) {
-            return t.replace(/([\d,–]+)(\s*\/\s*)([\d,]+)\+?/g, function (m, a, sl, b) { return b + sl + b + '+'; }).replace(/\d/g, '8');
+            return t.replace(/([\d,–]+)(\s*\/\s*)([\d,]+)(\+?)/g, function (m, a, sl, b, p) { return b + sl + b + p; }).replace(/\d/g, '8');
         };
         const cv = galFullW.cv || (galFullW.cv = document.createElement('canvas').getContext('2d'));
         let need = 0;
@@ -16438,7 +16455,7 @@
             cv.font = (segs ? '700' : cs.fontWeight || '400') + ' ' + size + 'px ' + (cs.fontFamily || 'system-ui, sans-serif');
             need = Math.max(need, cv.measureText(pic ? s.picW.replace(/\d/g, '8') : ahead(t.textContent)).width + segs * 14 + (pic ? 6 : 0));     // a segment's padding and border; the total's gap
         });
-        return Math.ceil(need + 2 * 20 + 2 * 4 + 8 + 6 + 16);      // ◀ ▶, their gaps, the strip's padding, the frame's border, room
+        return Math.ceil(need + 2 * 20 + 2 * 4 + 8 + 6 + 2);      // ◀ ▶, their gaps, the strip's padding, the frame's border, rounding
     }
 
     // The row lines a place is remembered against: a one-page gallery's own, else the paged grid's, which only the window's height decides.
@@ -16551,7 +16568,7 @@
         const u = k.u;
         if (u.w < GAL_PIC_MIN_W - 1 || u.h - galAttH() < GAL_PIC_MIN_H - 1) return null;     // smaller than its controls need: placed afresh
         if (!asp || Math.abs(asp - k.asp) <= 0.02 * k.asp) return Object.assign({}, u);
-        const w = Math.min(W - 8, Math.max(GAL_UNIT_MIN_W, GAL_PIC_MIN_W, (u.h - galAttH()) * asp));
+        const w = Math.min(W - 8, Math.max(GAL_UNIT_MIN_W, GAL_PIC_MIN_W, galAttH() ? galFullW() : 0, (u.h - galAttH()) * asp));     // as wide as the strip's text, as galPadFit
         const x = u.x + u.w / 2 > W / 2 ? u.x + u.w - w : u.x;
         return { x: Math.round(Math.max(0, Math.min(W - w, x))), y: u.y, w: Math.round(w), h: u.h };
     }
@@ -16776,7 +16793,7 @@
             return;
         }
         // kind: true/false a checkbox, {radio: bool} one of several, a string the icon of an action.
-        const item = function (text, kind, act) {
+        const item = function (text, kind, act, tip) {
             const it = document.createElement('div');
             it.className = 'it';
             const ck = document.createElement('span');
@@ -16788,6 +16805,7 @@
             it.appendChild(ck);
             it.appendChild(tx);
             it.addEventListener('mousedown', function (e) { e.preventDefault(); e.stopPropagation(); if (e.button === 0) act(); });
+            if (tip) setTip(it, tip);
             m.appendChild(it);
         };
         const sep = function () { const d = document.createElement('div'); d.className = 'sep'; m.appendChild(d); };
@@ -16849,7 +16867,7 @@
                 item('Endless mode: stop after this gallery (Last)', { radio: on && galLast }, function () { if (!on) galEndlessSet(true); galLastSet(true); galMenuShow(x, y); });
                 item('Endless mode off', { radio: !on }, function () { if (on) galEndlessSet(false); galMenuShow(x, y); });
             } else item('Endless mode', !!cfg.galleryEndless, function () { galEndlessSet(!cfg.galleryEndless); galMenuShow(x, y); });
-            item('Show all galleries: include ones already viewed', !!cfg.galleryEndlessViewed, function () { galEndlessViewedSet(!cfg.galleryEndlessViewed); galMenuShow(x, y); });
+            item('Show all galleries: include ones already viewed', !!cfg.galleryEndlessViewed, function () { galEndlessViewedSet(!cfg.galleryEndlessViewed); galMenuShow(x, y); }, GAL_ALL_TIP);
             item('Endless mode: stop once at each gallery\'s end', !!cfg.galleryEndlessStop, flip('galleryEndlessStop'));
             item('Load all of a gallery\'s originals when it opens', !!cfg.galleryLoadAll, function () { galLoadAllSet(!cfg.galleryLoadAll); galMenuShow(x, y); });
         }
@@ -16940,7 +16958,7 @@
         setTimeout(galStoreTick, 0);     // after a closing preview's own removal
         galFlyZ();
         galStripBuild();
-        if (!galCur || galCur.href !== href) galStripBlank();
+        if ((!galCur || galCur.href !== href) && !(galChain && galChain.land)) galStripBlank();     // an endless switch keeps the old numbers until the new gallery's arrive
         galStripPlace();
         galDlShow();        // galToolsBuild ran before el was in the page, so its own call skipped the button
         setTimeout(galStripHidesPreview, GAL_FLY_MS + 20);      // the strip lands under a still pointer
@@ -19936,8 +19954,7 @@
             'Its pictures 2 pages behind you and everything ahead; nothing behind kept past 5 minutes. Over this, pictures behind go first, then the farthest ahead. (default: 1024)', 64, 16384, 64);
         num('keepMB', 'Memory for pictures loaded ahead elsewhere (MB)',
             'The oldest go first. (default: 512)', 32, 16384, 32);
-        check('galleryEndlessViewed', 'Show all galleries: include ones already viewed',
-            'Off: galleries already seen or visited are left out of the queue, judged once when each joins it. Also the Show all galleries button on the clicked picture.');
+        check('galleryEndlessViewed', 'Show all galleries: include ones already viewed', GAL_ALL_TIP);
         check('galleryEndlessStop', 'Endless mode: stop once at each gallery\'s end',
             'A slideshow step past a gallery\'s last picture stops there with a note; the next step opens the next gallery. Off: it crosses straight on. The slideshow playing by itself never stops.');
         check('doorScan', 'Find galleries without a hover',

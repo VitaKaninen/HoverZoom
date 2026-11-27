@@ -366,7 +366,7 @@ Turn Endless back on afterwards.
 
 9.2 **Nothing overlaps at the smallest size.** Drag a corner of the clicked picture to make it as small as it goes,
     then hover it. **Expect:** it stops at 160×134 (the picture, without the strip); ⓘ ↗, ⤓ ✕ ⛶, the R/P/D readout
-    (spelled out while hovered), ☐ Endless and ☐ All all clear of each other and clickable.
+    (spelled out while hovered), ☐ Endless all clear of each other and clickable (no ☐ All since v0.433.0).
     - Without Ctrl the drag snaps, and stopped at 239x157 here; hold Ctrl to reach the minimum.
 9.2b **Last page.** Page to the end of the last gallery. **Expect:** no ✕ beside ▶ until then; the totals stay
     normal colour; ▶ shows "No more pages" in red for 2 s and brings up ✕ beside it, which closes the gallery; ◀

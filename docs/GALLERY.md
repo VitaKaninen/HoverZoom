@@ -756,7 +756,7 @@ The page a door opens is the ground truth for the press that opened it. Hovers c
 
 ## Endless (v0.359.0, user; INTERACTION.md `G12`)
 
-`cfg.galleryEndless` (remembered; ☐ Endless at the clicked picture's bottom-left, ☐ All (`galleryEndlessViewed`, `galEndlessViewedSet`) below it,
+`cfg.galleryEndless` (remembered; ☐ Endless at the clicked picture's bottom-left (Show all galleries, `galleryEndlessViewed` / `galEndlessViewedSet`, only in the menu and Settings since v0.433.0 (user), tip `GAL_ALL_TIP`: the traffic it costs),
 one word, swapped on hover for "Endless mode" / "Show all galleries" (`.s`/`.l`; user v0.424.0: keep it short, they
 run the picture very small); ⓘ ↗ top-left (`.endl.top`), `galEndlessBuild`. ✕ and ⛶ rest at 60 %, full while the picture is hovered (user v0.427.0, as the preview's ✕); every
 other button there and ⤓ is hidden until the picture is hovered, then fully shown (`.fd`; user v0.424.0). The readout
@@ -790,14 +790,19 @@ right-click menu and the panel; on by default since v0.387.0, user). Code: `galE
   total ` (12,574)` beside it in grey, all centred (v0.430.0's "34 left of 75" with the total floated right was dropped:
   user preferred the plain count); a click asks a picture of the whole queue (`galChainPicJump`: in another gallery it
   opens the page holding it). `s.picW` is the row's widest form for `galFullW`, so the box does not resize as a count
-  gains a digit.
+  gains a digit; `galFullW` adds no slack beside ◀ ▶ (user v0.433.0) and counts `+` only while shown.
+  `+` = some count not final. A gallery not open counts `galChainN` (its list or `hzGalCounts`) ÷ this `galPer`,
+  1 page when unknown. `s.nums` {page, gal, pic, tb} feeds `twAsk`. The page row always shows in endless (`galStripRows`).
+  **Tips** (user v0.433.0, only these three): P:, G: and the picture numbers say what they count; `P`/Page is
+  `GAL_TIP_P` blue and `G`/Gallery `GAL_TIP_G` green in both strip and tip (`showTip` takes [text, colour] parts).
+  **A switch keeps the old numbers** (user v0.433.0): while `galChain.land` points elsewhere `galStripText` leaves the
+  text and only runs `galPadFit`, and `galFlyOut` skips `galStripBlank` — blanking narrowed the box, then the rows
+  reshuffled when the numbers came back. `galBoxKept` also keeps the text's width.
 - **The box's least width** (`galPadFit`, run by every `galStripText`; user v0.431.0: keeps the picture small): outside
   fullscreen, with the strip attached, the box is at least `galFullW()` (and `GAL_PIC_MIN_W`) wide; the picture keeps
   its height and `.fly.pad` draws it `object-fit: contain` with bars at its sides. `galPlace` and a corner drag widen the
   same way — **never make a narrow picture taller to reach a minimum width** (the old `GAL_PIC_MIN_W / asp` height floor;
   the user keeps pictures small). In fullscreen `galFullRect` sets the width; `pad` only stops the crop there.
-  `+` = some count not final. A gallery not open counts `galChainN` (its list or `hzGalCounts`) ÷ this `galPer`,
-  1 page when unknown. `s.nums` {page, gal, pic, tb} feeds `twAsk`. The page row always shows in endless (`galStripRows`).
 - **Last** (`galLast`; user v0.430.0: finish this gallery without opening the next, which would mark it seen): the
   Endless box cycles Endless → Last → off (`galEndlessCycle`; menu: three radio dots). Last stops for good at the end
   of the gallery on screen — `galSeam` (note "End of this gallery: stopped (Last)", the self-playing slideshow too),
