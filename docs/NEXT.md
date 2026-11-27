@@ -2,9 +2,10 @@
 
 Start a new session with: **"Read docs/NEXT.md 'NEXT TASK' and do the consistency review."**
 
-**Progress:** batch 1 done in v0.426.0 (session 2026-11-27). The inventory is `docs/CONSISTENCY.md`; its
-"Not yet swept" list is what remains. User's answers that batch: no tooltips on ◀ ▶ on either widget; page keys
-close a preview like the buttons.
+**Progress (session 2026-11-27): v0.426.0–v0.428.0, the seed list swept.** The inventory is `docs/CONSISTENCY.md`.
+User's answers: no tooltips on ◀ ▶ on either widget; page keys close a preview like the buttons; the preview's ✕
+and the gallery picture's ✕ ⛶ rest at 60 %. Not done: a sweep for duplicated helpers / dead code beyond the
+page-step branches removed in v0.426.0.
 
 **Goal, user's words in substance:** many good-practice behaviours were built in one place only. Review the
 whole script so a good idea used in one place applies everywhere it makes sense, and the same kind of control

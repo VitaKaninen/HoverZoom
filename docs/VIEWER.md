@@ -879,7 +879,8 @@ time the flip with a `MutationObserver`, not a polling loop. See [`TESTING.md`](
 - **Two close buttons (v0.127.0, `E68`, user's call).** The old corner X (gone v0.30.0–v0.126.0)
   sat in the corner the hand reaches for to resize. Now `CX_SIZE` 26, `CX_INSET` 10 inside the
   border (v0.131.0): an SVG ring and ✕ at stroke 1.6, no fill, no shadow (user's call), 60% opacity,
-  red and opaque on hover. It **rides the bar's fade** (`.baridle`, `--barfade`); with the bar
+  red and opaque on hover. It **stays at 60 % when the bar fades** (user v0.427.0, as the gallery picture's ✕ ⛶; it used to ride
+  `.baridle` out); with the bar
   off (`.nobar`, set in `caption()`) it shows on `:hover` only. `hitRegion` returns null over it
   (offset by `borderPx()`, since CSS places it inside the border), so the corner resizes from the
   10 px inside it, the 6 px outside and the 24 px arms. The bar's `.xb` is the

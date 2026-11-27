@@ -758,7 +758,7 @@ The page a door opens is the ground truth for the press that opened it. Hovers c
 
 `cfg.galleryEndless` (remembered; ☐ Endless at the clicked picture's bottom-left, ☐ All (`galleryEndlessViewed`, `galEndlessViewedSet`) below it,
 one word, swapped on hover for "Endless mode" / "Show all galleries" (`.s`/`.l`; user v0.424.0: keep it short, they
-run the picture very small); ⓘ ↗ top-left (`.endl.top`), `galEndlessBuild`. ✕ and ⛶ are always fully shown; every
+run the picture very small); ⓘ ↗ top-left (`.endl.top`), `galEndlessBuild`. ✕ and ⛶ rest at 60 %, full while the picture is hovered (user v0.427.0, as the preview's ✕); every
 other button there and ⤓ is hidden until the picture is hovered, then fully shown (`.fd`; user v0.424.0). The readout
 always shows. ⤓ greyed (page not read yet) is by colour, never opacity, or it fights the fade. Also the
 right-click menu and the panel; on by default since v0.387.0, user). Code: `galEndless` … `galInfoShow`, after `galPageStep`.

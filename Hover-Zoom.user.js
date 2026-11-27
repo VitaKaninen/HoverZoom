@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.427.0
+// @version      0.428.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -3082,9 +3082,8 @@
             '.cx svg{display:block;width:100%;height:100%;fill:none;stroke:currentColor;',
             'stroke-width:1.6;stroke-linecap:round}',
             '.cx:hover{color:#f38ba8;opacity:1}',
-            // Rides the bar's fade; with the bar off it shows only while the pointer is on the window.
+            // Stays at 60 % when the bar fades, as the gallery picture's ✕ ⛶ (user); with the bar off it shows only while the pointer is on the window.
             '.box.placed.hot .cx{display:flex}',
-            '.box.baridle .cx{opacity:0;pointer-events:none}',
             '.box.nobar:not(:hover) .cx{display:none}',
             '.box.hot .cap.hasvid .vidoff{display:block}',
             '.box.hot .cap .retry.on{display:block}',
@@ -13655,6 +13654,7 @@
             'background:rgba(30,30,46,.92);border:1px solid #45475a;color:#cdd6f4;font:13px/1 system-ui,sans-serif;white-space:nowrap;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.5)}' +
             '.fly .tools span:hover{background:#313244;color:#89b4fa}' +
             '.fly .tools span{pointer-events:auto}' +
+            '.fly .tools span:not(.fd){opacity:.6;transition:opacity .15s ease}.fly:hover .tools span:not(.fd){opacity:1}' +     // ✕ ⛶ rest at 60 %, as the preview's ✕ (user)
             '.fly .tools .fd,.fly .endl>*,.fly .endl>.hzst{opacity:0;pointer-events:none;transition:opacity .15s ease}' +
             '.fly:hover .tools .fd,.fly .tools.busy .fd,.fly:hover .endl>*,.fly:hover .endl>.hzst{opacity:1;pointer-events:auto}' +
             '.fly .endl>label:hover .s{display:none}' +

@@ -370,7 +370,7 @@ Turn Endless back on afterwards.
     - Without Ctrl the drag snaps, and stopped at 239x157 here; hold Ctrl to reach the minimum.
 9.2b **Last page.** Page to the end of the last gallery. **Expect:** no ✕ beside ▶ until then; the totals stay
     normal colour; ▶ shows "No more pages" in red for 2 s and brings up ✕ beside it, which closes the gallery; ◀
-    hides ✕ again. Both strip rows are the same height. Unhovered: only ✕ and ⛶ show on the picture (the R/P/D
+    hides ✕ again. Both strip rows are the same height. Unhovered: only ✕ and ⛶ show on the picture, at 60 % (the R/P/D
     readout hides too).
 9.2c **Typing a number blocks previews.** Click the page number ("Page: [n] (n/N)"), then move over thumbnails.
     **Expect:** no preview opens until the box closes.
@@ -403,6 +403,11 @@ Turn Endless back on afterwards.
 9b.6 **◀ ▶ have no tooltips** on either widget; ⇅ says "Start / stop the slideshow".
 9b.7 **Destructive buttons ask.** Settings → Reset to defaults, the request log's Clear, a learned-gallery Forget:
      each asks first; Cancel leaves everything as it was.
+9b.8 **Edit as text** on any Settings list. **Expect:** only the text box shows (no entry list or add row); Done
+     brings them back. (v0.427.0)
+9b.9 **The wheel over the right-click menu** does not scroll the page behind it. (v0.427.0)
+9b.10 **Close never vanishes.** Pin a preview and let its bar fade. **Expect:** the corner ✕ stays at 60 %, full and
+     red on hover. On a gallery's picture, unhovered: ✕ ⛶ at 60 %, full while the picture is hovered. (v0.428.0)
 
 ## 10. Did the files loaded ahead survive in the cache?
 
