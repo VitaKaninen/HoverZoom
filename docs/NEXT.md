@@ -4,14 +4,13 @@ Start a new session with: **"Read docs/NEXT.md 'NEXT TASK' and do the consistenc
 
 **Progress (session 2026-11-27): v0.426.0–v0.428.0, the seed list swept.** The inventory is `docs/CONSISTENCY.md`.
 User's answers: no tooltips on ◀ ▶ on either widget; page keys close a preview like the buttons; the preview's ✕
-and the gallery picture's ✕ ⛶ rest at 60 %. Not done: a sweep for duplicated helpers / dead code beyond the
-page-step branches removed in v0.426.0.
+and the gallery picture's ✕ ⛶ rest at 60 %. v0.429.0: dead code and duplicated helpers swept (CONSISTENCY.md last rows). User 2026-11-27: the red
+"No more pages" stays; only the page numbers must never be red (already so since v0.425.0).
 
 **Handoff #13 (2026-11-27, ~372k tokens): v0.426.0–v0.428.0, all pushed.** User asked: do this review, using the
 principles of the 2026-11-13 "Script consistency and gallery mode" session and the 5 after it (same behaviour in every
 mode, fewer variants for a newcomer, a good idea built once goes everywhere). Done: see `docs/CONSISTENCY.md` (each
-row says the version). Verified live in the Browser pane. **Last asked the user:** "Do you want me to do the
-duplicated-code / dead-code sweep here now?" — not answered yet.
+row says the version). Verified live in the Browser pane. **Last asked the user:** the dead-code sweep — answered yes, done in v0.429.0.
 
 **Goal, user's words in substance:** many good-practice behaviours were built in one place only. Review the
 whole script so a good idea used in one place applies everywhere it makes sense, and the same kind of control

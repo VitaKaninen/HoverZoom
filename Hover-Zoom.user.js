@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.428.0
+// @version      0.429.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -3435,16 +3435,8 @@
 
     function bottomGap() { return EDGE_GAP + (cfg.keepClearStatus ? STATUS_TIP_H : 0); }
 
-    const TW_FLOOR_BAND = 16;   // px: a widget whose bottom is this close to the window's is docked at the bottom
 
     function twShownRect() { return tw && tw.rect && tw.host.style.display !== 'none' ? tw.rect : null; }
-
-    // Room the ◀ ▶ widget takes off the bottom of the window when it is docked there. See VIEWER.md.
-    function widgetFloor() {
-        const r = twShownRect(), vh = vpH();
-        if (!r || !vh || r.y + r.h < vh - TW_FLOOR_BAND) return 0;
-        return Math.max(0, vh - r.y + EDGE_GAP);
-    }
 
     // A window that would cover the widget is nudged sideways or up/down, whichever moves it least and
     // stays on screen; with no room either way it stays under, unless keepClearWidget shrinks it.
@@ -4480,7 +4472,6 @@
     const VCTL_GAP = 6;         // clearance above the status bar
     // Below this the strip would cover the clip instead of sitting on it.
     const VCTL_MIN_H = 110;
-    const VCTL_PAD = 8;         // .vctl's own left/right padding, matching the rule
     const VBTN_W = 20;          // one strip button's box
     const NAV_GAP = 4;          // between ◀, the counter and ▶ in the tour widget
     const TW_PAD = 4;           // the widget's buttons from its edge, as in a gallery's
@@ -6074,10 +6065,23 @@
         window.open(url, '_blank', 'noopener');
     }
 
-    function copyOriginal(url) {
-        try {
-            navigator.clipboard.writeText(url).catch(function (e) { dbg('copying the address failed', String(e)); });
-        } catch (e) { dbg('copying the address threw', String(e)); }
+    function copyOriginal(url) { copyText(url, null); }
+
+    // Text to the clipboard; the button, or a note by the pointer, says Copied for COPIED_MS. `before` runs ahead of the old-style fallback.
+    const COPIED_MS = 1500;
+    function copyText(text, btn, before) {
+        const ok = function () {
+            if (!btn) { toast('Copied', COPIED_MS); return; }
+            if (!btn.__label) btn.__label = btn.textContent;
+            btn.textContent = 'Copied';
+            clearTimeout(btn.__copiedT);
+            btn.__copiedT = setTimeout(function () { btn.textContent = btn.__label; }, COPIED_MS);
+        };
+        const fallback = function (e) {
+            if (e) dbg('copying failed', String(e));
+            try { if (before) before(); if (document.execCommand('copy')) ok(); } catch (x) { /* left selected */ }
+        };
+        try { navigator.clipboard.writeText(text).then(ok, fallback); } catch (e) { fallback(e); }
     }
 
     // ---- teaching where the original lives, from the bar's find button. See RESOLVER.md "Taught patterns".
@@ -6610,10 +6614,6 @@
         if (dlHost && node === dlHost) return true;
         return !!host && (node === host || (host.contains && host.contains(node)));
     }
-
-    const PASS_CONTROL = 'button,input,select,textarea,summary,label,[contenteditable=""],[contenteditable="true"],' +
-        '[role="button"],[role="checkbox"],[role="switch"],[role="tab"],[role="menuitem"],[role="radio"],' +
-        '[role="slider"],[role="combobox"],[role="option"]';
 
     function closestComposed(el, sel) {
         while (el) {
@@ -12332,7 +12332,6 @@
         const dm = +navigator.deviceMemory || 0, lim = dm && dm < 8 ? dm * 128 : Infinity;     // GB, rounded; Chromium only, at most 8
         return { gal: Math.min(lim, +cfg.galleryKeepMB || 1024) * 1048576, page: Math.min(lim, +cfg.keepMB || 512) * 1048576 };
     }
-    function plBudget() { return keepCaps().page; }
 
     const KEEP_BACK_PAGES = 2, KEEP_BEHIND_MS = 5 * 60000;     // a gallery keeps this many pages behind the user, none behind longer than this
     const KEEP_BEHIND_W = 2;            // a picture behind counts this many times as far as one ahead
@@ -14308,12 +14307,6 @@
     }
 
 
-    // The cells of the page on screen, as their pics.
-    function galPagePics(set) {
-        const p = set.pages && set.pages[set.page];
-        return p ? set.pics.slice(p[0], p[1]) : set.pics.slice();
-    }
-
     // Work owed to the page on screen: bigger files for cells drawn large, and the originals of its cells and then of the pages ahead.
     function galPageWork(set, L) {
         const p = set.pages[set.page] || [0, set.pics.length];
@@ -14851,17 +14844,6 @@
         e.preventDefault();
         e.stopImmediatePropagation();
         if (placed) { lastUserAct = Date.now(); dismiss(); }
-    }
-
-    // Every visible linked picture on the page, as rects.
-    function galPics() {
-        const out = [];
-        document.querySelectorAll('a[href] img').forEach(function (img) {
-            const r = img.getBoundingClientRect();
-            if (r.width < 24 || r.height < 24 || r.bottom <= 0 || r.right <= 0 || r.top >= vpH() || r.left >= vpW()) return;
-            out.push({ x: r.left, y: r.top, w: r.width, h: r.height });
-        });
-        return out;
     }
 
     // Bigger files for one thumbnail, the next size up first: srcset widths ascending, else the resolver's list.
@@ -17178,14 +17160,7 @@
         if (debugOn()) ahT('note', { m: 'gallery did not open: ' + why, d: { href: p.href } });
         copy.textContent = 'Copy';
         close.textContent = 'Close';
-        copy.addEventListener('click', function () {
-            const ok = function () { copy.textContent = 'Copied'; };
-            ta.focus();
-            ta.select();
-            try {
-                navigator.clipboard.writeText(ta.value).then(ok, function () { if (document.execCommand('copy')) ok(); });
-            } catch (e) { if (document.execCommand('copy')) ok(); }
-        });
+        copy.addEventListener('click', function () { ta.focus(); ta.select(); copyText(ta.value, copy); });
         close.addEventListener('click', function () { d.remove(); });
         d.appendChild(b);
         d.appendChild(ta);
@@ -18856,7 +18831,8 @@
             mount.appendChild(r);
         }
 
-        function requestLogRow() {
+        // A log's count, then Copy, Show and Clear: the request log and the miss log.
+        function logRow(o) {
             const count = document.createElement('span');
             count.className = 'hint';
             const btns = document.createElement('div');
@@ -18869,9 +18845,9 @@
                 btns.appendChild(b);
                 return b;
             };
-            const copyBtn = mk('Copy for sharing', 'Copy the log with every hostname replaced by site1, site2…');
-            const showBtn = mk('Show', 'Show the log here, with the real hostnames');
-            const clearBtn = mk('Clear', 'Empty the request log');
+            const copyBtn = mk(o.copy[0], o.copy[1]);
+            const showBtn = mk('Show', o.showTip);
+            const clearBtn = mk('Clear', o.clearTip);
             const ta = document.createElement('textarea');
             ta.readOnly = true;
             ta.hidden = true;
@@ -18884,80 +18860,46 @@
             mount.appendChild(r);
             mount.appendChild(ta);
             function refresh() {
-                const s = usLog.stats();
-                count.textContent = s.rows + ' logged' + (s.limits ? ' · ' + s.limits + ' refused' : '');
-                btns.hidden = !s.rows;
-                btns.style.display = s.rows ? 'flex' : 'none';
+                const c = o.count();
+                count.textContent = c.text;
+                btns.style.display = c.any ? 'flex' : 'none';
             }
             function shown(text) { ta.value = text; ta.hidden = false; showBtn.textContent = 'Hide'; }
             function hidden() { ta.value = ''; ta.hidden = true; showBtn.textContent = 'Show'; }
             copyBtn.addEventListener('click', function () {
-                const text = usLog.text({ anon: true });
-                const done = function () { copyBtn.textContent = 'Copied'; };
-                const fallback = function () {
-                    shown(text);
-                    try { ta.focus(); ta.select(); if (document.execCommand('copy')) done(); } catch (e) { /* left selected */ }
-                };
-                try { navigator.clipboard.writeText(text).then(done, fallback); } catch (e) { fallback(); }
+                const text = o.copyText();
+                copyText(text, copyBtn, function () { shown(text); ta.focus(); ta.select(); });
             });
-            showBtn.addEventListener('click', function () { if (ta.hidden) shown(usLog.text()); else hidden(); });
-            clearBtn.addEventListener('click', function () { if (!confirm('Empty the request log?')) return; usLog.clear(); hidden(); refresh(); });
+            showBtn.addEventListener('click', function () { if (ta.hidden) shown(o.showText()); else hidden(); });
+            clearBtn.addEventListener('click', function () { if (!confirm(o.confirm)) return; o.clear(); hidden(); refresh(); });
             refresh();
         }
 
-        // The miss log's count, copy, show and clear.
+        function requestLogRow() {
+            logRow({
+                copy: ['Copy for sharing', 'Copy the log with every hostname replaced by site1, site2…'],
+                showTip: 'Show the log here, with the real hostnames', clearTip: 'Empty the request log',
+                confirm: 'Empty the request log?',
+                count: function () { const s = usLog.stats(); return { text: s.rows + ' logged' + (s.limits ? ' · ' + s.limits + ' refused' : ''), any: !!s.rows }; },
+                copyText: function () { return usLog.text({ anon: true }); },
+                showText: function () { return usLog.text(); },
+                clear: function () { usLog.clear(); }
+            });
+        }
+
         function missLogRow() {
-            const count = document.createElement('span');
-            count.className = 'hint';
-            const btns = document.createElement('div');
-            btns.style.cssText = 'display:flex;gap:6px;flex:none';
-            const mk = function (label, tip) {
-                const b = document.createElement('button');
-                b.type = 'button';
-                b.textContent = label;
-                setTip(b, tip);
-                btns.appendChild(b);
-                return b;
-            };
-            const copyBtn = mk('Copy', 'Copy the whole log, addresses included');
-            const showBtn = mk('Show', 'Show the log here');
-            const clearBtn = mk('Clear', 'Empty the log');
-            const ta = document.createElement('textarea');
-            ta.readOnly = true;
-            ta.hidden = true;
-            ta.spellcheck = false;
-            ta.style.cssText = 'height:160px;font-size:10px;white-space:pre';
-            const r = document.createElement('div');
-            r.className = 'row';
-            r.appendChild(count);
-            r.appendChild(btns);
-            mount.appendChild(r);
-            mount.appendChild(ta);
-            function refresh() {
-                const log = missRead(MISS_LOG_KEY, {}), n = Array.isArray(log.rows) ? log.rows.length : 0;
-                const ok = Object.keys(log.hosts || {}).reduce(function (a, h) { return a + (log.hosts[h].ok || 0); }, 0);
-                count.textContent = n + ' wrong' + (ok ? ' · ' + ok + ' right' : '');
-                btns.style.display = n || ok ? 'flex' : 'none';
-            }
-            function shown(text) { ta.value = text; ta.hidden = false; showBtn.textContent = 'Hide'; }
-            function hidden() { ta.value = ''; ta.hidden = true; showBtn.textContent = 'Show'; }
-            copyBtn.addEventListener('click', function () {
-                const text = missLogText();
-                const done = function () { copyBtn.textContent = 'Copied'; };
-                const fallback = function () {
-                    shown(text);
-                    try { ta.focus(); ta.select(); if (document.execCommand('copy')) done(); } catch (e) { /* left selected */ }
-                };
-                try { navigator.clipboard.writeText(text).then(done, fallback); } catch (e) { fallback(); }
+            logRow({
+                copy: ['Copy', 'Copy the whole log, addresses included'],
+                showTip: 'Show the log here', clearTip: 'Empty the log',
+                confirm: 'Empty the gallery-link miss log?',
+                count: function () {
+                    const log = missRead(MISS_LOG_KEY, {}), n = Array.isArray(log.rows) ? log.rows.length : 0;
+                    const ok = Object.keys(log.hosts || {}).reduce(function (a, h) { return a + (log.hosts[h].ok || 0); }, 0);
+                    return { text: n + ' wrong' + (ok ? ' · ' + ok + ' right' : ''), any: !!(n || ok) };
+                },
+                copyText: missLogText, showText: missLogText,
+                clear: function () { GM_setValue(MISS_LOG_KEY, ''); }
             });
-            showBtn.addEventListener('click', function () { if (ta.hidden) shown(missLogText()); else hidden(); });
-            clearBtn.addEventListener('click', function () {
-                if (!confirm('Empty the gallery-link miss log?')) return;
-                GM_setValue(MISS_LOG_KEY, '');
-                hidden();
-                refresh();
-            });
-            refresh();
         }
 
         function check(key, labelText, hintText) {
