@@ -259,6 +259,16 @@ Test pages:
     - **Page steps don't stop it:** PageDown. **Expect:** no `pages skipped` line; loading carries on.
     - **Next gallery:** step past the last page into the next gallery. **Expect:** its originals start from its
       picture 1.
+    - **G: holds it** (v0.434.0, Endless on): press G: on the strip's page row before hovering anything. **Expect:**
+      `loading ahead: G: pressed, originals wait for a preview`, and no more `orig galo` starts. G: ▶ into the next
+      gallery: still no originals. Hover a picture: originals start from it and then load all. Press P: on a gallery
+      not previewed yet: `P: pressed, Load all goes on`.
+    - **No more than 5 galleries ahead:** G: ▶ four times. **Expect:** `ahead: 5` in every `thumbnails of gallery N of
+      the queue` line, never 10.
+    - **Last loads no next gallery:** cycle the Endless box to Last. **Expect:** no new `thumbnails of gallery N of the
+      queue` lines; back to off/Endless, they resume.
+    - **A slideshow brings its page's thumbnails:** start a slideshow on page 1 of a long gallery and let it run
+      past page 2, then close it. **Expect:** the page it closed on is full, not filling in.
     - **Memory full:** on a gallery bigger than the memory cap (Settings → *Memory for an open gallery*; set it
       to 64 to try it), **expect** `memory keep: dropped …` and then `gallery originals: memory full`, and no more
       original requests until you page on.

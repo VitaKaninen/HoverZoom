@@ -1456,7 +1456,7 @@ const galPH = function (min) {
     eq('ahead: just opened = 2', ahAheadN(0, 0), 2);
     eq('ahead: paging forward in the first = 5', ahAheadN(0, 1), 5);
     eq('ahead: second gallery = 5', ahAheadN(1, 0), 5);
-    eq('ahead: third on = 10', [ahAheadN(2, 0), ahAheadN(7, 3)], [10, 10]);
+    eq('ahead: third on stays 5 (user: never more)', [ahAheadN(2, 0), ahAheadN(7, 3)], [5, 5]);
     const pS = src.indexOf('    function ahPri'), pE = src.indexOf('    // A start slot');
     const ahPri = new Function(src.slice(pS, pE) + '\nreturn ahPri;')();
     eq('gate: open gallery before counts before the main page', [ahPri('gal'), ahPri('galo'), ahPri('galn'), ahPri('count'), ahPri('main')], [0, 0, 0.5, 1, 2]);

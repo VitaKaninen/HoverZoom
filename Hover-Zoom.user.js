@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.433.0
+// @version      0.434.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -14306,7 +14306,7 @@
             const g = e.target && e.target.closest ? e.target.closest('.sg') : null;
             if (!g) return;
             const gal = g.classList.contains('g');
-            if (gal !== galStepG) { galStepG = gal; if (galCur) galStripText(galCur); return; }
+            if (gal !== galStepG) { galStepG = gal; if (galCur) galStripText(galCur); ahStepMode(); return; }
             twAsk(gal ? 'gal' : 'page', s.pgT);
         });
         ['mousedown', 'mouseup', 'click', 'auxclick', 'dblclick', 'contextmenu'].forEach(function (t) {
@@ -14389,7 +14389,7 @@
     function galHqAhead(set) {
         const g = ahG;
         if (!set.pv || !g || !g.origs || galCur !== set || galLook) return;
-        const P = set.pages && set.pages.length ? set.pages : [[0, set.pics.length]], pg = Math.min(set.page || 0, P.length - 1), all = !!cfg.galleryLoadAll;
+        const P = set.pages && set.pages.length ? set.pages : [[0, set.pics.length]], pg = Math.min(set.page || 0, P.length - 1), all = ahAll();
         let from = P[pg][0];
         const end = all ? set.pics.length : P[Math.min(P.length - 1, pg + 2)][1];
         if (g.at != null && g.at >= from && g.at < end) from = g.at;
@@ -14438,7 +14438,7 @@
         const g = ahG;
         if (!g) return;
         ahT('act', { a: 'page', dir: dir, page: (set.page || 0) + 1 });
-        if (dir > 0 && cfg.galleryLoadAll) {
+        if (dir > 0 && ahAll()) {
             g.fwd++;
             g.back = null;
             ahGalAhead();
@@ -14544,12 +14544,15 @@
     }
 
     // Galleries kept loaded ahead, from the queue position `at` (0-based) and forward steps taken: 2, 5 once the user goes on, 10 from the third.
-    function ahAheadN(at, fwd) { return at >= 2 ? 10 : at >= 1 || fwd > 0 ? 5 : 2; }
+    function ahAheadN(at, fwd) { return at >= 1 || fwd > 0 ? 5 : 2; }
 
-    // Endless: the next galleries' first 2 pages of thumbnails, 2 ahead, 5 once the user goes on, 10 from the third; with originals on, the next one's first page too.
+    // Load all, unless G: is pressed and nothing in this gallery has been previewed yet.
+    function ahAll() { return !!cfg.galleryLoadAll && !(galStepG && galEndless() && !(ahG && ahG.saw)); }
+
+    // Endless: the next galleries' first 2 pages of thumbnails, 2 ahead, 5 once the user goes on; with originals on, the next one's first page too. Last: none.
     async function ahGalAhead() {
         const g = ahG, c = galEndless() ? galChain : null;
-        if (!g || !c || !galCur || galPreStop) return;
+        if (!g || !c || !galCur || galPreStop || galLast) return;
         const run = ++g.run, live = function () { return ahG === g && g.run === run && galChain === c; };
         const n = ahAheadN(c.at, g.fwd), per = Math.max(1, galPer(galCur));
         const P = galCur.pages || [], near = (galCur.page || 0) + 2 >= P.length - 1;
@@ -14755,6 +14758,7 @@
     function galLastSet(on) {
         galLast = on && !!cfg.galleryEndless;
         dbg('endless: Last ' + (galLast ? 'on — stops after this gallery' : 'off'));
+        if (ahG) { if (galLast) { ahG.run++; if (ahG.otok) ahG.otok.stop = true; ahDrop('galn'); } else ahGalAhead(); }     // Last: the next galleries never open, so none loads
         galEndlessPaint();
         if (galCur) galPageNote(galCur);
     }
@@ -14797,8 +14801,18 @@
         const g = ahG, set = galCur;
         dbg('load all ' + (on ? 'on' : 'off'));
         if (!g || !set) return;
-        g.origs = on;
-        if (on) galHqAhead(set);
+        g.origs = on && (ahAll() || g.saw);
+        if (g.origs) galHqAhead(set);
+        else { if (set.hqTok) set.hqTok.cancelled = true; ahDrop('galo'); ahDrop('galn'); }
+    }
+
+    // P: or G: was pressed: G: holds the open gallery's originals until a preview; P: lets Load all go on.
+    function ahStepMode() {
+        const g = ahG, set = galCur;
+        if (!g || !set || g.saw || !cfg.galleryLoadAll) return;
+        dbg('loading ahead: ' + (galStepG ? 'G: pressed, originals wait for a preview' : 'P: pressed, Load all goes on'));
+        g.origs = !galStepG;
+        if (g.origs) galHqAhead(set);
         else { if (set.hqTok) set.hqTok.cancelled = true; ahDrop('galo'); ahDrop('galn'); }
     }
 
@@ -15148,7 +15162,7 @@
         const root = galLayer();
         if (!galHost.isConnected) galSlot(galHost);
         const page = galCur && galCur.href === href ? galCur.page : 0;
-        if (ahG && !galLook && galCur && galCur.href !== href) { ahG.at = ahG.back = null; ahG.from = ahG.end = 0; if (cfg.galleryLoadAll) ahG.origs = true; }     // a queue switch
+        if (ahG && !galLook && galCur && galCur.href !== href) { ahG.at = ahG.back = null; ahG.from = ahG.end = 0; ahG.saw = false; if (galStepG && galEndless()) ahG.origs = false; else if (cfg.galleryLoadAll) ahG.origs = true; }     // a queue switch
         if (galCur) galDrop(galCur);
         const set = { href: href, el: document.createElement('div'), shade: document.createElement('div'),
             cells: [], asp: [], pics: [], page: page, fed: 0, far: page };
@@ -18071,7 +18085,7 @@
         galPageY = window.scrollY;
         ahT('act', { a: 'open' });
         ahDrop('main');
-        ahG = { fwd: 0, origs: !!cfg.galleryLoadAll, at: null, back: null, from: 0, end: 0, run: 0, warm: null };
+        ahG = { fwd: 0, origs: !!cfg.galleryLoadAll, saw: false, at: null, back: null, from: 0, end: 0, run: 0, warm: null };
     }
 
     // The gallery closed: what it queued is dropped, and the main page starts again from the first door on screen.
@@ -18092,13 +18106,15 @@
         const k = set.pics.findIndex(function (p) { return p.img === img; });
         if (k < 0) return;
         ahT('act', { a: tour ? 'slide' : 'preview', pic: k + 1, dir: dir });
+        if (tour && tour.gal === set) { const p = galPageOf(set, k); if (p > (set.far || 0)) { set.far = p; galFeed(set); } }     // the slideshow's page and those ahead get their thumbnails
         const was = g.origs;
         g.origs = true;
+        g.saw = true;
         if (dir < 0) { if (g.back === k) return; g.back = k; }
         else {
             const at = g.at;
             g.at = k;
-            if (cfg.galleryLoadAll) { const it = set.pics[k].item; if (was && !set.hqHorizon && (k === at || (it && it.hqTried))) return; }     // load all: an unloaded picture jumps the queue; a run stopped at the memory horizon goes on from here
+            if (ahAll()) { const it = set.pics[k].item; if (was && !set.hqHorizon && (k === at || (it && it.hqTried))) return; }     // load all: an unloaded picture jumps the queue; a run stopped at the memory horizon goes on from here
             else if (was && k >= g.from && k < g.end - 1) return;      // still inside what is loading
         }
         if (!was) dbg('loading ahead: a preview; originals from picture ' + (k + 1));

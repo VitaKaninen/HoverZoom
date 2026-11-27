@@ -341,8 +341,13 @@ What loads ahead follows what the user does. Code: the `ah*` functions after `ga
   original's item loses `hqTried`, so a backward run loads it again. Runs on every add and each storage-readout
   tick (1 s). Verified on eporner with a 64 MB cap: 361/666 then `memory full`.
 - **Gallery, endless** (`ahG`, made in `galMiddle` unless a queue switch, dropped in `galHide`): thumbnails
-  (first 2 pages) of the next `ahAheadN` galleries — 2, 5 once the user steps forward or reaches gallery 2,
-  10 from gallery 3 (`ahGalAhead`, run on every landing and page step, and when Endless is ticked). With Load all
+  (first 2 pages) of the next `ahAheadN` galleries — 2, then 5 once the user steps forward or reaches gallery 2, never
+  more (user v0.434.0: 10 was overkill) (`ahGalAhead`, run on every landing and page step, and when Endless is ticked).
+  **Last** loads none (`galLastSet` bumps `ahG.run`, stops `otok`, drops `galn`): those galleries never open.
+  **G: pressed** (`ahAll()`, `ahStepMode`, user v0.434.0): Load all waits until something in the gallery on screen is
+  previewed (`ahG.saw`, set in `ahSaw`, cleared on a queue switch); P: pressed on an unpreviewed gallery resumes it.
+  **A slideshow step** raises `set.far` to its picture's page and runs `galFeed` (in `ahSaw`), so the page it closes
+  on already has its thumbnails (user: an empty page filling in shuffles the cells). With Load all
   off, originals only after a preview
   (`ahSaw` from `galPv` and from `tourGo` in a gallery): `galHqAhead` = from the previewed picture through 2
   pages on (only what `galFeed` has built); within reach of the end, the next gallery's first page too. A
