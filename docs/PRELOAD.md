@@ -45,7 +45,7 @@ Queues (each kind below names its own). They do not know about each other; all s
 
 ## Plan — the user's (2026-11-27, wrote M6–M9 themselves); being built
 
-**Built (v0.438.0):** M6–M9 and M11 as in the lines below, except: the clip lines (L24/L25, "Upgrade clips") and
+**Built (v0.438.0–v0.439.0; verified in Chrome on eporner: M6, M7, M8, M11):** M6–M9 and M11 as in the lines below, except: the clip lines (L24/L25, "Upgrade clips") and
 L13's place (still its own frame queue, started as before); L16/L20/L21 are direct (the browser's order, so L16 may
 overlap L12, and L22 overlaps L12 in M8). M10 = M6/M7 order with no HQ until a hover; its "L17 first gallery before
 L20" is not built (L17 waits for all thumbnails). Without Load all a hover now loads L22 only (was 2 pages on).

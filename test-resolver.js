@@ -1508,6 +1508,9 @@ const galPH = function (min) {
     held.g.wait.length && (ctx.galCur.inflight = 0, held.g.pump());
     eq('gate: thumbnails in, the rest goes in order', held.seen, ['galh', 'galp', 'gal', 'galo', 'galn']);
     eq('gate: a thumbnail stalled past AH_THUMB_STALL_MS stops holding', run('fwd', { inflight: 4, thumbAt: 1e9 - 5000 }, ['galo', 'galh']).seen, ['galh', 'galo']);
+    const walkRun = function (m) { const r = run(m, { inflight: 0 }, []); ctx.ahG.walk = 1; ['galo', 'gal'].forEach(function (t) { r.g.wait.push({ tag: t, resolve: function (free) { r.seen.push(t); if (free) free(); } }); }); r.g.pump(); return r.seen; };
+    eq('gate M7: L14 waits for the L17 walk', walkRun('fwd'), ['gal']);
+    eq('gate M6: L14 does not wait for the walk', walkRun('open'), ['galo', 'gal']);
     eq('gate: no gallery on screen, counts go again', run('', null, ['main', 'count']).seen, ['count', 'main']);
     ctx.ahG = null; ctx.galCur = null;
 }

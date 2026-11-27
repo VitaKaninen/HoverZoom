@@ -279,7 +279,7 @@ What loads ahead follows what the user does. Code: the `ah*` functions after `ga
   started under the first batch, v0.438.0 on door-big) everything but `galh` waits, unless none settled for `AH_THUMB_STALL_MS` 3 s (a
   stalled file must not block originals for good); each thumbnail sets `set.thumbAt`, the last pumps the gates.
   A run (`galHqAll`) keeps `GAL_HQ_Q` 12 waiting or in flight, twice the gate's 6, so a lower line never starts in the
-  gap between one original landing and the next being queued. The slideshow (`ahMoment` 'slide') keeps the old
+  gap between one original landing and the next being queued. During an L17 walk (`ahGalAhead`, `ahG.walk` = its run) `galo` is held in M7–M9, page reads included: the walk awaits one gallery at a time, and without it L14 filled every gap between galleries (eporner, v0.438.0). L18 (`galn`) is queued after the walk. The slideshow (`ahMoment` 'slide') keeps the old
   order: `gal`/`galo` equal and taking turns, no hold (M13 not built). `ahDrop(tag)` resolves a tag's waiting slots
   to null (callers skip); `ahDropOrigs` drops all four originals lines. A hidden tab starts nothing. Measured on `door-long`:
   picture starts 58 / 141 / 453 ms (min / median / max).

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.438.0
+// @version      0.439.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -14601,7 +14601,7 @@
     // Load all, unless G: is pressed and nothing in this gallery has been previewed yet.
     function ahAll() { return !!cfg.galleryLoadAll && !(galStepG && galEndless() && !(ahG && ahG.saw)); }
 
-    // Endless: the next galleries' first 2 pages of thumbnails, 2 ahead, 5 once the user goes on; with originals on, the next one's first page too. Last: none.
+    // Endless: the next galleries' first 2 pages of thumbnails (L17), 2 ahead, 5 once the user goes on; then with Load all the next one's first page full size (L18). Last: none.
     async function ahGalAhead() {
         const g = ahG, c = galEndless() ? galChain : null;
         if (!g || !c || !galCur || galPreStop || galLast) return;
@@ -14609,18 +14609,19 @@
         const n = ahAheadN(c.at, g.fwd), per = Math.max(1, galPer(galCur));
         const P = galCur.pages || [], near = (galCur.page || 0) + 2 >= P.length - 1;
         if (!g.warm) g.warm = new Set();
-        for (let i = c.at + 1; i <= Math.min(c.hrefs.length - 1, c.at + n); i++) {
-            const h = c.hrefs[i];
-            if (!galLists.has(h) && !galCache.has(h) && !galNoFrame(h)) await galCountLoad(h, 'gal');
-            if (!live()) return;
-            let list = galLists.get(h);
-            if (!list) {
-                if (galGrowing || galFrameStop) continue;      // a frame is reading the open gallery: this one waits for the next pass
-                list = await galLoad(h);
+        g.walk = run;      // M7-M9: L14 waits for the whole walk, its page reads included (ahHeld)
+        try {
+            for (let i = c.at + 1; i <= Math.min(c.hrefs.length - 1, c.at + n); i++) {
+                const h = c.hrefs[i];
+                if (!galLists.has(h) && !galCache.has(h) && !galNoFrame(h)) await galCountLoad(h, 'gal');
                 if (!live()) return;
-            }
-            if (!Array.isArray(list) || !list.length) continue;
-            if (!g.warm.has(h)) {
+                let list = galLists.get(h);
+                if (!list) {
+                    if (galGrowing || galFrameStop) continue;      // a frame is reading the open gallery: this one waits for the next pass
+                    list = await galLoad(h);
+                    if (!live()) return;
+                }
+                if (!Array.isArray(list) || !list.length || g.warm.has(h)) continue;
                 g.warm.add(h);
                 dbg('loading ahead: thumbnails of gallery ' + (i + 1) + ' of the queue', { href: h, ahead: n });
                 const tl = list.slice(0, 2 * per), job = actJob('Next galleries: thumbnails of the first 2 pages of ' + actGal(h) + ' (keeping ' + n + ' galleries ready)', tl.length);
@@ -14628,16 +14629,15 @@
                 actEnd(job, live() ? 'done' : 'stopped');
                 if (!live()) return;
             }
-            if (ahAll() && near && i === c.at + 1) {
-                const todo = list.slice(0, per).filter(function (it) { return it && !(it.hqTried && it.hit); });
-                if (g.otok) g.otok.stop = true;     // the last walk's waiters leave the line
-                if (!todo.length) continue;
-                const tok = g.otok = { cancelled: false, fresh: false, job: actJob('Next gallery: full-size pictures of its first page — ' + actGal(h), todo.length) };
-                await Promise.all(todo.map(function (it) { return ahOrig(it, 'galn', tok); }));
-                actEnd(tok.job, tok.stop ? 'stopped' : 'done', tok.stop ? 'a newer pass took over' : '');
-                if (!live()) return;
-            }
-        }
+        } finally { if (g.walk === run) { g.walk = 0; ahPump(); } }
+        const h1 = c.hrefs[c.at + 1], list1 = h1 && galLists.get(h1);
+        if (!ahAll() || !near || !Array.isArray(list1)) return;
+        const todo = list1.slice(0, per).filter(function (it) { return it && !(it.hqTried && it.hit); });
+        if (g.otok) g.otok.stop = true;     // the last walk's waiters leave the line
+        if (!todo.length) return;
+        const tok = g.otok = { cancelled: false, fresh: false, job: actJob('Next gallery: full-size pictures of its first page — ' + actGal(h1), todo.length) };
+        await Promise.all(todo.map(function (it) { return ahOrig(it, 'galn', tok); }));
+        actEnd(tok.job, tok.stop ? 'stopped' : 'done', tok.stop ? 'a newer pass took over' : '');
     }
 
     // The page row's ◀ ▶: a page, or with G: pressed (endless), a whole gallery, landing on its first page.
@@ -17953,6 +17953,7 @@
     function ahHeld(tag, m, busy) {
         if (!m) return false;
         if (tag === 'count' || tag === 'main') return true;
+        if (tag === 'galo' && ahG && ahG.walk && m !== 'open' && m !== 'slide') return true;     // M7-M9: L17's walk first
         return busy && tag !== 'galh' && m !== 'slide';
     }
     function ahPump() { ahPics.pump(); ahPages.pump(); }
@@ -18248,7 +18249,7 @@
         galPageY = window.scrollY;
         ahT('act', { a: 'open' });
         ahDrop('main');
-        ahG = { fwd: 0, m: 'open', saw: false, slide: false, at: null, back: null, near: null, from: 0, end: 0, run: 0, warm: null };
+        ahG = { fwd: 0, m: 'open', saw: false, slide: false, at: null, back: null, near: null, from: 0, end: 0, run: 0, walk: 0, warm: null };
     }
 
     // The gallery closed: what it queued is dropped, and the main page starts again from the first door on screen.
@@ -18291,7 +18292,7 @@
         let ready = true;
         for (let d = 1; d <= AH_NEAR; d++) if (!done(set.pics[k + d]) || !done(set.pics[k - d])) ready = false;
         g.near = k;
-        if (ready && !set.hqHorizon && !(fresh && ahAll())) return;      // M8: its L22 is in; the run under way goes on in the hover's order
+        if (ready && !set.hqHorizon && !(fresh && galStepG && ahAll())) return;      // M8: its L22 is in; the run under way goes on in the hover's order (G: held it: this first hover starts it)
         dbg('loading ahead: a preview; originals around picture ' + (k + 1));
         galHqAhead(set);
     }
