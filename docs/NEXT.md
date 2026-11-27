@@ -1,3 +1,83 @@
+# NEXT TASK (user, 2026-11-26): consistency review of the whole script
+
+Start a new session with: **"Read docs/NEXT.md 'NEXT TASK' and do the consistency review."**
+
+**Goal, user's words in substance:** many good-practice behaviours were built in one place only. Review the
+whole script so a good idea used in one place applies everywhere it makes sense, and the same kind of control
+behaves the same way everywhere. "I am sure we have tons of other things in one place that we need to apply
+elsewhere."
+
+**Method (the script is ~19k lines; never read it whole, ~250k tokens):**
+1. Build the inventory first, in a new `docs/CONSISTENCY.md`, as a table: *pattern* · *the function(s) that do it
+   now* · *every other place of the same kind* (found by grep) · *missing where* · *verdict* (apply / not
+   applicable, with one-line reason). One home: the per-pattern reason stays in the doc it belongs to; this doc
+   points at it.
+2. Then apply in batches of related fixes, one version bump + commit + push per batch, each verified live in the
+   Browser pane (`python test-server.py`, `test-page.html`, `test-pages/door-search.html`; open the 240-picture
+   door by its gallery button) plus `node --check` and `node test-resolver.js`. Update INTERACTION.md and
+   TEST-PLAN.md in the same commit as each behaviour change.
+3. Clear cases (same kind of control, the existing behaviour is obviously right for it): just do them. Judgement
+   calls (it changes what a user sees or how a gesture works somewhere it was deliberate): list them for the user
+   in one batch with a recommendation each, and get answers via one AskUserQuestion, not one by one.
+4. Shared code: `dock/us-dock.js` and `shared/us-log.js` are synced copies; a fix there goes in HoverZoom's
+   master and `node dock/sync-dock.js` / `node shared/sync-shared.js`. Forum Stumbler / RNFP get no edits from
+   this task unless the user asks.
+
+**Seed list, the patterns known so far (grep for each holder, then find its siblings):**
+- **Typed-number box** (`twAsk`/`twAskEnd`, `twAskEatUntil`): prefilled "Page: [n] (n/N)"; Enter goes, Esc cancels;
+  a click away goes only if the value changed, and that click is eaten; keyboard captured; **nothing previews
+  while it is up** (`twTyping` checked in `onOver`, `galPv`). Siblings to check: the zoom % box (`zinEl`), playback
+  rate (`rateInEl`), teach box (`teachInEl`), the settings panel's inputs and the activity window's, the
+  folder `prompt()` (`saveFolder`), any other `createElement('input'|'textarea')`. At least the "no preview while
+  typing" and "click away is eaten" rules likely apply to all of them.
+- **Page step closes the preview first** (`twPageBtn`, strip `galPageStep` buttons, v0.421.0): other "go
+  elsewhere" actions (gallery jump, Endless next gallery, widget ◀ ▶ picture steps from a pinned preview, keys
+  ↑ ↓ PageUp PageDown) — does each close or move a preview the same way?
+- **End-of-range feedback**: strip ▶ on the last page flashes "No more pages" in red 2 s and reveals ✕
+  (`galNoMore`); a greyed button pressed does that only there. The widget's ◀ ▶, the picture row's ◀ ▶ at the
+  first/last picture, the slideshow's ends ("Last picture of this gallery", "End of post"), keyboard steps at an
+  end — same feedback? Same wording style and colour?
+- **Tooltips**: `setTip` on every button (never `title`), short wording ("Endless mode", not a sentence). Grep
+  buttons built without `setTip`, and any remaining `.title =`.
+- **Fade-until-hover controls**: on the corner picture, ✕ ⛶ always shown, everything else (`.fd`, `.endl>*`,
+  readout) hidden until hovered. The preview window's bar, the widget, the strip: is the rule the same (close and
+  fullscreen always visible, the rest on hover)?
+- **Menus**: `galMenuShow` draws checkbox / radio / action marks, has a ✕, uses the real gallery icon
+  (`withGalIcon`), every entry also in Settings. The preview's right-click menu (`VIEWER.md`), the script
+  manager's menu (`buildMenu`), any other popup: same marks, same ✕, same "also in Settings" rule?
+- **Text that does not fit** shrinks then drops a word (`galStripSqueeze`, `twAsk`): other fixed-width text
+  (preview status bar caption, widget counter, download strip `.dl .txt` which ellipsizes).
+- **Hovering a control row hides the preview under it** (`galStripHidesPreview`): the widget, the download
+  strip, the dock.
+- **Hold to repeat** (`twHoldOn`) on picture ◀ ▶: every stepping button?
+- **Click a number to type where to go**: widget and strip both; the preview's own counter, the slideshow's?
+- **Right-click opens the one menu** on the picture, the strip, the widget: other gallery surfaces?
+- **Wheel**: over the strip/picture flips pictures, over a preview zooms, never scrolls the page behind; check
+  every overlay of ours eats the wheel the same way.
+- **State labels**: "gallery button" on screen (code still says chip); grep visible strings for "chip", "▦" left
+  over, and other internal words (tour, fly, hole, look) leaking into UI text or tooltips.
+- **Rules from CLAUDE.md files** (top of HoverZoom/CLAUDE.md, ../CLAUDE.md): `isBoxControl` for controls in
+  `.box`, `[hidden]` vs explicit `display`, `isTopFrame` guards, global listeners acting only on our own state,
+  `releaseSliders` for every held flag, `pointer-events` class removed on the hide path, state-changing menu
+  items flip their label and show a 3 s popup, destructive items `confirm()`. Sweep for violations.
+Add anything else found that is done well in one place and not in its siblings: that is the point of the task.
+
+**Out of scope unless the user says:** new features, the comment budget (bare minimum stays), Forum Stumbler.
+
+# Handoff 2026-11-26 #12: v0.425.0, pushed
+
+User asked, all done and verified in the Browser pane (door-search.html, door-big gallery):
+- Page row's ✕ beside ▶ only after ▶ finds no more pages (Endless, or 2+ pages); goes when the page changes.
+- Last page totals back to normal colour (the red "No more pages" stays).
+- R/P/D readout hides with the other buttons until the picture is hovered.
+- Even page sharing (v0.422.0) reverted (user: no picture grew, same pages, looked worse; GALLERY.md Pages says so).
+- Page row 24 px like the picture row (`GAL_STRIP_H` 54 → 62); number box "Page: / Gallery: / Image:".
+- No preview opens while the number box is up (`twTyping` in `onOver`, `galPv`; a hover preview closes as it opens).
+Answered in chat: Disk = `navigator.storage.estimate().usage`, the whole site's storage, rounded to MB, so 0 unless
+the site stores a lot or a ⤓ download queue holds originals in IndexedDB (`hz-held-originals`); Preloaded has ≈
+because its bytes are guessed from pixels (`PL_BYTES_PER_PX`), the file sizes are not readable for `<img>` loads.
+**Last asked the user:** nothing open.
+
 # Handoff 2026-11-26 #11 (~334k tokens): v0.421.0 → v0.424.0, all pushed
 
 User asked, all done and verified in the Browser pane on door-search.html (localhost fixtures, not on eporner):
