@@ -40,7 +40,10 @@ a picture in the gallery", its lines from PRELOAD.md with the user's short label
 <name>", "2. HQ of 1, 2, then 3 before and after it"), each line • → ✓ when done, the rest ✗ when a new moment takes
 over, expanded = today's detail lines + "interrupted: you went forward a page"; lines that do not apply ([Load all]
 / [Endless] off, not built) shown as skipped. Then the older list: M5 live check, M13, L24, L13.
-**Last asked:** "Build the save-queue cut, thumbs cut and the checklist log next?" — not answered yet.
+This session also did (user asked): gallery cell marks (v0.441.0–v0.442.0: one bottom-right corner, yellow = the
+cover in place of blue = original held, a setting each); a gallery hover counts only once its preview shows
+(v0.443.0, the user's diagnosis from their logs). User said "no" to ready marks on the results page.
+**Last asked:** nothing open — the user already said yes to all three items above; build them without asking again.
 
 ---
 
