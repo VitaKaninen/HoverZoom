@@ -43,7 +43,7 @@ reads it for **what changes and how long each piece takes**, not file names. Cod
 - **Checklist** (user, v0.445.0): one block per moment (PRELOAD.md M1–M14), `actMoment(id, temp)`; its lines are
   the moment's L-numbers with the user's short labels (`ACT_L`, `ACT_M` — keep them in step with PRELOAD.md). Line
   states: wait • / run … / done ✓ / skip – (why: Load all off, Endless off, not built) / nt · (built, no job to
-  watch: L10, L13) / cut ⏹ (started, then the next moment came: named) / none – (never started: already loaded or not
+  watch: L10, L13) / moved ↓ (running when the next moment came, which has the same line: it goes on there, `actMomentEnd(m, by, to)`; only real stops read as interrupted — a hover must not mark work it did not stop) / cut ⏹ (started, then the next moment came and does not carry it: named) / none – (never started: already loaded or not
   reached). A job names its line (`actJob(text, total, L)`; rounds are `L4r1`, `L5r1`, `r2`, `r3`); a full-size run
   (`galHqAll`) has no single line, so its pictures' tags tick L22/L23/L14/L18 (`ACT_TAG`, `actTagEv`). A line is done
   when its jobs end with none of it left running — lines served by one job per gallery (rounds, L17) flip ✓ → … as the

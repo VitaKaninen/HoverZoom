@@ -382,6 +382,12 @@ Test pages:
      next moment (named), · not tracked. ▸ on the header shows the jobs that ran in it. Copy / Export include the
      checklist and every open (Copy) or every (Export) box.
 
+7.12e **A hover stops only what it must** (v0.452.0). Open a gallery with Load all on, wait until every original is
+     in, open the activity window, hover several pictures. **Expect:** no new `M8` block, no `Stopped N downloads`
+     line, nothing ⏹ in the open moment. Hover a door whose gallery preview was shown before: no `Stopped` line.
+     A running line the next moment shares shows ↓ (carries on under Mx), not ⏹. **Fail:** each hover adds an
+     `M8` block or marks the next galleries' lines interrupted.
+
 7.13 **A missed original is tried again** (v0.395.0). On a site where some originals fail (`found` lower
      than `pictures` in 7.2's `done` line), close the gallery and open it again, then hover.
      - **Expect:** the second run's `found` is equal or higher; the misses were tried again, not skipped

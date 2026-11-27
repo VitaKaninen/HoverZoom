@@ -72,6 +72,11 @@ has the site's still as its thumbnail, so L24 for clips = only the ▶. **Next:*
 number / pager, learned per site, frame count as ground truth — PRELOAD.md "L13 split"); then L25 + "Upgrade clips".
 Nothing asked of the user is open.
 Start line: **"Read docs/NEXT.md 'NEXT TASK' and continue: the L13 split's cheap count."**
+**v0.452.0 (2026-11-27, pushed).** User: "every hover interrupts other things when it need not". Fixed (PRELOAD.md
+"Only when needed"; ACTIVITY.md ↓ moved lines): thumbnail-only pictures counted as unknown on every hover; idle gallery
+hovers opened an M8 that marked running lines ⏹; a gallery preview with its first page in cut anyway. Verified in the
+pane on door-search d6 (4 hovers after Load all: no M8, no cut; door re-hover: "nothing stopped"). Not live-tested on
+a real site. The L13 cheap count was not started. Start line unchanged (above).
 
 ---
 

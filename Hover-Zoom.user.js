@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.451.0
+// @version      0.452.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -743,12 +743,21 @@
     const ACT_TAG = { gals: 'L19', galh: 'L22', galp: 'L23', galo: 'L14', galn: 'L18' };
     let actMs = [];             // the moments in force, the last on top (a results-page hover's sits over the page's)
 
-    // A new moment: the ones in force end (a temporary one, M2/M3, ends only the temporary one under it).
+    // A new moment: the ones in force end (a temporary one, M2/M3, ends only the temporary one under it); their running lines it shares carry over.
     function actMoment(id, temp) {
         const def = ACT_M[id];
         if (!def) return null;
-        if (!temp) while (actMs.length) actMomentEnd(actMs.pop(), def[0]);
-        else if (actMs.length && actMs[actMs.length - 1].temp) actMomentEnd(actMs.pop(), def[0]);
+        const m = actMomentNew(id, def, temp);
+        if (!temp) while (actMs.length) actMomentEnd(actMs.pop(), def[0], m);
+        else if (actMs.length && actMs[actMs.length - 1].temp) actMomentEnd(actMs.pop(), def[0], m);
+        actMs.push(m);
+        try { dbg('checklist: moment ' + id); } catch (e) { /* booting */ }
+        actKeep({ mom: m });
+        actSend(actMomMsg(m));
+        m.lines.forEach(function (ln, n) { actSend(actLineMsg(m, n)); });
+        return m;
+    }
+    function actMomentNew(id, def, temp) {
         let A = false, E = false;
         try { A = ahAll(); E = galEndless() && !galLast; } catch (e) { /* booting: not declared yet */ }
         const m = { id: ++actJobN, mid: id, t: actNow(), t0: performance.now(), text: id + ' – ' + def[0], temp: !!temp, state: 'run', note: '', bad: 0, ms: null, lines: [] };
@@ -761,10 +770,6 @@
             else if (ACT_NT[k]) { ln.st = 'nt'; ln.why = 'runs, but not tracked here'; }
             m.lines.push(ln);
         });
-        actMs.push(m);
-        actKeep({ mom: m });
-        actSend(actMomMsg(m));
-        m.lines.forEach(function (ln, n) { actSend(actLineMsg(m, n)); });
         return m;
     }
     function actMomMsg(m) { return { t: 'mom', id: m.id, at: m.t, text: m.text, state: m.state, note: m.note, bad: m.bad, ms: m.ms }; }
@@ -772,17 +777,19 @@
         const ln = m.lines[n];
         return { t: 'mline', id: m.id, n: n, st: ln.st, bad: ln.bad, text: (n + 1) + '. ' + (ACT_L[ln.k] || ln.k) + ' (' + ln.k.replace(/r1$/, '') + ')' + (ln.bad ? ' — ' + ln.bad + ' failed' : '') + (ln.why ? ' — ' + ln.why : '') };
     }
-    // A moment ends: lines started and unfinished are interrupted by `by`; lines never started say so.
-    function actMomentEnd(m, by) {
-        let cut = 0;
+    // A moment ends: a running line the next moment `to` also has goes on there; other lines started and unfinished are interrupted by `by`; lines never started say so.
+    function actMomentEnd(m, by, to) {
+        let cut = 0, moved = 0;
         m.lines.forEach(function (ln, n) {
-            if (ln.st === 'run') { ln.st = 'cut'; ln.why = 'interrupted: ' + by; cut++; }
+            const nx = ln.st === 'run' && to ? to.lines.find(function (x) { return x.k === ln.k && x.st === 'wait'; }) : null;
+            if (nx) { nx.st = 'run'; nx.live = ln.live; nx.bad = ln.bad; ln.st = 'moved'; ln.why = 'carries on under ' + to.mid; moved++; }
+            else if (ln.st === 'run') { ln.st = 'cut'; ln.why = 'interrupted: ' + by; cut++; }
             else if (ln.st === 'wait') { ln.st = 'none'; ln.why = by ? 'not started before: ' + by + ' (already loaded, or not reached)' : 'not needed (already loaded)'; }
             else return;
             actSend(actLineMsg(m, n));
         });
         m.state = cut ? 'stopped' : 'done';
-        m.note = cut && by ? 'interrupted: ' + by : '';
+        m.note = cut && by ? 'interrupted: ' + by : moved ? 'carries on under ' + to.mid : '';
         m.ms = performance.now() - m.t0;
         actSend(actMomMsg(m));
     }
@@ -841,6 +848,7 @@
         actSend(actMomMsg(m));
         const k = j.L || (j.tags && j.tags.size ? ACT_TAG[Array.from(j.tags).pop()] : '');
         const n = k ? m.lines.findIndex(function (ln) { return ln.k === k; }) : -1;
+        if (n >= 0 && m.lines[n].st === 'moved') { const at = actLineFor(k); if (at) { at[0].lines[at[1]].bad++; actSend(actLineMsg(at[0], at[1])); } return; }
         if (n >= 0) { m.lines[n].bad++; actSend(actLineMsg(m, n)); }
     }
 
@@ -1005,7 +1013,7 @@
                 if (!g) return;
                 let r = g.cl.querySelector('[data-n="' + m.n + '"]');
                 if (!r) { r = d.createElement('div'); r.setAttribute('data-n', String(m.n)); r.style.cssText = 'white-space:pre-wrap;padding:0'; g.cl.appendChild(r); }
-                const L = { wait: ['•', '#9399b2'], run: ['…', '#cdd6f4'], done: ['✓', '#a6e3a1'], skip: ['–', '#6c7086'], nt: ['·', '#7f849c'], cut: ['⏹', '#f9e2af'], none: ['–', '#7f849c'] }[m.st] || ['·', '#cdd6f4'];
+                const L = { wait: ['•', '#9399b2'], run: ['…', '#cdd6f4'], done: ['✓', '#a6e3a1'], skip: ['–', '#6c7086'], nt: ['·', '#7f849c'], cut: ['⏹', '#f9e2af'], none: ['–', '#7f849c'], moved: ['↓', '#89b4fa'] }[m.st] || ['·', '#cdd6f4'];
                 r.textContent = L[0] + ' ' + m.text;
                 r.style.color = m.bad ? S.failed : L[1];
             } else if (m.t === 'line') {
@@ -16248,7 +16256,7 @@
         timer = setTimeout(async function () {
             if (myToken.cancelled || active !== img) return;
             showSpinner();
-            const t1 = performance.now(), known = !!img.__hzItem.hit;
+            const t1 = performance.now(), known = !!img.__hzItem.hit || !!img.__hzItem.hqTried;     // hqTried: found before, the thumbnail itself included
             if (!known) {      // the pointer rested: this one alone loads until it shows; every background download stops
                 galPvWait = { img: img, at: t1 };
                 if (hoverFirst('a hover came first') && galCur) galCur.hqCut = true;
@@ -16267,6 +16275,7 @@
                 return;
             }
             if (it.hqFail || hit.video) { it.hqFail = false; galCellMarksSoon(); }
+            if (hit.url === it.thumb) it.hqTried = true;      // no bigger file: the next hover of it stops nothing (a real original sets it.hit)
             showViewer(hit, pointer);
             ahSaw(img, 1);      // a hover counts once its preview shows, not for every cell the pointer crosses
             if (pinOnShow === img) { pinOnShow = null; place(); }
@@ -18943,8 +18952,8 @@
         if (tour && tour.gal === set) { const p = galPageOf(set, k); if (p > (set.far || 0)) { set.far = p; galFeed(set); } }     // the slideshow's page and those ahead get their thumbnails
         const fresh = !g.saw;
         g.saw = true;
-        { const tp = actMs[actMs.length - 1]; if (tour && tour.gal === set) { if (!tp || tp.mid !== 'M13') actMoment('M13'); } else if (!tp || tp.mid !== 'M8' || g.near !== k) { actMoment('M8'); actLineSet('L9', 'done'); if (!ahThumbsBusy()) actLineSet('L12', 'done'); } }
         if (tour && tour.gal === set) {      // M13: the buffer moves with every step
+            { const tp = actMs[actMs.length - 1]; if (!tp || tp.mid !== 'M13') actMoment('M13'); }
             const it = set.pics[k].item, d = dir < 0 ? -1 : 1, same = g.slide && g.cur === k && g.dir === d;
             g.slide = true;
             if (!(it && it.hqTried && it.hit)) g.caught = true;     // shown before its original was in: 20 ahead next
@@ -18954,14 +18963,17 @@
             if (!same) galHqAhead(set);
             return;
         }
-        const done = function (q) { return !q || !q.item || (q.item.hqTried && q.item.hit) || q.item.hqBusy; };
+        const done = function (q) { return !q || !q.item || q.item.hqTried || q.item.hqBusy; };     // hqTried is set only on a hit, the thumbnail itself included
         let ready = true;
         for (let d = 1; d <= AH_NEAR; d++) if (!done(set.pics[k + d]) || !done(set.pics[k - d])) ready = false;
         const keep = new Set();
         for (let d = 1; d <= AH_NEAR; d++) [set.pics[k + d], set.pics[k - d]].forEach(function (q) { if (q) keep.add(q.item); });
-        if (g.near != null && g.near !== k) galCutNote('a new hover', netCutWhere(function (o) { return o.tag === 'galh' && !keep.has(o.it); }, 'a newer hover'));     // the last hover's L22: dropped, not re-queued
+        const cutN = g.near != null && g.near !== k ? netCutWhere(function (o) { return o.tag === 'galh' && !keep.has(o.it); }, 'a newer hover') : 0;     // the last hover's L22: dropped, not re-queued
+        galCutNote('a new hover', cutN);
+        const idle = ready && !set.hqHorizon && !set.hqCut && !(fresh && galStepG && ahAll());
+        { const tp = actMs[actMs.length - 1]; if ((!idle || cutN) && (!tp || tp.mid !== 'M8' || g.near !== k)) { actMoment('M8'); actLineSet('L9', 'done'); if (!ahThumbsBusy()) actLineSet('L12', 'done'); } }     // a hover with nothing to load starts no moment
         g.near = k;
-        if (ready && !set.hqHorizon && !set.hqCut && !(fresh && galStepG && ahAll())) return;      // M8: its L22 is in; the run under way goes on in the hover's order (G: held it: this first hover starts it)
+        if (idle) return;      // M8: its L22 is in; the run under way goes on in the hover's order (G: held it: this first hover starts it)
         dbg('loading ahead: a preview; originals around picture ' + (k + 1));
         galHqAhead(set);
     }
@@ -19172,6 +19184,12 @@
     // The gallery preview: a hovered door's first page of thumbnails laid out around it, nothing active; leaving the door closes it.
     const LOOK_FIRST = 'a gallery preview came first';
     function lookDone() { if (hoverHold && hoverHold.by === LOOK_FIRST) hoverDone(); }
+    // A gallery preview needs no download: its list is read and its first page's thumbnails are loaded.
+    function galLookReady(href) {
+        const list = galLists.get(href);
+        if (!Array.isArray(list) || !list.length) return false;
+        return list.slice(0, galPer(null)).every(function (it) { return it && (galThumbDone.has(it.thumb) || galThumbKeep.has(it.thumb)); });
+    }
     function galLookOpen(el, href) {
         if (galPtOut || galCur || galWant || placed || tour || !isTopFrame) return;
         const pic = el.tagName === 'IMG' ? el : el.querySelector('img');
@@ -19186,10 +19204,13 @@
         galWant = href;
         galTrace(href, 'gallery preview');
         galStoreTick();
-        if (galPre) { ahDrop('main'); dbg('loading ahead: a gallery preview; the page\'s rounds paused, done again later from it'); }     // M3: the round under way is undone (redone later), not lost
         actMoment('M3', true);
-        galThumbCut(function (r) { return r.tag === 'main'; }, LOOK_FIRST);
-        hoverFirst(LOOK_FIRST);      // M3 line 1: its first page of thumbnails before anything else; hoverDone once they are in
+        if (galLookReady(href)) { actLineSet('L11', 'done'); dbg('loading ahead: a gallery preview whose first page is in; nothing stopped'); }
+        else {
+            if (galPre) { ahDrop('main'); dbg('loading ahead: a gallery preview; the page\'s rounds paused, done again later from it'); }     // M3: the round under way is undone (redone later), not lost
+            galThumbCut(function (r) { return r.tag === 'main'; }, LOOK_FIRST);
+            hoverFirst(LOOK_FIRST);      // M3 line 1: its first page of thumbnails before anything else; hoverDone once they are in
+        }
         galLoad(href).then(function (list) {
             if (!galLook || galLook.href !== href) return;
             galShow(href, list);
