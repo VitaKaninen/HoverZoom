@@ -448,6 +448,11 @@ sat centred on its dark ring; a star was replaced by a corner):
 - **The next gallery paints at once** (v0.445.0): L17's loaded thumbnails are kept as `<img>`s (`galThumbKeep`, 600,
   cleared on close) and handed to the new gallery's cells by `galImg`. Before, the cells refetched them (user saw the
   blue corners first — originals held — then thumbnails filling left to right, the browser's 6 per host).
+- **Not preloaded yet, it still appears as one block** (v0.446.0, user: page steps paint as a block, so must a new
+  gallery): a set placed by declared sizes gets `.set.hold` (`galHoldStart`) — its first page stays hidden until every
+  cell there settles (`galHoldCheck` from `galEarlyDone`), at most `GAL_WAIT_MS`; a page step ends it. The undeclared
+  path already waits for all (`Promise.race([all, cap])`). Seen when L17 had not run: a fresh open (M6) puts L17 after
+  L14, so with Load all the first Endless switch often lands before the next gallery's thumbnails are in.
 - Both settings: settings panel (Galleries) and the gallery right-click menu, beside the saved-disc one.
 - Verified in Chrome on eporner 2026-11-27: cover on the right cell (5-picture gallery: picture 4; Endless into the
   next gallery: its picture 15 = its door's src); ready 12 → 144 over 23 s with Load all; both menu toggles.

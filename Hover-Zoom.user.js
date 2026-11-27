@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.445.0
+// @version      0.446.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -13976,6 +13976,7 @@
             'img{display:block;width:100%;height:100%;object-fit:cover;border-radius:6px;background:#1e1e2e;opacity:0;transition:opacity ' + GAL_FADE_MS + 'ms ease;' +
             'box-shadow:0 8px 22px rgba(0,0,0,.55),0 2px 5px rgba(0,0,0,.4)}' +
             'img.ok{opacity:1}' +
+            '.set.hold img.ok{opacity:0}' +
             '.shade{position:absolute;inset:0;background:rgba(0,0,0,.8)}' +
             '.set.live .shade{pointer-events:auto}' +
             '.veil{position:fixed;inset:0;background:rgba(0,0,0,.8);opacity:0;pointer-events:none;transition:opacity ' + GAL_FADE_MS + 'ms ease}' +
@@ -14805,6 +14806,7 @@
         if (to === set.page) return false;
         if (galOwns(active) && !placed) cancel();
         set.want = null;
+        galHoldEnd(set);
         const L0 = set.pages[set.page] || [0, 0], left = new Set(set.pics.slice(L0[0], L0[1]).map(function (p) { return p.item; }));
         set.page = to;
         galCutNote('a page step', netCutWhere(function (o) { return left.has(o.it); }, 'you left its page') +
@@ -15465,16 +15467,40 @@
     // A cell placed by the site's size got its file (or none): shown, its shape corrected if the size was wrong.
     function galEarlyDone(set, e, p) {
         const cell = e.img.parentNode;
-        if (!p && e.item.__cut) { e.cut = true; return; }     // stopped by a page step: its place kept, loaded when its page shows
-        if (!p) { e.bad = true; if (cell) cell.classList.add('gone'); return; }
+        if (!p && e.item.__cut) { e.cut = true; galHoldCheck(set); return; }     // stopped by a page step: its place kept, loaded when its page shows
+        if (!p) { e.bad = true; if (cell) cell.classList.add('gone'); galHoldCheck(set); return; }
         if (p.img !== e.img) e.img.src = p.img.src;
         e.nw = p.nw;
         e.img.classList.add('ok');
+        galHoldCheck(set);
         if (Math.abs(Math.log(p.asp / e.asp)) <= GAL_DECL_TOL || galCur !== set) return;
         const k = set.pics.indexOf(e);
         if (k < 0) return;
         set.asp[k] = e.asp = p.asp;
         galLayout(set, set.open);
+    }
+
+    // A gallery placed by declared sizes shows its first page as one block: hidden until all its thumbnails settle, at most GAL_WAIT_MS.
+    function galHoldStart(set) {
+        if (!set) return;
+        set.el.classList.add('hold');
+        set.holdT = setTimeout(function () { galHoldEnd(set); }, GAL_WAIT_MS);
+        galHoldCheck(set);
+    }
+    function galHoldEnd(set) {
+        if (!set || !set.holdT) return;
+        clearTimeout(set.holdT);
+        set.holdT = 0;
+        set.el.classList.remove('hold');
+    }
+    function galHoldCheck(set) {
+        if (!set || !set.holdT || !set.pages) return;
+        const L0 = set.pages[set.page] || [0, 0];
+        for (let k = L0[0]; k < L0[1]; k++) {
+            const e = set.pics[k];
+            if (e && e.early && !e.bad && !e.cut && !e.img.classList.contains('ok')) return;
+        }
+        galHoldEnd(set);
     }
 
     // A thumbnail finished loading (or failed): chips whose first page is now in turn blue.
@@ -15544,6 +15570,7 @@
             })).then(function () { actEnd(job); if (galLook && galLook.href === href) lookDone(); });
             galTrace(href, 'thumbnails: placed by the sizes the site declares');
             galBuild(href, early.filter(Boolean), list.length);
+            galHoldStart(galCur && galCur.href === href ? galCur : null);
             return;
         }
         const pend = new Map();
