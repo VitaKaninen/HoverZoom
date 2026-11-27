@@ -249,14 +249,18 @@ Test pages:
 
 7.0 **Load all on (the default): every original at once** (v0.397.0, `G14`). Middle-click a cover (or click its gallery button)
     and don't hover anything.
-    - **Expect:** the main page's loading stops at once. `orig galo` loads start within a second, from picture 1,
-      through every picture of the gallery (`gallery originals: done {pictures, found}` at the end), with the next
-      2 galleries' thumbnails (`thumbnails of gallery N of the queue`) alongside. eporner, Chrome: 279 pictures,
-      49 MB in about 80 s. `gallery originals: restarted` (v0.398.0) is a run replaced by a newer one (layout, hover,
-      page step), not a stop; `cut` is a stop.
+    - **Expect** (v0.438.0, `docs/PRELOAD.md` M6): the main page's loading stops at once, counts included. No
+      original starts until the page's thumbnails (and the next page's) are in; then `orig galp` for the page on
+      screen, `orig galo` for the rest of the gallery (`gallery originals: done {pictures, found}` at the end), and
+      only then the next galleries' thumbnails (`thumbnails of gallery N of the queue`). `gallery originals:
+      restarted` (v0.398.0) is a run replaced by a newer one (layout, hover, page step), not a stop; `cut` is a stop.
+    - **No empty page:** open a big gallery and PageDown at once, several times. **Expect:** each page's thumbnails
+      fill before any original or next-gallery thumbnail starts (`hover-zoom:ahead-trace`: no `orig` or `thumb gal`
+      start while that page's `thumb shown` loads are open, unless one hangs for 3 s).
     - **A hover jumps the queue:** hover a picture far down that hasn't loaded yet. **Expect:** `a preview;
-      originals from picture N`, and loading carries on from N.
-    - **Page steps don't stop it:** PageDown. **Expect:** no `pages skipped` line; loading carries on.
+      originals around picture N`: `orig galh` for the 3 either side, before anything else.
+    - **Page steps re-queue it:** PageDown. **Expect:** `orig galp` for the new page first, then the next galleries'
+      thumbnails, then `orig galo` for the rest (M7). PageUp: the page's originals from its last picture backward (M9).
     - **Next gallery:** step past the last page into the next gallery. **Expect:** its originals start from its
       picture 1.
     - **G: holds it** (v0.434.0, Endless on): press G: on the strip's page row before hovering anything. **Expect:**
@@ -287,17 +291,15 @@ Test pages:
       thumbnails of their first 2 pages, and **no originals**. eporner, Chrome: verified (v0.397.0).
     - Tests 7.2–7.7 are data-saver tests unless they say otherwise; tick Load all (right-click menu) again afterwards.
 
-7.2 **A hover starts originals.** Hover a picture in the gallery, say picture 4.
-    - **Expect:** `loading ahead: a preview; originals from picture 4`, then original requests from
-      picture 4 through the end of the page after next, paced per 1.1 and 1.2.
-    - Pictures before 4 aren't loaded. Pages not laid out yet aren't loaded either; at the start that's
-      2 pages.
+7.2 **A hover loads the 3 either side** (v0.438.0, M8; until v0.437.0 it loaded 2 pages on). Hover picture 8.
+    - **Expect:** `loading ahead: a preview; originals around picture 8`, then originals of 9, 7, 10, 6, 11, 5
+      (`orig galh`), and nothing more.
     - At the end of the run: `gallery originals: done {pictures, found, bytes}`.
 
-7.3 **Hovering inside the run doesn't restart it.** Hover picture 10 while 7.2 runs.
-    **Expect:** no new `a preview` line, and the run carries on.
+7.3 **Hovering inside what is loaded doesn't restart it.** After 7.2, hover picture 9.
+    **Expect:** a new run only for the pictures not loaded yet (12); hovering 8 again: no new `a preview` line.
 
-7.4 **Hovers find the originals ready.** After 7.2 finishes, hover pictures 5–20 one after another.
+7.4 **Hovers find the originals ready.** After 7.2 finishes, hover pictures 5–11 one after another.
     **Expect:** each preview shows the full-size picture at once, with no loading ring.
 
 7.5 **The ahead ramp: 2 → 5 → 10.**
@@ -305,17 +307,12 @@ Test pages:
       `ahead` to 5. Reaching the 3rd gallery raises it to 10. Each raise prints `thumbnails of gallery N
       of the queue` lines for the newly covered galleries.
 
-7.6 **A forward page step means skipping: thumbnails only** (Load all off). After 7.2, press PageDown.
-    - **Expect:** `loading ahead: pages skipped, thumbnails only until the next preview`. Original
-      requests stop (in-flight ones finish), and the next galleries' thumbnails continue.
-    - Hovering a picture on the new page starts originals again from that picture (7.2's line again).
+7.6 **A page step loads no originals** (Load all off). After 7.2, press PageDown, then PageUp.
+    - **Expect:** no new original requests (in-flight ones finish); the next galleries' thumbnails continue.
+    - Hovering a picture on the new page loads its 3 either side (7.2's line again).
 
-7.7 **A backward step loads 5 the other way first.** On page 3, hover a picture, then press PageUp (or ↑).
-    - **Expect:** originals for the 5 pictures before where you were load first, then forward loading
-      resumes. Pressing PageUp again follows you back.
-    - "Where you were" is the first picture of the page you stepped back from. eporner, Chrome (v0.404.0): from
-      page 5, PageUp loaded 180 → 176 first, then 192 on. With no preview since the last forward step (originals
-      off), a backward step loads nothing until the next hover.
+7.7 *(retired v0.438.0: a backward page step no longer loads the 5 before it; M9 loads the page on screen from its
+    end backward, with Load all on — see 7.0.)*
 
 7.8 **Slideshow: originals run ahead of it.** In a gallery, start the slideshow (⛶ on the clicked
     picture's bottom right) and step forward with → or `]`.

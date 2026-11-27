@@ -7,7 +7,9 @@ Code names, constants and reasons live in `GALLERY.md` "Loading ahead" and `RESO
 Queues (each kind below names its own). They do not know about each other; all share the one network line.
 - **PL**: the page preloader (`plQueue`/`plPump`), `PL_WORKERS` 6 at once, `PL_GAP_MS` 120 between starts, nearest first.
 - **AH-pic / AH-page**: the gallery gates (`ahPics` 6 at once, 50–200 ms apart; `ahPages` 4, 300–800 ms). Order
-  (`ahPri`): `gal`+`galo` 0 (equal: take turns) → `galn` 0.5 → `count` 1 → `main` 2.
+  (`ahPri(tag, ahMoment())`): no gallery = `count` → `main`; a gallery open (M6–M9) = `galh` → `galp` → `galo`/`gal`
+  (M6 `galo` first) → `galn`, `count`/`main` paused, all but `galh` held while its thumbnails arrive; a slideshow
+  (M13 not built) = the old order, `gal`+`galo` equal taking turns → `galn` → `count` → `main`. Reasons: GALLERY.md.
 - **direct**: no queue, the browser's own connection limit only.
 
 | ID | What | When, now | Queue |
@@ -15,7 +17,7 @@ Queues (each kind below names its own). They do not know about each other; all s
 | **Results page, nothing open** ||||
 | L1 | Single pictures' full size, on screen and the next screen | on arrival (`pgFill` level 2); waits while L3 runs (`galCountsBusy`) | PL |
 | L2 | Single pictures' full size, the whole page | 3 screens scrolled, a screen's scroll after a hover, or arrived from a gallery link (`pgTick`) | PL |
-| L3 | Gallery page reads: each door's linked page fetched for its picture list (= the count) | always, nearest the window's middle first (`galCountNext`) | AH-page `count` |
+| L3 | Gallery page reads: each door's linked page fetched for its picture list (= the count) | always, nearest the window's middle first (`galCountNext`); paused while a gallery is open | AH-page `count` |
 | L4 | Gallery thumbnails, 10 per door per round, 3 rounds (30) | from the hovered door, else the first on screen, in page order (`ahMainPick`) | AH-pic `main` |
 | L5 | Gallery full size, one per door per round (3) | inside L4's rounds | AH-pic `main` |
 | L6 | The door after a gallery preview: its whole first page of thumbnails | after L4/L5 (`ahLookLast`) | AH-pic `main` |
@@ -30,9 +32,9 @@ Queues (each kind below names its own). They do not know about each other; all s
 | L20 | Thumbnails of the next page | with L12 (`galFeed`, 1 page ahead on page 1) | direct |
 | L21 | Thumbnails of pages further ahead (up to 5 once stepped on) | with L12 (`galFeed`) | direct |
 | L13 | Frame read for the rest of this gallery's list | when its HTML lists fewer than it has (`galGrow`, `galTourMore` on a step past it) | frame |
-| L22 | Full size of the pictures around the one just hovered, ±3 nearest first | not separate now: part of L14's run from the hovered picture on | AH-pic `galo` |
-| L23 | Full size of the page on screen | not separate now: the start of L14's run | AH-pic `galo` |
-| L14 | This gallery's full size: Load all on = page on screen → end → 2 pages behind; off = from a preview through 2 pages on | Load all: at once (P:), after a preview (G:); a hover on an unloaded picture restarts it there | AH-pic `galo` |
+| L22 | Full size of the pictures around the one just hovered, ±3 nearest first | a hover (`ahSaw` → `ahG.near`), any setting; the head of the run (`galHqAhead`) | AH-pic `galh` |
+| L23 | Full size of the page on screen (M9: from its end backward) | Load all: after the thumbnails, each open, step, landing | AH-pic `galp` |
+| L14 | This gallery's full size after the page on screen: → end → 2 pages behind | Load all: after L23 (M6) or after L17 (M7–M9); G: waits for a hover | AH-pic `galo` |
 | L15 | Bigger thumbnail files for cells drawn large | page laid out (`galUpgrade`) | direct |
 | L16 | The clicked (corner) picture's full size | on open (`galFlyUpgrade`) | direct |
 | **Endless** ||||
@@ -41,7 +43,14 @@ Queues (each kind below names its own). They do not know about each other; all s
 | **Slideshow** ||||
 | L19 | Page slideshow: every picture's full size ahead and behind, nearest first (behind counts double); clips buffered ahead | each step (`plFill`); in a gallery L14 does this instead | PL |
 
-## Plan — PROPOSED 2026-11-27, the user reviewing it (wrote M6–M9 themselves), NOT in code yet
+## Plan — the user's (2026-11-27, wrote M6–M9 themselves); being built
+
+**Built (v0.438.0):** M6–M9 and M11 as in the lines below, except: the clip lines (L24/L25, "Upgrade clips") and
+L13's place (still its own frame queue, started as before); L16/L20/L21 are direct (the browser's order, so L16 may
+overlap L12, and L22 overlaps L12 in M8). M10 = M6/M7 order with no HQ until a hover; its "L17 first gallery before
+L20" is not built (L17 waits for all thumbnails). Without Load all a hover now loads L22 only (was 2 pages on).
+**Not built:** M4, M5, M13 (the slideshow keeps the old order: `ahMoment` 'slide'), L24/L25, the L13 split, L8's
+new rule, next-page finding.
 
 New kinds in the plan (not in code): **L24** clip/GIF still + ▶ icon, from a partial download (a video's first frame via
 `preload="metadata"`; a GIF's first frame from a range request of its start — both unverified, test before building);

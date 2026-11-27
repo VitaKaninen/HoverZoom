@@ -1480,7 +1480,10 @@ const galPH = function (min) {
     const ahPri = new Function(src.slice(pS, pE) + '\nreturn ahPri;')();
     eq('gate: open gallery before counts before the main page', [ahPri('gal'), ahPri('galo'), ahPri('galn'), ahPri('count'), ahPri('main')], [0, 0, 0.5, 1, 2]);
     const gS = src.indexOf('    function ahGate'), gE = src.indexOf('    // A start slot');
-    const ahGate = new Function('document', 'performance', 'setTimeout', 'clearTimeout', src.slice(gS, gE) + '\nreturn ahGate;')({ visibilityState: 'visible' }, { now: function () { return 1e9; } }, function () {}, function () {});
+    const ctx = { ahG: null, galCur: null };
+    const mkGate = new Function('document', 'performance', 'setTimeout', 'clearTimeout', 'ctx', 'tour', 'galLook', 'galShownAt', 'AH_THUMB_STALL_MS', 'galEarlyLeft',
+        'var ahG, galCur; function sync() { ahG = ctx.ahG; galCur = ctx.galCur; }\n' + src.slice(gS, gE).replace('const m = ahMoment()', 'sync(); const m = ahMoment()') + '\nreturn ahGate;');
+    const ahGate = mkGate({ visibilityState: 'visible' }, { now: function () { return 1e9; } }, function () {}, function () {}, ctx, null, null, function () { return -1; }, 3000, new Map());
     const gt = ahGate([0, 0], 1), order = [];
     ['gal', 'gal', 'gal', 'galo', 'galo', 'main', 'gal'].forEach(function (t) { gt.wait.push({ tag: t, resolve: function (free) { order.push(t); free(); } }); });
     gt.pump();
@@ -1489,6 +1492,24 @@ const galPH = function (min) {
     [['galo', old], ['galo', old], ['galn', null], ['galo', cur]].forEach(function (w) { gs.wait.push({ tag: w[0], tok: w[1], resolve: function (free) { got.push(free ? w[0] + (w[1] === cur ? '+' : '') : 'dropped'); if (free) free(); } }); });
     gs.pump();
     eq('gate: a stopped run\'s waiters leave the line; the open gallery before the next one (v0.414.0)', got, ['dropped', 'dropped', 'galo+', 'galn']);
+    // PRELOAD.md M6-M9 (v0.438.0): the moment's order, counts paused in a gallery, the thumbnails hold the rest.
+    const run = function (m, cur, tags) {
+        ctx.ahG = { m: m }; ctx.galCur = cur;
+        const g = ahGate([0, 0], 1), seen = [];
+        tags.forEach(function (t) { g.wait.push({ tag: t, resolve: function (free) { seen.push(t); if (free) free(); } }); });
+        g.pump();
+        return { g: g, seen: seen };
+    };
+    const all5 = ['count', 'galn', 'galo', 'gal', 'galp', 'galh'];
+    eq('gate M7/M9: L22, L23, L17, L14, L18; counts paused', run('fwd', { inflight: 0 }, all5).seen, ['galh', 'galp', 'gal', 'galo', 'galn']);
+    eq('gate M6: this gallery (L14) before the next ones (L17)', run('open', { inflight: 0 }, all5).seen, ['galh', 'galp', 'galo', 'gal', 'galn']);
+    const held = run('fwd', { inflight: 4, thumbAt: 1e9 }, all5);
+    eq('gate: thumbnails arriving hold all but L22', held.seen, ['galh']);
+    held.g.wait.length && (ctx.galCur.inflight = 0, held.g.pump());
+    eq('gate: thumbnails in, the rest goes in order', held.seen, ['galh', 'galp', 'gal', 'galo', 'galn']);
+    eq('gate: a thumbnail stalled past AH_THUMB_STALL_MS stops holding', run('fwd', { inflight: 4, thumbAt: 1e9 - 5000 }, ['galo', 'galh']).seen, ['galh', 'galo']);
+    eq('gate: no gallery on screen, counts go again', run('', null, ['main', 'count']).seen, ['count', 'main']);
+    ctx.ahG = null; ctx.galCur = null;
 }
 // ---- the open gallery's thumbnail ramp: 1 page ahead on page 1, GAL_AHEAD_ON once the user steps on, then the page's number.
 const srcLf = src.split(String.fromCharCode(13)).join('');     // the checkout may be CRLF

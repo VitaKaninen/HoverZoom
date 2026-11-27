@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.437.0
+// @version      0.438.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -12621,11 +12621,14 @@
     const GAL_REPORT_MS = 4500;         // longest wait for its report once loaded (the frame's own cap + slack)
     const GAL_AHEAD_ON = 5;             // pages of thumbnails kept ahead once the user steps forward in a gallery
     const GAL_HQ_PAR = 6;               // originals in flight at most (their starts are paced by ahPics)
+    const GAL_HQ_Q = 12;                // originals a run keeps waiting or in flight: more than the gate starts, so a lower line never slips in between
     const AH_PIC_GAP = [50, 200], AH_PAGE_GAP = [300, 800];     // ms between starts, random in the range (pages: Forum Stumbler's gap)
     const AH_THUMBS_STEP = 10;          // main page: thumbnails per gallery per round; each round also loads that round's one original
     const AH_LOOK_MS = 500;             // a door hovered this long shows its gallery preview
     const AH_STILL_MS = 250, AH_HOVER_WAIT_MS = 1000;   // a scroll counts as stopped after this, then this long for a hover
-    const AH_BACK = 5;                  // originals loaded the other way on a backward step
+    const AH_BACK = 5;                  // slideshow: originals loaded the other way on a backward step
+    const AH_NEAR = 3;                  // a hover in a gallery: the originals this many either side first (PRELOAD.md L22)
+    const AH_THUMB_STALL_MS = 3000;     // the open gallery's thumbnails hold its other loads until none has settled this long
     const AH_SHARE = 0.4;               // endless off: originals past the first gallery once this share of the page's galleries was opened
     const AH_THUMBS_OFF = 3;            // endless off: galleries after the first whose thumbnails load before that share
     const AH_THUMBS_MAIN = 30;          // main page: thumbnails per gallery in the first pass (the preview loads the rest)
@@ -12637,7 +12640,8 @@
     const ahFiles = new Set();          // originals loaded ahead, checked when shown
     const ahWarm = { n: 0, kept: 0 };
     let ahBehind = false, ahStillT = 0, ahCheckAt = 0, ahGen = 0;
-    let ahG = null;                     // the open gallery's loading ahead: {fwd, origs, at, back, from, end, run, warm}
+    let ahG = null;                     // the open gallery's loading ahead: {fwd, m, saw, slide, at, back, near, from, end, run, warm}
+    const galEarlyLeft = new Map();     // href -> {n, at}: thumbnails galShow placed by declared sizes, still loading
     let galLook = null;                 // the gallery preview (a hovered door's thumbnails, nothing active): {el, href}
     const GAL_REST_MS = 15000;          // a short gallery waits this long for the rest before redrawing with what came
     const GAL_RETRY_GAP_MS = 1000;      // then the failed thumbnails are tried once more after this
@@ -14416,10 +14420,34 @@
         galHqAhead(set);
     }
 
-    // Originals once the user previews: from the previewed picture through 2 pages on, a backward step's AH_BACK first. See GALLERY.md "Loading ahead".
+    // The open gallery's originals in its moment's order (PRELOAD.md M6-M9): L22 around a hover, then with Load all L23 the page on screen, L14 the rest.
     function galHqAhead(set) {
         const g = ahG;
-        if (!set.pv || !g || !g.origs || galCur !== set || galLook) return;
+        if (!set.pv || !g || galCur !== set || galLook) return;
+        if (tour && tour.gal === set) { galHqSlide(set); return; }
+        const P = set.pages && set.pages.length ? set.pages : [[0, set.pics.length]], pg = Math.min(set.page || 0, P.length - 1), all = ahAll();
+        const a = P[pg][0], b = Math.min(P[pg][1], set.pics.length), near = [];
+        if (g.near != null) for (let d = 1; d <= AH_NEAR; d++) near.push(set.pics[g.near + d], set.pics[g.near - d]);
+        const page = all ? set.pics.slice(a, b) : [];
+        if (g.m === 'back') page.reverse();      // M9: from the page's end backward
+        const after = all ? set.pics.slice(b) : [], behind = all ? set.pics.slice(Math.max(0, a - KEEP_BACK_PAGES * Math.max(1, galPer(set))), a).reverse() : [];     // behind: what the memory keep holds, nearest first
+        const list = galLists.get(set.href), stand = all && Array.isArray(list) ? list.slice(set.pics.length).map(function (it) {
+            return { __hzItem: it, naturalWidth: 0, naturalHeight: 0, src: it.thumb, currentSrc: it.thumb };     // not built yet: a stand-in, as ahOrig
+        }) : [];
+        const tags = new Map(), out = [];
+        [[near, 'galh'], [page, 'galp'], [after, 'galo'], [stand, 'galo'], [behind, 'galo']].forEach(function (L) {
+            L[0].forEach(function (q) { const img = q && (q.img || q); if (img && !tags.has(img)) { tags.set(img, L[1]); out.push(img); } });
+        });
+        g.from = a;
+        g.end = all ? set.pics.length : b;
+        if (set.hqTok) set.hqTok.stop = true;      // the old run starts nothing more; what it has in flight still lands
+        galHqAll(set, out, tags);
+        if (all) ahGalAhead();
+    }
+
+    // The slideshow's originals (M13 not built: the old order): from its picture through 2 pages on, a backward step's AH_BACK first.
+    function galHqSlide(set) {
+        const g = ahG;
         const P = set.pages && set.pages.length ? set.pages : [[0, set.pics.length]], pg = Math.min(set.page || 0, P.length - 1), all = ahAll();
         let from = P[pg][0];
         const end = all ? set.pics.length : P[Math.min(P.length - 1, pg + 2)][1];
@@ -14466,25 +14494,15 @@
         galFlip(dir);
     }
 
-    // A page step in an open gallery: forward skips (originals stop, thumbnails go further); backward loads AH_BACK the other way first.
+    // A page step in an open gallery: the moment M7 (forward) or M9 (back); the flip's galPageWork re-queues the originals in its order.
     function ahPageStep(set, dir) {
         const g = ahG;
         if (!g) return;
         ahT('act', { a: 'page', dir: dir, page: (set.page || 0) + 1 });
         predNote('page', { g: predGal(set.href), dir: dir, p: (set.page || 0) + dir + 1, th: predTh(set.href, (set.page || 0) + dir), q: predQ() });     // the page stepped to, before the flip
-        if (dir > 0 && ahAll()) {
-            g.fwd++;
-            g.back = null;
-            ahGalAhead();
-        } else if (dir > 0) {
-            g.fwd++;
-            g.back = null;
-            if (g.origs) dbg('loading ahead: pages skipped, thumbnails only until the next preview');
-            g.origs = false;
-            if (set.hqTok) set.hqTok.cancelled = true;
-            ahDrop('galo'); ahDrop('galn');
-            ahGalAhead();
-        } else if (set.pages && set.pages[set.page]) g.back = set.pages[set.page][0];
+        g.m = dir > 0 ? 'fwd' : 'back';
+        g.near = g.back = null;
+        if (dir > 0) { g.fwd++; ahGalAhead(); }
     }
 
     // ---- endless: the galleries after this one, opened in turn
@@ -14610,7 +14628,7 @@
                 actEnd(job, live() ? 'done' : 'stopped');
                 if (!live()) return;
             }
-            if (g.origs && near && i === c.at + 1) {
+            if (ahAll() && near && i === c.at + 1) {
                 const todo = list.slice(0, per).filter(function (it) { return it && !(it.hqTried && it.hit); });
                 if (g.otok) g.otok.stop = true;     // the last walk's waiters leave the line
                 if (!todo.length) continue;
@@ -14839,9 +14857,8 @@
         const g = ahG, set = galCur;
         dbg('load all ' + (on ? 'on' : 'off'));
         if (!g || !set) return;
-        g.origs = on && (ahAll() || g.saw);
-        if (g.origs) galHqAhead(set);
-        else { if (set.hqTok) set.hqTok.cancelled = true; ahDrop('galo'); ahDrop('galn'); }
+        if (!on) { if (set.hqTok) set.hqTok.cancelled = true; ahDropOrigs(); }
+        galHqAhead(set);       // on: L23/L14 from the page on screen; off: only the hover's L22
     }
 
     // P: or G: was pressed: G: holds the open gallery's originals until a preview; P: lets Load all go on.
@@ -14849,9 +14866,8 @@
         const g = ahG, set = galCur;
         if (!g || !set || g.saw || !cfg.galleryLoadAll) return;
         dbg('loading ahead: ' + (galStepG ? 'G: pressed, originals wait for a preview' : 'P: pressed, Load all goes on'));
-        g.origs = !galStepG;
-        if (g.origs) galHqAhead(set);
-        else { if (set.hqTok) set.hqTok.cancelled = true; ahDrop('galo'); ahDrop('galn'); }
+        if (galStepG) { if (set.hqTok) set.hqTok.cancelled = true; ahDropOrigs(); }
+        else galHqAhead(set);
     }
 
     // Where ⛶ starts: the gallery picture in the preview, else the first picture of the page on screen.
@@ -15137,9 +15153,14 @@
         galTrace(href, 'thumbnails: loading ' + list.length + ' (' + galHostMix(list.map(function (it) { return it.thumb; })) + ')');
         const job = actJob((galLook ? 'Gallery preview: thumbnails of its first page' : 'Open gallery: thumbnails of its first 2 pages') + ' — ' + actGal(href), list.length);
         if (list.every(galDeclAsp)) {      // every size declared: placed at once, each shown as it loads
-            const early = [];
+            const early = [], left = { n: list.length, at: performance.now() };
+            if (!galLook) galEarlyLeft.set(href, left);     // before galBuild: its layout queues the originals that wait for these
             Promise.all(list.map(function (item, i) {
-                return galImg(item, null, job, function (e) { early[i] = e; }).then(function (p) { const set = galCur; if (set && set.href === href && early[i]) galEarlyDone(set, early[i], p); });
+                return galImg(item, null, job, function (e) { early[i] = e; }).then(function (p) {
+                    left.n--; left.at = performance.now();
+                    if (!left.n) { if (galEarlyLeft.get(href) === left) galEarlyLeft.delete(href); ahPump(); }
+                    const set = galCur; if (set && set.href === href && early[i]) galEarlyDone(set, early[i], p);
+                });
             })).then(function () { actEnd(job); });
             galTrace(href, 'thumbnails: placed by the sizes the site declares');
             galBuild(href, early.filter(Boolean), list.length);
@@ -15247,7 +15268,7 @@
         const root = galLayer();
         if (!galHost.isConnected) galSlot(galHost);
         const page = galCur && galCur.href === href ? galCur.page : 0;
-        if (ahG && !galLook && galCur && galCur.href !== href) { ahG.at = ahG.back = null; ahG.from = ahG.end = 0; ahG.saw = false; if (galStepG && galEndless()) ahG.origs = false; else if (cfg.galleryLoadAll) ahG.origs = true; }     // a queue switch
+        if (ahG && !galLook && galCur && galCur.href !== href) { ahG.at = ahG.back = ahG.near = null; ahG.from = ahG.end = 0; ahG.saw = ahG.slide = false; ahG.m = 'open'; }     // a queue switch: M11, as M6
         if (galCur) galDrop(galCur);
         const set = { href: href, el: document.createElement('div'), shade: document.createElement('div'),
             cells: [], asp: [], pics: [], page: page, fed: fed || 0, far: page, pend: galShowPend };
@@ -15335,6 +15356,7 @@
         let left = items.length;
         if (!set.q) { set.q = new Map(); set.qIn = set.qOut = 0; }
         set.inflight = (set.inflight || 0) + items.length;
+        set.thumbAt = performance.now();
         items.forEach(function (it) {
             const n = set.qIn++;
             let early = null;
@@ -15345,6 +15367,8 @@
             }).then(function (p) {
                 if (!--left) actEnd(job);
                 set.inflight--;
+                set.thumbAt = performance.now();
+                if (!set.inflight) ahPump();     // the gallery's other loads were waiting for its thumbnails
                 if (galCur !== set) return;
                 if (early) { galEarlyDone(set, early, p); if (!set.inflight && set.waiting) galLayout(set, set.open); return; }
                 galQPut(set, n, p);
@@ -15519,8 +15543,8 @@
         return galHqLive.size + ' (' + closed + ' for a closed gallery), oldest ' + Math.round((performance.now() - old) / 100) / 10 + ' s';
     }
 
-    // Every cell's original, GAL_HQ_PAR at a time, through the hover's own probe, so a hover finds it loaded.
-    function galHqAll(set, imgs) {
+    // Every cell's original, GAL_HQ_PAR at a time, through the hover's own probe, so a hover finds it loaded. tags: img -> its line (default galo).
+    function galHqAll(set, imgs, tags) {
         imgs = imgs.filter(function (img) { return !(img.__hzItem && (img.__hzItem.hqTried || img.__hzItem.hqBusy)); });
         if (!imgs.length) return;
         const job = actJob('Open gallery: full-size pictures, starting with ' + actPic((imgs[0].__hzItem && imgs[0].__hzItem.thumb) || imgs[0].src) +
@@ -15552,18 +15576,18 @@
         const next = function () {
             if (tok.cancelled || tok.stop) { if (!running) end(cutWhy()); return; }
             if (i >= imgs.length) { if (!running) end(full ? 'memory full' : 'done'); return; }
-            while (running < GAL_HQ_PAR && i < imgs.length) {
+            while (running < GAL_HQ_Q && i < imgs.length) {
                 if (!keepRoomFor(imgs[i].__hzItem)) { i = imgs.length; full = true; break; }      // the cap's horizon: what is nearer fills it; a later step resumes
-                const img = imgs[i++];
+                const img = imgs[i++], tag = (tags && tags.get(img)) || 'galo';
                 running++;
-                ahSlot(ahPics, 'galo', tok).then(function (free) {
+                ahSlot(ahPics, tag, tok).then(function (free) {
                     const it = img.__hzItem;
                     if (!free || tok.cancelled || tok.stop || (it && (it.hqTried || it.hqBusy))) { if (free) free(); if (!free && !tok.stop) tok.cancelled = true; running--; next(); return; }     // !tok.stop: a stop lets in-flight land
                     if (it) it.hqBusy = true;
                     const r = lg && lg.req(), live = { t: performance.now(), mine: tok }, t0 = performance.now();
                     galHqLive.add(live);
                     galResolve(img, tok).then(function (hit) {
-                        ahT('orig', { tag: 'galo', u: (img.__hzItem && img.__hzItem.thumb) || img.src, s: Math.round(t0), ms: Math.round(performance.now() - t0), ok: hit ? 1 : 0 }, job);
+                        ahT('orig', { tag: tag, u: (img.__hzItem && img.__hzItem.thumb) || img.src, s: Math.round(t0), ms: Math.round(performance.now() - t0), ok: hit ? 1 : 0 }, job);
                         if (hit) { got++; if (!hit.video) { plKeepImage(hit, img.__hzItem); ahFiles.add(hit.url); } size(hit); nextWarmSeen(hit.url, performance.now() - t0); }
                         if (hit && !tok.cancelled && img.__hzItem) img.__hzItem.hqTried = img.__hzItem.predOr = true;     // a miss is asked again by the next run
                         if (r) r.done({ status: hit ? 200 : 0 });
@@ -17879,13 +17903,16 @@
             clearTimeout(g.timer);
             if (document.visibilityState === 'hidden') return;
             g.wait = g.wait.filter(function (w) { if (!w.tok || !(w.tok.stop || w.tok.cancelled)) return true; w.resolve(null); return false; });     // a stopped run's waiters leave the line
+            const m = ahMoment(), busy = ahThumbsBusy();
+            const ok = function (w) { return !ahHeld(w.tag, m, busy); };
             while (g.wait.length && g.live < max) {
                 const now = performance.now();
+                let k = -1;
+                g.wait.forEach(function (w, i) { if (ok(w) && (k < 0 || ahPri(w.tag, m) < ahPri(g.wait[k].tag, m))) k = i; });
+                if (k < 0) { if (busy) g.timer = setTimeout(g.pump, AH_THUMB_STALL_MS); return; }     // all paused: a thumbnail settling, the gallery closing or a stall pumps again
                 if (now < g.at) { g.timer = setTimeout(g.pump, g.at - now); return; }
-                let k = 0;
-                g.wait.forEach(function (w, i) { if (ahPri(w.tag) < ahPri(g.wait[k].tag)) k = i; });
                 if (g.wait[k].tag === g.last) {     // equal priority takes turns: originals alongside the queue's thumbnails
-                    const p = ahPri(g.wait[k].tag), o = g.wait.findIndex(function (w) { return w.tag !== g.last && ahPri(w.tag) === p; });
+                    const p = ahPri(g.wait[k].tag, m), o = g.wait.findIndex(function (w) { return w.tag !== g.last && ok(w) && ahPri(w.tag, m) === p; });
                     if (o >= 0) k = o;
                 }
                 const w = g.wait.splice(k, 1)[0];
@@ -17899,7 +17926,36 @@
         };
         return g;
     }
-    function ahPri(tag) { return tag === 'gal' || tag === 'galo' ? 0 : tag === 'galn' ? 0.5 : tag === 'count' ? 1 : 2; }
+    // A waiting load's rank (lower starts first) in moment m (PRELOAD.md "Plan"): galh L22, galp L23, galo L14, gal L17, galn L18.
+    function ahPri(tag, m) {
+        if (!m || m === 'slide') return tag === 'gal' || tag === 'galo' || tag === 'galp' || tag === 'galh' ? 0 : tag === 'galn' ? 0.5 : tag === 'count' ? 1 : 2;     // M13 not built: the slideshow keeps the old order
+        const p = { galh: 0, galp: 1, galo: m === 'open' ? 2 : 3, gal: m === 'open' ? 3 : 2, galn: 4 }[tag];     // M6: this gallery before the next ones; M7-M9 the reverse
+        return p == null ? 5 : p;
+    }
+
+    // The open gallery's moment: 'slide' (M13), 'hover' (M8), else its last step: 'open' (M6, M11), 'fwd' (M7), 'back' (M9). '' = no gallery open.
+    function ahMoment() {
+        const g = ahG;
+        if (!g || !galCur || galLook) return '';
+        if (tour && tour.gal === galCur) return 'slide';
+        return galShownAt(galCur) >= 0 ? 'hover' : g.m || 'open';
+    }
+
+    // The open gallery's thumbnails still arriving (L12/L20/L21), unless none has settled for AH_THUMB_STALL_MS.
+    function ahThumbsBusy() {
+        const s = galCur;
+        if (!ahG || !s || galLook) return false;
+        const e = galEarlyLeft.get(s.href), now = performance.now();     // e: the first pages placed by declared sizes, loading outside galAppend
+        return (s.inflight > 0 && now - (s.thumbAt || 0) < AH_THUMB_STALL_MS) || !!(e && e.n > 0 && now - e.at < AH_THUMB_STALL_MS);
+    }
+
+    // Paused in moment m: the main page while a gallery is open; the gallery's own lines below its thumbnails while they arrive.
+    function ahHeld(tag, m, busy) {
+        if (!m) return false;
+        if (tag === 'count' || tag === 'main') return true;
+        return busy && tag !== 'galh' && m !== 'slide';
+    }
+    function ahPump() { ahPics.pump(); ahPages.pump(); }
 
     // A start slot: resolves to its release, or to null once its tag is dropped or its run (tok) stopped.
     function ahSlot(g, tag, tok) { return new Promise(function (resolve) { g.wait.push({ tag: tag, tok: tok, resolve: resolve }); g.pump(); }); }
@@ -17909,6 +17965,8 @@
             g.wait = g.wait.filter(function (w) { if (w.tag !== tag) return true; w.resolve(null); return false; });
         });
     }
+    // The open gallery's originals still waiting, every line (L22, L23, L14, L18).
+    function ahDropOrigs() { ['galh', 'galp', 'galo', 'galn'].forEach(ahDrop); }
     async function ahRun(g, tag, fn, tok) {
         const free = await ahSlot(g, tag, tok);
         if (!free) return null;
@@ -17969,7 +18027,7 @@
                 main: { anchor: ahAnchor ? doors.indexOf(ahAnchor) + 1 : null, behind: ahBehind, busy: galPre ? doors.indexOf(galPre) + 1 : null, counts: galCnt, rounds: Array.from(ahRound.values()).join(''), lookLast: ahLookLast ? doors.indexOf(ahLookLast) + 1 : null, growing: !!galGrowing },
                 look: galLook ? doors.indexOf(galLook.href) + 1 || true : null,
                 gallery: cur ? { g: doors.indexOf(cur.href) + 1, page: (cur.page || 0) + 1, pages: (cur.pages || []).length, queueAt: c ? c.at + 1 : null, queue: c ? c.hrefs.length : null,
-                    ahead: ahG && c ? ahAheadN(c.at, ahG.fwd) : null, origs: ahG ? ahG.origs : null, fwd: ahG ? ahG.fwd : null, from: ahG ? ahG.from + 1 : null, end: ahG ? ahG.end : null, back: ahG && ahG.back != null ? ahG.back + 1 : null } : null,
+                    ahead: ahG && c ? ahAheadN(c.at, ahG.fwd) : null, m: ahG ? ahMoment() : null, all: ahG ? ahAll() : null, fwd: ahG ? ahG.fwd : null, from: ahG ? ahG.from + 1 : null, end: ahG ? ahG.end : null, back: ahG && ahG.back != null ? ahG.back + 1 : null } : null,
                 pics: waits(ahPics), pages: waits(ahPages),
                 keep: { n: plKeep.length, mb: Math.round(plKeepBytes / 1048576), galCapMb: Math.round(keepCaps().gal / 1048576), pageCapMb: Math.round(keepCaps().page / 1048576), behind: plKeep.filter(function (k) { return k.bh; }).length }, heldMb: Math.round(heldBytes / 1048576), held: heldBlobs.size,
             },
@@ -18190,7 +18248,7 @@
         galPageY = window.scrollY;
         ahT('act', { a: 'open' });
         ahDrop('main');
-        ahG = { fwd: 0, origs: !!cfg.galleryLoadAll, saw: false, at: null, back: null, from: 0, end: 0, run: 0, warm: null };
+        ahG = { fwd: 0, m: 'open', saw: false, slide: false, at: null, back: null, near: null, from: 0, end: 0, run: 0, warm: null };
     }
 
     // The gallery closed: what it queued is dropped, and the main page starts again from the first door on screen.
@@ -18199,8 +18257,9 @@
         ahT('act', { a: 'close', why: why || 'pointer left', you: GAL_USER_HIDE.indexOf(why) >= 0 });
         ahG = null;
         ahDrop('gal');
-        ahDrop('galo'); ahDrop('galn');
+        ahDropOrigs();
         ahAnchor = null;
+        ahPump();      // the counts paused while it was open
         ahWarmReport();
     }
 
@@ -18213,17 +18272,27 @@
         ahT('act', { a: tour ? 'slide' : 'preview', pic: k + 1, dir: dir });
         { const it = set.pics[k].item; predNote(tour ? 'slide' : 'pv', { g: predGal(set.href), i: k + 1, pre: it && it.hqTried && it.hit ? 1 : it && it.hqBusy ? 2 : 0, q: predQ() }); }
         if (tour && tour.gal === set) { const p = galPageOf(set, k); if (p > (set.far || 0)) { set.far = p; galFeed(set); } }     // the slideshow's page and those ahead get their thumbnails
-        const was = g.origs;
-        g.origs = true;
+        const fresh = !g.saw;
         g.saw = true;
-        if (dir < 0) { if (g.back === k) return; g.back = k; }
-        else {
-            const at = g.at;
-            g.at = k;
-            if (ahAll()) { const it = set.pics[k].item; if (was && !set.hqHorizon && (k === at || (it && it.hqTried))) return; }     // load all: an unloaded picture jumps the queue; a run stopped at the memory horizon goes on from here
-            else if (was && k >= g.from && k < g.end - 1) return;      // still inside what is loading
+        if (tour && tour.gal === set) {      // M13 not built: the slideshow's old order
+            const was = g.slide || ahAll();
+            g.slide = true;
+            if (dir < 0) { if (g.back === k) return; g.back = k; }
+            else {
+                const at = g.at;
+                g.at = k;
+                if (ahAll()) { const it = set.pics[k].item; if (was && !set.hqHorizon && (k === at || (it && it.hqTried))) return; }     // load all: an unloaded picture jumps the queue; a run stopped at the memory horizon goes on from here
+                else if (was && k >= g.from && k < g.end - 1) return;      // still inside what is loading
+            }
+            galHqAhead(set);
+            return;
         }
-        if (!was) dbg('loading ahead: a preview; originals from picture ' + (k + 1));
+        const done = function (q) { return !q || !q.item || (q.item.hqTried && q.item.hit) || q.item.hqBusy; };
+        let ready = true;
+        for (let d = 1; d <= AH_NEAR; d++) if (!done(set.pics[k + d]) || !done(set.pics[k - d])) ready = false;
+        g.near = k;
+        if (ready && !set.hqHorizon && !(fresh && ahAll())) return;      // M8: its L22 is in; the run under way goes on in the hover's order
+        dbg('loading ahead: a preview; originals around picture ' + (k + 1));
         galHqAhead(set);
     }
 

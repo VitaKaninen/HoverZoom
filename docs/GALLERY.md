@@ -271,8 +271,17 @@ What loads ahead follows what the user does. Code: the `ah*` functions after `ga
 - **Pacing** (`ahGate`): every background start waits for a slot; starts are a random `AH_PIC_GAP` 50–200 ms
   apart for pictures (≤ `GAL_HQ_PAR` 6 in flight), `AH_PAGE_GAP` 300–800 ms for page reads (Forum Stumbler's gap,
   ≤ 4). In flight settles at download time ÷ gap, so a faster line has *fewer* overlapping, the rate stays human.
-  Order (`ahPri`): the open gallery (`gal` thumbnails, `galo` originals) → counts → the main page. `ahDrop(tag)`
-  resolves a tag's waiting slots to null (callers skip). A hidden tab starts nothing. Measured on `door-long`:
+  Order (`ahPri(tag, ahMoment())`): no gallery open = counts → the main page. A gallery open = PRELOAD.md M6–M9:
+  `galh` (L22) → `galp` (L23) → `galo` (L14) / `gal` (L17) (M6 `galo` first, else `gal`) → `galn` (L18); counts and
+  the main page paused (`ahHeld`), resumed by `ahGalClose`'s `ahPump`. While the open gallery's thumbnails arrive
+  (`set.inflight`; and `galEarlyLeft`, the first 2 pages `galShow` places by declared sizes and loads outside
+  `galAppend` — set *before* `galBuild`, whose layout queues the originals synchronously; without it 2 originals
+  started under the first batch, v0.438.0 on door-big) everything but `galh` waits, unless none settled for `AH_THUMB_STALL_MS` 3 s (a
+  stalled file must not block originals for good); each thumbnail sets `set.thumbAt`, the last pumps the gates.
+  A run (`galHqAll`) keeps `GAL_HQ_Q` 12 waiting or in flight, twice the gate's 6, so a lower line never starts in the
+  gap between one original landing and the next being queued. The slideshow (`ahMoment` 'slide') keeps the old
+  order: `gal`/`galo` equal and taking turns, no hold (M13 not built). `ahDrop(tag)` resolves a tag's waiting slots
+  to null (callers skip); `ahDropOrigs` drops all four originals lines. A hidden tab starts nothing. Measured on `door-long`:
   picture starts 58 / 141 / 453 ms (min / median / max).
 - **Main page** (`galPreNext` → `ahMainPick`, no gallery or preview up; v0.397.0, user 2026-11-26): page reads for every
   door all the time (`galCountNext`, HTML only, nearest the middle first — the read *is* the count and the thumbnail
@@ -313,12 +322,14 @@ What loads ahead follows what the user does. Code: the `ah*` functions after `ga
   creation (a closing preview's `galHide` removes it on a timeout that can land after the gallery opened).
   Preloaded is NOT thumbnails (user asked; it is full-size pictures held for the next steps).
 - **Load all** (`cfg.galleryLoadAll`, default on, v0.397.0; the right-click menu and Settings → Galleries — off the
-  clicked picture since v0.423.0, user): the open gallery's originals load at once — `ahG.origs` true from `ahGalOpen`, `galHqAhead`
-  from the page on screen through every built cell, then stand-ins for the list's unbuilt rest, then the
-  `KEEP_BACK_PAGES` behind it. A hover on a picture not loaded yet (`hqTried` unset) restarts the run there (jumps
-  the queue). Page steps never stop it; a queue switch (`galBuild`, new href) starts the new gallery from its
-  start. Turned off mid-gallery: `galo` dropped, nothing new until a preview. Off = the data-saver rules below
-  (originals from a preview on; a forward page step stops them, also the step past a gallery's end).
+  clicked picture since v0.423.0, user): `galHqAhead` (v0.438.0, PRELOAD.md M6–M9) queues, in this order, the
+  `AH_NEAR` 3 either side of the last hovered picture (`ahG.near`, `galh`), the page on screen (`galp`; `ahG.m`
+  'back' = from its end), every built cell after it, stand-ins for the list's unbuilt rest, then the
+  `KEEP_BACK_PAGES` behind it nearest first (all `galo`). A hover whose ±3 are loaded does not restart the run
+  (`ahSaw`), unless it is the gallery's first (G: waiting) or the run stopped at the memory horizon. Each page step
+  sets the moment (`ahPageStep`: `fwd`/`back`) and the flip's `galPageWork` re-queues from the new page; a queue switch
+  (`galBuild`, new href) sets `open` (M11). Turned off mid-gallery: the run cancelled, only `galh` from then on. Off
+  = only `galh` (the plan's [Load all] lines skipped; until v0.437.0: from a preview through 2 pages on).
   The clicked picture is never under `GAL_PIC_MIN_W`×`GAL_PIC_MIN_H` 160×134 (`galPlace`, drag `lo`, `galBoxKept`):
   measured v0.423.0 at the floor (inner 173×128, the 3 px border eats 6): ⓘ ↗ 11–74 × 6–30, ⤓ ✕ from 103, the
   left column (readout 40 + Endless 20 + All 20, 4 px gaps) 34–122, ⛶ 135–162. Taller column = the height floor;
@@ -347,13 +358,11 @@ What loads ahead follows what the user does. Code: the `ah*` functions after `ga
   **G: pressed** (`ahAll()`, `ahStepMode`, user v0.434.0): Load all waits until something in the gallery on screen is
   previewed (`ahG.saw`, set in `ahSaw`, cleared on a queue switch); P: pressed on an unpreviewed gallery resumes it.
   **A slideshow step** raises `set.far` to its picture's page and runs `galFeed` (in `ahSaw`), so the page it closes
-  on already has its thumbnails (user: an empty page filling in shuffles the cells). With Load all
-  off, originals only after a preview
-  (`ahSaw` from `galPv` and from `tourGo` in a gallery): `galHqAhead` = from the previewed picture through 2
-  pages on (only what `galFeed` has built); within reach of the end, the next gallery's first page too. A
-  forward page step outside a slideshow = skipping: originals stop (`galo` dropped) until the next preview. A
-  backward step puts the `AH_BACK` 5 before it first; forward resumes after. Closing the gallery drops `gal`
-  and `galo` and the main page restarts from the first door on screen.
+  on already has its thumbnails (user: an empty page filling in shuffles the cells). The slideshow's originals
+  (`galHqSlide`, from `ahSaw` in `tourGo`): from its picture through 2 pages on (only what `galFeed` has built; Load
+  all: to the end); within reach of the end, the next gallery's first page too. A backward slideshow step puts the
+  `AH_BACK` 5 before it first; forward resumes after. Closing the gallery drops `gal` and the originals lines and the
+  main page restarts from the first door on screen.
 - **A restart never cancels what is in flight** (v0.412.0, user: after 2 page steps nothing loaded but the hovered
   picture). `galHqAhead` runs on every thumbnail append (`set.pv`) and every preview, and it used to set `hqTok.cancelled`,
   which `galResolve` honours: each restart killed the run's 6 in-flight originals, so few ever finished. Now it sets
