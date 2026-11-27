@@ -428,21 +428,23 @@ moves** except on a resize, a hole move, or a declared size proving wrong.
 - Not fixed: the main page's loading ahead and the open gallery can ask for the same thumbnail at once (seen
   on d8, uncached; pre-existing).
 
-## Cell marks: ★ cover, ● ready (v0.441.0, user 2026-11-27)
+## Cell marks: cover and ready corners (v0.441.0–v0.442.0, user 2026-11-27)
 
 In the open gallery and the gallery preview (`galCellMarks`, painted 120 ms after any cell or keep change via
-`galCellMarksSoon`):
-- **★ bottom-left** (`.cvr`, `#f9e2af`) on the cell that is the door's own picture — the user looks for it first.
-  `set.cover` = `galCoverSrc(href)` read at `galBuild` (the flown picture, the previewed door, else the page's door
-  linking there; Endless from a fetched results page has none → no star). Matched by `galCoverItem` (same URL, `sameStem`,
-  `galSameFile`; shared with `galFlyUpgrade`), retried as cells join until found.
-- **● bottom-right** (`.rdy`, green `#a6e3a1`, 7 px) where the original is held in the memory keep (`plKeep` or
+`galCellMarksSoon`). One 14 px corner triangle, bottom-right, clipped to the cell's 6 px rounding (user: a dot never
+sat centred on its dark ring; a star was replaced by a corner):
+- **Yellow** (`.cvr`, `#f9e2af`, setting `galleryCoverMark`) on the cell that is the door's own picture — the user
+  looks for it first. **In place of** the blue one, never both (user). `set.cover` = `galCoverSrc(href)` read at
+  `galBuild`: the corner picture's page door (`galFly.pic`; Endless always opens from a door on the live page, so it
+  has one), else its first src (`galFly.src0`), the previewed door, else the page's door linking there. Matched by
+  `galCoverItem` (same URL, `sameStem`, `galSameFile`), retried as cells join; `galFlyUpgrade` also sets it.
+- **Blue** (`.rdy`, `#89b4fa`, setting `galleryReadyMark`) where the original is held in the memory keep (`plKeep` or
   `heldBlobs` via `keepItem`) — the honest "a hover shows it at once". Recomputed from the keep every paint, so a
-  dropped original loses its dot. Not blue: the saved disc (top-left) is a blue circle. Clips get none (not kept).
-- `galFlyUpgrade` now stores the cover's original (`it.hit`, `plKeepImage`), so the cover's cell is dotted too.
-- No setting yet; the saved disc has `gallerySavedMarks` if the user wants one.
-- Verified in Chrome on eporner 2026-11-27: star on the right cell (5-picture gallery: picture 4; 144-picture: 1);
-  dots 12 → 144 over 23 s with Load all.
+  dropped original loses it. Clips get none (not kept).
+- `galFlyUpgrade` stores the cover's original (`it.hit`, `plKeepImage`).
+- Both settings: settings panel (Galleries) and the gallery right-click menu, beside the saved-disc one.
+- Verified in Chrome on eporner 2026-11-27: cover on the right cell (5-picture gallery: picture 4; Endless into the
+  next gallery: its picture 15 = its door's src); ready 12 → 144 over 23 s with Load all; both menu toggles.
 
 ## Arrival check (v0.411.0, user 2026-11-26; INTERACTION.md `G15`)
 

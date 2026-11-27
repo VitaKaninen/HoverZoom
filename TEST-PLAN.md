@@ -345,11 +345,13 @@ Test pages:
      - If the slideshow showed pictures loaded ahead, you'll see
        `loading ahead: originals shown that the browser kept {kept, of}` (test 10.1).
 
-7.12b **Cover star and ready dots** (v0.441.0). Open a gallery from its cover.
-     - **Expect:** a small yellow ★ bottom-left on the picture the cover shows (any page it is on); a small green
-       dot bottom-right on each picture whose full size has loaded, growing as loading goes on. Hover a dotted
-       one: the full size shows at once, no ring.
-     - **Fail:** a star on a picture that is not the cover, or a dotted picture that still shows the loading ring.
+7.12b **Cover and ready corners** (v0.442.0). Open a gallery from its cover, then let Endless move to the next one.
+     - **Expect:** a small yellow corner bottom-right on the picture the cover shows (any page it is on, and in each
+       gallery Endless moves to); a blue corner in the same spot on each other picture whose full size has loaded,
+       growing as loading goes on. Hover a blue-cornered one: the full size shows at once, no ring. Right-click menu
+       → the two "Mark …" items turn each off and on at once.
+     - **Fail:** yellow on a picture that is not the cover, yellow and blue on one picture, or a blue-cornered
+       picture that still shows the loading ring.
 
 7.13 **A missed original is tried again** (v0.395.0). On a site where some originals fail (`found` lower
      than `pictures` in 7.2's `done` line), close the gallery and open it again, then hover.

@@ -53,7 +53,7 @@ L20" is not built (L17 waits for all thumbnails). Without Load all a hover now l
 drop):** M1, M4, M5 (L8 = the next page's lists + 3 rounds, no 20 % rule). User confirmed 2026-11-27: L1
 includes gallery covers' own full size (the cover is the gallery's best picture, looked for first); automatic L2
 only on pages with doors (others keep the interest rule), and M4's singles below the screen go first while
-scrolling ("1 screen ahead is fine"; built: 2). Cover ★ and ready ● in gallery cells: GALLERY.md "Cell marks". Not live-tested: M5 (needs a page's 3 rounds to finish), the counts-before-rounds hold.
+scrolling ("1 screen ahead is fine"; built: 2). Cover and ready corners in gallery cells: GALLERY.md "Cell marks". Not live-tested: M5 (needs a page's 3 rounds to finish), the counts-before-rounds hold.
 **Not built:** M13 (the slideshow keeps the old order: `ahMoment` 'slide'), L24/L25 and "Upgrade clips", the L13
 split and L13's place, M10's "L17 first gallery before L20", L8's L1 (singles of a fetched page), L10's ±3-then-rest,
 next-page finding (its own session, three repos).

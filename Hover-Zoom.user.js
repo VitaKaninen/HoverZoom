@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.441.0
+// @version      0.442.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -262,6 +262,8 @@
         galleryChips: true,         // the ▦ chip on every gallery thumbnail; off: only on the one under the pointer
         galleryTicks: true,         // seen / visited ticks on results
         gallerySavedMarks: true,    // saved discs on results and in galleries
+        galleryCoverMark: true,     // a yellow corner on the cover's picture in its gallery
+        galleryReadyMark: true,     // a blue corner on gallery pictures whose full size is held
         galleryPreload: true,       // read the first page of every gallery on screen ahead of a click
         galleryRowMin: 120,         // px: gallery rows never shorter; spare room grows them; past that, pages
         hoverPreload: true,         // load the page's pictures ahead of the user, as far as they show interest
@@ -13627,8 +13629,8 @@
             'padding:6px 12px;border-radius:8px;background:#1e1e2e;border:1px solid #f9e2af;color:#f9e2af;font:13px/1.3 system-ui,sans-serif;' +
             'pointer-events:none;box-shadow:0 4px 14px rgba(0,0,0,.6)}' +
             '.svd{position:absolute;left:4px;top:4px;width:22px;height:22px;pointer-events:none}' +
-            '.cvr{position:absolute;left:4px;bottom:4px;width:14px;height:14px;pointer-events:none;filter:drop-shadow(0 0 1.5px rgba(17,17,27,.9))}' +
-            '.rdy{position:absolute;right:5px;bottom:5px;width:7px;height:7px;border-radius:50%;background:#a6e3a1;box-shadow:0 0 0 1.5px rgba(17,17,27,.75);pointer-events:none}' +
+            '.cvr,.rdy{position:absolute;right:0;bottom:0;width:14px;height:14px;pointer-events:none;border-bottom-right-radius:6px;clip-path:polygon(100% 0,100% 100%,0 100%)}' +
+            '.cvr{background:#f9e2af}.rdy{background:#89b4fa}' +
             '.strip[hidden]{display:none}' +
             '.strip{position:fixed;z-index:4;display:flex;flex-direction:column;justify-content:space-evenly;padding:0 4px;box-sizing:border-box;cursor:move;' +
             'background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);' +
@@ -15286,22 +15288,29 @@
         if (!galCellMarksT) galCellMarksT = setTimeout(function () { galCellMarksT = 0; galCellMarks(galCur); }, 120);
     }
 
-    // The open gallery's cell marks: ★ on the door's own picture, a green dot where the original is held (a hover shows it at once).
+    // The open gallery's cell marks, bottom-right: yellow on the door's own picture, else blue where the original is held (a hover shows it at once).
     function galCellMarks(set) {
         if (!set || !set.cells) return;
         if (!set.coverItem && set.cover && set.coverTried !== set.pics.length) {
             set.coverTried = set.pics.length;
             set.coverItem = galCoverItem(set.pics.map(function (p) { return p.item; }), set.cover);
-        }        const held = new Set();
-        plKeep.forEach(function (k) { const it = keepItem.get(k.url); if (it) held.add(it); });
-        heldBlobs.forEach(function (h, u) { const it = keepItem.get(u); if (it) held.add(it); });
+        }
+        const held = new Set();
+        if (cfg.galleryReadyMark) {
+            plKeep.forEach(function (k) { const it = keepItem.get(k.url); if (it) held.add(it); });
+            heldBlobs.forEach(function (h, u) { const it = keepItem.get(u); if (it) held.add(it); });
+        }
+        const mark = function (cell, cls, on) {
+            const m = cell.querySelector('.' + cls);
+            if (on && !m) { const d = document.createElement('span'); d.className = cls; cell.appendChild(d); }
+            else if (!on && m) m.remove();
+        };
         set.pics.forEach(function (p, k) {
             const cell = set.cells[k];
             if (!cell) return;
-            const star = cell.querySelector('.cvr'), dot = cell.querySelector('.rdy');
-            if (p.item === set.coverItem && !star) cell.appendChild(galStarIcon('cvr'));
-            if (held.has(p.item) && !dot) { const d = document.createElement('span'); d.className = 'rdy'; cell.appendChild(d); }
-            else if (!held.has(p.item) && dot) dot.remove();
+            const cover = !!cfg.galleryCoverMark && p.item === set.coverItem;
+            mark(cell, 'cvr', cover);
+            mark(cell, 'rdy', !cover && held.has(p.item));     // the cover's corner takes the ready one's place
         });
     }
 
@@ -15312,30 +15321,13 @@
             list.find(function (x) { return galSameFile(x.thumb, src); }) || null;
     }
 
-    // The door's own picture for a gallery: the flown one, the previewed door's, else the page's door that links there.
+    // The door's own picture for a gallery: the corner picture (its page door, else what it first showed), the previewed door's, else the page's door that links there.
     function galCoverSrc(href) {
         const of = function (el) { const pic = el && (el.tagName === 'IMG' ? el : el.querySelector('img')); return pic ? pic.currentSrc || pic.src : ''; };
-        if (galFly && galFly.href === href) return of(galFly.pic);
+        if (galFly && galFly.href === href) return of(galFly.pic) || galFly.src0 || '';
         if (galLook && galLook.href === href) return of(galLook.el);
         const d = doorImgs(document).find(function (img) { return galLinkOf(img) === href; });
         return of(d);
-    }
-
-    function galStarIcon(cls) {
-        const NS = 'http://www.w3.org/2000/svg';
-        const m = document.createElement('span');
-        m.className = cls;
-        const svg = document.createElementNS(NS, 'svg');
-        svg.setAttribute('viewBox', '0 0 24 24');
-        svg.setAttribute('width', '100%');
-        svg.setAttribute('height', '100%');
-        const s = document.createElementNS(NS, 'path');
-        s.setAttribute('d', 'M12 2.5l2.9 6.1 6.6.8-4.9 4.6 1.3 6.6L12 17.3l-5.9 3.3 1.3-6.6-4.9-4.6 6.6-.8z');
-        s.setAttribute('fill', '#f9e2af');
-        s.setAttribute('stroke', '#11111b'); s.setAttribute('stroke-width', '1.5'); s.setAttribute('stroke-linejoin', 'round');
-        svg.appendChild(s);
-        m.appendChild(svg);
-        return m;
     }
 
     function galBuild(href, pics, fed) {
@@ -17048,6 +17040,7 @@
                     const d = c.querySelector('.svd');
                     if (d && !cfg.gallerySavedMarks) d.remove();
                 });
+                if (key === 'galleryCoverMark' || key === 'galleryReadyMark') galCellMarks(galCur);
                 galMarkSoon();
                 galChipsSync();
                 galMenuShow(x, y);
@@ -17076,6 +17069,8 @@
             item('Show the ▦ gallery button on every gallery', !!cfg.galleryChips, flip('galleryChips'));
             item('Tick results whose gallery was seen', !!cfg.galleryTicks, flip('galleryTicks'));
             item('Mark results something was saved from', !!cfg.gallerySavedMarks, flip('gallerySavedMarks'));
+            item('Mark the cover\'s picture in its gallery', !!cfg.galleryCoverMark, flip('galleryCoverMark'));
+            item('Mark pictures whose full size is ready', !!cfg.galleryReadyMark, flip('galleryReadyMark'));
             item('Middle-click opens a gallery', !!cfg.galleryMiddle, flip('galleryMiddle'));
             if (galCur) {       // the Endless box's three states
                 const on = !!cfg.galleryEndless;
@@ -17170,7 +17165,7 @@
         void el.offsetWidth;
         el.classList.add('on');
         el.style.transform = 'none';
-        galFly = { el: el, img: img, pic: pic, href: href, asp: hr.width && hr.height ? hr.width / hr.height : 1, pic0: pw, hds: hds };
+        galFly = { el: el, img: img, pic: pic, href: href, asp: hr.width && hr.height ? hr.width / hr.height : 1, pic0: pw, hds: hds, src0: img.src };
         setTimeout(galStoreTick, 0);     // after a closing preview's own removal
         galFlyZ();
         galStripBuild();
@@ -17220,6 +17215,7 @@
         const src = f.pic.currentSrc || f.pic.src, nat = { w: f.pic.naturalWidth || 0, h: f.pic.naturalHeight || 0 };
         const tok = { cancelled: false, fresh: false };
         const it = galCoverItem(list, src);
+        if (it && galCur && galCur.href === f.href && !galCur.coverItem) { galCur.coverItem = it; galCellMarksSoon(); }
         let hit = null;
         if (it) { if (!it.link) galLinksPick(list); hit = await galLinkedHit(it, f.pic, tok); }
         if (it && hit && !hit.video) { it.hit = hit; plKeepImage(hit, it); }     // its cell's hover is then instant, and dotted
@@ -20458,6 +20454,10 @@
             'One green tick for a gallery you looked at, two for a page you opened.').el.addEventListener('change', galMarkSoon);
         check('gallerySavedMarks', 'Mark results something was saved from',
             'A blue disc on the result, and on each saved picture in its gallery.').el.addEventListener('change', galMarkSoon);
+        check('galleryCoverMark', 'Mark the cover\'s picture in its gallery',
+            'A yellow corner, bottom-right, on the picture the gallery\'s cover shows (in place of the blue one).').el.addEventListener('change', galCellMarksSoon);
+        check('galleryReadyMark', 'Mark pictures whose full size is ready',
+            'A blue corner, bottom-right, on each gallery picture whose full size is loaded: a hover shows it at once.').el.addEventListener('change', galCellMarksSoon);
         check('galleryPreload', 'Read the galleries on screen ahead of a click',
             'One at a time, nearest the pointer first, so a gallery opens at once. Stops on this page if the site refuses a request.').el.addEventListener('change', galMarkSoon);
         num('galleryRowMin', 'Smallest gallery row',
