@@ -97,8 +97,10 @@ fight that. They are deleted. Do not put nav controls back on the frame.
   outlived the close, so a new slideshow opening on that picture zoomed on the wheel — user; `upgradeViewer` carries it). Click 2 of a double-click undoes click 1's toggle (`tapZoomed`), like
   `tapPaused`. A hover preview, and a pinned one outside galleries and fullscreen, zoom as always.
 - **Typed numbers** (`twAsk(kind, holder)`, v0.317.0, user; Forum Stumbler's counter box; the gallery widget too):
-  click the picture or page number; Enter, leaving the box or a press anywhere else goes (window-capture
-  mousedown — widget presses are preventDefault'ed, so blur alone never came; v0.319.0), Esc cancels. A window-capture keydown registered before every
+  click the picture or page number: "Jump to page: [n] (n/N)" (gallery / image likewise), prefilled with where you
+  are, the type shrinking then "Jump to" dropping to fit. Enter goes; a press away (window-capture mousedown —
+  widget presses are preventDefault'ed, so blur alone never came; v0.319.0) goes only if the number changed, and
+  that press and its click are eaten either way (`twAskEatUntil`, user v0.423.0: it used to act on the page); Esc cancels. A window-capture keydown registered before every
   other key listener of ours gives the box the keyboard. Past what is loaded → the last loaded, and
   more is asked for (`twLoadFurther`: `tourMoreOnce(true)` / a gallery's `far`). Page k on a page =
   scroll to screen k; with a slideshow up, its first picture there (`twGoPage`).

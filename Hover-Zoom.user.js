@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.422.0
+// @version      0.423.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -2937,6 +2937,14 @@
     const ICON_FIND = 'M10 3a7 7 0 0 1 5.6 11.2l4.6 4.6-1.4 1.4-4.6-4.6A7 7 0 1 1 10 3zm0 2a5 5 0 1 0 0 10 5 5 0 0 0 0-10zm-1 2h2v2h2v2h-2v2H9v-2H7V9h2V7z';
 
     // A filled glyph from one path, or a stroked one from several.
+    // Text into el, each ▦ drawn as the gallery button's own icon.
+    function withGalIcon(el, text) {
+        String(text).split('▦').forEach(function (part, i) {
+            if (i) el.appendChild(mkIcon(ICON_GALLERY));
+            if (part) el.appendChild(document.createTextNode(part));
+        });
+    }
+
     function mkIcon(d) {
         const svg = document.createElementNS(SVG_NS, 'svg');
         svg.setAttribute('viewBox', '0 0 24 24');
@@ -10325,6 +10333,7 @@
             '.count{flex:1;padding:0 4px;text-align:center;font-variant-numeric:tabular-nums;color:var(--text);cursor:text}',
             '.tw input.ask{width:4.5em;box-sizing:border-box;margin:0 2px;padding:1px 4px;font:inherit;text-align:center;color:var(--text);' +
                 'background:var(--btn);border:1px solid var(--accent);border-radius:4px;outline:none}',
+            '.tw .askw{white-space:nowrap;cursor:default}.tw .askw input.ask{width:3.5em}',
             '.load{flex:none;padding:0 2px;font-size:11px;font-variant-numeric:tabular-nums;color:var(--muted)}',
             '.load.done{color:var(--done)}',
             '.dup{margin-left:3px;font-size:9px;color:var(--dup)}',
@@ -10704,20 +10713,35 @@
         }
     }
 
-    // A click on the picture or page number (either widget): a box to type where to go. Enter, leaving it or a press anywhere else goes; Esc cancels.
-    let twTyping = null;        // { input, kind } while the box is up
+    // A click on a number (either widget): "Jump to page: [n] (n/N)". kind: 'page', 'gal' (endless queue) or 'pic'.
+    let twTyping = null;        // { input, wrap, kind, holder, start, tb } while the box is up
     function twAsk(kind, holder) {
         if (twTyping || twBusy()) return;
         if (!holder) { if (!tw) return; holder = kind === 'pic' ? tw.count : tw.pgNum; }
-        const m = /(\d+)\s*\//.exec(tw && holder === tw.count ? tw.num.nodeValue : holder.textContent);
+        let cur, all, tb = 0;
+        const sn = galSt && (holder === galSt.pgT || holder === galSt.picT) && galSt.nums;
+        if (sn && sn[kind]) { cur = sn[kind][0]; all = sn[kind][1]; tb = kind === 'pic' ? sn.tb || 0 : 0; }
+        else {
+            const m = /(\d+)\s*\/\s*(\d+\+?)/.exec(tw && holder === tw.count ? tw.num.nodeValue : holder.textContent);
+            cur = m ? +m[1] : 1; all = m ? m[2] : '?';
+        }
+        const wrap = document.createElement('span');
+        wrap.className = holder.className + ' askw';
         const input = document.createElement('input');
         input.className = 'ask';
-        input.value = m ? m[1] : '';
+        input.value = String(cur);
         input.addEventListener('mousedown', function (e) { e.stopPropagation(); }, true);
-        input.addEventListener('blur', function () { twAskEnd(true); });
+        input.addEventListener('blur', function () { if (twTyping && twTyping.input === input) twAskEnd(input.value !== twTyping.start); });
+        wrap.appendChild(document.createTextNode('Jump to ' + (kind === 'pic' ? 'image' : kind === 'gal' ? 'gallery' : 'page') + ': '));
+        wrap.appendChild(input);
+        wrap.appendChild(document.createTextNode(' (' + cur + '/' + all + ')'));
         holder.style.display = 'none';
-        holder.parentNode.insertBefore(input, holder.nextSibling);
-        twTyping = { input: input, kind: kind, holder: holder };
+        holder.parentNode.insertBefore(wrap, holder.nextSibling);
+        twTyping = { input: input, wrap: wrap, kind: kind, holder: holder, start: input.value, tb: tb };
+        const over = function () { return wrap.scrollWidth > wrap.clientWidth + 0.5; };     // too wide: the type shrinks, then "Jump to" goes
+        let f = parseFloat(getComputedStyle(wrap).fontSize) || 12;
+        while (over() && f > 8) { f -= 0.5; wrap.style.fontSize = f + 'px'; }
+        if (over()) wrap.firstChild.nodeValue = wrap.firstChild.nodeValue.replace('Jump to ', '').replace(/^./, function (c) { return c.toUpperCase(); });
         hideTip();
         input.focus();
         input.select();
@@ -10728,17 +10752,72 @@
         if (!t) return;
         twTyping = null;
         const n = parseInt(String(t.input.value).replace(/[^0-9]/g, ''), 10);
-        t.input.remove();
+        t.wrap.remove();
         t.holder.style.display = '';
-        if (go && n >= 1) { if (t.kind === 'pic') twGoTo(n - 1); else twGoPage(n - 1); }
+        if (go && n >= 1) {
+            if (t.kind === 'gal') galChainJump(n - 1);
+            else if (t.kind === 'pic' && galCur && galSt && t.holder === galSt.picT && galSt.nums && galSt.nums.gal) galChainPicJump(n - 1);
+            else if (t.kind === 'pic') twGoTo(n - 1);
+            else twGoPage(n - 1);
+        }
         twSync();
         if (galCur) galPageNote(galCur);
     }
 
-    // A press anywhere but the box closes it; the press then does what it would have.
+    // The page row's text "P:a/b · G:c/d": true when x is right of the ·, the gallery half.
+    function galStripHalf(el, x) {
+        const t = el.firstChild, i = t && t.nodeType === 3 ? t.nodeValue.indexOf('·') : -1;
+        if (i < 0) return false;
+        const r = document.createRange();
+        r.setStart(t, i);
+        r.setEnd(t, i + 1);
+        return x >= r.getBoundingClientRect().left;
+    }
+
+    // Endless: open queued gallery k (0-based) at its first page.
+    function galChainJump(k) {
+        const c = galEndless() ? galChain : null;
+        if (!c || !galCur) return;
+        k = Math.max(0, Math.min(c.hrefs.length - 1, k));
+        if (k !== c.at) galChainOpen(k, k > c.at ? 1 : -1, 0, 'page');
+    }
+
+    // Endless: picture k (0-based) of the whole queue: here, a step to it; in another gallery, that gallery opened at the page holding it.
+    function galChainPicJump(k) {
+        const c = galEndless() ? galChain : null, set = galCur;
+        if (!c || !set) return;
+        const per = Math.max(1, galPer(set));
+        let b = 0;
+        for (let i = 0; i < c.hrefs.length; i++) {
+            const n = i === c.at ? Math.max(set.cells.length, (galLists.get(set.href) || []).length) : galChainN(c.hrefs[i])[0] || 0;
+            if (k < b + n || i === c.hrefs.length - 1) {
+                const j = Math.max(0, k - b);
+                if (i === c.at) twGoTo(j);
+                else galChainOpen(i, i > c.at ? 1 : -1, Math.floor(j / per), 'page');
+                return;
+            }
+            b += n;
+        }
+    }
+
+    // A press away from the box: goes if the number was changed, else nothing; either way the press itself is eaten.
+    let twAskEatUntil = 0;
     window.addEventListener('mousedown', function (e) {
-        if (twTyping && e.composedPath()[0] !== twTyping.input) twAskEnd(true);
+        const t = twTyping;
+        if (!t || e.composedPath().indexOf(t.wrap) >= 0) return;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        twAskEatUntil = Date.now() + 1500;
+        twAskEnd(t.input.value !== t.start);
     }, true);
+    ['mouseup', 'click', 'auxclick', 'contextmenu'].forEach(function (type) {
+        window.addEventListener(type, function (e) {
+            if (Date.now() > twAskEatUntil) return;
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            if (type !== 'mouseup') twAskEatUntil = 0;
+        }, true);
+    });
 
     // The box owns the keyboard: nothing of ours (or the page's) sees a key typed into it.
     window.addEventListener('keydown', function (e) {
@@ -12550,7 +12629,7 @@
     const GAL_STRIP_H1 = 34;            // the picture row alone: a one-page gallery
     const GAL_STRIP_DL = 26;            // the download row the strip gains while this site has downloads
     const GAL_UNIT_MIN_W = 120;         // a picture holding the strip: never narrower, or its numbers cannot fit
-    const GAL_PIC_MIN_W = 196, GAL_PIC_MIN_H = 130;     // the clicked picture never smaller: its ⓘ, ⤓ ✕ ⛶, ☐ Load all / ☐ Endless and the storage readout clear of each other (measured v0.397.0)
+    const GAL_PIC_MIN_W = 160, GAL_PIC_MIN_H = 134;     // the clicked picture never smaller: its ⓘ ↗, ⤓ ✕ ⛶ and the readout / Endless / All column clear of each other (measured v0.423.0)
     const GAL_HD = 7;                   // a resize corner: the frame's 3 px border plus 2 px inside and out
     const GAL_STRIP_W = 190;            // their least width; wider under a wider picture
     const GAL_STRIP_GAP = 6;            // between the picture and the strip
@@ -12753,7 +12832,7 @@
                 dbg('door kind: second opinion', { first: href, other: other, kind: k2 });
                 if (k2 && k2 !== 'results') k = k2;
             }
-            actEnd(aj, k ? 'done' : 'failed', k === 'gallery' ? 'yes: ' + many + ' galleries get a chip' : k === 'results' ? 'no: ' + many + ' links lead to more results, not galleries' : 'could not tell; a hover asks again');
+            actEnd(aj, k ? 'done' : 'failed', k === 'gallery' ? 'yes: ' + many + ' galleries get a gallery button' : k === 'results' ? 'no: ' + many + ' links lead to more results, not galleries' : 'could not tell; a hover asks again');
             galKindDone.set(key, k);
             setTimeout(twRecount, 0);       // a settled area may make this a page of galleries
             return k;
@@ -13508,6 +13587,7 @@
             '.strip .b:hover{background:var(--btnHover)}.strip .b.faint{opacity:.35;cursor:default}.strip .b.faint:hover{background:var(--btn)}' +
             '.strip input.ask{width:4.5em;box-sizing:border-box;margin:0 auto;padding:1px 4px;font:inherit;text-align:center;color:var(--text);' +
             'background:var(--btn);border:1px solid var(--accent);border-radius:4px;outline:none;cursor:text}' +
+            '.strip .askw{display:block;white-space:nowrap;text-overflow:clip;font-size:11px;cursor:default}.strip .askw input.ask{width:3.5em;margin:0 3px}' +
             '.strip .t{cursor:text;flex:1;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}' +
             '.strip .dl{flex:none;display:flex;flex-direction:column;justify-content:center;gap:4px;height:' + (GAL_STRIP_DL - 4) + 'px;padding:0 2px;font:11px/14px system-ui,sans-serif}' +
             '.strip .dl .top{display:flex;align-items:center;gap:6px}.strip .dl .txt{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}' +
@@ -13550,19 +13630,30 @@
             '.fly .tools span{display:flex;align-items:center;justify-content:center;min-width:26px;height:26px;padding:0 7px;box-sizing:border-box;border-radius:13px;' +
             'background:rgba(30,30,46,.92);border:1px solid #45475a;color:#cdd6f4;font:13px/1 system-ui,sans-serif;white-space:nowrap;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.5)}' +
             '.fly .tools span:hover{background:#313244;color:#89b4fa}' +
-            '.fly .endl{position:absolute;bottom:6px;left:' + (GAL_HD + 4) + 'px;display:flex;gap:6px;opacity:.6;transition:opacity .15s ease}' +
+            '.fly .tools .fd,.fly .endl>*{opacity:.45;transition:opacity .15s ease}.fly .tools .fd:hover,.fly .endl>*:hover{opacity:1}' +
+            '.fly .endl{position:absolute;bottom:6px;left:' + (GAL_HD + 4) + 'px;display:flex;gap:6px}' +
             '.fly .endl.top{top:6px;bottom:auto}.fly .endl:not(.top){flex-direction:column;align-items:flex-start}' +
-            '.fly:hover .endl{opacity:1}.fly.edit .endl,.fly.asking .endl{display:none}' +
+            '.fly.edit .endl,.fly.asking .endl{display:none}' +
             '.fly .endl>*{display:flex;align-items:center;gap:5px;height:24px;padding:0 8px;box-sizing:border-box;border-radius:12px;' +
             'background:rgba(30,30,46,.92);border:1px solid #45475a;color:#cdd6f4;font:12px/1 system-ui,sans-serif;white-space:nowrap;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.5)}' +
             '.fly .endl>*:hover{background:#313244;color:#89b4fa}' +
             '.fly .endl input{margin:0;width:13px;height:13px;accent-color:#89b4fa;cursor:pointer}' +
+            '.fly .endl .l,.hzst .l{display:none}.fly .endl>*:hover .l,.fly:hover .hzst .l,.hzst.fix .l{display:inline}.fly:hover .hzst .s,.hzst.fix .s{display:none}' +
+            '.fly .endl:not(.top){gap:4px}.fly .endl:not(.top)>label{height:20px;border-radius:10px}' +
+            '.fly .endl>.hzst{position:static;display:block;height:auto;padding:0 7px;border-radius:9px;font-size:11px;line-height:1.15;text-align:left;cursor:default}' +
+            '.fly .endl>.hzst:hover{background:rgba(30,30,46,.92);color:#cdd6f4}' +
             '.menu.info{padding:6px 2px}.menu.info .lb.hp{max-width:440px;padding:3px 10px;color:#cdd6f4;font-size:12px}.menu .lb.hp b{color:#89b4fa;font-weight:600}' +
             '.menu[hidden]{display:none}' +
             '.menu{position:fixed;z-index:5;min-width:240px;padding:4px;box-sizing:border-box;background:#1e1e2e;border:1px solid #45475a;border-radius:8px;' +
             'box-shadow:0 8px 28px rgba(0,0,0,.6);color:#cdd6f4;font:13px/1.3 system-ui,sans-serif;pointer-events:auto}' +
             '.menu .it{display:flex;align-items:center;gap:6px;padding:5px 10px 5px 6px;border-radius:5px;cursor:pointer;white-space:nowrap}' +
-            '.menu .it:hover{background:#313244}.menu .ck{width:16px;text-align:center;color:#89b4fa}' +
+            '.menu .it:hover{background:#313244}.menu .ck{flex:none;width:16px;text-align:center;color:#89b4fa}' +
+            '.menu .ck.cb,.menu .ck.rd{width:12px;height:12px;margin:0 2px;box-sizing:border-box;border:1.5px solid #6c7086;border-radius:3px;' +
+            'color:#1e1e2e;font:bold 10px/9px system-ui,sans-serif}.menu .ck.rd{border-radius:50%}' +
+            '.menu .ck.cb.on{background:#89b4fa;border-color:#89b4fa}.menu .ck.rd.on{border-color:#89b4fa;background:#89b4fa;box-shadow:inset 0 0 0 2px #1e1e2e}' +
+            '.menu .it.act span:last-child{color:#89b4fa}.menu svg{width:13px;height:13px;fill:currentColor;vertical-align:-2px}' +
+            '.menu .x{position:absolute;top:4px;right:4px;width:20px;height:20px;display:flex;align-items:center;justify-content:center;border-radius:4px;cursor:pointer;color:#a6adc8}' +
+            '.menu .x:hover{background:#313244;color:#f38ba8}' +
             '.menu .sep{height:1px;margin:4px 6px;background:#45475a}' +
             '.menu .lb{padding:6px 10px 2px 28px;color:#6c7086;font-size:11px}.menu .lb.hp{padding-top:2px;max-width:300px}' +
             '.pend[hidden]{display:none}.pend{position:fixed;box-sizing:border-box;border:3px solid #89b4fa;border-radius:8px;' +
@@ -13578,7 +13669,7 @@
             '.diag button:hover{background:#585b70}' +
             '.hzst{position:absolute;right:6px;bottom:6px;z-index:4;padding:2px 7px;border-radius:9px;background:rgba(30,30,46,.88);border:1px solid #45475a;' +
             'color:#cdd6f4;font:11px/1.35 system-ui,sans-serif;font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap;pointer-events:none}' +
-            '.hzst.fix{position:fixed;right:auto;bottom:auto}.fly:hover .hzst{bottom:38px}';
+            '.hzst.fix{position:fixed;right:auto;bottom:auto}.fly .hzst{pointer-events:auto}';
         galRoot.appendChild(st);
         galTopHost = document.createElement('div');
         galTopHost.style.cssText = 'all:initial;position:fixed;inset:0;pointer-events:none;z-index:2147483647';
@@ -14024,6 +14115,7 @@
         const pg = ch ? ch.pg : (page + 1) + ' / ' + total + (reading ? '+' : '');
         s.pgT.textContent = ch ? pg : 'Page ' + pg;
         s.picT.textContent = ch ? ch.pic : (at >= 0 ? at + 1 : '–') + ' / ' + n + (reading ? '+' : '');
+        s.nums = ch ? ch.nums : { page: [page + 1, total + (reading ? '+' : '')], gal: null, pic: [Math.max(0, at) + 1, n + (reading ? '+' : '')] };
         galStripSqueeze(s, pg);
         s.pgP.classList.toggle('faint', ch ? !ch.back : total < 2);
         s.pgN.classList.toggle('faint', ch ? !ch.on : total < 2);
@@ -14096,7 +14188,7 @@
         row('pg', 'pgP', 'pgT', 'pgN', 'Previous page · ↑', 'Next page · ↓', galPageStep);
         row('pn', 'picP', 'picT', 'picN', 'Previous picture · ← · hold to repeat', 'Next picture · → · hold to repeat', galStep);
         s.picT.addEventListener('click', function () { twAsk('pic', s.picT); });
-        s.pgT.addEventListener('click', function () { twAsk('page', s.pgT); });
+        s.pgT.addEventListener('click', function (e) { twAsk(galStripHalf(s.pgT, e.clientX) && s.nums && s.nums.gal ? 'gal' : 'page', s.pgT); });
         ['mousedown', 'mouseup', 'click', 'auxclick', 'dblclick', 'contextmenu'].forEach(function (t) {
             el.addEventListener(t, function (e) {
                 e.preventDefault();
@@ -14337,6 +14429,7 @@
             on: c.at < c.hrefs.length - 1 || !lastPage || !whole,
             picBack: c.at > 0 || at > 0,
             picOn: c.at < c.hrefs.length - 1 || !whole || at < n - 1,     // the queue's last picture: the slideshow stops there (user)
+            nums: { page: [pb + page + 1, pall], gal: [c.at + 1, c.hrefs.length], pic: [tb + Math.max(0, at) + 1, fmt(tall) + (open ? '+' : '')], tb: tb },
         };
     }
 
@@ -14544,8 +14637,8 @@
     function galEndlessPaint() {
         const ck = galFly && galFly.el.querySelector('.endl .ek input');
         if (ck) ck.checked = !!cfg.galleryEndless;
-        const la = galFly && galFly.el.querySelector('.endl .la input');
-        if (la) la.checked = !!cfg.galleryLoadAll;
+        const ev = galFly && galFly.el.querySelector('.endl .ev input');
+        if (ev) ev.checked = !!cfg.galleryEndlessViewed;
     }
 
     // The ☐ Load all box was pressed: on, the open gallery's originals start now; off, nothing new starts until a preview.
@@ -14589,40 +14682,59 @@
         tourFromStart(1, true, at).then(full, full);
     }
 
-    // The clicked picture's top-left ⓘ and bottom-left ☐ Endless.
-    function galEndlessBuild(pw) {
+    // The clicked picture's top-left ⓘ ↗ and bottom-left ☐ Endless ☐ All (one word, spelled out on hover).
+    function galEndlessBuild(pw, href) {
         const bar = document.createElement('div');
         bar.className = 'endl';
-        const box = function (cls, on, text, tip) {
-            const l = document.createElement('label'), c = document.createElement('input'), t = document.createElement('span');
+        const box = function (cls, on, text, more, tip) {
+            const l = document.createElement('label'), c = document.createElement('input'), t = document.createElement('span'), m = document.createElement('span');
             l.className = cls;
             c.type = 'checkbox';
             c.checked = on;
             t.textContent = text;
+            m.className = 'l';
+            m.textContent = more;
             l.appendChild(c);
             l.appendChild(t);
+            t.appendChild(m);
             setTip(l, tip);
             return l;
         };
-        const lb = box('ek', !!cfg.galleryEndless, 'Endless', 'Endless: at the end of this gallery the next one on the page opens; back from its first page goes to the one before');
-        const la = box('la', !!cfg.galleryLoadAll, 'Load all', 'Load all: every original of a gallery loads as soon as it opens; a hover jumps the queue. Off: originals wait for a preview, and a page step stops them');
+        const lb = box('ek', !!cfg.galleryEndless, 'Endless', ': next gallery at the end of this one', 'At the end of this gallery the next one on the page opens; back from its first page goes to the one before');
+        const lv = box('ev', !!cfg.galleryEndlessViewed, 'All', ' — show ALL galleries', 'Endless includes galleries you have already viewed or visited. Off: those are left out of the queue');
         const info = document.createElement('span');
         info.textContent = 'ⓘ';
         setTip(info, 'What the buttons and numbers mean');
+        const tab = document.createElement('span');
+        tab.textContent = '↗';
+        setTip(tab, 'Open this gallery\'s page in a new tab');
         const eat = function (e) { e.preventDefault(); e.stopPropagation(); };
         lb.addEventListener('mousedown', function (e) { eat(e); if (e.button === 0) galEndlessSet(!cfg.galleryEndless); });
-        la.addEventListener('mousedown', function (e) { eat(e); if (e.button === 0) galLoadAllSet(!cfg.galleryLoadAll); });
+        lv.addEventListener('mousedown', function (e) { eat(e); if (e.button === 0) galEndlessViewedSet(!cfg.galleryEndlessViewed); });
         info.addEventListener('mousedown', function (e) { eat(e); if (e.button === 0) galInfoShow(info); });
-        [lb, la, info].forEach(function (b) {
+        tab.addEventListener('mousedown', function (e) { eat(e); if (e.button === 0) openOriginal(href); });
+        [lb, lv, info, tab].forEach(function (b) {
             ['mouseup', 'click', 'auxclick', 'dblclick', 'contextmenu'].forEach(function (t) { b.addEventListener(t, eat); });
         });
-        bar.appendChild(la);
         bar.appendChild(lb);
+        bar.appendChild(lv);
         pw.appendChild(bar);
         const top = document.createElement('div');
         top.className = 'endl top';
         top.appendChild(info);
+        top.appendChild(tab);
         pw.appendChild(top);
+    }
+
+    // ☐ All on the clicked picture, or the menu: endless includes galleries already viewed.
+    function galEndlessViewedSet(on) {
+        reloadSettings();
+        cfg.galleryEndlessViewed = on;
+        saveSettings();
+        refreshPanel();
+        if (on && galChain) galChainWiden(galChain);
+        galEndlessPaint();
+        if (galCur) galPageNote(galCur);
     }
 
     // ⓘ: every control of the open gallery and what its numbers mean, in the menu's box.
@@ -14631,13 +14743,15 @@
         galMenuShow(b.left, b.top, [
             ['The picture in the corner', 'click: close · drag: move · drag a corner: resize (Ctrl: no snapping) · right-click: settings'],
             ['⤓ ⛶ ✕', 'save every picture of this gallery not saved yet (once its page is read; never the rest of the endless queue) · the slideshow fullscreen, from the picture in the preview (else the first on this page) · close the gallery'],
-            ['Right-click', 'settings, and open the gallery\'s page in a new tab'],
+            ['↗', 'open the gallery\'s page in a new tab'],
+            ['R  P  D', 'memory: RAM held, full-size pictures preloaded for the next steps (estimate), disk this site stores · spelled out while the picture is hovered'],
+            ['Right-click', 'settings (Load all is there), and open the gallery\'s page in a new tab'],
             ['Strip', 'drag it by its background to take it off the picture'],
             ['Page row ◀ ▶', 'a page of thumbnails back or on · also ↑ ↓, PageUp / PageDown, the wheel away from the preview'],
             ['Picture row ◀ ▶', 'the slideshow, one picture back or on · also ← →, the wheel over the strip · hold to repeat'],
-            ['Numbers', 'click one to type where to go · + = still being read'],
-            ['☐ Load all', 'on: every original of the gallery loads as soon as it opens, and a hovered picture not loaded yet goes first · off: originals load from a preview (hover or slideshow) on, and a page step without one stops them'],
-            ['☐ Endless', 'at the end of this gallery the next one on the page opens, and back from its first page goes to the one before · galleries already seen or visited are left out (right-click to include them), judged once when queued · a step past a gallery\'s end stops there once, the next goes on (right-click to turn that off) · the last gallery\'s last picture stops for good'],
+            ['Numbers', 'click one to type where to go: the page number or the gallery number on the page row, a picture on the picture row · Enter or a click away goes there if you changed it; Esc, or a click away with nothing changed, does nothing · + = still being read'],
+            ['☐ Endless', 'at the end of this gallery the next one on the page opens, and back from its first page goes to the one before · galleries already seen or visited are left out unless ☐ All is on, judged once when queued · a step past a gallery\'s end stops there once, the next goes on (right-click to turn that off) · the last gallery\'s last picture stops for good'],
+            ['☐ All', 'endless shows ALL galleries, including the ones you already viewed or visited'],
             ['P:11/18', 'endless: page 11 of 18, counting every queued gallery — one not read yet counts as one page'],
             ['G:10/16', 'endless, page row: gallery 10 of the 16 queued'],
             ['G:10/20', 'endless, picture row: picture 10 of this gallery\'s 20'],
@@ -15400,9 +15514,11 @@
         bar.className = 'tools';
         const low = document.createElement('div');
         low.className = 'tools low';
-        const tool = function (text, tip, act, into) {
+        const tool = function (text, tip, act, into, fade) {
             const b = document.createElement('span');
             b.textContent = text;
+            setTip(b, tip);
+            if (fade) b.className = 'fd';
             b.addEventListener('mousedown', function (e) {
                 e.preventDefault();
                 e.stopPropagation();
@@ -15415,7 +15531,7 @@
             return b;
         };
         const dl = tool('⤓', 'Download every picture of this gallery not saved yet, into the folder under Settings, Saving · works once the whole page has been read · click again to stop',
-            function () { galDownloadAll(href); });
+            function () { galDownloadAll(href); }, null, true);
         tool('✕', 'Close the gallery', function () { galHide('hole'); });
         tool('⛶', 'Slideshow fullscreen, from the picture in the preview (else the first on this page) · in fullscreen: leave it', function () { galFullStart(); }, low);
         pw.appendChild(bar);
@@ -16540,14 +16656,16 @@
             hideTip();
             return;
         }
-        const item = function (text, on, act) {
+        // kind: true/false a checkbox, {radio: bool} one of several, a string the icon of an action.
+        const item = function (text, kind, act) {
             const it = document.createElement('div');
             it.className = 'it';
             const ck = document.createElement('span');
-            ck.className = 'ck';
-            ck.textContent = on === true ? '✓' : on === 'radio' ? '●' : '';
+            if (typeof kind === 'boolean') { ck.className = 'ck cb' + (kind ? ' on' : ''); ck.textContent = kind ? '✓' : ''; }
+            else if (kind && typeof kind === 'object') ck.className = 'ck rd' + (kind.radio ? ' on' : '');
+            else { ck.className = 'ck'; ck.textContent = kind || ''; it.classList.add('act'); }
             const tx = document.createElement('span');
-            tx.textContent = text;
+            withGalIcon(tx, text);
             it.appendChild(ck);
             it.appendChild(tx);
             it.addEventListener('mousedown', function (e) { e.preventDefault(); e.stopPropagation(); if (e.button === 0) act(); });
@@ -16582,10 +16700,16 @@
                 galMenuShow(x, y);
             };
         };
+        const xb = document.createElement('span');
+        xb.className = 'x';
+        xb.textContent = '✕';
+        setTip(xb, 'Close this menu');
+        xb.addEventListener('mousedown', function (e) { e.preventDefault(); e.stopPropagation(); if (e.button === 0) { galMenuHide(); hideTip(); } });
+        m.appendChild(xb);
         label('The preview opens');
         [['auto', 'Centred, or under the pointer'], ['cursor', 'Beside the pointer'], ['under', 'Under the pointer'],
             ['remember', 'Where I last put it, for good']].forEach(function (o) {
-            item(o[1], cfg.position === o[0] ? 'radio' : null, set('position', o[0]));
+            item(o[1], { radio: cfg.position === o[0] }, set('position', o[0]));
         });
         item('Never cover the widget', !!cfg.keepClearWidget, flip('keepClearWidget'));
         item('Keep the browser link bar uncovered', !!cfg.keepClearStatus, flip('keepClearStatus'));
@@ -16596,26 +16720,19 @@
         if (galCur || galMarksHere()) {
             sep();
             label('Galleries');
-            item('Show the ▦ chip on every gallery', !!cfg.galleryChips, flip('galleryChips'));
+            item('Show the ▦ gallery button on every gallery', !!cfg.galleryChips, flip('galleryChips'));
             item('Tick results whose gallery was seen', !!cfg.galleryTicks, flip('galleryTicks'));
             item('Mark results something was saved from', !!cfg.gallerySavedMarks, flip('gallerySavedMarks'));
             item('Middle-click opens a gallery', !!cfg.galleryMiddle, flip('galleryMiddle'));
             item('Endless: next gallery at the end of this one', !!cfg.galleryEndless, function () { galEndlessSet(!cfg.galleryEndless); galMenuShow(x, y); });
-            item('Endless: include galleries already viewed', !!cfg.galleryEndlessViewed, function () {
-                reloadSettings();
-                cfg.galleryEndlessViewed = !cfg.galleryEndlessViewed;
-                saveSettings();
-                refreshPanel();
-                if (cfg.galleryEndlessViewed && galChain) galChainWiden(galChain);
-                if (galCur) galPageNote(galCur);
-                galMenuShow(x, y);
-            });
+            item('Endless: include galleries already viewed (All)', !!cfg.galleryEndlessViewed, function () { galEndlessViewedSet(!cfg.galleryEndlessViewed); galMenuShow(x, y); });
             item('Endless: stop once at each gallery\'s end', !!cfg.galleryEndlessStop, flip('galleryEndlessStop'));
+            item('Load all of a gallery\'s originals when it opens', !!cfg.galleryLoadAll, function () { galLoadAllSet(!cfg.galleryLoadAll); galMenuShow(x, y); });
         }
         sep();
-        item('All settings…', null, function () { galMenuHide(); showPanel(); });
-        if (galFly) { const gh = galFly.href; item('Open the gallery\'s page in a new tab', null, function () { galMenuHide(); openOriginal(gh); }); }
-        if (galCur) item('Close the gallery', null, function () { galMenuHide(); galHide('menu'); });
+        item('All settings…', '⚙', function () { galMenuHide(); showPanel(); });
+        if (galFly) { const gh = galFly.href; item('Open the gallery\'s page in a new tab', '↗', function () { galMenuHide(); openOriginal(gh); }); }
+        if (galCur) item('Close the gallery', '✕', function () { galMenuHide(); galHide('menu'); });
         if (galFly) {
             sep();
             label('Using the gallery');
@@ -16686,7 +16803,7 @@
         };
         pair('bt ask', 'Join the strip to the picture?', 'Join them: the strip goes inside the picture\'s frame', 'Keep them apart', galJoin);
         galToolsBuild(pw, href);
-        galEndlessBuild(pw);
+        galEndlessBuild(pw, href);
         el.addEventListener('mousedown', function (e) {
             if (e.button !== 0 && e.button !== 1) return;
             e.preventDefault();         // middle too: no autoscroll, and galMidEat eats its click
@@ -16847,11 +16964,22 @@
         let ahead = 0;
         plKeep.forEach(function (k) { if (!heldBlobs.has(k.url)) ahead += k.bytes; });
         const mb = function (b) { return b >= 1073741824 ? (b / 1073741824).toFixed(2) + ' GB' : Math.round(b / 1048576) + ' MB'; };
-        const lines = ['RAM ' + mb(heldBytes), 'ahead ≈' + mb(ahead), 'disk ' + (galDiskB === null ? '…' : mb(galDiskB))];
-        if (el.childNodes.length !== 3) { while (el.firstChild) el.firstChild.remove(); lines.forEach(function () { el.appendChild(document.createElement('div')); }); }
-        lines.forEach(function (t, i) { el.childNodes[i].textContent = t; });
-        if (!galLook && galFly && galFly.pic0 && galFly.pic0.isConnected) {      // pic0: the corner box (pic is the page's own picture)
-            if (el.parentNode !== galFly.pic0) galFly.pic0.appendChild(el);
+        const lines = [['R', 'RAM', mb(heldBytes)], ['P', 'Preloaded', '≈' + mb(ahead)], ['D', 'Disk', galDiskB === null ? '…' : mb(galDiskB)]];
+        if (el.childNodes.length !== 3) {
+            while (el.firstChild) el.firstChild.remove();
+            lines.forEach(function (t) {
+                const d = document.createElement('div'), s = document.createElement('span'), l = document.createElement('span');
+                s.className = 's'; s.textContent = t[0];
+                l.className = 'l'; l.textContent = t[1];
+                d.appendChild(s); d.appendChild(l); d.appendChild(document.createTextNode(''));
+                el.appendChild(d);
+            });
+            setTip(el, 'RAM: the full-size pictures this gallery holds in memory\nPreloaded: full-size pictures loaded for the next steps (an estimate)\nDisk: what this site has stored on disk');
+        }
+        lines.forEach(function (t, i) { el.childNodes[i].lastChild.nodeValue = ': ' + t[2]; });
+        const col = !galLook && galFly && galFly.pic0 && galFly.pic0.isConnected && galFly.pic0.querySelector('.endl:not(.top)');
+        if (col) {      // pic0: the corner box (pic is the page's own picture); the readout tops its left column
+            if (el.parentNode !== col || col.firstChild !== el) col.insertBefore(el, col.firstChild);
             el.classList.remove('fix');
             el.style.left = el.style.top = '';
         } else if (galHole && galTop) {
@@ -18302,6 +18430,7 @@
             '.row label{flex:1;cursor:pointer}',
             '.row[hidden]{display:none}',
             '.hint{display:block;font-size:11px;color:' + C.sub + ';margin-top:1px}',
+            '.row label>svg{width:13px;height:13px;fill:#89b4fa;vertical-align:-2px}',
             'input[type=checkbox]{accent-color:' + C.blue + ';width:15px;height:15px;cursor:pointer;flex:none}',
             'input[type=number],input[type=text],select,textarea{background:' + C.surface + ';color:' + C.text + ';',
             'border:1px solid ' + C.surface2 + ';border-radius:5px;padding:4px 7px;font-size:12px}',
@@ -18635,7 +18764,7 @@
             const r = document.createElement('div');
             r.className = 'row';
             const l = document.createElement('label');
-            l.textContent = labelText;
+            withGalIcon(l, labelText);
             if (hintText) {
                 const hint = document.createElement('span');
                 hint.className = 'hint';
@@ -19720,23 +19849,23 @@
 
         section('Galleries');
         check('galleryMiddle', 'Middle-click opens a gallery',
-            'Off: middle-click opens the link in a new tab as usual, and clicking the ▦ chip on a result opens its gallery.');
+            'Off: middle-click opens the link in a new tab as usual, and clicking the gallery button on a result opens its gallery.');
         check('galleryEndless', 'Endless galleries',
-            'At the end of a gallery the next one on the page opens, and back from its first page goes to the one before. Also the ☐ Endless box on the clicked picture.');
+            'At the end of a gallery the next one on the page opens, and back from its first page goes to the one before. Also the Endless button on the clicked picture.');
         check('galleryLoadAll', 'Load all of a gallery\'s originals when it opens',
-            'Off (saves data): originals load only from a preview (hover or slideshow) on, and a page step without one stops them. Also the ☐ Load all box on the clicked picture.');
+            'Off (saves data): originals load only from a preview (hover or slideshow) on, and a page step without one stops them. Also in the gallery\'s right-click menu.');
         num('galleryKeepMB', 'Memory for an open gallery (MB)',
             'Its pictures 2 pages behind you and everything ahead; nothing behind kept past 5 minutes. Over this, pictures behind go first, then the farthest ahead. (default: 1024)', 64, 16384, 64);
         num('keepMB', 'Memory for pictures loaded ahead elsewhere (MB)',
             'The oldest go first. (default: 512)', 32, 16384, 32);
         check('galleryEndlessViewed', 'Endless: include galleries already viewed',
-            'Off: galleries already seen or visited are left out of the queue, judged once when each joins it.');
+            'Off: galleries already seen or visited are left out of the queue, judged once when each joins it. Also the All button on the clicked picture.');
         check('galleryEndlessStop', 'Endless: stop once at each gallery\'s end',
             'A slideshow step past a gallery\'s last picture stops there with a note; the next step opens the next gallery. Off: it crosses straight on. The slideshow playing by itself never stops.');
         check('doorScan', 'Find galleries without a hover',
             'Reads up to 3 linked pages of each grid of linked thumbnails, one at a time, so gallery links are known before you hover one. Off: three hovers teach it.');
-        check('galleryChips', 'Show the ▦ chip on every gallery',
-            'Off: the chip shows only on the thumbnail under the pointer.').el.addEventListener('change', galMarkSoon);
+        check('galleryChips', 'Show the ▦ gallery button on every gallery',
+            'Off: the gallery button shows only on the thumbnail under the pointer.').el.addEventListener('change', galMarkSoon);
         check('galleryTicks', 'Tick results whose gallery was seen',
             'One green tick for a gallery you looked at, two for a page you opened.').el.addEventListener('change', galMarkSoon);
         check('gallerySavedMarks', 'Mark results something was saved from',

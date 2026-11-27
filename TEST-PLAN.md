@@ -247,7 +247,7 @@ Test pages:
 
 ## 7. Opening a gallery (endless on, the default)
 
-7.0 **Load all on (the default): every original at once** (v0.397.0, `G14`). Middle-click a cover (or click its chip)
+7.0 **Load all on (the default): every original at once** (v0.397.0, `G14`). Middle-click a cover (or click its gallery button)
     and don't hover anything.
     - **Expect:** the main page's loading stops at once. `orig galo` loads start within a second, from picture 1,
       through every picture of the gallery (`gallery originals: done {pictures, found}` at the end), with the next
@@ -263,12 +263,12 @@ Test pages:
       to 64 to try it), **expect** `memory keep: dropped …` and then `gallery originals: memory full`, and no more
       original requests until you page on.
 
-7.1 **Load all off (data saver): 2 galleries of thumbnails ahead, no originals.** Untick ☐ Load all, close the
+7.1 **Load all off (data saver): 2 galleries of thumbnails ahead, no originals.** Untick Load all in the right-click menu, close the
     gallery, then middle-click a cover and don't hover any picture.
     - **Expect:** the main page's loading stops at once. Then
       `loading ahead: thumbnails of gallery N of the queue {href, ahead: 2}` for the next 2 galleries:
       thumbnails of their first 2 pages, and **no originals**. eporner, Chrome: verified (v0.397.0).
-    - Tests 7.2–7.7 are data-saver tests unless they say otherwise; tick ☐ Load all again afterwards.
+    - Tests 7.2–7.7 are data-saver tests unless they say otherwise; tick Load all (right-click menu) again afterwards.
 
 7.2 **A hover starts originals.** Hover a picture in the gallery, say picture 4.
     - **Expect:** `loading ahead: a preview; originals from picture 4`, then original requests from
@@ -365,9 +365,11 @@ Turn Endless back on afterwards.
     everything closes.
 
 9.2 **Nothing overlaps at the smallest size.** Drag a corner of the clicked picture to make it as small as it goes,
-    then hover it. **Expect:** it stops at 196×130 (the picture, without the strip); ⓘ, ⤓ ✕ ⛶, ☐ Load all, ☐ Endless
-    and the readout (raised on hover) all clear of each other and clickable.
+    then hover it. **Expect:** it stops at 160×134 (the picture, without the strip); ⓘ ↗, ⤓ ✕ ⛶, the R/P/D readout
+    (spelled out while hovered), ☐ Endless and ☐ All all clear of each other and clickable.
     - Without Ctrl the drag snaps, and stopped at 239x157 here; hold Ctrl to reach the minimum.
+9.2a **Jump box.** Click P on the page row, then click a thumbnail without typing. **Expect:** the box closes and
+    nothing else happens. Click G, type 2, click away. **Expect:** gallery 2 opens and the click does nothing more.
     - eporner, Chrome (v0.405.0): verified. The frame is 196x130 (picture 190x124 inside the border); each control
       hit-tests as itself, and the gaps are 3 px or more.
 

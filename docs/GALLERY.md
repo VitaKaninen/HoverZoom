@@ -1,5 +1,8 @@
 # Galleries (peek)
 
+**Names:** the ▦ on a gallery's thumbnail is the **gallery button** in everything the user reads (user
+2026-11-26: "chip" was never theirs); code and these notes still say chip (`galChip…`, `galleryChips`).
+
 A click on a door's ▦ chip (or a middle press, with `galleryMiddle`) floats the linked page's
 thumbnails over the page, so the user can judge whether that gallery is worth opening. Code:
 `galDoorHover` … `galMove`, after `harvest`. Where it runs = wherever doors are learned (`P17`).
@@ -304,23 +307,25 @@ What loads ahead follows what the user does. Code: the `ah*` functions after `ga
   `galLookOpen` refuses until the next move — else the timer opened it at the stale `galPt`), a left press (the link is followed), or any other hover (`onOver` — it ran `return` for an open
   gallery and swallowed the next door's mouseover). Middle press / chip from it opens the gallery (`galMiddle`
   closes it first; `galChipOpen` ignores it). Wheel and keys stay the page's.
-- **Storage readout** (user, v0.394.0): `galStoreTick`, `.hzst`, bottom-right of the gallery's own picture — the
-  hovered door (`galHole`, fixed in `galTop`) for a preview, the corner box `galFly.pic0` once open (**not**
-  `galFly.pic`: that is the page's own `<img>`). Lines: RAM = `heldBytes`; ahead ≈ `plKeep` bytes not in `heldBlobs`
+- **Storage readout** (user, v0.394.0; v0.423.0 R/P/D): `galStoreTick`, `.hzst` — bottom-right of the hovered door
+  (`galHole`, fixed in `galTop`, long labels) for a preview; once open, the first child of the corner box
+  `galFly.pic0`'s bottom-left column, above Endless and All (**not** `galFly.pic`: that is the page's own `<img>`).
+  Short `R: P: D:`, spelled out (RAM, Preloaded, Disk) while the picture is hovered (`.s`/`.l` spans). Lines: RAM = `heldBytes`; Preloaded ≈ `plKeep` bytes not in `heldBlobs`
   (an estimate from pixels, `PL_BYTES_PER_PX`); disk = `navigator.storage.estimate().usage` (the whole origin). Ticks
   each second while `galLook`/`galCur`/`galWant`; started from `galShow`, `galLookOpen`, the `galCur` set and the fly's
-  creation (a closing preview's `galHide` removes it on a timeout that can land after the gallery opened); `.fly:hover`
-  lifts it over ⛶.
-- **Load all** (`cfg.galleryLoadAll`, default on, v0.397.0; ☐ Load all above ☐ Endless on the clicked picture, and
-  Settings → Galleries): the open gallery's originals load at once — `ahG.origs` true from `ahGalOpen`, `galHqAhead`
+  creation (a closing preview's `galHide` removes it on a timeout that can land after the gallery opened).
+  Preloaded is NOT thumbnails (user asked; it is full-size pictures held for the next steps).
+- **Load all** (`cfg.galleryLoadAll`, default on, v0.397.0; the right-click menu and Settings → Galleries — off the
+  clicked picture since v0.423.0, user): the open gallery's originals load at once — `ahG.origs` true from `ahGalOpen`, `galHqAhead`
   from the page on screen through every built cell, then stand-ins for the list's unbuilt rest, then the
   `KEEP_BACK_PAGES` behind it. A hover on a picture not loaded yet (`hqTried` unset) restarts the run there (jumps
   the queue). Page steps never stop it; a queue switch (`galBuild`, new href) starts the new gallery from its
   start. Turned off mid-gallery: `galo` dropped, nothing new until a preview. Off = the data-saver rules below
   (originals from a preview on; a forward page step stops them, also the step past a gallery's end).
-  The clicked picture is never under `GAL_PIC_MIN_W`×`GAL_PIC_MIN_H` 196×130 (`galPlace`, drag `lo`, `galBoxKept`):
-  measured, the stacked checkboxes (11 px in, 77 wide, 54 tall) and the storage readout (81×51, raised 38 px on
-  hover over ⛶) need 181×127.
+  The clicked picture is never under `GAL_PIC_MIN_W`×`GAL_PIC_MIN_H` 160×134 (`galPlace`, drag `lo`, `galBoxKept`):
+  measured v0.423.0 at the floor (inner 173×128, the 3 px border eats 6): ⓘ ↗ 11–74 × 6–30, ⤓ ✕ from 103, the
+  left column (readout 40 + Endless 20 + All 20, 4 px gaps) 34–122, ⛶ 135–162. Taller column = the height floor;
+  Endless and All side by side would lower it ~24 px.
   A run stops at the **memory horizon** (`keepRoomFor(item)`, v0.420.0, user: "stay under the cap, drop things to
   make room"): it loads the next picture while it fits, or fits by dropping only pictures *farther* than it
   (`keepDist`); otherwise it ends `memory full` and sets `set.hqHorizon`, and every slideshow step/preview
@@ -753,7 +758,9 @@ The page a door opens is the ground truth for the press that opened it. Hovers c
 
 ## Endless (v0.359.0, user; INTERACTION.md `G12`)
 
-`cfg.galleryEndless` (remembered; ☐ Endless at the clicked picture's bottom-left, ⓘ top-left (`.endl.top`), `galEndlessBuild`; also the
+`cfg.galleryEndless` (remembered; ☐ Endless at the clicked picture's bottom-left, ☐ All (`galleryEndlessViewed`, `galEndlessViewedSet`) below it,
+each one word spelled out on hover (`.l`); ⓘ ↗ top-left (`.endl.top`), `galEndlessBuild`. Every button there and ⤓ fade to .45 until
+hovered (`.fd`); ✕ and ⛶ never fade (user). Also the
 right-click menu and the panel; on by default since v0.387.0, user). Code: `galEndless` … `galInfoShow`, after `galPageStep`.
 - **The queue** (`galChain` {hrefs, at, land}, made in `galMiddle` by `galChainFrom` for a user's open, kept for
   a queued one: `land.href === href`): the opened door, then the doors after it in document order (`galDoorList`:
@@ -775,8 +782,9 @@ right-click menu and the panel; on by default since v0.387.0, user). Code: `galE
   → `galChainSkip`, the next one that way, else closes as before.
 - **Strip** (`galChainText`): `P:page/pages · G:gallery/galleries`, `G:picture/pictures · T:picture/pictures`
   (`+` = some count not final). A gallery not open counts `galChainN` (its list or `hzGalCounts`) ÷ this `galPer`,
-  1 page when unknown. P and G are plain numbers: `twAsk` reads the first `\d+/`; a typed page maps across the queue
-  (`galChainPageAt`). The page row always shows in endless (`galStripRows`).
+  1 page when unknown. `galStripText` keeps `s.nums` {page, gal, pic, tb} for `twAsk`: a click left of the page row's
+  `·` asks a page (`galChainPageAt`), right of it a gallery (`galStripHalf` → `galChainJump`); the picture row asks a
+  picture of the whole queue (T; `galChainPicJump`: in another gallery it opens the page holding it, not the picture). The page row always shows in endless (`galStripRows`).
 - The galleries ahead load per "Loading ahead" (`ahGalAhead`; replaced `galChainWarm`, which read only the next
   one's thumbnails, on the last page).
 - **Closing** (`galHide`) after the queue moved on scrolls the current card into view (`behavior: 'instant'` — a
@@ -802,6 +810,9 @@ right-click menu and the panel; on by default since v0.387.0, user). Code: `galE
   screen first. Debug line `gallery refit {full, W, H, kept, restored}`. The pane's viewport emulation stops sending
   `resize` after a few changes: dispatch one by hand when testing this.
 - **Wheel in a gallery or fullscreen**: flips; a click on the picture makes it zoom (`docs/TOUR.md`, `wheelFlips`).
+- **Right-click menu marks** (v0.423.0, user): `item(text, kind, act)` — boolean = a drawn checkbox, `{radio}` = a dot,
+  a string = an action's icon (⚙ ↗ ✕, blue text). ✕ top-right closes it. Every setting in it is also in the panel;
+  `withGalIcon` draws ▦ in a label as `ICON_GALLERY` (menu and panel).
 - **ⓘ box and the right-click menu**: the ⓘ box is placed off its button (above, else below, else beside:
   `galMenuShow(…, avoid)`). While it is up the next press anywhere, ⓘ included, only closes it; while the menu is
   up a press off it does the same (user v0.363.0; a press on an item still acts). `galInfoPress` is the first
