@@ -39,6 +39,21 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   end, `N+` from the HTML only, nothing when unknown; `galKnownN(href)` reads memory, then the kept list, then
   sessionStorage `hzGalCounts2` {href: [n, at]}, 3000, whole galleries only, written by `galKeep`. `galChipsCount(href)`
   restyles after `galLoad`, `galMore` and `galGrow`'s end.
+- **Cheap count (L13 split, v0.453.0)**: every fetched gallery page (`galCountRead`, from `galLoad` and `galCountLoad`,
+  no extra request) yields candidates (`galCountCands`): short labels (≤ 60 chars, title included) stating a number of
+  pictures (`countStated`), and the pager's last page (`pagerNum`: same path with `?page=N` etc., or `/N`, `/page/N`;
+  count range `pagerRange` at the HTML's own count per page). Ground truth = a frame read to its end (`galCountTruth`,
+  in `galGrow`'s end): agreeing candidates are area samples (shared rule; stores `countAreas` / `pagerAreas`, keyed by
+  the gallery's host, path = its path), 3 galleries → a rule; a covering rule that disagrees is struck (`vdForget`),
+  or dropped at once (`areaDrop`) when it equalled the HTML count (it would have ended the list early). Free check on
+  every read: a stated count below the HTML's is struck. Under a rule (`galStated`): the chip/strip show that count
+  (no `+` when stated; a pager gives `N+`; `galKnownN`; a list growing past it proves it wrong); stated = HTML count →
+  list final with no frame (`galStatedTake`); otherwise the idle reads (L7 `ahIdleGrow`, L13 `galGrowLater`) are
+  skipped and the read starts only when pages past the list are wanted (`galGrowNeed`) or Load all needs the list
+  (Load all on = L13 runs as before). `COUNT_CHECK` 1 in 10 galleries (`galCountDraw`, per href) is read anyway to
+  keep the rule honest. Debug: `gallery count from a learned place`, `gallery count: the read to its end checks the
+  page's numbers` (says `page not read in this tab` when no candidates were kept — seen once on the fixture, cause
+  not found). Fixture `door-count.html` (TESTING.md).
 - **Grey chip until its first round is in** (user, v0.388.0; round 1 since v0.418.0): `[data-hz-door].wait` (icon `#a6adc8`, blue `#89b4fa`
   once ready). `galThumbsReady(href)` = the first `AH_THUMBS_STEP` (10, or `galPer(null)` if fewer) items of `galLists` all in `galThumbDone` (thumbnail
   URLs settled, load or error, recorded in `galImg`), so a broken thumbnail cannot keep it grey. `galThumbSettled`

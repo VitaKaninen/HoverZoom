@@ -77,6 +77,12 @@ Start line: **"Read docs/NEXT.md 'NEXT TASK' and continue: the L13 split's cheap
 hovers opened an M8 that marked running lines ⏹; a gallery preview with its first page in cut anyway. Verified in the
 pane on door-search d6 (4 hovers after Load all: no M8, no cut; door re-hover: "nothing stopped"). Not live-tested on
 a real site. The L13 cheap count was not started. Start line unchanged (above).
+**v0.453.0 (2026-11-27, pushed).** The L13 split's cheap count built (GALLERY.md "Cheap count"); verified in the pane on
+`door-count.html` (learned after 3 reads; fresh tab: all chips `80`, opened gallery `1 / 80` `P:1/5` with no frame,
+read started by the page step past the HTML). Not live-tested on a real site (TEST-PLAN 7.12f). The user offered to
+start the activity window on a landed page so I can test it and they send the log — use that for 7.12e/7.12d.
+**Next:** L25 + "Upgrade clips".
+Start line: **"Read docs/NEXT.md 'NEXT TASK' and continue: L25 and Upgrade clips."**
 
 ---
 

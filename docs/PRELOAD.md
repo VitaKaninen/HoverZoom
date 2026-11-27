@@ -70,8 +70,7 @@ the read has ended (`galListRead`: grown, or stopped with a reason) `galWhole` i
 Trap: a gate's release pumps **both** gates (`onFree` = `ahPump`, set beside the two gates so `ahGate` stays testable alone), or `grow` (AH-page) never sees AH-pic's originals finish.
 Chrome-pane check, door-search: d6 (240 in HTML) read at 32.8 s right after its 240 originals with Load all, 0.1 s
 without; d7 (10 in HTML) "needed now" at once. The step-past jump is not live-tested.
-**Not built:** L25 and "Upgrade clips" (a clip's original is still only probed for metadata until a hover), the L13
-split (a cheap count first), M10's "L17 first gallery before L20", L8's L1 (singles of a fetched page), L10's ±3-then-rest,
+**Not built:** L25 and "Upgrade clips" (a clip's original is still only probed for metadata until a hover), M10's "L17 first gallery before L20", L8's L1 (singles of a fetched page), L10's ±3-then-rest,
 next-page finding (its own session, three repos).
 
 New kind in the plan (not in code): **L25** the full clip. L10 = ±3 nearest first, then the rest of the section on screen. L8 = the next results page's
@@ -163,7 +162,7 @@ step a page or gallery they are skimming, and M6 does not return until the galle
 "Upgrade clips" = the page on screen only; when Load all reaches the next page, its clips go first.
 **L17 is capped at the first 2 pages of each next gallery** (user: some have hundreds of thumbnails) — as now.
 
-**L13 split (user 2026-11-27), not built** (its place is, v0.450.0): the list read is one thing today — an HTML fetch of the gallery page gives
+**L13 split, built v0.453.0** (the count; how it is learned and used: GALLERY.md "Cheap count"). The user's ask: the list read is one thing today — an HTML fetch of the gallery page gives
 each picture's thumbnail + link, and their number *is* the count; past what the HTML holds, only a hidden frame
 (the page loaded in full, scripts and images included; measured ~5–9 s each, one at a time) reads the rest. Cost (`galRender`
 grow mode): it downloads what a visit scrolled to the bottom would — page, scripts, ads, every thumbnail; only video,

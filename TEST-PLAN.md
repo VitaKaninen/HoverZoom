@@ -388,6 +388,12 @@ Test pages:
      A running line the next moment shares shows ↓ (carries on under Mx), not ⏹. **Fail:** each hover adds an
      `M8` block or marks the next galleries' lines interrupted.
 
+7.12f **The count before the list** (v0.453.0). On a site whose gallery pages state their size ("240 photos"), open
+     three galleries and let each read to its end (strip loses its `+`). Then in a fresh tab of the results page.
+     **Expect:** chips show the full count (no `+`) before any gallery is opened; an opened gallery's strip shows the
+     full count and pages at once; with Load all off it reads past its page only when you step past what it holds.
+     **Fail:** chips stay `N+`, or a gallery stops short of its stated count.
+
 7.13 **A missed original is tried again** (v0.395.0). On a site where some originals fail (`found` lower
      than `pictures` in 7.2's `done` line), close the gallery and open it again, then hover.
      - **Expect:** the second run's `found` is equal or higher; the misses were tried again, not skipped

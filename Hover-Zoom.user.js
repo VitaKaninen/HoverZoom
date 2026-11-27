@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.452.0
+// @version      0.453.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -324,6 +324,8 @@
         ownPlayerAreas: {},         // host -> {rules, samples, idleDays}: video-link thumbnails the site's own player lands on
         linkAreas: {},              // host -> {rules, samples, idleDays}: thumbnails whose linked page never holds the original
         doorAreas: {},              // host -> {rules, samples, idleDays}: thumbnails that lead to other pages, not a bigger copy (P17)
+        countAreas: {},             // gallery host -> {rules, samples, idleDays}: where its gallery pages state their picture count (L13 split)
+        pagerAreas: {},             // gallery host -> {rules, samples, idleDays}: where its gallery pages put a pager whose last page gives the count
         doorScan: true,             // read a few linked pages of every grid of linked thumbnails, so doors are known before a hover
         doorScanned: {},            // host -> {chain|path: {day, v}}: scanned grids that formed no door rule
         taughtRules: {},            // image host -> [{re, to, ex, one?, made}]: where the original lives, shown by the user
@@ -7757,7 +7759,7 @@
 
     function vdRecord(chain, path, elapsed) { vdApply(vdLearn, chain, path, elapsed); }
 
-    const AREA_STORES = ['avatarAreas', 'ownPlayerAreas', 'linkAreas', 'doorAreas', 'videoDelays'];
+    const AREA_STORES = ['avatarAreas', 'ownPlayerAreas', 'linkAreas', 'doorAreas', 'videoDelays', 'countAreas', 'pagerAreas'];
 
     // The learned rule in cfg[key] covering this chain on this site, or null.
     function areaRule(key, chain, path) {
@@ -13511,6 +13513,140 @@
         galChipsCount(href);
     }
 
+    // ---- cheap count (L13 split): a stated number or the pager's last page, learned per site against a frame read to its end. PRELOAD.md "L13 split".
+    const COUNT_AFTER = /(\d{1,3}(?:[,.  ]\d{3})+|\d{1,6})\s*(?:photos?|pictures?|pics?|images?|imgs?|items?|media|files?|fotos?|bilder|slides?)\b/i;
+    const COUNT_BEFORE = /\b(?:photos?|pictures?|pics|images?|items|media|fotos?|bilder)\s*[:(\[]?\s*(\d{1,3}(?:[,.  ]\d{3})+|\d{1,6})\b/i;
+    const COUNT_TEXT_MAX = 60;          // longer text is prose, not a label
+    const COUNT_CHECK = 0.1;            // a count taken from a rule is still read to its end this often
+    // The number of pictures a short label states, or null.
+    function countStated(text) {
+        const t = String(text || '').replace(/\s+/g, ' ').trim();
+        if (!t || t.length > COUNT_TEXT_MAX || !/\d/.test(t)) return null;
+        const m = COUNT_AFTER.exec(t) || COUNT_BEFORE.exec(t);
+        if (!m) return null;
+        const n = parseInt(m[1].replace(/\D/g, ''), 10);
+        return n > 0 && n < 100000 ? n : null;
+    }
+    // The page number a link to another page of this same gallery carries, or null.
+    function pagerNum(galHref, linkHref) {
+        let g, u;
+        try { g = new URL(galHref); u = new URL(linkHref, galHref); } catch (e) { return null; }
+        if (g.origin !== u.origin) return null;
+        const gp = g.pathname.replace(/\/+$/, ''), up = u.pathname.replace(/\/+$/, '');
+        let n = null;
+        if (up === gp) {
+            ['page', 'p', 'pg', 'pn', 'pagenum'].some(function (k) { const v = u.searchParams.get(k); if (v && /^\d+$/.test(v)) { n = +v; return true; } return false; });
+        } else if (up.indexOf(gp + '/') === 0) {
+            const m = /^\/(?:page[\/-]?)?(\d+)$/.exec(up.slice(gp.length));
+            if (m) n = +m[1];
+        }
+        return n >= 2 && n < 10000 ? n : null;
+    }
+    // A pager's last page at `per` pictures a page: the counts it allows.
+    function pagerRange(last, per) { return { lo: (last - 1) * per + 1, hi: last * per }; }
+    // Does a candidate agree with the count a read to the end found?
+    function countVerdict(c, truth) { return c.k === 'stated' ? c.n === truth : truth >= c.lo && truth <= c.hi; }
+    // ---- cheap count: the page's candidates, the learned place, the ground truth
+
+    const galCands = new Map();         // href -> {cands, n0}: a fetched gallery page's count candidates, n0 = pictures its HTML holds
+    const galStated = new Map();        // href -> {n, exact}: the count a learned place gives
+    const galCountDraws = new Map();    // href -> true when this gallery is read to its end anyway, to check its rule
+    // A fetched gallery page's candidates: short labels stating a number of pictures, and the pager's last page.
+    function galCountCands(doc, href, per) {
+        const out = [], root = doc && doc.documentElement;
+        if (!root) return out;
+        const seen = new Set(), walk = doc.createTreeWalker(root, 4);
+        for (let t = walk.nextNode(); t && out.length < 40; t = walk.nextNode()) {
+            if (!/\d/.test(t.nodeValue)) continue;
+            let el = t.parentElement;
+            for (let up = 0; el && up < 3; up++, el = el.parentElement) {
+                if (/^(SCRIPT|STYLE|NOSCRIPT|TEMPLATE)$/.test(el.tagName)) break;
+                const n = countStated(el.textContent);
+                if (n == null) { if ((el.textContent || '').length > COUNT_TEXT_MAX) break; continue; }
+                if (!seen.has(el)) { seen.add(el); out.push({ k: 'stated', chain: domChain(el), n: n }); }
+                break;
+            }
+        }
+        let best = null;
+        if (per) doc.querySelectorAll('a[href]').forEach(function (a) { const n = pagerNum(href, a.href); if (n && (!best || n > best.n)) best = { n: n, a: a }; });
+        if (best) { const r = pagerRange(best.n, per); out.push({ k: 'pager', chain: domChain(best.a), n: best.n, lo: r.lo, hi: r.hi }); }
+        return out;
+    }
+    function galCountKey(c) { return c.k === 'stated' ? 'countAreas' : 'pagerAreas'; }
+    function galCountPath(href) { try { return '/' + new URL(href).pathname.split('/').filter(Boolean).join('/'); } catch (e) { return '/'; } }
+    // Read-modify-write of a count store for the gallery's own site (its host, not this page's).
+    function countApply(key, step, href, chain) {
+        const h = galWholeHost(href);
+        if (!h || !isTopFrame) return null;
+        reloadSettings();
+        const path = galCountPath(href), r = step((cfg[key] || {})[h] || null, chain, path, areaDay(), href);
+        if (!r || !r.change) return null;
+        const all = Object.assign({}, cfg[key]);
+        if (r.entry) all[h] = r.entry; else delete all[h];
+        cfg[key] = all;
+        saveSettings();
+        dbg(key + ': ' + r.change, { host: h, chain: chain, path: path, href: href });
+        return r.change;
+    }
+    // The candidate a learned place covers: stated first, then the pager; none when the place holds two different numbers.
+    function galCountRuled(href, cands) {
+        const h = galWholeHost(href), path = galCountPath(href);
+        const pick = function (k) {
+            const e = (cfg[k === 'stated' ? 'countAreas' : 'pagerAreas'] || {})[h];
+            if (!e || !e.rules) return null;
+            const hits = cands.filter(function (c) { return c.k === k && vdRuleFor(e, c.chain, path); });
+            return hits.length && new Set(hits.map(function (c) { return c.n; })).size === 1 ? hits[0] : null;
+        };
+        return pick('stated') || pick('pager');
+    }
+    function galCountDraw(href) {
+        if (!galCountDraws.has(href)) galCountDraws.set(href, Math.random() < COUNT_CHECK);
+        return galCountDraws.get(href);
+    }
+    // A gallery page fetched: its candidates kept for the ground truth; under a learned place, its count.
+    function galCountRead(href, doc, list) {
+        if (!doc || !isTopFrame) return;
+        const n0 = list ? list.length : 0;
+        let cands;
+        try { cands = galCountCands(doc, href, n0); } catch (e) { dbg('gallery count: reading the page\'s numbers failed', { href: href, error: String(e) }); return; }
+        galCands.set(href, { cands: cands, n0: n0 });
+        if (galCands.size > GAL_CACHE) galCands.delete(galCands.keys().next().value);
+        const c = galCountRuled(href, cands);
+        if (!c) return;
+        if (c.k === 'stated' && c.n < n0) { countApply('countAreas', vdForget, href, c.chain); return; }     // free check: the page already holds more
+        countApply(galCountKey(c), areaTouch, href, c.chain);
+        const s = c.k === 'stated' ? { n: c.n, exact: true } : { n: Math.max(c.lo, n0), exact: false };
+        galStated.set(href, s);
+        if (galStated.size > GAL_CACHE * 4) galStated.delete(galStated.keys().next().value);
+        dbg('gallery count from a learned place', { href: href, kind: c.k, pictures: s.n, exact: s.exact, html: n0, check: galCountDraw(href) });
+        galChipsCount(href);
+    }
+    // An exact count from a learned place, taken for this gallery now (not one drawn for the check).
+    function galStatedN(href) { const s = galStated.get(href); return s && s.exact && !galCountDraw(href) ? s.n : 0; }
+    // A list the learned count says is whole: final with no frame read.
+    function galStatedTake(href) {
+        const list = galLists.get(href), n = galStatedN(href);
+        if (!n || !list || list.length !== n || galGrown.has(href) || galGrowing === href) return;
+        galGrown.add(href);
+        galGrowWhy.delete(href);
+        galKeep(href, false);
+        galChipsCount(href);
+        dbg('gallery: its page holds the whole gallery, as its stated count says', { href: href, pictures: n });
+    }
+    // A read to its end found N: candidates that agree are samples (three galleries in one place make a rule), a covering rule that disagrees is struck.
+    function galCountTruth(href, N) {
+        const got = galCands.get(href);
+        dbg('gallery count: the read to its end checks the page\'s numbers', { href: href, pictures: N, candidates: got ? got.cands.map(function (c) { return c.k + ' ' + (c.k === 'stated' ? c.n : c.lo + '-' + c.hi); }) : 'page not read in this tab' });
+        if (!got || !N) return;
+        const ruled = galCountRuled(href, got.cands);
+        got.cands.forEach(function (c) {
+            if (countVerdict(c, N)) countApply(galCountKey(c), areaLearn, href, c.chain);
+            else if (c === ruled) countApply(galCountKey(c), c.k === 'stated' && c.n === got.n0 ? areaDrop : vdForget, href, c.chain);     // it would have ended the list at the HTML: dropped at once
+        });
+        const s = galStated.get(href);
+        if (s && (s.exact ? s.n !== N : N < s.n)) galStated.delete(href);
+    }
+
     function galRender(href, onMore, onEnd, solo) {
         if (galFrameStop && !solo) galFrameStop();
         return new Promise(function (resolve) {
@@ -13823,7 +13959,7 @@
                 retryAfter: busy ? usLog.retryAfterOf(refused.headers) : null } : { status: doc ? 200 : 0 });
             if (doc) keepDocInfo(href, doc);
             const got = doc ? galPick(doc, href) : null;
-            if (doc) galTrace(href, 'html: ' + (got ? got.length : 0) + ' pictures');
+            if (doc) { galTrace(href, 'html: ' + (got ? got.length : 0) + ' pictures'); galCountRead(href, doc, got); }
             return got;
         });
         const p = new Promise(function (resolve) {
@@ -13847,6 +13983,7 @@
                 galLists.set(href, v);
                 if (galLists.size > GAL_CACHE) galLists.delete(galLists.keys().next().value);
                 if (galNoFrame(href) && !weak && !galGrown.has(href)) { galGrown.add(href); galGrowWhy.set(href, 'html'); galKeep(href, true); }    // no frame here: the HTML is all
+                galStatedTake(href);
                 galChipsCount(href);
             }
             return v;
@@ -14266,6 +14403,7 @@
         ahDrop('grow');
         if (galGrowing === href || galGrown.has(href)) return;     // a read that stopped short is tried again on each open, as before
         if ((galLists.get(href) || []).length < galWantN(set)) { galGrowNeed(set, 'the list is shorter than the pages wanted', true); return; }     // galBuild's own galFeed runs before galCur is set
+        if (galStatedN(href) && !ahAll()) { galTrace(href, 'reading on: not now, the count is known (' + galStatedN(href) + '); read when its pages are wanted'); return; }     // L13 split
         ahRun(ahPages, 'grow', function () {
             if (galCur === set && galGrowing !== href && !galGrown.has(href)) { galTrace(href, 'reading on: everything before it is done'); galGrow(href); }
             return Promise.resolve();
@@ -14526,8 +14664,8 @@
         const s = galSt;
         if (!s || !set) return;
         if (galChain && galChain.land && galChain.land.href !== set.href && s.nums && s.nums.gal) { galPadFit(); return; }     // endless switching: the old numbers stay up, or the box narrows and the rows reshuffle (user)
-        const reading = galGrowing === set.href || !galListRead(set.href),     // "+" until the read past the HTML has ended
-            base = galLists.get(set.href), n = Math.max(set.cells.length, base ? base.length : 0);
+        const known = galKnownN(set.href), reading = (galGrowing === set.href || !galListRead(set.href)) && !(known[1] && !galGrown.has(set.href)),     // "+" until the read past the HTML has ended, or a learned place gave the count
+            base = galLists.get(set.href), n = Math.max(set.cells.length, base ? base.length : 0, known[0] || 0);
         galStripRows(set);
         const page = set.page || 0, at = set.pics.length ? galStartAt(set) : -1;
         const total = galPagesOf(set);
@@ -14571,7 +14709,7 @@
 
     // The set's pages: laid out, plus the pictures known but not loaded yet.
     function galPagesOf(set) {
-        const base = galLists.get(set.href), n = Math.max(set.cells.length, base ? base.length : 0), more = n - set.cells.length;
+        const base = galLists.get(set.href), n = Math.max(set.cells.length, base ? base.length : 0, galKnownN(set.href)[0] || 0), more = n - set.cells.length;
         return (set.pages ? set.pages.length : 1) + (more > 0 ? Math.ceil(more / galPer(set)) : 0);
     }
 
@@ -14966,7 +15104,7 @@
         const per = Math.max(1, galPer(set)), fmt = function (v) { return v.toLocaleString(); };
         let pb = 0, pall = 0, tb = 0, tall = 0, open = reading;
         c.hrefs.forEach(function (h, i) {
-            const k = i === c.at ? [n, galGrown.has(h)] : galChainN(h), p = i === c.at ? total : galChainPages(c, i, per);
+            const k = i === c.at ? [n, !reading] : galChainN(h), p = i === c.at ? total : galChainPages(c, i, per);
             if (i < c.at) { pb += p; tb += k[0]; }
             pall += p;
             tall += k[0];
@@ -16016,7 +16154,8 @@
 
     // A gallery's known picture count: [n, whole] from memory, the kept list, or the kept count.
     function galKnownN(href) {
-        const l = galLists.get(href);
+        const l = galLists.get(href), s = galStated.get(href);
+        if (s && !galGrown.has(href) && s.n >= (l ? l.length : 0)) return [s.n, s.exact];     // a learned place's count (L13 split); a list past it proves it wrong
         if (l && l.length) return [l.length, galGrown.has(href)];
         const k = galKeptAll()[href];
         if (k && Array.isArray(k.items) && k.items.length) return [k.items.length, k.whole !== false];
@@ -16067,7 +16206,7 @@
             if (why === 'grown' || why === 'reported' || html) { galGrown.add(href); galKeep(href, html); }
             if (html) galGrowWhy.set(href, 'html');
             else if (!galGrown.has(href)) galGrowWhy.set(href, why);
-            if (!html && galGrown.has(href)) galWholeSeen(href, from, (galLists.get(href) || []).length);
+            if (!html && galGrown.has(href)) { galWholeSeen(href, from, (galLists.get(href) || []).length); galCountTruth(href, (galLists.get(href) || []).length); }
             galTrace(href, 'reading on: ' + why);
             ahGrowEnd(href, why === 'grown' || why === 'reported' ? '' : why);
             dlqGrowEnd(href, why, galGrown.has(href));
@@ -18717,10 +18856,11 @@
                 if (req) req.done(refused ? { status: refused.status, limited: busy, signal: 'hard', retryAfter: busy ? usLog.retryAfterOf(refused.headers) : null } : { status: doc ? 200 : 0 });
                 if (doc) keepDocInfo(href, doc);
                 const got = doc ? galPick(doc, href) : null;
+                if (doc) galCountRead(href, doc, got);
                 ahT('page', { tag: tag || 'count', h: href, s: Math.round(t0), ms: Math.round(performance.now() - t0), ok: doc ? 1 : 0, st: refused ? refused.status : undefined, n: got ? got.length : 0 }, job);
                 if (job && doc) { if (got && got.length >= GAL_HTML_ENOUGH) job.gal = (job.gal || 0) + 1; else job.few = (job.few || 0) + 1; }
                 dbg('gallery count from its page', { href: href, pictures: got ? got.length : null, why: refused ? 'status ' + refused.status : !doc ? 'no page' : got && got.length < GAL_HTML_ENOUGH ? 'too few, the frame decides' : null, shared: pageTextHits });
-                if (got && got.length >= GAL_HTML_ENOUGH && !galLists.has(href)) { galLists.set(href, got); galFromHtml.add(href); galChipsCount(href); galWholeTake(href); galKeep(href, false); }
+                if (got && got.length >= GAL_HTML_ENOUGH && !galLists.has(href)) { galLists.set(href, got); galFromHtml.add(href); galChipsCount(href); galWholeTake(href); galStatedTake(href); galKeep(href, false); }
             });
         });
     }
@@ -18865,7 +19005,7 @@
     function ahIdleGrow() {
         if (galGrowing || galFrameStop) return true;
         const h = galDoorList().map(function (d) { return d.h; }).find(function (x) {
-            return galLists.has(x) && !galGrown.has(x) && !ahGrowTried.has(x) && !galNoFrame(x);
+            return galLists.has(x) && !galGrown.has(x) && !ahGrowTried.has(x) && !galNoFrame(x) && !galStatedN(x);     // a learned count needs no frame read
         });
         if (!h) return false;
         ahGrowTried.add(h);
@@ -19541,7 +19681,7 @@
     let panelOpened = null;     // Undo's snapshot — see openPanel(); MUST outlive a re-render
 
     // What the user entered per site, not knobs: `Reset to defaults` leaves these alone.
-    const RESET_KEEPS = ['siteList', 'blockList', 'referrerSites', 'siteAudio', 'videoDelays', 'avatarAreas', 'ownPlayerAreas', 'linkAreas', 'doorAreas', 'doorScanned', 'areasAgedOn', 'taughtRules'];
+    const RESET_KEEPS = ['siteList', 'blockList', 'referrerSites', 'siteAudio', 'videoDelays', 'avatarAreas', 'ownPlayerAreas', 'linkAreas', 'doorAreas', 'countAreas', 'pagerAreas', 'doorScanned', 'areasAgedOn', 'taughtRules'];
 
     // Open/closed, the fold, scroll and position for this TAB — sessionStorage is per tab and
     // per origin, so it follows a same-site link or a refresh and dies with the tab.

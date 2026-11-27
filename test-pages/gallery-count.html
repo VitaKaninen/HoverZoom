@@ -1,0 +1,86 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Counted gallery</title>
+<!-- L13 split fixture: the HTML holds 50 pictures and states "80 photos"; the rest mount 10 at a time near the bottom. door-count.html links it as ?c=N. -->
+<style>body{margin:0;background:#1e1e2e;color:#cdd6f4;font:14px system-ui} .grid img{width:200px;height:150px;margin:6px}</style>
+<div class="wrap"><div class="head"><div class="info"><span class="count">80 photos</span></div></div></div>
+<div class="grid" id="grid">
+  <div class="tile"><img src="/many/cnt-1.jpg"></div>
+  <div class="tile"><img src="/many/cnt-2.jpg"></div>
+  <div class="tile"><img src="/many/cnt-3.jpg"></div>
+  <div class="tile"><img src="/many/cnt-4.jpg"></div>
+  <div class="tile"><img src="/many/cnt-5.jpg"></div>
+  <div class="tile"><img src="/many/cnt-6.jpg"></div>
+  <div class="tile"><img src="/many/cnt-7.jpg"></div>
+  <div class="tile"><img src="/many/cnt-8.jpg"></div>
+  <div class="tile"><img src="/many/cnt-9.jpg"></div>
+  <div class="tile"><img src="/many/cnt-10.jpg"></div>
+  <div class="tile"><img src="/many/cnt-11.jpg"></div>
+  <div class="tile"><img src="/many/cnt-12.jpg"></div>
+  <div class="tile"><img src="/many/cnt-13.jpg"></div>
+  <div class="tile"><img src="/many/cnt-14.jpg"></div>
+  <div class="tile"><img src="/many/cnt-15.jpg"></div>
+  <div class="tile"><img src="/many/cnt-16.jpg"></div>
+  <div class="tile"><img src="/many/cnt-17.jpg"></div>
+  <div class="tile"><img src="/many/cnt-18.jpg"></div>
+  <div class="tile"><img src="/many/cnt-19.jpg"></div>
+  <div class="tile"><img src="/many/cnt-20.jpg"></div>
+  <div class="tile"><img src="/many/cnt-21.jpg"></div>
+  <div class="tile"><img src="/many/cnt-22.jpg"></div>
+  <div class="tile"><img src="/many/cnt-23.jpg"></div>
+  <div class="tile"><img src="/many/cnt-24.jpg"></div>
+  <div class="tile"><img src="/many/cnt-25.jpg"></div>
+  <div class="tile"><img src="/many/cnt-26.jpg"></div>
+  <div class="tile"><img src="/many/cnt-27.jpg"></div>
+  <div class="tile"><img src="/many/cnt-28.jpg"></div>
+  <div class="tile"><img src="/many/cnt-29.jpg"></div>
+  <div class="tile"><img src="/many/cnt-30.jpg"></div>
+  <div class="tile"><img src="/many/cnt-31.jpg"></div>
+  <div class="tile"><img src="/many/cnt-32.jpg"></div>
+  <div class="tile"><img src="/many/cnt-33.jpg"></div>
+  <div class="tile"><img src="/many/cnt-34.jpg"></div>
+  <div class="tile"><img src="/many/cnt-35.jpg"></div>
+  <div class="tile"><img src="/many/cnt-36.jpg"></div>
+  <div class="tile"><img src="/many/cnt-37.jpg"></div>
+  <div class="tile"><img src="/many/cnt-38.jpg"></div>
+  <div class="tile"><img src="/many/cnt-39.jpg"></div>
+  <div class="tile"><img src="/many/cnt-40.jpg"></div>
+  <div class="tile"><img src="/many/cnt-41.jpg"></div>
+  <div class="tile"><img src="/many/cnt-42.jpg"></div>
+  <div class="tile"><img src="/many/cnt-43.jpg"></div>
+  <div class="tile"><img src="/many/cnt-44.jpg"></div>
+  <div class="tile"><img src="/many/cnt-45.jpg"></div>
+  <div class="tile"><img src="/many/cnt-46.jpg"></div>
+  <div class="tile"><img src="/many/cnt-47.jpg"></div>
+  <div class="tile"><img src="/many/cnt-48.jpg"></div>
+  <div class="tile"><img src="/many/cnt-49.jpg"></div>
+  <div class="tile"><img src="/many/cnt-50.jpg"></div>
+</div>
+<script>
+  var made = 50;
+  function more() {
+    var g = document.getElementById('grid');
+    for (var i = 0; i < 10 && made < 80; i++) {
+      made++;
+      var d = document.createElement('div'); d.className = 'tile';
+      var im = document.createElement('img'); im.src = '/many/cnt-' + made + '.jpg';
+      d.appendChild(im); g.appendChild(d);
+    }
+  }
+  window.addEventListener('scroll', function () {
+    if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 300) setTimeout(more, 200);
+  });
+</script>
+<script>
+  var GM_getValue = function (key, dflt) {
+    var v = localStorage.getItem(key);
+    return v === null ? dflt : v;
+  };
+  var GM_setValue = function (key, val) { localStorage.setItem(key, val); };
+  var GM_addValueChangeListener = function () {};
+  var GM_listValues = function () { return Object.keys(localStorage); };
+  var GM_deleteValue = function (key) { localStorage.removeItem(key); };
+  var GM_registerMenuCommand = function () { return 'x'; };
+  var GM_unregisterMenuCommand = function () {};
+</script>
+<script src="../Hover-Zoom.user.js"></script>

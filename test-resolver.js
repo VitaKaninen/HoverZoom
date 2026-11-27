@@ -1587,5 +1587,38 @@ const srcLf = src.split(String.fromCharCode(13)).join('');     // the checkout m
     eq('gif: not a GIF', gifFrameEnd(new Uint8Array([0xFF, 0xD8, 0xFF, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])), -2);
     eq('gif: one frame then the trailer', gifFrameEnd(new Uint8Array(hdr.concat(img, [0x3B]))), hdr.length + img.length);
 }
+// ---- cheap count (L13 split): stated labels, pager links, verdicts; learned through the shared area rules
+{
+    const srcN = src.replace(/\r\n/g, '\n'), a = srcN.indexOf('    const COUNT_AFTER'), b = srcN.indexOf('    // ---- cheap count: the page');
+    const cc = new Function('URL', srcN.slice(a, b) + '\nreturn {countStated, pagerNum, pagerRange, countVerdict};')(URL);
+    eq('count: "240 photos"', cc.countStated('240 photos'), 240);
+    eq('count: "Pictures: 1,234"', cc.countStated('Pictures: 1,234'), 1234);
+    eq('count: "(36 pics)" in a title', cc.countStated('Kate on the beach (36 pics) - Site'), 36);
+    eq('count: "Photos (12)"', cc.countStated('Photos (12)'), 12);
+    eq('count: views are not pictures', cc.countStated('1,234 views'), null);
+    eq('count: prose is not a label', cc.countStated('This gallery has 240 photos that were taken on a long trip along the coast last year'), null);
+    eq('count: zero is nothing', cc.countStated('0 photos'), null);
+    const G = 'https://e.com/gallery/kate-36/';
+    eq('pager: ?page=4', cc.pagerNum(G, '/gallery/kate-36/?page=4'), 4);
+    eq('pager: /gallery/x/3', cc.pagerNum(G, 'https://e.com/gallery/kate-36/3/'), 3);
+    eq('pager: /page/5', cc.pagerNum(G, '/gallery/kate-36/page/5'), 5);
+    eq('pager: another gallery is not this pager', cc.pagerNum(G, '/gallery/other-9/?page=4'), null);
+    eq('pager: page 1 says nothing', cc.pagerNum(G, '?page=1'), null);
+    eq('pager: another site', cc.pagerNum(G, 'https://x.com/gallery/kate-36/?page=4'), null);
+    eq('pager: last page 4 at 30 a page', cc.pagerRange(4, 30), { lo: 91, hi: 120 });
+    eq('verdict: stated agrees', cc.countVerdict({ k: 'stated', n: 36 }, 36), true);
+    eq('verdict: stated off by one disagrees', cc.countVerdict({ k: 'stated', n: 36 }, 35), false);
+    eq('verdict: pager range holds it', cc.countVerdict({ k: 'pager', lo: 91, hi: 120 }, 100), true);
+    eq('verdict: pager range misses', cc.countVerdict({ k: 'pager', lo: 91, hi: 120 }, 60), false);
+    const CH = 'span>div.info>div.head>div.wrap';
+    let e = null;
+    ['a', 'b', 'c'].forEach(function (x) { e = vd.areaLearn(e && e.entry, CH, '/gallery/' + x, 9, 'https://e.com/gallery/' + x); });
+    eq('count area: three galleries agreeing in one place make a rule', e.change, 'learned');
+    eq('count area: the rule covers a new gallery there', !!vd.vdRuleFor(e.entry, CH, '/gallery/d'), true);
+    let s = e;
+    for (let i = 0; i < vd.VDELAY_FORGET; i++) s = vd.vdForget(s.entry, CH, '/gallery/d');
+    eq('count area: three disagreements in a row drop it', s.change, 'forgot the site');
+    eq('count area: a disagreement that lost pictures drops it at once', vd.areaDrop(e.entry, CH, '/gallery/d').change, 'forgot the site');
+}
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);
