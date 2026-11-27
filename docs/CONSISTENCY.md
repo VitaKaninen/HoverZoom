@@ -25,11 +25,8 @@ a good idea built in one place goes everywhere it makes sense.
 | State menu items flip their label and toast 3 s | `refreshSiteMenu` | site, slideshow lines, debug | already true | ../CLAUDE.md |
 | Esc / a press away closes our menus | `galMenuHide`, `closePops` | gallery menu, ⓘ box, preview pops | already true | — |
 
-## Not yet swept (next batch)
-
-- Text that does not fit: shrink-then-drop (`galStripSqueeze`, `twAsk`) vs the preview caption and download bar
-  (`.dl .txt` ellipsizes).
-- Fade rules: corner picture (✕ ⛶ always, rest on hover) vs the preview bar and the widgets.
-- The wheel over our other overlays (the right-click menu, ⓘ box, Settings, download bar) never scrolling the page.
-- CLAUDE.md trap sweep: `isTopFrame` on per-page listeners that write settings; every held flag cleared in
-  `releaseSliders`; `pointer-events` classes removed on the hide path; `[hidden]` vs explicit `display`.
+| The wheel over an overlay of ours never scrolls the page behind | widgets (`twWheel`), gallery (`galWheel`), Settings (`overscroll-behavior:contain`) | right-click menu / ⓘ box | applied v0.427.0; the download bar n/a (a status bar, not a surface you scroll on) | — |
+| Text that does not fit: numbers shrink, then a word drops; never cut | `galStripSqueeze`, `twAsk` | page widget (sizes to its text), preview caption and download bar (file names ellipsize) | n/a: a cut file name loses nothing a tip does not give back; a cut number would | — |
+| `[hidden]` must beat the element's own `display` | per-rule `[hidden]` lines | Settings: `.entries`, `.addrow` (flex) stayed up in "Edit as text" | fixed v0.427.0 with one `[hidden]{display:none!important}` in the panel sheet | CLAUDE.md trap |
+| CLAUDE.md traps: `isTopFrame` on per-page listeners that store; held flags cleared on mouseup; `pointer-events` classes removed on hide | `missPress`, `savePanelState`, `releaseSliders`, `twHoldStop`, `hideViewer` | every top-level listener; every range input; `.hot`, `.catch` | already true (swept v0.427.0) | CLAUDE.md |
+| Close and fullscreen always visible, the rest fades | corner picture (`.fd`, user v0.424.0) | the preview's ✕ rides the bar's fade (user v0.127.0) | asked the user (v0.427.0) | VIEWER.md E68 |

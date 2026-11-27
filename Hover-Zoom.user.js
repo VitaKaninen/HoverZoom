@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.426.0
+// @version      0.427.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -10684,6 +10684,7 @@
     // the slideshow; over a preview it zooms (a hover one is pinned first); anywhere else the page scrolls and a pinned preview goes.
     function twWheel(e) {
         if (!e.deltaY) return;
+        if (galMenuEl && !galMenuEl.hidden && e.composedPath().indexOf(galMenuEl) >= 0) { e.preventDefault(); e.stopImmediatePropagation(); return; }    // our menu: the page behind stays put, as under the widgets
         if (tw) twNear(e.clientX, e.clientY);
         if (e.ctrlKey || panelOwns(e)) return;
         const up = !!view && !!box && box.classList.contains('on');
@@ -18468,7 +18469,7 @@
             'letter-spacing:.06em;color:' + C.sub + ';border-bottom:1px solid ' + C.surface + ';padding-bottom:5px}',
             '.row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:5px 0}',
             '.row label{flex:1;cursor:pointer}',
-            '.row[hidden]{display:none}',
+            '[hidden]{display:none!important}',     // .entries and .addrow are flex: [hidden] lost to them
             '.hint{display:block;font-size:11px;color:' + C.sub + ';margin-top:1px}',
             '.row label>svg{width:13px;height:13px;fill:#89b4fa;vertical-align:-2px}',
             'input[type=checkbox]{accent-color:' + C.blue + ';width:15px;height:15px;cursor:pointer;flex:none}',
