@@ -77,7 +77,7 @@ pictures up to 2 screens below, as the page adds them · 2 L3 for galleries on s
 r1 for the same · once still: M1 from the first gallery on screen. Unverified: lazy sites put the real address in the
 page only near the screen (`data-src` etc. are read; a picture with no address yet waits).
 **M5 – Reached the bottom of the results page:** 1 M1 lines 1–7 if unfinished · 2 L8 (next page's M1 1–6); M1 line 8
-dropped. (User said "#6"; read as line 8 by their words "the long list of galleries" — confirm.)
+dropped (user confirmed). Galleries scrolled past were already dropped by M4.
 **M6 – Just opened a gallery (P:), nothing hovered:** 1 L12 (clips L24) · 2 L16 · 3 L20 · 4 Upgrade clips on the page on
 screen [Load all] · 5 L21 · 6 L23 [Load all] · 7 L14 + L25 [Load all] · 8 L17 [Endless] · 9 L18 [Endless, Load all] · 10 L13
 **M7 – Stepped a page forward:** 1 L12 · 2 L20 · 3 Upgrade clips on the page on screen [Load all] · 4 L21 · 5 L23 [Load
@@ -86,18 +86,30 @@ all] · 6 L17 [Endless] · 7 L14 [Load all] · 8 L18 [Endless, Load all] · 9 L1
 3 L12 · 4 L20 · 5 Upgrade clips on the page on screen [Load all] · 6 L21 · 7 L23 [Load all] · 8 L17 [Endless] · 9 L14
 [Load all] · 10 L18 [Endless, Load all] · 11 L13
 **M9 – Stepped a page back:** 1 L12 · 2 L20 · 3 Upgrade clips on the page on screen [Load all] · 4 L21 · 5 L23 from the
-page's end backward [Load all] · 6 L17 [Endless] · 7 L14 [Load all] · 8 L18 [Endless, Load all] · 9 L13. (Proposed to the
-user: thumbs of the page *before* in 2 and 4 — the pages ahead were just seen; only an Endless step back lands on the
-previous gallery's last page with nothing before it loaded.)
+page's end backward [Load all] · 6 L17 [Endless] · 7 L14 [Load all] · 8 L18 [Endless, Load all] · 9 L13. User's reason (2026-11-27): a step
+back is temporary — to save or re-hover one picture — then forward again, so pages ahead stay. Settle from the log:
+`page` dir -1 then further back vs forward, `pv`/`save` on the back page (`save` added v0.437.0).
 **M10 – G: pressed, stepping whole galleries:** 1 L12 (clips L24) · 2 L16 · 3 L17 first gallery [Endless] · 4 L20 · 5 L17
 the rest [Endless] · 6 L13 · no HQ or full clips until a hover (then M8)
 **M11 – Endless landed on the next gallery:** as M6 (P:) or M10 (G:)
 **M12 – Slideshow on a results page:** 1 L19 ahead, nearest first · 2 L19 behind
-**M13 – Slideshow in a gallery:** 1 HQ of the next 3 in its direction (a clip: in full) · 2 L12 of the page it is on · 3
-L20 · 4 L23 [Load all] · 5 L17 [Endless] · 6 L14 + L25 ahead of it [Load all] · 7 L18 [Endless, Load all] · 8 L13
+**M13 – Slideshow in a gallery** (user's): 1 HQ of the next 10 in its direction, kept 10 ahead (a clip: in full, any
+setting); if the slideshow catches up with the loaded ones, 20 ahead before anything below resumes · 2 L12 of the page
+it is on · 3 L20/L21 (next 2 pages) · 4 L17 [Endless] · 5 L23 [Load all] · 6 L14 + L25 ahead of it [Load all] · 7 L18
+[Endless, Load all] · 8 L13. Starting a slideshow without Load all: the page's clips load in full (any not started).
 **M14 – Gallery closed:** M1 from the first gallery on screen
 
-Open to the user: M6 has L14 before L17, M7–M9 the reverse.
+M6 has L14 before L17, M7–M9 the reverse — on purpose (user): a fresh open means they want this gallery; once they
+step a page or gallery they are skimming, and M6 does not return until the gallery is closed and opened again.
+"Upgrade clips" = the page on screen only; when Load all reaches the next page, its clips go first.
+**L17 is capped at the first 2 pages of each next gallery** (user: some have hundreds of thumbnails) — as now.
+
+**L13 split (user 2026-11-27), not built:** the list read is one thing today — an HTML fetch of the gallery page gives
+each picture's thumbnail + link, and their number *is* the count; past what the HTML holds, only a hidden frame
+(the page loaded in full, scripts and images included; measured ~5–9 s each, one at a time) reads the rest. Full-size
+addresses are not part of it: each is found per picture when its HQ is wanted (`galResolve`). Wanted: the **count**
+first and cheap — a stated number ("240 photos") or the gallery's own pager, learned per site with the frame's final
+count as ground truth (shared rule §learning) — then the rest of the list only when thumbnails past it are needed.
 
 **Next-page finding (all three scripts, user 2026-11-27):** the best parts of each, one shared copy (as us-dock/us-log).
 Open Links in New Tab (`nextPageReason`) recognises *that* a link is a pager control — rel, icon-only arrows by

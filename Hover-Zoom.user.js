@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.436.0
+// @version      0.437.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -8418,6 +8418,7 @@
         if (at && Date.now() - at < MID_RETRY_MS) { toast('Already saved', 2000); return; }
         midSaved.set(url, Date.now());
         const gImg = galOwns(active) ? active : null, gHref = gImg && galCur ? galCur.href : null;
+        if (gImg && galCur) { const k = galCur.pics.findIndex(function (p) { return p.img === gImg; }); if (k >= 0) predNote('save', { g: predGal(gHref), i: k + 1, p: galPageOf(galCur, k) + 1, on: (galCur.page || 0) + 1 }); }
         dbg('middle press: saving', url);
         saveOriginal(url, true, function () { dbg('middle press: saved', url); midSaved.set(url, Infinity); syncSavedMark(); if (gImg) galSaved(gImg, gHref); }, savePage(active));
     }
