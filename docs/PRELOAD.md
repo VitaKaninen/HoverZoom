@@ -1,4 +1,4 @@
-# Preload kinds — IDs the user cites (`L1` … `L23`, moments `M1` … `M14`)
+# Preload kinds — IDs the user cites (`L1` … `L25`, moments `M1` … `M14`)
 
 User 2026-11-27: every kind of thing loaded ahead gets an ID; the user then states, per situation, the order they
 want, and the code is made to match. **Keep this list current when a load kind is added, removed or re-ordered.**
@@ -41,33 +41,54 @@ Queues (each kind below names its own). They do not know about each other; all s
 | **Slideshow** ||||
 | L19 | Page slideshow: every picture's full size ahead and behind, nearest first (behind counts double); clips buffered ahead | each step (`plFill`); in a gallery L14 does this instead | PL |
 
-## Order per moment — PROPOSED 2026-11-27, awaiting the user's adjustments, NOT in code yet
+## Plan — PROPOSED 2026-11-27, the user reviewing it, NOT in code yet
 
-Read as "first → last". Anything not listed is paused. A new moment drops what is still *waiting* and re-queues in
-its order; what is in flight lands (cancelling wastes its bytes). Dropping loses nothing: the next moment re-derives
-what is unloaded from the page (nothing is cached), so a drop behaves as a pause. The latest action always wins;
-hovers (M2, M3, M8) and scrolling (M4) are temporary — when they end, the moment underneath resumes from where the
-pointer/screen now is. "Around" (L10 in M2, L22) = nearest first, before and after alike (user: before is as likely
-as after; goes 2–3 either way): ±1, ±2, ±3, then (L10 only) the rest of the section on screen. Tab hidden: nothing.
-Now (code): L10 queues every on-screen picture in the hovered picture's section in page order, not nearest first;
-interruption is a mix — a gallery open or a scroll drops the main page's waiting jobs, a forward page step with Load
-all on drops nothing, a gallery preview drops nothing.
+New kinds in the plan (not in code): **L24** clip/GIF still + ▶ icon, from a partial download (a video's first frame via
+`preload="metadata"`; a GIF's first frame from a range request of its start — both unverified, test before building);
+**L25** the full clip. L10 changes to ±3 nearest first, then the rest of the section on screen.
 
-| ID | Moment | Order |
-|---|---|---|
-| M1 | Landed on a results page, nothing hovered | L1 → L3 → L4 round 1 → L5 round 1 → L4/L5 rounds 2–3 → L2 → L7 |
-| M2 | Hovering a single picture there | L9 → L10 → back to M1 |
-| M3 | Gallery preview on a door | L11 → L6 → M1 from this door on |
-| M4 | Scrolling the results page | nothing new; once still, M1 from the first door on screen |
-| M5 | At the bottom, going through the galleries | M1's rest → L8 |
-| M6 | Just opened a gallery, nothing hovered (P:) | L12 → L16 → L20 → L13 → L23 → L21 → L14 → L17 → L18 |
-| M7 | Stepped a page forward | L12 → L20 → L13 → L23 → L21 → L14 → L17 → L18 |
-| M8 | Hovered a picture in the gallery | L9 → L22 → L12 → L20 → L23 → L14 → L21 → L17 → L18 |
-| M9 | Stepped a page back | L12 → L23 (from the page's end back) → L20 → L14 → L17 |
-| M10 | G: pressed, stepping whole galleries | L12 → L16 → L17 (the next gallery first) → L20 → L13; full size waits for a hover (then M8) |
-| M11 | Endless landed on the next gallery | as M6 (P:) or M10 (G:); Last ticked: no L17/L18 |
-| M12 | Slideshow on a results page | L19 ahead (nearest first) → L19 behind |
-| M13 | Slideshow in a gallery | L22 ahead of the slideshow → L12/L20 of the page it reaches → L14 → L18 near the end → L17 |
-| M14 | Gallery closed | M1 from the first door on screen |
+**Rules for every moment.** Each line waits for the one above. Not listed = paused. The latest action wins: a new
+moment drops what is still *waiting* and re-queues in its order; in flight lands. A drop loses nothing (the next moment
+re-derives what is unloaded from the page). Hovers (M2, M3, M8) and scrolling (M4) are temporary: when they end, the
+moment underneath resumes from where the pointer/screen now is. Tab hidden: nothing.
+**[Load all]** = the line runs only with "Load all of a gallery's originals when it opens" ticked; unticked it is
+skipped (and HQ in a gallery waits for a hover: M8). **[Endless]** = only with Endless on and Last unticked.
+**Clips and GIFs** (gallery preview and open gallery): every clip/GIF cell shows L24 first; L25 follows in the
+gallery's order under [Load all], else only for the hovered one.
 
-Load all off: drop L23/L14 from M6/M7/M9/M11 (L22 still follows a hover). Endless off or Last: drop L17/L18.
+Short labels the user reads (keep them when editing):
+L1 HQ singles, on screen + next screen · L2 HQ singles, rest of page · L3 Gallery lists · L4 Gallery thumbs, 10 per
+round · L5 Gallery HQ, 1 per round · L6 Next gallery's p1 thumbs · L7 Full list of long galleries (slow) · L8 Next
+results page: 3 galleries · L9 HQ of hovered img · L10 HQ ±3 around it, then rest on screen · L11 Hovered gallery's
+p1 thumbs · L12 Thumbs, page on screen · L13 Rest of gallery list (slow) · L14 HQ, rest of gallery · L15 Bigger
+thumbs for big cells · L16 HQ of clicked picture (corner) · L17 Next galleries' thumbs p1–2 · L18 Next gallery's p1 HQ
+· L19 Slideshow HQ · L20 Thumbs, next page · L21 Thumbs, pages after that · L22 HQ ±3 around hovered gallery img ·
+L23 HQ, page on screen · L24 Clip/GIF stills with ▶ · L25 Full clips
+
+**M1 – Landed on a results page:** 1 L1 · 2 L3 · 3 L4 r1 (thumbs 1–10) · 4 L5 r1 (HQ #1) · 5 L4/L5 r2 · 6 L4/L5 r3 · 7 L2 · 8 L7
+**M2 – Hovering a single picture:** 1 L9 · 2 L10 · 3 back to M1
+**M3 – Gallery preview:** 1 L11 (clips as L24) · 2 L6 · 3 M1 from this gallery on
+**M4 – Scrolling the results page** (a gallery's waiting loads dropped the moment it leaves the screen; new content
+counts as it appears): 1 L1 for pictures as they come on screen · 2 L3 for galleries on screen · 3 L4 r1 for galleries
+on screen · once still: M1 from the first gallery on screen
+**M5 – At the bottom of the results page, idle, having opened ≥ 20 % of its galleries:** 1 M1's rest · 2 L8
+**M6 – Just opened a gallery (P:), nothing hovered:** 1 L12 (clips as L24) · 2 L16 · 3 L20 · 4 L13 · 5 L23 [Load all]
+· 6 L21 · 7 L14 [Load all] (clips: L25) · 8 L17 [Endless] · 9 L18 [Endless, Load all]
+**M7 – Stepped a page forward:** 1 L12 · 2 L20 · 3 L13 · 4 L23 [Load all] · 5 L21 · 6 L14 [Load all] · 7 L17 [Endless]
+· 8 L18 [Endless, Load all]
+**M8 – Hovered a picture in the gallery:** 1 L9 (a clip: L25 for it) · 2 L22 · 3 L12 · 4 L20 · 5 L23 [Load all] · 6 L14
+[Load all] · 7 L21 · 8 L17 [Endless] · 9 L18 [Endless, Load all]
+**M9 – Stepped a page back:** 1 L12 · 2 L23 from the page's end backward [Load all] · 3 L20 · 4 L14 [Load all] · 5 L17 [Endless]
+**M10 – G: pressed, stepping whole galleries:** 1 L12 · 2 L16 · 3 L17 (next gallery first) [Endless] · 4 L20 · 5 L13 ·
+HQ waits for a hover (then M8)
+**M11 – Endless landed on the next gallery:** as M6 (P:) or M10 (G:)
+**M12 – Slideshow on a results page:** 1 L19 ahead, nearest first · 2 L19 behind
+**M13 – Slideshow in a gallery:** 1 L22 ahead of the slideshow · 2 L12/L20 of the page it reaches · 3 L14 [Load all] ·
+4 L18 near the end [Endless, Load all] · 5 L17 [Endless]
+**M14 – Gallery closed:** M1 from the first gallery on screen
+
+**L8's next page (now):** `nextPageIn` — HZ's own three rungs, each refusing ambiguity: `rel="next"` → a numbered
+pager (the number after the one that is not a link) → a lone forward-word link ("next", "older", "more", », ›, →).
+Forum Stumbler's `detectNextRecord` has the same rungs plus a user-taught pager (authoritative, an empty group = last
+page) and a learned next rule, and drops the numbered rung on infinite-scroll pages. Open question to the user:
+adopt FS's (copied verbatim between markers, as us-dock/us-log).
