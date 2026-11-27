@@ -16,6 +16,8 @@ reads it for **what changes and how long each piece takes**, not file names. Cod
   run (`galHqAll`, ends with found + bytes or why it stopped), next galleries' thumbnails and next gallery's
   full-size first page (`ahGalAhead`), idle count to the end (`ahIdleGrow` → `ahGrowJob`; its count is pictures known,
   `actCount` from `galMore`; `ahGrowEnd` from `galGrow`'s end: N in all / stopped, not to the end).
+- **Follows the bottom**: `receive` checks "at the bottom" before *every* message and scrolls after (v0.448.0) — not
+  only in `put()`: checklist lines (`mline`) and job headers grow the page without `put`.
 - **The window runs its own code** (`actPopup(win, own)`, injected as a string by `actInject`: `GM_addElement`
   first — it passes the page's CSP — else a `<script>` with the page's nonce and a Trusted Types policy). Listeners
   made by the page's script die with a reload of the page (that was "stops updating, Clear does nothing"), so the

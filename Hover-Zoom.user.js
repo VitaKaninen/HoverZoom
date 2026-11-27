@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.447.0
+// @version      0.448.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -940,7 +940,6 @@
             return g;
         };
         const put = function (el, box, into, box2) {
-            const sc = d.scrollingElement || de, stick = sc.scrollHeight - sc.scrollTop - sc.clientHeight < 40;
             const at = into || list;
             at.appendChild(el);
             if (box) at.appendChild(box);
@@ -951,14 +950,18 @@
                 if (f.getAttribute('data-mg')) moms.delete(f.getAttribute('data-mg'));
                 f.remove();
             }
-            if (stick) sc.scrollTop = sc.scrollHeight;
         };
         const head = function (m) {
             const sym = m.state === 'run' ? '…' : m.state === 'done' ? '✓' : m.state === 'stopped' ? '⏹' : m.state === 'failed' ? '✗' : '·';
             const n = m.total || m.done ? ' · ' + m.done + (m.total ? '/' + m.total : '') : '';
             return sym + ' ' + m.text + n + (m.bad ? ' (' + m.bad + ' failed)' : '') + (m.warn ? ' (' + m.warn + ' only the thumbnail)' : '') + (m.cut ? ' (' + m.cut + ' stopped mid-way, again later)' : '') + (m.ms != null ? ' · ' + secs(m.ms) : '') + (m.note ? ' — ' + m.note : '');
         };
-        const receive = function (m) {
+        const receive = function (m) {     // every message: kept at the bottom if it was there (checklist lines grow the page too)
+            const sc = d.scrollingElement || de, stick = sc.scrollHeight - sc.scrollTop - sc.clientHeight < 40;
+            take(m);
+            if (stick) sc.scrollTop = sc.scrollHeight;
+        };
+        const take = function (m) {
             if (!m || !m.t) return;
             if (m.t === 'hello') {
                 if (pids.has(m.pid)) return;
