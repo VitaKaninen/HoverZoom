@@ -376,7 +376,8 @@ Turn Endless back on afterwards.
     **Expect:** no preview opens until the box closes.
 9.2a **Jump box.** Click the pressed P: on the page row, then click a thumbnail without typing. **Expect:** the box
     closes and nothing else happens. Click G: (it presses), click it again, type 2, click away. **Expect:** gallery 2
-    opens and the click does nothing more.
+    opens and the click does nothing more. Open either number box and click its own row beside the field: the box
+    closes and the click does nothing else (v0.432.0).
     - eporner, Chrome (v0.405.0): verified. The frame is 196x130 (picture 190x124 inside the border); each control
       hit-tests as itself, and the gaps are 3 px or more.
 

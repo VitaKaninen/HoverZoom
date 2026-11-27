@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.431.0
+// @version      0.432.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -10824,7 +10824,7 @@
     let twAskEatUntil = 0;
     window.addEventListener('mousedown', function (e) {
         const t = twTyping;
-        if (!t || e.composedPath().indexOf(t.wrap) >= 0) return;
+        if (!t || e.composedPath().indexOf(t.input) >= 0) return;      // only the field itself: its row beside it is "away" (user)
         e.preventDefault();
         e.stopImmediatePropagation();
         twAskEatUntil = Date.now() + 1500;
