@@ -368,6 +368,8 @@ Turn Endless back on afterwards.
     then hover it. **Expect:** it stops at 160×134 (the picture, without the strip); ⓘ ↗, ⤓ ✕ ⛶, the R/P/D readout
     (spelled out while hovered), ☐ Endless and ☐ All all clear of each other and clickable.
     - Without Ctrl the drag snaps, and stopped at 239x157 here; hold Ctrl to reach the minimum.
+9.2b **Last page.** Page to the end of the last gallery. **Expect:** the totals after P and G are red; ▶ shows
+    "No more pages" in red for 2 s; ✕ beside ▶ closes the gallery. Unhovered: only ✕ and ⛶ show on the picture.
 9.2a **Jump box.** Click P on the page row, then click a thumbnail without typing. **Expect:** the box closes and
     nothing else happens. Click G, type 2, click away. **Expect:** gallery 2 opens and the click does nothing more.
     - eporner, Chrome (v0.405.0): verified. The frame is 196x130 (picture 190x124 inside the border); each control

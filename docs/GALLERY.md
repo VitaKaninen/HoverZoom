@@ -759,8 +759,10 @@ The page a door opens is the ground truth for the press that opened it. Hovers c
 ## Endless (v0.359.0, user; INTERACTION.md `G12`)
 
 `cfg.galleryEndless` (remembered; ☐ Endless at the clicked picture's bottom-left, ☐ All (`galleryEndlessViewed`, `galEndlessViewedSet`) below it,
-each one word spelled out on hover (`.l`); ⓘ ↗ top-left (`.endl.top`), `galEndlessBuild`. Every button there and ⤓ fade to .45 until
-hovered (`.fd`); ✕ and ⛶ never fade (user). Also the
+one word, swapped on hover for "Endless mode" / "Show all galleries" (`.s`/`.l`; user v0.424.0: keep it short, they
+run the picture very small); ⓘ ↗ top-left (`.endl.top`), `galEndlessBuild`. ✕ and ⛶ are always fully shown; every
+other button there and ⤓ is hidden until the picture is hovered, then fully shown (`.fd`; user v0.424.0). The readout
+always shows. ⤓ greyed (page not read yet) is by colour, never opacity, or it fights the fade. Also the
 right-click menu and the panel; on by default since v0.387.0, user). Code: `galEndless` … `galInfoShow`, after `galPageStep`.
 - **The queue** (`galChain` {hrefs, at, land}, made in `galMiddle` by `galChainFrom` for a user's open, kept for
   a queued one: `land.href === href`): the opened door, then the doors after it in document order (`galDoorList`:
@@ -810,6 +812,11 @@ right-click menu and the panel; on by default since v0.387.0, user). Code: `galE
   screen first. Debug line `gallery refit {full, W, H, kept, restored}`. The pane's viewport emulation stops sending
   `resize` after a few changes: dispatch one by hand when testing this.
 - **Wheel in a gallery or fullscreen**: flips; a click on the picture makes it zoom (`docs/TOUR.md`, `wheelFlips`).
+- **Page row end** (user v0.424.0): the total of P (when `!ch.on`: nothing further anywhere) and of G (last gallery
+  queued) turn red (`galStripPg`, `.no`); without endless the total turns red on the last page once `galWhole`. ▶
+  with nowhere to go — greyed, or `galChainGo` false after `galTourMore` — shows "No more pages" in red for
+  `GAL_NOMORE_MS` 2 s (`galNoMore`). A ✕ left of the page row's ▶ closes the gallery (`galHide('hole')`).
+  A typed page past what is laid out sets `want`, so it lands there once loaded (it used to stop at the last page laid out).
 - **Right-click menu marks** (v0.423.0, user): `item(text, kind, act)` — boolean = a drawn checkbox, `{radio}` = a dot,
   a string = an action's icon (⚙ ↗ ✕, blue text). ✕ top-right closes it. Every setting in it is also in the panel;
   `withGalIcon` draws ▦ in a label as `ICON_GALLERY` (menu and panel).

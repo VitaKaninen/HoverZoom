@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.423.0
+// @version      0.424.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -10766,7 +10766,7 @@
 
     // The page row's text "P:a/b · G:c/d": true when x is right of the ·, the gallery half.
     function galStripHalf(el, x) {
-        const t = el.firstChild, i = t && t.nodeType === 3 ? t.nodeValue.indexOf('·') : -1;
+        const t = [].find.call(el.childNodes, function (c) { return c.nodeType === 3 && c.nodeValue.indexOf('·') >= 0; }), i = t ? t.nodeValue.indexOf('·') : -1;
         if (i < 0) return false;
         const r = document.createRange();
         r.setStart(t, i);
@@ -10863,7 +10863,7 @@
             if (galEndless() && galChain.hrefs[galChain.at] === g.href) { k = galChainPageAt(k); if (k < 0) return; }
             g.want = null;
             const last = (g.pages ? g.pages.length : 1) - 1, to = Math.max(0, Math.min(last, k));
-            if (k > last && !galWhole(g)) { g.far = Math.max(g.far || 0, k); galFeed(g); }
+            if (k > last && !galWhole(g)) { g.far = Math.max(g.far || 0, k); g.want = k; galFeed(g); }     // lands on k once it is laid out (galLayout clears want)
             if (placed && view && tour && tour.gal === g) {
                 const list = tourEntries(), at = g.pages[to][0];
                 if (at < list.length && at !== tour.index) { tourTurnOn(); seamDir = 0; tourGo(list, at, at > tour.index ? 1 : -1, false); }
@@ -13585,6 +13585,7 @@
             '.strip.out{width:max-content}.strip.out .t{padding:0 6px}' +
             '.strip .b{flex:none;display:flex;align-items:center;justify-content:center;width:20px;height:24px;box-sizing:border-box;border-radius:5px;background:var(--btn);border:1px solid var(--border);cursor:pointer;font-size:11px}' +
             '.strip .b:hover{background:var(--btnHover)}.strip .b.faint{opacity:.35;cursor:default}.strip .b.faint:hover{background:var(--btn)}' +
+            '.strip .no,.strip .b.gx{color:#f38ba8}' +
             '.strip input.ask{width:4.5em;box-sizing:border-box;margin:0 auto;padding:1px 4px;font:inherit;text-align:center;color:var(--text);' +
             'background:var(--btn);border:1px solid var(--accent);border-radius:4px;outline:none;cursor:text}' +
             '.strip .askw{display:block;white-space:nowrap;text-overflow:clip;font-size:11px;cursor:default}.strip .askw input.ask{width:3.5em;margin:0 3px}' +
@@ -13624,13 +13625,16 @@
             '.fly .bt span{display:flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:16px;' +
             'background:#1e1e2e;border:1px solid #45475a;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.6)}' +
             '.fly .bt svg{width:18px;height:18px;fill:#a6e3a1}.fly .bt .no svg{fill:#f38ba8}' +
-            '.fly .tools{position:absolute;top:6px;right:' + (GAL_HD + 4) + 'px;display:flex;gap:6px;opacity:0;transition:opacity .15s ease;pointer-events:none}' +
+            '.fly .tools{position:absolute;top:6px;right:' + (GAL_HD + 4) + 'px;display:flex;gap:6px;pointer-events:none}' +
             '.fly .tools.low{top:auto;bottom:6px}' +
-            '.fly:hover .tools,.fly .tools.busy{opacity:1;pointer-events:auto}.fly.edit .tools,.fly.asking .tools{display:none}' +
+            '.fly.edit .tools,.fly.asking .tools{display:none}' +
             '.fly .tools span{display:flex;align-items:center;justify-content:center;min-width:26px;height:26px;padding:0 7px;box-sizing:border-box;border-radius:13px;' +
             'background:rgba(30,30,46,.92);border:1px solid #45475a;color:#cdd6f4;font:13px/1 system-ui,sans-serif;white-space:nowrap;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.5)}' +
             '.fly .tools span:hover{background:#313244;color:#89b4fa}' +
-            '.fly .tools .fd,.fly .endl>*{opacity:.45;transition:opacity .15s ease}.fly .tools .fd:hover,.fly .endl>*:hover{opacity:1}' +
+            '.fly .tools span{pointer-events:auto}' +
+            '.fly .tools .fd,.fly .endl>:not(.hzst){opacity:0;pointer-events:none;transition:opacity .15s ease}' +
+            '.fly:hover .tools .fd,.fly .tools.busy .fd,.fly:hover .endl>*{opacity:1;pointer-events:auto}' +
+            '.fly .endl>label:hover .s{display:none}' +
             '.fly .endl{position:absolute;bottom:6px;left:' + (GAL_HD + 4) + 'px;display:flex;gap:6px}' +
             '.fly .endl.top{top:6px;bottom:auto}.fly .endl:not(.top){flex-direction:column;align-items:flex-start}' +
             '.fly.edit .endl,.fly.asking .endl{display:none}' +
@@ -14112,11 +14116,13 @@
         const page = set.page || 0, at = set.pics.length ? galStartAt(set) : -1;
         const total = galPagesOf(set);
         const ch = galChainText(set, page, total, at, n, reading);
-        const pg = ch ? ch.pg : (page + 1) + ' / ' + total + (reading ? '+' : '');
-        s.pgT.textContent = ch ? pg : 'Page ' + pg;
         s.picT.textContent = ch ? ch.pic : (at >= 0 ? at + 1 : '–') + ' / ' + n + (reading ? '+' : '');
         s.nums = ch ? ch.nums : { page: [page + 1, total + (reading ? '+' : '')], gal: null, pic: [Math.max(0, at) + 1, n + (reading ? '+' : '')] };
-        galStripSqueeze(s, pg);
+        const N = s.nums;
+        if (Date.now() < galNoMoreUntil) galStripPg(s, [['No more pages', true]], '');
+        else if (ch) galStripPg(s, ['P:' + N.page[0] + '/', [String(N.page[1]), !ch.on], ' · G:' + N.gal[0] + '/', [String(N.gal[1]), N.gal[0] >= N.gal[1]]], '');
+        else galStripPg(s, [(page + 1) + ' / ', [total + (reading ? '+' : ''), page + 1 >= total && galWhole(set)]], 'Page ');
+        galStripSqueeze(s);
         s.pgP.classList.toggle('faint', ch ? !ch.back : total < 2);
         s.pgN.classList.toggle('faint', ch ? !ch.on : total < 2);
         s.picP.classList.toggle('faint', !n || (!!ch && !ch.picBack));
@@ -14131,12 +14137,37 @@
         return (set.pages ? set.pages.length : 1) + (more > 0 ? Math.ceil(more / galPer(set)) : 0);
     }
 
+    // The page row's text: parts are strings or [text, red]; pre ("Page ") is the first thing squeezed out.
+    function galStripPg(s, parts, pre) {
+        const t = s.pgT;
+        while (t.firstChild) t.firstChild.remove();
+        s.pgPre = pre ? t.appendChild(document.createTextNode(pre)) : null;
+        parts.forEach(function (p) {
+            if (typeof p === 'string') { t.appendChild(document.createTextNode(p)); return; }
+            if (!p[1]) { t.appendChild(document.createTextNode(p[0])); return; }
+            const r = document.createElement('span');
+            r.className = 'no';
+            r.textContent = p[0];
+            t.appendChild(r);
+        });
+    }
+
+    // ▶ on the last page: "No more pages" in red for GAL_NOMORE_MS.
+    let galNoMoreUntil = 0, galNoMoreT = 0;
+    const GAL_NOMORE_MS = 2000;
+    function galNoMore() {
+        galNoMoreUntil = Date.now() + GAL_NOMORE_MS;
+        clearTimeout(galNoMoreT);
+        galNoMoreT = setTimeout(function () { galNoMoreUntil = 0; if (galCur) galStripText(galCur); }, GAL_NOMORE_MS);
+        if (galCur) galStripText(galCur);
+    }
+
     // Numbers that do not fit: "Page" goes first, then the type shrinks.
-    function galStripSqueeze(s, pg) {
+    function galStripSqueeze(s) {
         [s.pgT, s.picT].forEach(function (t) { t.style.fontSize = ''; });
         if (s.el.hidden || s.el.classList.contains('out')) return;
         const over = function (t) { return t.scrollWidth > t.clientWidth + 0.5; };
-        if (over(s.pgT)) s.pgT.textContent = pg;
+        if (over(s.pgT) && s.pgPre && s.pgPre.parentNode) s.pgPre.remove();
         [s.pgT, s.picT].forEach(function (t) {
             let f = parseFloat(getComputedStyle(t).fontSize) || 12;
             while (over(t) && f > 8) { f -= 0.5; t.style.fontSize = f + 'px'; }
@@ -14168,9 +14199,11 @@
                 const b = document.createElement('span');
                 b.className = 'b';
                 b.textContent = text;
+                setTip(b, tip);
                 b.addEventListener('mousedown', function (e) {
                     e.preventDefault();
                     e.stopPropagation();
+                    if (e.button === 0 && b.classList.contains('faint') && act === galPageStep && dir > 0) { galNoMore(); return; }
                     if (e.button !== 0 || b.classList.contains('faint')) return;
                     if (act === galPageStep && (active || view)) { if (placed) unplace(); else cancel(); }
                     act(dir);
@@ -14182,7 +14215,16 @@
             s[tk] = document.createElement('span');
             s[tk].className = 't';
             s[nk] = btn('▶', nextTip, 1);
-            r.appendChild(s[pk]); r.appendChild(s[tk]); r.appendChild(s[nk]);
+            r.appendChild(s[pk]); r.appendChild(s[tk]);
+            if (cls === 'pg') {     // ✕ beside ▶: close without looking for it (user)
+                const x = document.createElement('span');
+                x.className = 'b gx';
+                x.textContent = '✕';
+                setTip(x, 'Close the gallery');
+                x.addEventListener('mousedown', function (e) { e.preventDefault(); e.stopPropagation(); if (e.button === 0) galHide('hole'); });
+                r.appendChild(x);
+            }
+            r.appendChild(s[nk]);
             el.appendChild(r);
         };
         row('pg', 'pgP', 'pgT', 'pgN', 'Previous page · ↑', 'Next page · ↓', galPageStep);
@@ -14311,8 +14353,8 @@
         const last = (set.pages ? set.pages.length : 1) - 1, to = (set.page || 0) + dir;
         if (to < 0) { galChainGo(-1, 'page'); return; }
         if (to > last) {
-            if (!galWhole(set)) galTourMore(set).then(function (grew) { if (galCur !== set) return; if (grew) galPageStep(dir); else { ahPageStep(set, 1); galChainGo(1, 'page'); } });
-            else { ahPageStep(set, 1); galChainGo(1, 'page'); }
+            if (!galWhole(set)) galTourMore(set).then(function (grew) { if (galCur !== set) return; if (grew) galPageStep(dir); else { ahPageStep(set, 1); if (!galChainGo(1, 'page')) galNoMore(); } });
+            else { ahPageStep(set, 1); if (!galChainGo(1, 'page')) galNoMore(); }
             return;
         }
         if (placed && view && tour && tour.gal === set) {
@@ -14691,17 +14733,18 @@
             l.className = cls;
             c.type = 'checkbox';
             c.checked = on;
+            t.className = 's';
             t.textContent = text;
             m.className = 'l';
             m.textContent = more;
             l.appendChild(c);
             l.appendChild(t);
-            t.appendChild(m);
+            l.appendChild(m);
             setTip(l, tip);
             return l;
         };
-        const lb = box('ek', !!cfg.galleryEndless, 'Endless', ': next gallery at the end of this one', 'At the end of this gallery the next one on the page opens; back from its first page goes to the one before');
-        const lv = box('ev', !!cfg.galleryEndlessViewed, 'All', ' — show ALL galleries', 'Endless includes galleries you have already viewed or visited. Off: those are left out of the queue');
+        const lb = box('ek', !!cfg.galleryEndless, 'Endless', 'Endless mode', 'The next gallery opens at the end of this one');
+        const lv = box('ev', !!cfg.galleryEndlessViewed, 'All', 'Show all galleries', 'Includes galleries already viewed');
         const info = document.createElement('span');
         info.textContent = 'ⓘ';
         setTip(info, 'What the buttons and numbers mean');
@@ -15551,7 +15594,7 @@
             const st = dlqStates(job);
             b.textContent = '⤓ ' + (st.length - dlqLeft(st)) + ' / ' + st.length + (dlqGrowing(job) ? '+' : '');
         } else b.textContent = wait ? '⤓ ' + (galLists.get(g.href) || []).length + '…' : '⤓';
-        b.style.opacity = wait ? '0.45' : '';
+        b.style.color = wait ? '#6c7086' : '';     // greyed by colour: opacity is the hover fade's
         b.style.cursor = wait ? 'not-allowed' : '';
         if (b.parentNode) b.parentNode.classList.toggle('busy', !!job);
     }
@@ -17113,6 +17156,8 @@
     // The gallery's state and the recent load traces (ms from each load's first step), URLs reduced to shape.
     function galStateText() {
         const lines = ['top frame ' + isTopFrame + ', host ' + pageHost() + ', doors ' + galMarksHere() + ', open ' + !!galCur + ', locked ' + !!galOn];
+        if (galCur) lines.push('open set: cells ' + galCur.cells.length + ', fed ' + galCur.fed + ' of list ' + (galLists.get(galCur.href) || []).length +
+            ', inflight ' + (galCur.inflight || 0) + ', growing ' + (galGrowing === galCur.href) + ', whole ' + galWhole(galCur) + ', pages ' + (galCur.pages || []).length + ', page ' + (galCur.page + 1));
         galTraces.forEach(function (l, href) {
             const t0 = l.length ? l[0][0] : 0;
             lines.push('link ' + galSane(href) + ' (cached ' + galCache.has(href) + ')');
