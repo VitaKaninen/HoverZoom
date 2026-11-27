@@ -7,6 +7,12 @@ User's answers: no tooltips on ◀ ▶ on either widget; page keys close a previ
 and the gallery picture's ✕ ⛶ rest at 60 %. Not done: a sweep for duplicated helpers / dead code beyond the
 page-step branches removed in v0.426.0.
 
+**Handoff #13 (2026-11-27, ~372k tokens): v0.426.0–v0.428.0, all pushed.** User asked: do this review, using the
+principles of the 2026-11-13 "Script consistency and gallery mode" session and the 5 after it (same behaviour in every
+mode, fewer variants for a newcomer, a good idea built once goes everywhere). Done: see `docs/CONSISTENCY.md` (each
+row says the version). Verified live in the Browser pane. **Last asked the user:** "Do you want me to do the
+duplicated-code / dead-code sweep here now?" — not answered yet.
+
 **Goal, user's words in substance:** many good-practice behaviours were built in one place only. Review the
 whole script so a good idea used in one place applies everywhere it makes sense, and the same kind of control
 behaves the same way everywhere. "I am sure we have tons of other things in one place that we need to apply
