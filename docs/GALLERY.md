@@ -124,12 +124,9 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   `cfg.galleryRowMin` (user v0.301.0, default 120, never under 48). If everything fits at the floor
   the binary search grows the rows from there; else pages, whose rows also grow to fill the height
   (`galPagedH`: as many rows as fit at the floor, then the spare height shared out; user: "any extra
-  room is taken up by expanding the images, they never go smaller"). **Shared out once the set is whole**
-  (`galRows(…, even)` = `galWhole(set)`, user v0.422.0: packed pages left a last page of a few): each picture
-  counts `f`× wider when packing, `f` the largest (binary search, ≤ 4) that keeps the packed page count; drawn at
-  its real width, spare spread between, a lone picture centred. Row height and row lines are unchanged —
-  growing the rows instead would move `galPagedRows`, which the clicked picture's snapping and memory sit on.
-  Not while growing: pages would reshuffle on every append. The grow-end callback relays once. A settings change while a
+  room is taken up by expanding the images, they never go smaller"). Not shared out evenly: v0.422.0 counted each
+  picture wider to spread the last page's few over every page; reverted v0.425.0 (user: no picture grew, same page count,
+  looked worse). A settings change while a
   gallery is open runs `galRefit`. A bar (the clicked picture, a detached strip) cuts only the rows
   it overlaps vertically: one touching a row, e.g. snapped to its bottom line, leaves that row whole
   (user v0.304.0; the old `G` margin cut it and left a gap above the picture). `galRows` takes several bars (the clicked picture and its strip). Tested in `test-resolver.js`.
@@ -140,14 +137,13 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   cells already answered.
 - **The strip** (user, v0.299.0–v0.303.0; replaced the top `.pg` line): one element for every
   gallery (`galSt`, built once by `galStripBuild`, filled by `galStripText`): ◀ Page n / N ▶
-  (`galFlip`, PageUp/PageDown; the `.pg` row, 16 px, user: "rarely used") and ◀ picture n / N ▶
-  (`galStep`, 24 px; row class `.pn` — `.pic` is the picture box's, and `.fly .pic{flex:1}`
+  (`galFlip`, PageUp/PageDown; the `.pg` row) and ◀ picture n / N ▶ (`galStep`; both rows 24 px, user v0.425.0; row class `.pn` — `.pic` is the picture box's, and `.fly .pic{flex:1}`
   stretched the row); rows `justify-content:space-evenly` (user: equal gaps); `+` while reading on. **The page row shows only with 2+ pages**
-  (`galStripOne`, `galStripRows`; strip `GAL_STRIP_H1` 34 vs `GAL_STRIP_H` 54). Each open starts
+  (`galStripOne`, `galStripRows`; strip `GAL_STRIP_H1` 34 vs `GAL_STRIP_H` 62). Each open starts
   with one row; the first time a set has 2+ pages it switches for good (`set.two`, so a relayout
   that fits one page again cannot flip it back and forth). An attached strip keeps the unit's
   height, so the picture narrows (the side nearer the window edge stays). The remembered `hf` counts
-  the full 54 px (`galSave`, and `galPlace` adds the difference back), so either strip gives the
+  the full `GAL_STRIP_H` (`galSave`, and `galPlace` adds the difference back), so either strip gives the
   same unit height. **Numbers never cut** (`galStripSqueeze`, user): 20 px buttons; then "Page"
   goes, then the type shrinks to 8 px; a picture holding the strip is never resized under
   `GAL_UNIT_MIN_W` 120. Three places (`galStripM.m`, placed by `galStripPlace`):
@@ -310,7 +306,8 @@ What loads ahead follows what the user does. Code: the `ah*` functions after `ga
 - **Storage readout** (user, v0.394.0; v0.423.0 R/P/D): `galStoreTick`, `.hzst` — bottom-right of the hovered door
   (`galHole`, fixed in `galTop`, long labels) for a preview; once open, the first child of the corner box
   `galFly.pic0`'s bottom-left column, above Endless and All (**not** `galFly.pic`: that is the page's own `<img>`).
-  Short `R: P: D:`, spelled out (RAM, Preloaded, Disk) while the picture is hovered (`.s`/`.l` spans). Lines: RAM = `heldBytes`; Preloaded ≈ `plKeep` bytes not in `heldBlobs`
+  Short `R: P: D:`, spelled out (RAM, Preloaded, Disk) while the picture is hovered (`.s`/`.l` spans); hidden with the other
+  buttons until the picture is hovered (v0.425.0). Lines: RAM = `heldBytes`; Preloaded ≈ `plKeep` bytes not in `heldBlobs`
   (an estimate from pixels, `PL_BYTES_PER_PX`); disk = `navigator.storage.estimate().usage` (the whole origin). Ticks
   each second while `galLook`/`galCur`/`galWant`; started from `galShow`, `galLookOpen`, the `galCur` set and the fly's
   creation (a closing preview's `galHide` removes it on a timeout that can land after the gallery opened).

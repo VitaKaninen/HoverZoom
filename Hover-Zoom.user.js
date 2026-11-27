@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.424.0
+// @version      0.425.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -8044,7 +8044,7 @@
         if (placed || priming || hotQuiet) return;
         if (galLook && galLook.el !== e.target) galHide('look');     // the gallery preview is not a gallery: the page hovers on
         if (galCur || (galOn && galWant)) return;      // an open gallery: its cells preview on their own
-        if (drag || twBusy() || dlqFinding) return;
+        if (drag || twBusy() || dlqFinding || twTyping) return;
         if (ours(e.target)) return;         // on our own overlay
         if (!siteEnabled() || CAPTCHA_HERE) return;
         if (mouseDown) return;
@@ -10732,17 +10732,17 @@
         input.value = String(cur);
         input.addEventListener('mousedown', function (e) { e.stopPropagation(); }, true);
         input.addEventListener('blur', function () { if (twTyping && twTyping.input === input) twAskEnd(input.value !== twTyping.start); });
-        wrap.appendChild(document.createTextNode('Jump to ' + (kind === 'pic' ? 'image' : kind === 'gal' ? 'gallery' : 'page') + ': '));
+        wrap.appendChild(document.createTextNode((kind === 'pic' ? 'Image' : kind === 'gal' ? 'Gallery' : 'Page') + ': '));
         wrap.appendChild(input);
         wrap.appendChild(document.createTextNode(' (' + cur + '/' + all + ')'));
         holder.style.display = 'none';
         holder.parentNode.insertBefore(wrap, holder.nextSibling);
         twTyping = { input: input, wrap: wrap, kind: kind, holder: holder, start: input.value, tb: tb };
-        const over = function () { return wrap.scrollWidth > wrap.clientWidth + 0.5; };     // too wide: the type shrinks, then "Jump to" goes
+        const over = function () { return wrap.scrollWidth > wrap.clientWidth + 0.5; };     // too wide: the type shrinks
         let f = parseFloat(getComputedStyle(wrap).fontSize) || 12;
         while (over() && f > 8) { f -= 0.5; wrap.style.fontSize = f + 'px'; }
-        if (over()) wrap.firstChild.nodeValue = wrap.firstChild.nodeValue.replace('Jump to ', '').replace(/^./, function (c) { return c.toUpperCase(); });
         hideTip();
+        if (!placed) cancel();      // nothing previews while the box is up
         input.focus();
         input.select();
     }
@@ -12625,7 +12625,7 @@
     const GAL_SETTLE_MS = 700;          // the frame counts once no picture has arrived for this long
     const GAL_QUIET_CAP_MS = 4000;      // from DOMContentLoaded: the frame reports by then whatever it has
     const GAL_MIN_H = 120;              // rows never shorter: a bigger gallery is laid out as pages (cfg.galleryRowMin)
-    const GAL_STRIP_H = 54;             // the page and picture rows under the clicked picture
+    const GAL_STRIP_H = 62;            // the page and picture rows under the clicked picture
     const GAL_STRIP_H1 = 34;            // the picture row alone: a one-page gallery
     const GAL_STRIP_DL = 26;            // the download row the strip gains while this site has downloads
     const GAL_UNIT_MIN_W = 120;         // a picture holding the strip: never narrower, or its numbers cannot fit
@@ -13581,7 +13581,7 @@
             'background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);' +
             'font:12px/1 system-ui,sans-serif;pointer-events:auto;box-shadow:var(--shadow);user-select:none}' +
             '.strip .r{display:flex;align-items:center;gap:4px;height:24px}' +
-            '.strip .r.pg{height:16px}.strip .r.pg .b{height:16px;font-size:8px}.strip .r.pg .t{font-size:11px}.strip.one .r.pg{display:none}' +
+            '.strip.one .r.pg{display:none}.strip .b[hidden]{display:none}' +
             '.strip.out{width:max-content}.strip.out .t{padding:0 6px}' +
             '.strip .b{flex:none;display:flex;align-items:center;justify-content:center;width:20px;height:24px;box-sizing:border-box;border-radius:5px;background:var(--btn);border:1px solid var(--border);cursor:pointer;font-size:11px}' +
             '.strip .b:hover{background:var(--btnHover)}.strip .b.faint{opacity:.35;cursor:default}.strip .b.faint:hover{background:var(--btn)}' +
@@ -13632,8 +13632,8 @@
             'background:rgba(30,30,46,.92);border:1px solid #45475a;color:#cdd6f4;font:13px/1 system-ui,sans-serif;white-space:nowrap;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.5)}' +
             '.fly .tools span:hover{background:#313244;color:#89b4fa}' +
             '.fly .tools span{pointer-events:auto}' +
-            '.fly .tools .fd,.fly .endl>:not(.hzst){opacity:0;pointer-events:none;transition:opacity .15s ease}' +
-            '.fly:hover .tools .fd,.fly .tools.busy .fd,.fly:hover .endl>*{opacity:1;pointer-events:auto}' +
+            '.fly .tools .fd,.fly .endl>*,.fly .endl>.hzst{opacity:0;pointer-events:none;transition:opacity .15s ease}' +
+            '.fly:hover .tools .fd,.fly .tools.busy .fd,.fly:hover .endl>*,.fly:hover .endl>.hzst{opacity:1;pointer-events:auto}' +
             '.fly .endl>label:hover .s{display:none}' +
             '.fly .endl{position:absolute;bottom:6px;left:' + (GAL_HD + 4) + 'px;display:flex;gap:6px}' +
             '.fly .endl.top{top:6px;bottom:auto}.fly .endl:not(.top){flex-direction:column;align-items:flex-start}' +
@@ -13694,8 +13694,8 @@
     }
 
     // Rows of one height spread over the viewport, split around the hole: the largest height that fits every shape,
-    // or, when that is under GAL_MIN_H, pages of GAL_MIN_H rows (`even`: shared out over those pages). {out: slots by index for `page`, pages: [[from, to]], page}.
-    function galRows(asp, hole, page, even) {
+    // or, when that is under GAL_MIN_H, pages of GAL_MIN_H rows. {out: slots by index for `page`, pages: [[from, to]], page}.
+    function galRows(asp, hole, page) {
         const G = GAL_GAP, W = vpW(), H = vpH(), bars = [].concat(hole);
         const free = function (y, h) {
             let segs = [[G, W - G]];
@@ -13711,9 +13711,8 @@
             });
             return segs;
         };
-        const place = function (h, from, top, f) {
+        const place = function (h, from, top) {
             top = top || G;
-            f = f || 1;
             const n = Math.max(1, Math.floor((H - top) / (h + G)));
             const pitch = n > 1 ? (H - top - G - h) / (n - 1) : 0;
             const out = [];
@@ -13722,18 +13721,16 @@
                 const y = top + k * pitch;
                 free(y, h).forEach(function (s) {
                     const row = [];
-                    let used = 0, real = 0;
+                    let used = 0;
                     while (i < asp.length) {
-                        const add = (row.length ? G : 0) + asp[i] * h * f;
+                        const add = (row.length ? G : 0) + asp[i] * h;
                         if (used + add > s[1] - s[0]) break;
-                        real += (row.length ? G : 0) + asp[i] * h;
                         row.push(i);
                         used += add;
                         i++;
                     }
-                    const room = s[1] - s[0] - real, more = i < asp.length;
-                    const spare = row.length > 1 && more ? room / (row.length - 1) : 0;     // the margins keep G; the rest goes between pictures
-                    let x = s[0] + (row.length === 1 && more && f > 1 ? room / 2 : 0);
+                    const spare = row.length > 1 && i < asp.length ? (s[1] - s[0] - used) / (row.length - 1) : 0;     // the margins keep G; the rest goes between pictures
+                    let x = s[0];
                     row.forEach(function (j) {
                         out[j] = { x: x, y: y, w: asp[j] * h, h: h };
                         x += asp[j] * h + G + spare;
@@ -13751,26 +13748,14 @@
             }
             return { out: best.out, pages: [[0, asp.length]], page: 0 };
         }
-        const top = G, ph = galPagedH(H).h;
-        const split = function (f) {
-            const pages = [];
-            for (let s = 0; s < asp.length;) {
-                const e = Math.max(place(ph, s, top, f).next, s + 1);
-                pages.push([s, e]);
-                s = e;
-            }
-            return pages;
-        };
-        let pages = split(1), f = 1;
-        if (even && pages.length > 1) {     // the whole set known: each picture counted wider, as far as the page count allows
-            let lo = 1, hi = 4;
-            for (let k = 0; k < 16; k++) {
-                const mid = (lo + hi) / 2, p = split(mid);
-                if (p.length <= pages.length) { lo = mid; f = mid; pages = p; } else hi = mid;
-            }
+        const top = G, pages = [], ph = galPagedH(H).h;
+        for (let s = 0; s < asp.length;) {
+            const e = Math.max(place(ph, s, top).next, s + 1);
+            pages.push([s, e]);
+            s = e;
         }
         const k = Math.min(Math.max(0, page | 0), pages.length - 1);
-        return { out: place(ph, pages[k][0], top, f).out, pages: pages, page: k };
+        return { out: place(ph, pages[k][0], top).out, pages: pages, page: k };
     }
 
     // The shading: the page dark and blurred, except the corner where the clicked picture waits.
@@ -13802,7 +13787,7 @@
     // Lay the set out around one hole; returns the slots.
     function galLayout(set, hole) {
         galLaidAt = performance.now();
-        const R = galRows(set.asp, galBars(hole), set.want != null ? set.want : set.page || 0, galWhole(set)), L = R.out;
+        const R = galRows(set.asp, galBars(hole), set.want != null ? set.want : set.page || 0), L = R.out;
         set.pages = R.pages;
         set.page = R.page;
         if (set.want != null && (R.page >= set.want || galWhole(set) || (set.want >= 1e9 && galFedAll(set)))) set.want = null;     // the last page: every picture known so far, not the read's end (user: back into a gallery stalled)
@@ -14120,8 +14105,10 @@
         s.nums = ch ? ch.nums : { page: [page + 1, total + (reading ? '+' : '')], gal: null, pic: [Math.max(0, at) + 1, n + (reading ? '+' : '')] };
         const N = s.nums;
         if (Date.now() < galNoMoreUntil) galStripPg(s, [['No more pages', true]], '');
-        else if (ch) galStripPg(s, ['P:' + N.page[0] + '/', [String(N.page[1]), !ch.on], ' · G:' + N.gal[0] + '/', [String(N.gal[1]), N.gal[0] >= N.gal[1]]], '');
-        else galStripPg(s, [(page + 1) + ' / ', [total + (reading ? '+' : ''), page + 1 >= total && galWhole(set)]], 'Page ');
+        else if (ch) galStripPg(s, ['P:' + N.page[0] + '/' + N.page[1] + ' · G:' + N.gal[0] + '/' + N.gal[1]], '');
+        else galStripPg(s, [(page + 1) + ' / ' + total + (reading ? '+' : '')], 'Page ');
+        if (galNoMoreSet === set && (ch ? ch.on : page + 1 < total)) galNoMoreSet = null;
+        s.gx.hidden = galNoMoreSet !== set;
         galStripSqueeze(s);
         s.pgP.classList.toggle('faint', ch ? !ch.back : total < 2);
         s.pgN.classList.toggle('faint', ch ? !ch.on : total < 2);
@@ -14152,10 +14139,12 @@
         });
     }
 
-    // ▶ on the last page: "No more pages" in red for GAL_NOMORE_MS.
-    let galNoMoreUntil = 0, galNoMoreT = 0;
+    // ▶ on the last page: "No more pages" in red for GAL_NOMORE_MS, and ✕ beside ▶ until the page changes.
+    let galNoMoreUntil = 0, galNoMoreT = 0, galNoMoreSet = null;
     const GAL_NOMORE_MS = 2000;
     function galNoMore() {
+        if (!galCur || !(galEndless() || galPagesOf(galCur) > 1)) return;
+        galNoMoreSet = galCur;
         galNoMoreUntil = Date.now() + GAL_NOMORE_MS;
         clearTimeout(galNoMoreT);
         galNoMoreT = setTimeout(function () { galNoMoreUntil = 0; if (galCur) galStripText(galCur); }, GAL_NOMORE_MS);
@@ -14216,9 +14205,10 @@
             s[tk].className = 't';
             s[nk] = btn('▶', nextTip, 1);
             r.appendChild(s[pk]); r.appendChild(s[tk]);
-            if (cls === 'pg') {     // ✕ beside ▶: close without looking for it (user)
-                const x = document.createElement('span');
+            if (cls === 'pg') {     // ✕ beside ▶ once ▶ found no more pages (user)
+                const x = s.gx = document.createElement('span');
                 x.className = 'b gx';
+                x.hidden = true;
                 x.textContent = '✕';
                 setTip(x, 'Close the gallery');
                 x.addEventListener('mousedown', function (e) { e.preventDefault(); e.stopPropagation(); if (e.button === 0) galHide('hole'); });
@@ -15282,7 +15272,7 @@
             ahGrowEnd(href, why === 'grown' || why === 'reported' ? '' : why);
             dlqGrowEnd(href, why, galGrown.has(href));
             dbg('gallery read to its end: ' + why, { href: href, from: from, pictures: (galLists.get(href) || []).length, final: galGrown.has(href), ms: Math.round(performance.now() - t0), open: !!galCur && galCur.href === href });
-            if (galCur && galCur.href === href) { galPageNote(galCur); if (galWhole(galCur) && galCur.pages && galCur.pages.length > 1 && !galLook) galPageWork(galCur, galLayout(galCur, galCur.open)); }     // the end known: pages share it out
+            if (galCur && galCur.href === href) galPageNote(galCur);
             galChipsCount(href);
             galDlShow();
         }).then(function (v) { if (Array.isArray(v)) galMore(href, v); });
@@ -15445,7 +15435,7 @@
 
     // Hovering a thumbnail: the ordinary preview of its best original, after the hover delay.
     function galPv(img) {
-        if (placed || !img.__hzItem) return;
+        if (placed || !img.__hzItem || twTyping) return;
         ahSaw(img, 1);
         cancel();
         if (img.__hzItem.hit && !img.__hzItem.hit.video) preDecode(img.__hzItem.hit.url);
