@@ -15,7 +15,7 @@ Queues (each kind below names its own). They do not know about each other; all s
 | ID | What | When, now | Queue |
 |---|---|---|---|
 | **Results page, nothing open** ||||
-| L1 | Single pictures' full size, on screen and the next screen | on arrival (`pgFill` level 2); waits while L3 runs (`galCountsBusy`) | PL |
+| L1 | Single pictures' full size, on screen and the next screen | on arrival (`pgFill` level 2, jobs marked `l1`); first: counts and rounds wait for it (`ahL1Busy`); scrolling: up to 2 screens below | PL |
 | L2 | Single pictures' full size, the whole page | 3 screens scrolled, a screen's scroll after a hover, or arrived from a gallery link (`pgTick`) | PL |
 | L3 | Gallery page reads: each door's linked page fetched for its picture list (= the count) | always, nearest the window's middle first (`galCountNext`); paused while a gallery is open | AH-page `count` |
 | L4 | Gallery thumbnails, 10 per door per round, 3 rounds (30) | from the hovered door, else the first on screen, in page order (`ahMainPick`) | AH-pic `main` |
@@ -49,8 +49,13 @@ Queues (each kind below names its own). They do not know about each other; all s
 L13's place (still its own frame queue, started as before); L16/L20/L21 are direct (the browser's order, so L16 may
 overlap L12, and L22 overlaps L12 in M8). M10 = M6/M7 order with no HQ until a hover; its "L17 first gallery before
 L20" is not built (L17 waits for all thumbnails). Without Load all a hover now loads L22 only (was 2 pages on).
-**Not built:** M4, M5, M13 (the slideshow keeps the old order: `ahMoment` 'slide'), L24/L25, the L13 split, L8's
-new rule, next-page finding.
+**Built (v0.440.0; Chrome on eporner: M1 order L1 → L3, round-1 thumbnails across doors; M4 scroll window and
+drop):** M1, M4, M5 (L8 = the next page's lists + 3 rounds, no 20 % rule). Assumptions to confirm with the user: L1
+includes gallery covers' own full size (what `pgFill` always took); automatic L2 only on pages with doors (others keep
+the interest rule). Not live-tested: M5 (needs a page's 3 rounds to finish), the counts-before-rounds hold.
+**Not built:** M13 (the slideshow keeps the old order: `ahMoment` 'slide'), L24/L25 and "Upgrade clips", the L13
+split and L13's place, M10's "L17 first gallery before L20", L8's L1 (singles of a fetched page), L10's ±3-then-rest,
+next-page finding (its own session, three repos).
 
 New kinds in the plan (not in code): **L24** clip/GIF still + ▶ icon, from a partial download (a video's first frame via
 `preload="metadata"`; a GIF's first frame from a range request of its start — both unverified, test before building);

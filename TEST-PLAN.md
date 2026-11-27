@@ -153,26 +153,26 @@ Test pages:
       from the last 30 s **before** you scroll, and note whether a gallery or preview was open at the
       time. The suspect is a stuck gate in `galPreNext`.
 
-3.4 **Covers' own originals wait behind counts.** This is the hover preview of a normal (non-gallery)
-    picture on the same page.
-    - **Expect:** while counts are still arriving (test 2.1), the page's own pictures don't preload
-      their originals. Once counts are done, they do.
-    - You said you'd circle back to this. Note whether the wait bothers you.
+3.4 **The page's own pictures first, then counts, then rounds** (v0.440.0, `docs/PRELOAD.md` M1). Fresh tab.
+    - **Expect:** the full-size pictures of what is on screen and the next screen load first; `gallery count from
+      its page` lines start only after them; `loading ahead: round {thumbs}` only after the counts. Each round is
+      every gallery's next 10 thumbnails, then every gallery's next full-size picture (`round {orig: true}`).
+      eporner, Chrome: L1 done 3.5 s, counts from 3.9 s (v0.440.0; the counts-before-rounds hold added after).
+    - Once the 3 rounds are done, `loading ahead: the whole page` and the rest of the page's pictures load.
 
 ---
 
 ## 4. Scrolling
 
-4.1 **Slow scroll: loading continues.** Scroll down slowly, a few lines at a time, with pauses shorter
-    than a second.
-    - **Expect:** no `scrolled past` line as long as the gallery being loaded is still on or below the
-      screen. Thumbnails keep arriving.
+4.1 **Scrolling loads only what is on and near the screen** (v0.440.0, M4). Scroll down slowly.
+    - **Expect:** `loading ahead: scrolling; only what is on and near the screen`. Meanwhile only round-1 thumbnails
+      (`round {round: 1, thumbs}`) of galleries on screen or up to 2 screens below, their counts, and the full size of
+      pictures in that window. No full-size gallery pictures, no rounds 2–3.
 
-4.2 **Fast scroll past: loading stops.** From the top, scroll quickly 5+ screens down, past the gallery
-    being loaded.
-    - **Expect:** `loading ahead: scrolled past what was loading; waiting for the scroll to stop`. No new
-      thumbnail or original requests start; requests in flight finish. Counts carry on (`fetch` rows
-      continue).
+4.2 **Fast scroll past: what left the screen is dropped.** From the top, scroll quickly 5+ screens down.
+    - **Expect:** one `loading ahead: the gallery loading left the screen; its waiting loads dropped` per job cut
+      (not one per scroll event); requests in flight finish. eporner, Chrome (v0.440.0): verified, before the
+      once-per-job fix (it then repeated every 200 ms).
     - **Fail:** the script keeps loading the galleries you scrolled past.
 
 4.3 **Stop, wait 1 s for a hover.** After 4.2, stop scrolling and hover a gallery straight away, within
@@ -185,6 +185,12 @@ Test pages:
 4.4 **Stop with no hover.** Repeat 4.2, then stop with the pointer on empty space.
     - **Expect:** `loading ahead: scroll stopped; from the first gallery on screen`, and loading restarts
       there.
+
+4.6 **The bottom loads the next page** (v0.440.0, M5; not yet run live). Scroll to the bottom of a results page and stay.
+    - **Expect:** no `idle, reading a count to its end` lines while at the bottom. Once this page's rounds and its
+      remaining pictures are done: `next page: loading ahead its gallery lists, then 3 rounds`, the next page's
+      `gallery count`-style list reads, then its rounds; no 20 % rule (nothing needs opening first).
+    - Then go to the next page: its galleries open at once (lists read ahead).
 
 4.5 **Cut work is redone.** A gallery whose loading 4.2 cut short (its line says `cut: true`) gets loaded
     again later when you scroll back to it.

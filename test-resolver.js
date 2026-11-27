@@ -1480,10 +1480,10 @@ const galPH = function (min) {
     const ahPri = new Function(src.slice(pS, pE) + '\nreturn ahPri;')();
     eq('gate: open gallery before counts before the main page', [ahPri('gal'), ahPri('galo'), ahPri('galn'), ahPri('count'), ahPri('main')], [0, 0, 0.5, 1, 2]);
     const gS = src.indexOf('    function ahGate'), gE = src.indexOf('    // A start slot');
-    const ctx = { ahG: null, galCur: null };
-    const mkGate = new Function('document', 'performance', 'setTimeout', 'clearTimeout', 'ctx', 'tour', 'galLook', 'galShownAt', 'AH_THUMB_STALL_MS', 'galEarlyLeft',
+    const ctx = { ahG: null, galCur: null }, testPlQueue = [], testPlL1 = { live: 0, at: 0 };
+    const mkGate = new Function('document', 'performance', 'setTimeout', 'clearTimeout', 'ctx', 'tour', 'galLook', 'galShownAt', 'AH_THUMB_STALL_MS', 'galEarlyLeft', 'plQueue', 'plL1', 'galCnt',
         'var ahG, galCur; function sync() { ahG = ctx.ahG; galCur = ctx.galCur; }\n' + src.slice(gS, gE).replace('const m = ahMoment()', 'sync(); const m = ahMoment()') + '\nreturn ahGate;');
-    const ahGate = mkGate({ visibilityState: 'visible' }, { now: function () { return 1e9; } }, function () {}, function () {}, ctx, null, null, function () { return -1; }, 3000, new Map());
+    const ahGate = mkGate({ visibilityState: 'visible' }, { now: function () { return 1e9; } }, function () {}, function () {}, ctx, null, null, function () { return -1; }, 3000, new Map(), testPlQueue, testPlL1, 0);
     const gt = ahGate([0, 0], 1), order = [];
     ['gal', 'gal', 'gal', 'galo', 'galo', 'main', 'gal'].forEach(function (t) { gt.wait.push({ tag: t, resolve: function (free) { order.push(t); free(); } }); });
     gt.pump();
@@ -1511,6 +1511,11 @@ const galPH = function (min) {
     const walkRun = function (m) { const r = run(m, { inflight: 0 }, []); ctx.ahG.walk = 1; ['galo', 'gal'].forEach(function (t) { r.g.wait.push({ tag: t, resolve: function (free) { r.seen.push(t); if (free) free(); } }); }); r.g.pump(); return r.seen; };
     eq('gate M7: L14 waits for the L17 walk', walkRun('fwd'), ['gal']);
     eq('gate M6: L14 does not wait for the walk', walkRun('open'), ['galo', 'gal']);
+    testPlQueue.push({ l1: true }); testPlL1.at = 1e9;
+    const l1 = run('', null, ['main', 'count', 'next']);
+    eq('gate M1: counts, rounds and the next page wait for L1', l1.seen, []);
+    testPlQueue.length = 0; l1.g.pump();
+    eq('gate M1: L1 done, counts then the rest', l1.seen, ['count', 'main', 'next']);
     eq('gate: no gallery on screen, counts go again', run('', null, ['main', 'count']).seen, ['count', 'main']);
     ctx.ahG = null; ctx.galCur = null;
 }

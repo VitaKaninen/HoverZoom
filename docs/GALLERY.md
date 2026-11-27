@@ -72,7 +72,7 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   each change of spot (v0.356.0, for the user's "bar stays mid-page after close", not reproduced on fixtures or in
   Chrome's geometry).
 - **Counts for every door on the page** (user, v0.343.0: "why does it take several minutes"): the preload read only
-  doors on screen, serially, each waiting for its thumbnails (`galWarm`). `galCountNext` now runs beside it:
+  doors on screen, serially, each waiting for its thumbnails (`galWarm`, removed v0.440.0). `galCountNext` now runs beside it:
   `galPrePick(true)` (anywhere, nearest the viewport's centre), `GAL_COUNT_PAR` 4 in flight, `galCountLoad` = the
   HTML alone (`galPick`; no frame, no thumbnails), skipping hrefs already counted. eporner, fresh tab: 99 counts in
   26 s (was 11 on screen, none below); after Back, all at once from `hzGalCounts`.
@@ -265,7 +265,7 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
 
 ## Loading ahead (v0.387.0, user's spec 2026-11-26; INTERACTION.md `G13`)
 
-What loads ahead follows what the user does. Code: the `ah*` functions after `galWarm`, constants beside
+What loads ahead follows what the user does. Code: the `ah*` functions after `galPre`'s declarations, constants beside
 `GAL_HQ_PAR`. Terms: **gallery** = the middle-click view (code: peek); **gallery preview** = the hover view.
 
 - **Pacing** (`ahGate`): every background start waits for a slot; starts are a random `AH_PIC_GAP` 50–200 ms
@@ -297,12 +297,22 @@ What loads ahead follows what the user does. Code: the `ah*` functions after `ga
   per door). Thumbnails already settled are skipped. A preview
   loads the rest of its page itself. Endless off: thumbnails for the first door + `AH_THUMBS_OFF` 3, originals for
   the first only, the rest once ≥ `AH_SHARE` 40 % of the page's doors are seen. Measured on eporner (Chrome, cold):
-  page reads ~0.4 s, 30 thumbnails ≈ 4 s a door, an original ≈ 1.1 s with 6 in flight. The covers' own originals
-  (`pgFill`, `hoverPreload`) wait while counts are in flight (`galCountsBusy`) — user: revisit later.
-- **Scrolling** (`ahScrollNote` from `galScroll`, checked ≤ every 200 ms): the next door to load scrolled above the
-  viewport = behind → `ahDrop('main')` and nothing new starts (counts go on). Still for `AH_STILL_MS` 250, then
-  `AH_HOVER_WAIT_MS` 1000 for a hover: the hovered door becomes the anchor, else the first door on screen. A job cut
-  by the drop (`ahGen` changed) is un-done so it loads again later.
+  page reads ~0.4 s, 30 thumbnails ≈ 4 s a door, an original ≈ 1.1 s with 6 in flight.
+- **Order on the results page** (v0.440.0, PRELOAD.md M1): L1 (`pgFill` jobs marked `l1`, on screen and the next
+  screen) → counts (`count` held by `ahL1Busy`; `plL1` counts L1 in flight, `plDoneOne` pumps the gates when the last
+  settles; stall guard `AH_THUMB_STALL_MS`) → rounds (`main` also held while `galCnt` > 0; counts and rounds are on
+  different gates, so without this they ran side by side, eporner v0.440.0). Rounds are steps per door (`ahRound` =
+  steps done): step 2r = round r's 10 thumbnails, 2r+1 = its original — every door's step before any door's next. Then
+  L2: `galPreNext` with no job sets `ahRoundsLeft` false and `pgWant(3)` on a page with doors; until then `pgFill` caps
+  at level 2 (pages without doors keep the interest rule: 3 screens scrolled, or a screen's scroll after a hover).
+  Until v0.439.0 the covers' originals waited for the counts instead.
+- **Scrolling** (v0.440.0, PRELOAD.md M4; `ahScrollNote` from `galScroll`, checked ≤ every 200 ms): any user scroll
+  sets `ahBehind` (= scrolling). Meanwhile only the window on screen → `AH_SCROLL_SCREENS` 3 screens down loads: L1
+  (`pgFill` span 3), counts (`galPrePick` skips doors outside it), round 1's thumbnails (`ahMainPick` scroll branch,
+  step 0 only); the job's door leaving the window → `ahDrop('main')`. Still for `AH_STILL_MS` 250, then
+  `AH_HOVER_WAIT_MS` 1000 for a hover: the hovered door becomes the anchor, else the first door on screen, and M1
+  resumes. A job cut by the drop (`ahGen` changed) is un-done so it loads again later. (Until v0.439.0 a scroll past
+  the next door stopped all new loads until still.)
 - **Gallery preview** (`galLookOpen`, `galLook`): a door hovered `AH_LOOK_MS` 500 lays out its first page of
   thumbnails around it, the door left in place as the hole (`galHole` = its rect, `galBars` → hole only). Inert:
   the set never gets `live` (no cell events), no strip (`galLayout` skips `galPageNote`/`galFeed`), never marked
@@ -551,14 +561,14 @@ The page a door opens is the ground truth for the press that opened it. Hovers c
   `galGrowing`) or a gallery or preview is up — `galRender` would kill that frame. Stops for the
   page on a 429/503 or a frozen page (`galPreHalt`); a hidden tab stops its frame. Logged as one
   `gallery` row in `us-log`.
-- **Next page** (`nextCheck` … `nextWarmReport`, user v0.325.0–v0.327.0): within a screen of the
-  bottom of a page with learned doors, idle (`nextIdle`: no preload, frame, gallery or slideshow), and
-  going through it — `nextEngaged`: galleries ticked since arrival ≥ `NEXT_SHARE` (20 %) of those
-  unticked at arrival (`nextTicked`, snapshot at boot; ticks = seen ∪ visited, re-read from GM so
-  other tabs count) — it reads `nextPageIn()`'s page and loads its first `NEXT_GALLERIES` (3)
-  unticked doors: `galLoad`, `galWarm`, then every original through `galResolve` on a stand-in img,
-  4 at a time, pausing while not idle. Once per page; a skim (0 opened) loads nothing and asks again
-  on the next scroll. Lists + hits + file URLs go to `sessionStorage` `hzNextPage`; the next page
+- **Next page** (`nextCheck` … `nextWarmReport`, user v0.325.0–v0.327.0; v0.440.0 = PRELOAD.md M5/L8): within a
+  screen of the bottom (`ahAtBottom`) of a page with learned doors, idle (`nextIdle`: no preload, frame, gallery,
+  slideshow or scroll), and this page's M1 lines 1–7 done (`ahRoundsLeft` false, no counts, no `page` PL jobs) —
+  it reads `nextPageIn()`'s page and runs its M1 lines 2–6: every door's list (`galLoad`), then 3 rounds of each
+  door's next 10 thumbnails (`ahImg`, tag `next`) then each door's next original (`galResolve` on a stand-in, through
+  `ahPics`); endless off = the first 1 + `AH_THUMBS_OFF` doors, originals for the first. No share-opened rule (user;
+  until v0.439.0 ≥ 20 % of the unseen galleries opened, 3 galleries, every original; `nextEngaged` is now only in the
+  debug line). Not built: the next page's L1 (its singles: they are elements of a fetched page). Once per page. Lists + hits + file URLs go to `sessionStorage` `hzNextPage`; the next page
   (`nextArrive`) seeds `galLists`/`galCache` from it, so those peeks open at once. Originals survive
   the navigation only in the browser's cache, so `nextWarmSeen` times each one asked again and
   `nextWarmReport` logs `nextwarm` (ok = arrived under `PL_COLD_MS`) per opened gallery — the

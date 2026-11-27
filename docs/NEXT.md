@@ -14,8 +14,15 @@ last message was M13 + answers; I said yes and recorded it. Not answered: none o
 **Build order proposed:** drop-and-re-queue on each moment + M6–M9 order (fixes the empty-page wait) first; then M4/M5,
 M13 buffer, clip stills (L24, test partial download first), L13 count split; then the shared next-page finder
 (OLINT recognition + HZ/FS direction + FS teaching) across three repos — its own session.
-**Step 1 done, v0.438.0** (what is and isn't built: PRELOAD.md "Plan" → "Built"). Verified on the local door-search
-d6 (M6, M7). Not verified: M8/M9 live, a real site, LibreWolf. Next: M4/M5.
+**Handoff (2026-11-27, ~290k tokens, v0.438.0–v0.440.0, all pushed).** User asked: build the plan, then "test in
+Chrome; any reason you did not finish the other steps?" Done: M6–M9/M11 (v0.438.0), Chrome fixes (v0.439.0: L14
+waits for the whole L17 walk; first-hover restart only under G:), M1/M4/M5 (v0.440.0). Status per line: PRELOAD.md
+"Plan" → "Built"/"Not built". Verified in Chrome on eporner: M6, M7, M8, M11, M1's L1→L3 and round split, M4.
+**Next, in order:** (1) live-check M5 and the counts-before-rounds hold on eporner (fresh tab: counts are per-tab
+sessionStorage); (2) M13 slideshow buffer (10 ahead, 20 when caught up; `galHqSlide` is the old order to replace);
+(3) L24 clip stills — first test whether `preload="metadata"` / a GIF range request gives a first frame; (4) L13
+split; (5) next-page finder across three repos, its own session. **Last asked:** two assumptions in PRELOAD.md
+"Built (v0.440.0)" (covers in L1; auto-L2 only on gallery pages) — not answered yet.
 
 ---
 
