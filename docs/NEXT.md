@@ -1,3 +1,18 @@
+# Handoff 2026-11-26 #11 (~334k tokens): v0.421.0 → v0.424.0, all pushed
+
+User asked, all done and verified in the Browser pane on door-search.html (localhost fixtures, not on eporner):
+- Page-row ◀ ▶ (widget and gallery strip) closes any open preview first, fullscreen too (v0.421.0).
+- A gallery's pages share pictures evenly once the set is whole (`galRows(..., even)`, v0.422.0; GALLERY.md Pages).
+- Corner picture rearranged (v0.423.0–v0.424.0, GALLERY.md Endless + "Page row end" + "Right-click menu marks"):
+  Load all only in the right-click menu; R/P/D readout over Endless, All below; ↗ beside ⓘ; ✕ ⛶ always shown, the
+  rest hidden until the picture is hovered; menu draws checkboxes/radios/action icons and a ✕; "chip" reads
+  "gallery button" on screen (code still says chip); jump box "Jump to page/gallery/image: [n] (n/N)", a click away
+  goes only if changed and is eaten; last page: red totals, "No more pages" 2 s, ✕ beside ▶; floor 160×134.
+Not verified: the dock widget's (non-gallery) page jump box; image jump into another queued gallery lands on its page,
+not the picture. In the user's screenshot ▶ was not greyed at P:13/13 (set not `galWhole`); the state dump's new
+"open set" line says why if it recurs.
+**Last asked the user:** nothing open. Offered: Endless and All side by side would lower the height floor ~24 px.
+
 # Handoff 2026-11-26 #10 (~300k tokens): v0.415.0 → v0.417.0, all pushed
 
 User asked, all done and verified in Chrome on eporner (the user's Chrome runs the disk copy):
