@@ -412,13 +412,16 @@ Turn Endless back on afterwards.
 
 ## 9c. Last, the P: / G: switch, pictures left (v0.430.0)
 
-9c.1 **Pictures left.** In Endless, the picture row reads "34 left of 75" (bold) with the queue's total "(13,850+)"
-     faint at the right; "last" in red on a gallery's last picture. Endless off: the same without the total.
+9c.1 **Counts.** In Endless, the page row reads "P:2/5 (248)" (this gallery's pages, the queue's in grey) and the
+     picture row "41 / 90 (12,574)", centred, totals in grey. Endless off: "41 / 90" alone.
+9c.1b **Small pictures are not made taller** (v0.431.0). Shrink the clicked picture as small as it goes (Ctrl), with a
+     portrait gallery too. **Expect:** neither strip row is cut off; the box widens with dark bars beside the picture
+     instead of the picture growing taller.
 9c.2 **P: / G:.** P: is pressed (dark, bold) when a gallery opens. Click G: — it presses; the page row's ▶ ◀ now open
      the next / previous gallery at its first page, closing any preview; ↑ ↓ PageUp PageDown still step pages. At the
      queue's end ▶ shows "No more galleries". Close and reopen: P: is pressed again.
 9c.3 **Last.** Click ☑ Endless once: it turns yellow and reads Last, and stays shown when the picture is not hovered;
-     "N left" turns yellow. Go to this gallery's last picture (fullscreen too) and press → several times. **Expect:**
+     the picture count turns yellow. Go to this gallery's last picture (fullscreen too) and press → several times. **Expect:**
      it stays there with "End of this gallery: stopped (Last)"; the next gallery is not opened (no seen tick on its
      card). The page row's ▶ on the last page shows "No more pages". Close the gallery and open another: the box
      reads Endless (blue) again. A third click on the box turns Endless off; a fourth back on.

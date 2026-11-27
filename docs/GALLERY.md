@@ -784,11 +784,18 @@ right-click menu and the panel; on by default since v0.387.0, user). Code: `galE
   (`.sg`, pressed = dark + bold, `galStripPg` `{seg}` parts). `galStepG` (reset on every open and close): G: pressed =
   the row's ◀ ▶ step whole galleries (`galRowStep` → `galChainOpen` at page 0, closing any preview; "No more
   galleries" at the queue's end); ↑ ↓ PageUp PageDown always step pages (`twPageBtn`). A click on the unpressed part
-  presses it, on the pressed part types (`twAsk` 'page' → `galChainPageAt`, 'gal' → `galChainJump`). Picture row
-  (`galStripPic`, endless or not; user: what is wanted at a glance is how many are left): bold `34 left of 75` (pictures
-  after this one; red `last` on the last), endless adds the queue's total `(13,850+)` floated right in grey; a click
-  asks a picture of the whole queue (`galChainPicJump`: in another gallery it opens the page holding it). `s.picW` is
-  the row's widest form for `galFullW`, so the fullscreen box does not resize as the count drops a digit.
+  presses it, on the pressed part types (`twAsk` 'page' → `galChainPageAt`, 'gal' → `galChainJump`). P: shows this
+  gallery's `page/pages` with the queue's page total beside it in grey (`.gr`, `{more}`), the typed number still counts
+  across the queue. Picture row (`galStripPic`, user v0.431.0): `41 / 90` in this gallery, endless adds the queue's
+  total ` (12,574)` beside it in grey, all centred (v0.430.0's "34 left of 75" with the total floated right was dropped:
+  user preferred the plain count); a click asks a picture of the whole queue (`galChainPicJump`: in another gallery it
+  opens the page holding it). `s.picW` is the row's widest form for `galFullW`, so the box does not resize as a count
+  gains a digit.
+- **The box's least width** (`galPadFit`, run by every `galStripText`; user v0.431.0: keeps the picture small): outside
+  fullscreen, with the strip attached, the box is at least `galFullW()` (and `GAL_PIC_MIN_W`) wide; the picture keeps
+  its height and `.fly.pad` draws it `object-fit: contain` with bars at its sides. `galPlace` and a corner drag widen the
+  same way — **never make a narrow picture taller to reach a minimum width** (the old `GAL_PIC_MIN_W / asp` height floor;
+  the user keeps pictures small). In fullscreen `galFullRect` sets the width; `pad` only stops the crop there.
   `+` = some count not final. A gallery not open counts `galChainN` (its list or `hzGalCounts`) ÷ this `galPer`,
   1 page when unknown. `s.nums` {page, gal, pic, tb} feeds `twAsk`. The page row always shows in endless (`galStripRows`).
 - **Last** (`galLast`; user v0.430.0: finish this gallery without opening the next, which would mark it seen): the
@@ -796,7 +803,7 @@ right-click menu and the panel; on by default since v0.387.0, user). Code: `galE
   of the gallery on screen — `galSeam` (note "End of this gallery: stopped (Last)", the self-playing slideshow too),
   `galPageStep` ("No more pages"), `galChainText`'s `on`/`picOn`. One flag, not tied to a gallery: forgotten on close
   or another user open (`galHide`, `galMiddle`), never saved; a G: step or typed gallery still moves (deliberate). Yellow
-  box and "N left" (`galEndlessLook`, `.lt`); the box stays shown unhovered while Last is on.
+  box and picture count (`galEndlessLook`, `.lt`); the box stays shown unhovered while Last is on.
 - The galleries ahead load per "Loading ahead" (`ahGalAhead`; replaced `galChainWarm`, which read only the next
   one's thumbnails, on the last page).
 - **Closing** (`galHide`) after the queue moved on scrolls the current card into view (`behavior: 'instant'` — a

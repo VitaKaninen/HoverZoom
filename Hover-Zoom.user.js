@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.430.0
+// @version      0.431.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -13598,7 +13598,7 @@
             '.strip .b{flex:none;display:flex;align-items:center;justify-content:center;width:20px;height:24px;box-sizing:border-box;border-radius:5px;background:var(--btn);border:1px solid var(--border);cursor:pointer;font-size:11px}' +
             '.strip .b:hover{background:var(--btnHover)}.strip .b.faint{opacity:.35;cursor:default}.strip .b.faint:hover{background:var(--btn)}' +
             '.strip .no,.strip .b.gx{color:#f38ba8}' +
-            '.strip .t b{font-weight:700}.strip .t b.lt{color:#f9e2af}.strip .tot{float:right;padding-left:6px;color:#6c7086}' +
+            '.strip .lt{color:#f9e2af}.strip .gr{color:#6c7086;font-weight:400}' +
             '.strip .sg{display:inline-block;padding:0 6px;line-height:18px;border:1px solid var(--border);background:var(--btn);opacity:.7;cursor:pointer;box-shadow:inset 0 1px 0 rgba(255,255,255,.08)}' +
             '.strip .sg.a{border-radius:5px 0 0 5px}.strip .sg.z{border-radius:0 5px 5px 0;border-left:0}.strip .sg:not(.on):hover{background:var(--btnHover);opacity:1}' +
             '.strip .sg.on{background:#11111b;color:#cdd6f4;opacity:1;font-weight:700;box-shadow:inset 0 2px 4px rgba(0,0,0,.8)}' +
@@ -13632,7 +13632,7 @@
             '.fly{display:flex;flex-direction:column}' +
             '.fly.on{transition:transform ' + GAL_FLY_MS + 'ms ease,opacity ' + GAL_FLY_MS + 'ms ease}' +
             '.fly .pic{position:relative;flex:1 1 0;min-height:0}' +
-            '.fly img{width:100%;height:100%;object-fit:cover;border-radius:0;box-shadow:none;opacity:1}' +
+            '.fly img{width:100%;height:100%;object-fit:cover;border-radius:0;box-shadow:none;opacity:1}.fly.pad .pic img{object-fit:contain}' +
             '.fly.edit{outline:2px dashed #f9e2af;outline-offset:3px}' +
             '.hd{position:fixed;z-index:6;width:' + GAL_HD + 'px;height:' + GAL_HD + 'px;pointer-events:auto}.hd.tl,.hd.br{cursor:nwse-resize}.hd.tr,.hd.bl{cursor:nesw-resize}' +
             '.fly .bt{display:none;gap:8px;position:absolute;left:50%;top:50%;transform:translate(-50%,-50%)}' +
@@ -13943,11 +13943,12 @@
             if (t !== null && b !== null && b - t - sh >= 48) ph = b - t - sh;
             else if (l !== null && r !== null && r - l >= 48) ph = (r - l) / asp;
             else { ph = H * Math.max(0.05, Math.min(0.9, +rec.hf || GAL_FLY_FRAC)) + (sh ? GAL_STRIP_H - sh : 0); both = false; }
-            ph = Math.max(ph, GAL_PIC_MIN_H, GAL_PIC_MIN_W / asp);
+            ph = Math.max(ph, GAL_PIC_MIN_H);
             w = ph * asp;
             const maxW = both ? W - 8 : W * 0.4;
             if (w > maxW) { w = maxW; ph = w / asp; }
             if (ph + sh > H) { ph = H - sh; w = ph * asp; }
+            w = Math.max(w, GAL_PIC_MIN_W);     // a narrow picture gets bars at its sides, never more height (user)
             h = ph + sh;
         }
         const x = l !== null ? l : r !== null ? r - w : posAxis(rec.x, w, W);
@@ -14123,7 +14124,7 @@
         s.nums = ch ? ch.nums : { page: [page + 1, total + (reading ? '+' : '')], gal: null, pic: [Math.max(0, at) + 1, n + (reading ? '+' : '')] };
         const N = s.nums;
         if (Date.now() < galNoMoreUntil) galStripPg(s, [[galNoMoreText, true]], '');
-        else if (ch) galStripPg(s, [{ seg: 'p', text: 'P:' + N.page[0] + '/' + N.page[1], on: !byG }, { seg: 'g', text: 'G:' + N.gal[0] + '/' + N.gal[1], on: byG }], '');
+        else if (ch) galStripPg(s, [{ seg: 'p', text: 'P:' + (page + 1) + '/' + total + (reading ? '+' : ''), more: '(' + N.page[1] + ')', on: !byG }, { seg: 'g', text: 'G:' + N.gal[0] + '/' + N.gal[1], on: byG }], '');
         else galStripPg(s, [(page + 1) + ' / ' + total + (reading ? '+' : '')], 'Page ');
         if (galNoMoreSet === set && (ch ? (byG ? ch.galOn : ch.on) : page + 1 < total)) galNoMoreSet = null;
         s.gx.hidden = galNoMoreSet !== set;
@@ -14133,7 +14134,23 @@
         s.picP.classList.toggle('faint', !n || (!!ch && !ch.picBack));
         s.picN.classList.toggle('faint', !n || (!!ch && !ch.picOn));
         if (galFly && fullActive() && !galEdit && Math.abs(Math.min(vpW() * 0.4, galFullW()) - galFullLast) > 1) galRefit();     // the text needs another width
+        galPadFit();
         galStripHidesPreview();     // the row may have come to a still pointer
+    }
+
+    // Outside fullscreen an attached strip's text sets the box's least width: the picture keeps its height, with bars at its sides (user).
+    function galPadFit() {
+        const f = galFly, sh = galAttH();
+        if (!f || galEdit || !galSt || galSt.el.hidden) return;
+        const u = galUnitRect(), W = vpW(), pw = Math.round((u.h - sh) * (f.asp || 1));
+        const w = fullActive() || !sh ? u.w : Math.round(Math.min(W - 8, Math.max(pw, GAL_PIC_MIN_W, galFullW())));     // fullscreen: its own width (galFullRect), bars only
+        f.el.classList.toggle('pad', w > pw + 2);
+        if (Math.abs(w - u.w) <= 1) return;
+        const x = u.x + u.w / 2 > W / 2 ? u.x + u.w - w : u.x;
+        galHole = { x: Math.round(Math.max(0, Math.min(W - w, x))), y: u.y, w: w, h: u.h };
+        galUnitPut(galHole);
+        galKeepNow(galHole, f.asp);
+        setTimeout(function () { if (galCur && !galEdit) galPageWork(galCur, galLayout(galCur, galHole)); }, 0);
     }
 
     // The set's pages: laid out, plus the pictures known but not loaded yet.
@@ -14153,6 +14170,7 @@
                 const g = document.createElement('span');
                 g.className = 'sg ' + p.seg + (i ? ' z' : ' a') + (p.on ? ' on' : '');
                 g.textContent = p.text;
+                if (p.more) { const m = document.createElement('span'); m.className = 'gr'; m.textContent = ' ' + p.more; g.appendChild(m); }
                 t.appendChild(g);
                 return;
             }
@@ -14164,23 +14182,21 @@
         });
     }
 
-    // The picture row: "34 left of 75" (pictures after this one; "last" on the last), and in endless the queue's total at the right.
+    // The picture row: "41 / 90" in this gallery (yellow while Last is on), and in endless the queue's total beside it in grey.
     function galStripPic(s, at, n, reading, ch) {
         const t = s.picT, fmt = function (v) { return v.toLocaleString(); }, N = fmt(n) + (reading ? '+' : '');
         while (t.firstChild) t.firstChild.remove();
-        if (ch) {       // floated right, so first
+        const b = document.createElement('span');
+        b.textContent = (at >= 0 ? fmt(at + 1) : '–') + ' / ' + N;
+        if (ch && galLast) b.className = 'lt';
+        t.appendChild(b);
+        if (ch) {
             const r = document.createElement('span');
-            r.className = 'tot';
-            r.textContent = '(' + ch.tot + ')';
+            r.className = 'gr';
+            r.textContent = ' (' + ch.tot + ')';
             t.appendChild(r);
         }
-        const b = document.createElement('b');
-        if (at < 0) b.textContent = '–';
-        else if (at >= n - 1 && !reading) { b.textContent = 'last'; b.className = 'no'; }
-        else { b.textContent = fmt(n - at - 1) + (reading ? '+' : '') + ' left'; if (ch && galLast) b.className = 'lt'; }
-        t.appendChild(b);
-        t.appendChild(document.createTextNode(' of ' + N));
-        s.picW = fmt(n) + '+ left of ' + fmt(n) + '+' + (ch ? ' (' + ch.tot.replace(/\+$/, '') + '+)' : '');      // galFullW measures this: the widest the row gets in this gallery
+        s.picW = fmt(n) + ' / ' + fmt(n) + '+' + (ch ? ' (' + ch.tot.replace(/\+$/, '') + '+)' : '');      // galFullW measures this: the widest the row gets in this gallery
     }
 
     // ▶ on the last page: "No more pages" in red for GAL_NOMORE_MS, and ✕ beside ▶ until the page changes.
@@ -14864,10 +14880,9 @@
             ['Numbers', 'click one to type where to go: a page, a gallery (endless: click P: or G: to press it, click the pressed one to type), a picture on the picture row · Enter or a click away goes there if you changed it; Esc, or a click away with nothing changed, does nothing · + = still being read'],
             ['Endless mode', 'click the box: Endless → Last → off · Endless: at the end of this gallery the next one on the page opens, and back from its first page goes to the one before · Last (yellow): stop at the end of the gallery on screen, until you close the gallery · galleries already seen or visited are left out unless Show all galleries is on, judged once when queued · a step past a gallery\'s end stops there once, the next goes on (right-click to turn that off) · the last gallery\'s last picture stops for good'],
             ['Show all galleries', 'endless shows ALL galleries, including the ones you already viewed or visited'],
-            ['P:11/18', 'endless: page 11 of 18, counting every queued gallery — one not read yet counts as one page'],
+            ['P:2/5 (248)', 'endless: page 2 of this gallery\'s 5; in grey, the pages of every queued gallery (one not read yet counts as one) · a typed page counts across them all'],
             ['G:10/16', 'endless: gallery 10 of the 16 queued'],
-            ['34 left of 75', 'picture row: pictures after this one in this gallery, of its 75 · "last" on its last picture · yellow while Last is on'],
-            ['(1,000)', 'endless: every queued gallery\'s pictures known so far (+ = some not counted yet) · click the row to type a picture of the whole queue'],
+            ['41 / 90 (12,574)', 'picture row: picture 41 of this gallery\'s 90 (yellow while Last is on); in grey, every queued gallery\'s pictures known so far (+ = some not counted yet) · a typed picture counts across them all'],
             ['Closing', 'the picture flies back to the current gallery\'s card on the page'],
             ['', 'any click closes this box'],
         ], b);
@@ -16420,7 +16435,7 @@
         [s.pgT, s.picT].forEach(function (t) {
             const cs = getComputedStyle(t), size = t === s.pgT ? 11 : parseFloat(getComputedStyle(s.el).fontSize) || 12;
             const pic = t === s.picT && s.picW, segs = t.querySelectorAll('.sg').length;
-            cv.font = (segs || pic ? '700' : cs.fontWeight || '400') + ' ' + size + 'px ' + (cs.fontFamily || 'system-ui, sans-serif');
+            cv.font = (segs ? '700' : cs.fontWeight || '400') + ' ' + size + 'px ' + (cs.fontFamily || 'system-ui, sans-serif');
             need = Math.max(need, cv.measureText(pic ? s.picW.replace(/\d/g, '8') : ahead(t.textContent)).width + segs * 14 + (pic ? 6 : 0));     // a segment's padding and border; the total's gap
         });
         return Math.ceil(need + 2 * 20 + 2 * 4 + 8 + 6 + 16);      // ◀ ▶, their gaps, the strip's padding, the frame's border, room
@@ -16639,7 +16654,7 @@
         const t0 = e.composedPath()[0], corner = t0 && t0.__hzCorner;
         let on = false, held = false;
         const u0 = galUnitRect(), sh = galAttH(), st = { x: e.clientX, y: e.clientY, l: u0.x, t: u0.y, w: u0.w, h: u0.h };
-        const ph0 = st.h - sh, asp = st.w / ph0, W = vpW(), H = vpH(), rows = galAnchorRows(H);
+        const ph0 = st.h - sh, asp = galFly.asp || st.w / ph0, minW = Math.max(GAL_PIC_MIN_W, sh ? galFullW() : 0), W = vpW(), H = vpH(), rows = galAnchorRows(H);
         const ys = galLines(H, rows).map(function (x) { return x.v; }), xs = galLines(W).map(function (x) { return x.v; });
         let dock = null;
         const move = function (ev) {
@@ -16656,11 +16671,12 @@
             if (corner) {
                 const sx = corner[1] === 'r' ? 1 : -1, sy = corner[0] === 'b' ? 1 : -1;
                 const k = Math.max((st.w + sx * dx) / st.w, (ph0 + sy * dy) / ph0);
-                const lo = Math.max(GAL_PIC_MIN_H, GAL_PIC_MIN_W / asp, sh ? GAL_UNIT_MIN_W / asp : 0);
+                const lo = GAL_PIC_MIN_H;
                 let ph = Math.max(lo, Math.min(H * 0.9, ph0 * k));
                 if (!ev.ctrlKey) ph = Math.max(lo, galSnapH(st, corner, ph, ys, W, H, sh, xs));
                 w = ph * asp;
                 if (w > W - 8) { w = W - 8; ph = w / asp; }
+                w = Math.min(W - 8, Math.max(w, minW));     // narrower than its controls or the strip's text: bars at the sides
                 h = ph + sh;
                 if (corner[1] === 'l') l = st.l + st.w - w;
                 if (corner[0] === 't') t = st.t + st.h - h;

@@ -1369,10 +1369,10 @@ const galPH = function (min) {
     eq('anchor: that line in a taller window', S.galEdgeAt(onRow, 900, r900), 746);
     eq('anchor: a line past the rows is gone', S.galEdgeAt({ k: 'r', e: 's', i: 40 }, 900, r900), null);
     const rec = { ey: { t: onRow, b: { k: 'w', e: 'e', o: 12 } }, ex: { r: { k: 'w', e: 'e', o: 12 } } };
-    eq('anchor: both y edges on lines set the height, the strip included; below the controls floor it grows to it', S.galPlace(rec, 0.75, 60, 1400, 900, r900), { x: 1192, y: 579, w: 196, h: 321 });
+    eq('anchor: both y edges on lines set the height, the strip included; narrower than the controls floor it widens, never taller (bars at the sides)', S.galPlace(rec, 0.75, 60, 1400, 900, r900), { x: 1192, y: 710, w: 196, h: 190 });
     eq('anchor: both y edges on lines set the height when above the floor', S.galPlace({ ey: { t: { k: 'w', e: 's', o: 12 }, b: { k: 'w', e: 'e', o: 12 } }, ex: { r: { k: 'w', e: 'e', o: 12 } } }, 0.75, 60, 1400, 900, r900).h, 876);
     eq('anchor: a fixed box follows its edge line', S.galPlace({ ex: { l: { k: 'c' } }, y: { m: 's', o: 20 } }, 1, 0, 1000, 800, [], { w: 190, h: 60 }), { x: 500, y: 20, w: 190, h: 60 });
-    eq('anchor: nothing on a line falls back to the remembered third and size', S.galPlace({ x: { m: 'e', o: -12 }, y: { m: 'e', o: -12 }, hf: 0.2 }, 1, 60, 1000, 800, []), { x: 792, y: 532, w: 196, h: 256 });     // 160 wide grows to GAL_PIC_MIN_W
+    eq('anchor: nothing on a line falls back to the remembered third and size', S.galPlace({ x: { m: 'e', o: -12 }, y: { m: 'e', o: -12 }, hf: 0.2 }, 1, 60, 1000, 800, []), { x: 792, y: 568, w: 196, h: 220 });     // 160 wide widens to GAL_PIC_MIN_W, same height
     eq('move snap: the right edge goes to the margin', S.galBoxSnap(1205, 300, 180, 100, 1400, 900, r900).x, 1208);
     eq('resize snap: the strip counts in the box', S.galSnapH({ l: 1700, t: 800, w: 200, h: 260 }, 'tl', 110, [900], 1920, 1080, 60), 100);
     const L = [{ x: 0, y: 12, w: 160, h: 120 }, { x: 170, y: 12, w: 160, h: 120 }, { x: 0, y: 150, w: 160, h: 120 }, null];
