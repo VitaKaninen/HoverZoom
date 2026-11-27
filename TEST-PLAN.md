@@ -374,8 +374,9 @@ Turn Endless back on afterwards.
     readout hides too).
 9.2c **Typing a number blocks previews.** Click the page number ("Page: [n] (n/N)"), then move over thumbnails.
     **Expect:** no preview opens until the box closes.
-9.2a **Jump box.** Click P on the page row, then click a thumbnail without typing. **Expect:** the box closes and
-    nothing else happens. Click G, type 2, click away. **Expect:** gallery 2 opens and the click does nothing more.
+9.2a **Jump box.** Click the pressed P: on the page row, then click a thumbnail without typing. **Expect:** the box
+    closes and nothing else happens. Click G: (it presses), click it again, type 2, click away. **Expect:** gallery 2
+    opens and the click does nothing more.
     - eporner, Chrome (v0.405.0): verified. The frame is 196x130 (picture 190x124 inside the border); each control
       hit-tests as itself, and the gaps are 3 px or more.
 
@@ -408,6 +409,22 @@ Turn Endless back on afterwards.
 9b.9 **The wheel over the right-click menu** does not scroll the page behind it. (v0.427.0)
 9b.10 **Close never vanishes.** Pin a preview and let its bar fade. **Expect:** the corner ✕ stays at 60 %, full and
      red on hover. On a gallery's picture, unhovered: ✕ ⛶ at 60 %, full while the picture is hovered. (v0.428.0)
+
+## 9c. Last, the P: / G: switch, pictures left (v0.430.0)
+
+9c.1 **Pictures left.** In Endless, the picture row reads "34 left of 75" (bold) with the queue's total "(13,850+)"
+     faint at the right; "last" in red on a gallery's last picture. Endless off: the same without the total.
+9c.2 **P: / G:.** P: is pressed (dark, bold) when a gallery opens. Click G: — it presses; the page row's ▶ ◀ now open
+     the next / previous gallery at its first page, closing any preview; ↑ ↓ PageUp PageDown still step pages. At the
+     queue's end ▶ shows "No more galleries". Close and reopen: P: is pressed again.
+9c.3 **Last.** Click ☑ Endless once: it turns yellow and reads Last, and stays shown when the picture is not hovered;
+     "N left" turns yellow. Go to this gallery's last picture (fullscreen too) and press → several times. **Expect:**
+     it stays there with "End of this gallery: stopped (Last)"; the next gallery is not opened (no seen tick on its
+     card). The page row's ▶ on the last page shows "No more pages". Close the gallery and open another: the box
+     reads Endless (blue) again. A third click on the box turns Endless off; a fourth back on.
+9c.4 **Right-click menu** with a gallery open: three dots — Endless mode, Endless mode: stop after this gallery
+     (Last), Endless mode off — matching the box.
+     - Claude, Browser pane, `door-whole.html` (v0.430.0): 9c.1–9c.3 verified (not fullscreen, not the menu).
 
 ## 10. Did the files loaded ahead survive in the cache?
 

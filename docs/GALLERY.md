@@ -780,11 +780,23 @@ right-click menu and the panel; on by default since v0.387.0, user). Code: `galE
   the old set, so `land` must stay set through the wait.
 - A queued door gone from the page is passed over; a queued gallery that fails (`galShow`: cancel / no pictures)
   → `galChainSkip`, the next one that way, else closes as before.
-- **Strip** (`galChainText`): `P:page/pages · G:gallery/galleries`, `G:picture/pictures · T:picture/pictures`
-  (`+` = some count not final). A gallery not open counts `galChainN` (its list or `hzGalCounts`) ÷ this `galPer`,
-  1 page when unknown. `galStripText` keeps `s.nums` {page, gal, pic, tb} for `twAsk`: a click left of the page row's
-  `·` asks a page (`galChainPageAt`), right of it a gallery (`galStripHalf` → `galChainJump`); the picture row asks a
-  picture of the whole queue (T; `galChainPicJump`: in another gallery it opens the page holding it, not the picture). The page row always shows in endless (`galStripRows`).
+- **Strip** (`galChainText`; user v0.430.0): page row = a two-part switch `P:page/pages` `G:gallery/galleries`
+  (`.sg`, pressed = dark + bold, `galStripPg` `{seg}` parts). `galStepG` (reset on every open and close): G: pressed =
+  the row's ◀ ▶ step whole galleries (`galRowStep` → `galChainOpen` at page 0, closing any preview; "No more
+  galleries" at the queue's end); ↑ ↓ PageUp PageDown always step pages (`twPageBtn`). A click on the unpressed part
+  presses it, on the pressed part types (`twAsk` 'page' → `galChainPageAt`, 'gal' → `galChainJump`). Picture row
+  (`galStripPic`, endless or not; user: what is wanted at a glance is how many are left): bold `34 left of 75` (pictures
+  after this one; red `last` on the last), endless adds the queue's total `(13,850+)` floated right in grey; a click
+  asks a picture of the whole queue (`galChainPicJump`: in another gallery it opens the page holding it). `s.picW` is
+  the row's widest form for `galFullW`, so the fullscreen box does not resize as the count drops a digit.
+  `+` = some count not final. A gallery not open counts `galChainN` (its list or `hzGalCounts`) ÷ this `galPer`,
+  1 page when unknown. `s.nums` {page, gal, pic, tb} feeds `twAsk`. The page row always shows in endless (`galStripRows`).
+- **Last** (`galLast`; user v0.430.0: finish this gallery without opening the next, which would mark it seen): the
+  Endless box cycles Endless → Last → off (`galEndlessCycle`; menu: three radio dots). Last stops for good at the end
+  of the gallery on screen — `galSeam` (note "End of this gallery: stopped (Last)", the self-playing slideshow too),
+  `galPageStep` ("No more pages"), `galChainText`'s `on`/`picOn`. One flag, not tied to a gallery: forgotten on close
+  or another user open (`galHide`, `galMiddle`), never saved; a G: step or typed gallery still moves (deliberate). Yellow
+  box and "N left" (`galEndlessLook`, `.lt`); the box stays shown unhovered while Last is on.
 - The galleries ahead load per "Loading ahead" (`ahGalAhead`; replaced `galChainWarm`, which read only the next
   one's thumbnails, on the last page).
 - **Closing** (`galHide`) after the queue moved on scrolls the current card into view (`behavior: 'instant'` — a

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.429.0
+// @version      0.430.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -9491,6 +9491,7 @@
     let galHost = null, galRoot = null, galBlur = null, galCur = null, galWant = null, galTopHost = null, galTop = null, galFlyHost = null, galFlyRootEl = null;
     let galHole = null, galFly = null;
     let galChain = null;    // endless: {hrefs, at, land, warm} — the queue of galleries, fixed when each joins it
+    let galLast = false, galStepG = false;     // until the gallery closes: Last (endless stops after the gallery on screen); the page row's ◀ ▶ step galleries (G: pressed)
     let dlHost = null, dlStripEl = null;   // the download strip
 
     const TOUR_ROW = 0.5;       // share of the shorter item's height that puts two in one row
@@ -10791,16 +10792,6 @@
         }
         twSync();
         if (galCur) galPageNote(galCur);
-    }
-
-    // The page row's text "P:a/b · G:c/d": true when x is right of the ·, the gallery half.
-    function galStripHalf(el, x) {
-        const t = [].find.call(el.childNodes, function (c) { return c.nodeType === 3 && c.nodeValue.indexOf('·') >= 0; }), i = t ? t.nodeValue.indexOf('·') : -1;
-        if (i < 0) return false;
-        const r = document.createRange();
-        r.setStart(t, i);
-        r.setEnd(t, i + 1);
-        return x >= r.getBoundingClientRect().left;
     }
 
     // Endless: open queued gallery k (0-based) at its first page.
@@ -13607,6 +13598,10 @@
             '.strip .b{flex:none;display:flex;align-items:center;justify-content:center;width:20px;height:24px;box-sizing:border-box;border-radius:5px;background:var(--btn);border:1px solid var(--border);cursor:pointer;font-size:11px}' +
             '.strip .b:hover{background:var(--btnHover)}.strip .b.faint{opacity:.35;cursor:default}.strip .b.faint:hover{background:var(--btn)}' +
             '.strip .no,.strip .b.gx{color:#f38ba8}' +
+            '.strip .t b{font-weight:700}.strip .t b.lt{color:#f9e2af}.strip .tot{float:right;padding-left:6px;color:#6c7086}' +
+            '.strip .sg{display:inline-block;padding:0 6px;line-height:18px;border:1px solid var(--border);background:var(--btn);opacity:.7;cursor:pointer;box-shadow:inset 0 1px 0 rgba(255,255,255,.08)}' +
+            '.strip .sg.a{border-radius:5px 0 0 5px}.strip .sg.z{border-radius:0 5px 5px 0;border-left:0}.strip .sg:not(.on):hover{background:var(--btnHover);opacity:1}' +
+            '.strip .sg.on{background:#11111b;color:#cdd6f4;opacity:1;font-weight:700;box-shadow:inset 0 2px 4px rgba(0,0,0,.8)}' +
             '.strip input.ask{width:4.5em;box-sizing:border-box;margin:0 auto;padding:1px 4px;font:inherit;text-align:center;color:var(--text);' +
             'background:var(--btn);border:1px solid var(--accent);border-radius:4px;outline:none;cursor:text}' +
             '.strip .askw{display:block;white-space:nowrap;text-overflow:clip;font-size:11px;cursor:default}.strip .askw input.ask{width:3.5em;margin:0 3px}' +
@@ -13664,6 +13659,7 @@
             'background:rgba(30,30,46,.92);border:1px solid #45475a;color:#cdd6f4;font:12px/1 system-ui,sans-serif;white-space:nowrap;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.5)}' +
             '.fly .endl>*:hover{background:#313244;color:#89b4fa}' +
             '.fly .endl input{margin:0;width:13px;height:13px;accent-color:#89b4fa;cursor:pointer}' +
+            '.fly .endl>label.last{opacity:1;pointer-events:auto;color:#f9e2af}.fly .endl>label.last input{accent-color:#f9e2af}' +
             '.fly .endl .l,.hzst .l{display:none}.fly .endl>*:hover .l,.fly:hover .hzst .l,.hzst.fix .l{display:inline}.fly:hover .hzst .s,.hzst.fix .s{display:none}' +
             '.fly .endl:not(.top){gap:4px}.fly .endl:not(.top)>label{height:20px;border-radius:10px}' +
             '.fly .endl>.hzst{position:static;display:block;height:auto;padding:0 7px;border-radius:9px;font-size:11px;line-height:1.15;text-align:left;cursor:default}' +
@@ -14122,18 +14118,18 @@
         galStripRows(set);
         const page = set.page || 0, at = set.pics.length ? galStartAt(set) : -1;
         const total = galPagesOf(set);
-        const ch = galChainText(set, page, total, at, n, reading);
-        s.picT.textContent = ch ? ch.pic : (at >= 0 ? at + 1 : '–') + ' / ' + n + (reading ? '+' : '');
+        const ch = galChainText(set, page, total, at, n, reading), byG = !!ch && galStepG;
+        galStripPic(s, at, n, reading, ch);
         s.nums = ch ? ch.nums : { page: [page + 1, total + (reading ? '+' : '')], gal: null, pic: [Math.max(0, at) + 1, n + (reading ? '+' : '')] };
         const N = s.nums;
-        if (Date.now() < galNoMoreUntil) galStripPg(s, [['No more pages', true]], '');
-        else if (ch) galStripPg(s, ['P:' + N.page[0] + '/' + N.page[1] + ' · G:' + N.gal[0] + '/' + N.gal[1]], '');
+        if (Date.now() < galNoMoreUntil) galStripPg(s, [[galNoMoreText, true]], '');
+        else if (ch) galStripPg(s, [{ seg: 'p', text: 'P:' + N.page[0] + '/' + N.page[1], on: !byG }, { seg: 'g', text: 'G:' + N.gal[0] + '/' + N.gal[1], on: byG }], '');
         else galStripPg(s, [(page + 1) + ' / ' + total + (reading ? '+' : '')], 'Page ');
-        if (galNoMoreSet === set && (ch ? ch.on : page + 1 < total)) galNoMoreSet = null;
+        if (galNoMoreSet === set && (ch ? (byG ? ch.galOn : ch.on) : page + 1 < total)) galNoMoreSet = null;
         s.gx.hidden = galNoMoreSet !== set;
         galStripSqueeze(s);
-        s.pgP.classList.toggle('faint', ch ? !ch.back : total < 2);
-        s.pgN.classList.toggle('faint', ch ? !ch.on : total < 2);
+        s.pgP.classList.toggle('faint', ch ? !(byG ? ch.galBack : ch.back) : total < 2);
+        s.pgN.classList.toggle('faint', ch ? !(byG ? ch.galOn : ch.on) : total < 2);
         s.picP.classList.toggle('faint', !n || (!!ch && !ch.picBack));
         s.picN.classList.toggle('faint', !n || (!!ch && !ch.picOn));
         if (galFly && fullActive() && !galEdit && Math.abs(Math.min(vpW() * 0.4, galFullW()) - galFullLast) > 1) galRefit();     // the text needs another width
@@ -14146,13 +14142,20 @@
         return (set.pages ? set.pages.length : 1) + (more > 0 ? Math.ceil(more / galPer(set)) : 0);
     }
 
-    // The page row's text: parts are strings or [text, red]; pre ("Page ") is the first thing squeezed out.
+    // The page row's text: parts are strings, [text, red] or {seg, text, on} (the P: / G: switch); pre ("Page ") is the first thing squeezed out.
     function galStripPg(s, parts, pre) {
         const t = s.pgT;
         while (t.firstChild) t.firstChild.remove();
         s.pgPre = pre ? t.appendChild(document.createTextNode(pre)) : null;
-        parts.forEach(function (p) {
+        parts.forEach(function (p, i) {
             if (typeof p === 'string') { t.appendChild(document.createTextNode(p)); return; }
+            if (p.seg) {
+                const g = document.createElement('span');
+                g.className = 'sg ' + p.seg + (i ? ' z' : ' a') + (p.on ? ' on' : '');
+                g.textContent = p.text;
+                t.appendChild(g);
+                return;
+            }
             if (!p[1]) { t.appendChild(document.createTextNode(p[0])); return; }
             const r = document.createElement('span');
             r.className = 'no';
@@ -14161,11 +14164,31 @@
         });
     }
 
+    // The picture row: "34 left of 75" (pictures after this one; "last" on the last), and in endless the queue's total at the right.
+    function galStripPic(s, at, n, reading, ch) {
+        const t = s.picT, fmt = function (v) { return v.toLocaleString(); }, N = fmt(n) + (reading ? '+' : '');
+        while (t.firstChild) t.firstChild.remove();
+        if (ch) {       // floated right, so first
+            const r = document.createElement('span');
+            r.className = 'tot';
+            r.textContent = '(' + ch.tot + ')';
+            t.appendChild(r);
+        }
+        const b = document.createElement('b');
+        if (at < 0) b.textContent = '–';
+        else if (at >= n - 1 && !reading) { b.textContent = 'last'; b.className = 'no'; }
+        else { b.textContent = fmt(n - at - 1) + (reading ? '+' : '') + ' left'; if (ch && galLast) b.className = 'lt'; }
+        t.appendChild(b);
+        t.appendChild(document.createTextNode(' of ' + N));
+        s.picW = fmt(n) + '+ left of ' + fmt(n) + '+' + (ch ? ' (' + ch.tot.replace(/\+$/, '') + '+)' : '');      // galFullW measures this: the widest the row gets in this gallery
+    }
+
     // ▶ on the last page: "No more pages" in red for GAL_NOMORE_MS, and ✕ beside ▶ until the page changes.
-    let galNoMoreUntil = 0, galNoMoreT = 0, galNoMoreSet = null;
+    let galNoMoreUntil = 0, galNoMoreT = 0, galNoMoreSet = null, galNoMoreText = 'No more pages';
     const GAL_NOMORE_MS = 2000;
-    function galNoMore() {
+    function galNoMore(text) {
         if (!galCur || !(galEndless() || galPagesOf(galCur) > 1)) return;
+        galNoMoreText = text || 'No more pages';
         galNoMoreSet = galCur;
         galNoMoreUntil = Date.now() + GAL_NOMORE_MS;
         clearTimeout(galNoMoreT);
@@ -14213,7 +14236,7 @@
                 b.addEventListener('mousedown', function (e) {
                     e.preventDefault();
                     e.stopPropagation();
-                    if (e.button === 0 && b.classList.contains('faint') && act === twPageBtn && dir > 0) { galNoMore(); return; }
+                    if (e.button === 0 && b.classList.contains('faint') && cls === 'pg' && dir > 0) { if (galStepG && galEndless()) galRowStep(1); else galNoMore(); return; }
                     if (e.button !== 0 || b.classList.contains('faint')) return;
                     act(dir);
                 });
@@ -14237,10 +14260,17 @@
             r.appendChild(s[nk]);
             el.appendChild(r);
         };
-        row('pg', 'pgP', 'pgT', 'pgN', twPageBtn);
+        row('pg', 'pgP', 'pgT', 'pgN', galRowStep);
         row('pn', 'picP', 'picT', 'picN', galStep);
         s.picT.addEventListener('click', function () { twAsk('pic', s.picT); });
-        s.pgT.addEventListener('click', function (e) { twAsk(galStripHalf(s.pgT, e.clientX) && s.nums && s.nums.gal ? 'gal' : 'page', s.pgT); });
+        s.pgT.addEventListener('click', function (e) {     // endless: a click on P: or G: presses it; on the pressed one, types a number
+            if (!(s.nums && s.nums.gal)) { twAsk('page', s.pgT); return; }
+            const g = e.target && e.target.closest ? e.target.closest('.sg') : null;
+            if (!g) return;
+            const gal = g.classList.contains('g');
+            if (gal !== galStepG) { galStepG = gal; if (galCur) galStripText(galCur); return; }
+            twAsk(gal ? 'gal' : 'page', s.pgT);
+        });
         ['mousedown', 'mouseup', 'click', 'auxclick', 'dblclick', 'contextmenu'].forEach(function (t) {
             el.addEventListener(t, function (e) {
                 e.preventDefault();
@@ -14357,8 +14387,8 @@
         const last = (set.pages ? set.pages.length : 1) - 1, to = (set.page || 0) + dir;
         if (to < 0) { galChainGo(-1, 'page'); return; }
         if (to > last) {
-            if (!galWhole(set)) galTourMore(set).then(function (grew) { if (galCur !== set) return; if (grew) galPageStep(dir); else { ahPageStep(set, 1); if (!galChainGo(1, 'page')) galNoMore(); } });
-            else { ahPageStep(set, 1); if (!galChainGo(1, 'page')) galNoMore(); }
+            if (!galWhole(set)) galTourMore(set).then(function (grew) { if (galCur !== set) return; if (grew) galPageStep(dir); else { ahPageStep(set, 1); if (galLast || !galChainGo(1, 'page')) galNoMore(); } });
+            else { ahPageStep(set, 1); if (galLast || !galChainGo(1, 'page')) galNoMore(); }
             return;
         }
         ahPageStep(set, dir);
@@ -14462,14 +14492,15 @@
             tall += k[0];
             if (!k[1]) open = true;
         });
-        const lastPage = page + 1 >= total, whole = galWhole(set);
+        const lastPage = page + 1 >= total, whole = galWhole(set), more = !galLast && c.at < c.hrefs.length - 1;     // Last: this gallery's end is the queue's
         return {
-            pg: 'P:' + (pb + page + 1) + '/' + pall + ' · G:' + (c.at + 1) + '/' + c.hrefs.length,
-            pic: 'G:' + (at >= 0 ? at + 1 : '–') + '/' + n + (reading ? '+' : '') + ' · T:' + (at >= 0 ? fmt(tb + at + 1) : '–') + '/' + fmt(tall) + (open ? '+' : ''),
+            tot: fmt(tall) + (open ? '+' : ''),
             back: c.at > 0 || page > 0,
-            on: c.at < c.hrefs.length - 1 || !lastPage || !whole,
+            on: more || !lastPage || !whole,
+            galBack: c.at > 0,
+            galOn: c.at < c.hrefs.length - 1,
             picBack: c.at > 0 || at > 0,
-            picOn: c.at < c.hrefs.length - 1 || !whole || at < n - 1,     // the queue's last picture: the slideshow stops there (user)
+            picOn: more || !whole || at < n - 1,     // the queue's last picture: the slideshow stops there (user)
             nums: { page: [pb + page + 1, pall], gal: [c.at + 1, c.hrefs.length], pic: [tb + Math.max(0, at) + 1, fmt(tall) + (open ? '+' : '')], tb: tb },
         };
     }
@@ -14516,6 +14547,19 @@
         }
     }
 
+    // The page row's ◀ ▶: a page, or with G: pressed (endless), a whole gallery, landing on its first page.
+    function galRowStep(dir) {
+        const c = galStepG && galEndless() ? galChain : null;
+        if (!c || !galCur) { twPageBtn(dir); return; }
+        if (c.land || c.hrefs[c.at] !== galCur.href) return;
+        if (dir > 0 && c.at === c.hrefs.length - 1) { galChainExtend(c); galChainFollow(c); }
+        const to = c.at + dir;
+        if (to < 0 || to >= c.hrefs.length) { if (dir > 0) galNoMore('No more galleries'); return; }
+        if (placed) unplace(); else cancel();
+        if (ahG && dir > 0) ahG.fwd++;
+        if (!galChainOpen(to, dir, 0, 'page') && dir > 0) galNoMore('No more galleries');
+    }
+
     // Endless: on to the next gallery (+1, its first page) or back to the one before (-1, its last page). pic: where a slideshow lands ('page' = that page's first). False with endless off or at the queue's end.
     function galChainGo(dir, pic) {
         const c = galEndless() ? galChain : null;
@@ -14533,6 +14577,7 @@
         if (!c || !galCur || !tour || !tour.gal) return false;
         if (c.land) return true;
         if (c.hrefs[c.at] !== galCur.href) return false;
+        if (dir > 0 && galLast) { seamDir = 0; seamNote('End of this gallery: stopped (Last)'); return true; }
         if (dir > 0 && c.at === c.hrefs.length - 1) galChainExtend(c);
         const stop = user && cfg.galleryEndlessStop;
         if (dir > 0 ? c.at >= c.hrefs.length - 1 : c.at <= 0) {
@@ -14662,8 +14707,23 @@
         return k;
     }
 
+    // The Endless box: Endless → Last (stop after this gallery, until it closes) → off → Endless.
+    function galEndlessCycle() {
+        if (cfg.galleryEndless && !galLast && galCur) { galLastSet(true); return; }
+        galEndlessSet(!cfg.galleryEndless);
+    }
+
+    // Last on or off: endless stops at the end of the gallery on screen; forgotten when the gallery closes.
+    function galLastSet(on) {
+        galLast = on && !!cfg.galleryEndless;
+        dbg('endless: Last ' + (galLast ? 'on — stops after this gallery' : 'off'));
+        galEndlessPaint();
+        if (galCur) galPageNote(galCur);
+    }
+
     // The ☐ Endless box was pressed.
     function galEndlessSet(on) {
+        galLast = false;
         reloadSettings();
         cfg.galleryEndless = on;
         saveSettings();
@@ -14676,10 +14736,19 @@
     }
 
     function galEndlessPaint() {
-        const ck = galFly && galFly.el.querySelector('.endl .ek input');
-        if (ck) ck.checked = !!cfg.galleryEndless;
+        const lb = galFly && galFly.el.querySelector('.endl .ek');
+        if (lb) galEndlessLook(lb);
         const ev = galFly && galFly.el.querySelector('.endl .ev input');
         if (ev) ev.checked = !!cfg.galleryEndlessViewed;
+    }
+
+    // The Endless box's look: ticked blue (Endless), ticked yellow "Last", or empty (off).
+    function galEndlessLook(lb) {
+        const on = !!cfg.galleryEndless, last = on && galLast;
+        lb.querySelector('input').checked = on;
+        lb.classList.toggle('last', last);
+        lb.querySelector('.s').textContent = last ? 'Last' : 'Endless';
+        lb.querySelector('.l').textContent = last ? 'Stop after this gallery' : on ? 'Endless mode' : 'Endless off';
     }
 
     // The ☐ Load all box was pressed: on, the open gallery's originals start now; off, nothing new starts until a preview.
@@ -14742,7 +14811,8 @@
             setTip(l, tip);
             return l;
         };
-        const lb = box('ek', !!cfg.galleryEndless, 'Endless', 'Endless mode', 'The next gallery opens at the end of this one');
+        const lb = box('ek', !!cfg.galleryEndless, 'Endless', 'Endless mode', 'Click: Endless → Last (stop after this gallery) → off');
+        galEndlessLook(lb);
         const lv = box('ev', !!cfg.galleryEndlessViewed, 'All', 'Show all galleries', 'Includes galleries already viewed');
         const info = document.createElement('span');
         info.textContent = 'ⓘ';
@@ -14751,7 +14821,7 @@
         tab.textContent = '↗';
         setTip(tab, 'Open this gallery\'s page in a new tab');
         const eat = function (e) { e.preventDefault(); e.stopPropagation(); };
-        lb.addEventListener('mousedown', function (e) { eat(e); if (e.button === 0) galEndlessSet(!cfg.galleryEndless); });
+        lb.addEventListener('mousedown', function (e) { eat(e); if (e.button === 0) galEndlessCycle(); });
         lv.addEventListener('mousedown', function (e) { eat(e); if (e.button === 0) galEndlessViewedSet(!cfg.galleryEndlessViewed); });
         info.addEventListener('mousedown', function (e) { eat(e); if (e.button === 0) galInfoShow(info); });
         tab.addEventListener('mousedown', function (e) { eat(e); if (e.button === 0) openOriginal(href); });
@@ -14789,15 +14859,15 @@
             ['R  P  D', 'memory: RAM held, full-size pictures preloaded for the next steps (estimate), disk this site stores · spelled out while the picture is hovered'],
             ['Right-click', 'settings (Load all is there), and open the gallery\'s page in a new tab'],
             ['Widget', 'drag it by its background to take it off the picture'],
-            ['Page row ◀ ▶', 'a page of thumbnails back or on, closing any preview · also ↑ ↓, PageUp / PageDown'],
+            ['Page row ◀ ▶', 'a page of thumbnails back or on, closing any preview · with G: pressed (endless), a whole gallery · ↑ ↓, PageUp / PageDown always step pages'],
             ['Picture row ◀ ▶', 'the slideshow, one picture back or on · also ← →, the wheel over the widget or the picture · hold to repeat'],
-            ['Numbers', 'click one to type where to go: the page number or the gallery number on the page row, a picture on the picture row · Enter or a click away goes there if you changed it; Esc, or a click away with nothing changed, does nothing · + = still being read'],
-            ['Endless mode', 'at the end of this gallery the next one on the page opens, and back from its first page goes to the one before · galleries already seen or visited are left out unless Show all galleries is on, judged once when queued · a step past a gallery\'s end stops there once, the next goes on (right-click to turn that off) · the last gallery\'s last picture stops for good'],
+            ['Numbers', 'click one to type where to go: a page, a gallery (endless: click P: or G: to press it, click the pressed one to type), a picture on the picture row · Enter or a click away goes there if you changed it; Esc, or a click away with nothing changed, does nothing · + = still being read'],
+            ['Endless mode', 'click the box: Endless → Last → off · Endless: at the end of this gallery the next one on the page opens, and back from its first page goes to the one before · Last (yellow): stop at the end of the gallery on screen, until you close the gallery · galleries already seen or visited are left out unless Show all galleries is on, judged once when queued · a step past a gallery\'s end stops there once, the next goes on (right-click to turn that off) · the last gallery\'s last picture stops for good'],
             ['Show all galleries', 'endless shows ALL galleries, including the ones you already viewed or visited'],
             ['P:11/18', 'endless: page 11 of 18, counting every queued gallery — one not read yet counts as one page'],
-            ['G:10/16', 'endless, page row: gallery 10 of the 16 queued'],
-            ['G:10/20', 'endless, picture row: picture 10 of this gallery\'s 20'],
-            ['T:300/1,000', 'endless: picture 300 of every queued gallery\'s pictures known so far (+ = some not counted yet)'],
+            ['G:10/16', 'endless: gallery 10 of the 16 queued'],
+            ['34 left of 75', 'picture row: pictures after this one in this gallery, of its 75 · "last" on its last picture · yellow while Last is on'],
+            ['(1,000)', 'endless: every queued gallery\'s pictures known so far (+ = some not counted yet) · click the row to type a picture of the whole queue'],
             ['Closing', 'the picture flies back to the current gallery\'s card on the page'],
             ['', 'any click closes this box'],
         ], b);
@@ -15398,6 +15468,7 @@
         galVeil(false);
         const ch = galChain;
         galChain = null;
+        galLast = galStepG = false;
         if (ch && ch.at > 0 && galFly && galFly.pic.isConnected) {      // endless moved on: the current gallery's card comes into view to fly back to
             const r = galHoleRect(galFly.pic);
             if (r.bottom < 0 || r.top > vpH()) galFly.pic.scrollIntoView({ block: 'center', behavior: 'instant' });
@@ -16298,7 +16369,7 @@
         const hr = galHoleRect(pic || t);
         if (galOwns(active)) cancel();
         const sw = !!(galChain && galChain.land && galChain.land.href === href && galFly);     // the queue switching gallery
-        if (!sw) galChain = cfg.galleryEndless ? galChainFrom(href) : null;
+        if (!sw) { galChain = cfg.galleryEndless ? galChainFrom(href) : null; galLast = galStepG = false; }
         if (!sw && galChain && galChain.hrefs.length <= 3) galChainFollow(galChain);     // a short queue: the page loads more under the gallery at once
         galOn = true;
         galStripOne = !galEndless();
@@ -16348,8 +16419,9 @@
         let need = 0;
         [s.pgT, s.picT].forEach(function (t) {
             const cs = getComputedStyle(t), size = t === s.pgT ? 11 : parseFloat(getComputedStyle(s.el).fontSize) || 12;
-            cv.font = (cs.fontWeight || '400') + ' ' + size + 'px ' + (cs.fontFamily || 'system-ui, sans-serif');
-            need = Math.max(need, cv.measureText(ahead(t.textContent)).width);
+            const pic = t === s.picT && s.picW, segs = t.querySelectorAll('.sg').length;
+            cv.font = (segs || pic ? '700' : cs.fontWeight || '400') + ' ' + size + 'px ' + (cs.fontFamily || 'system-ui, sans-serif');
+            need = Math.max(need, cv.measureText(pic ? s.picW.replace(/\d/g, '8') : ahead(t.textContent)).width + segs * 14 + (pic ? 6 : 0));     // a segment's padding and border; the total's gap
         });
         return Math.ceil(need + 2 * 20 + 2 * 4 + 8 + 6 + 16);      // ◀ ▶, their gaps, the strip's padding, the frame's border, room
     }
@@ -16755,7 +16827,12 @@
             item('Tick results whose gallery was seen', !!cfg.galleryTicks, flip('galleryTicks'));
             item('Mark results something was saved from', !!cfg.gallerySavedMarks, flip('gallerySavedMarks'));
             item('Middle-click opens a gallery', !!cfg.galleryMiddle, flip('galleryMiddle'));
-            item('Endless mode', !!cfg.galleryEndless, function () { galEndlessSet(!cfg.galleryEndless); galMenuShow(x, y); });
+            if (galCur) {       // the Endless box's three states
+                const on = !!cfg.galleryEndless;
+                item('Endless mode', { radio: on && !galLast }, function () { if (on) galLastSet(false); else galEndlessSet(true); galMenuShow(x, y); });
+                item('Endless mode: stop after this gallery (Last)', { radio: on && galLast }, function () { if (!on) galEndlessSet(true); galLastSet(true); galMenuShow(x, y); });
+                item('Endless mode off', { radio: !on }, function () { if (on) galEndlessSet(false); galMenuShow(x, y); });
+            } else item('Endless mode', !!cfg.galleryEndless, function () { galEndlessSet(!cfg.galleryEndless); galMenuShow(x, y); });
             item('Show all galleries: include ones already viewed', !!cfg.galleryEndlessViewed, function () { galEndlessViewedSet(!cfg.galleryEndlessViewed); galMenuShow(x, y); });
             item('Endless mode: stop once at each gallery\'s end', !!cfg.galleryEndlessStop, flip('galleryEndlessStop'));
             item('Load all of a gallery\'s originals when it opens', !!cfg.galleryLoadAll, function () { galLoadAllSet(!cfg.galleryLoadAll); galMenuShow(x, y); });
