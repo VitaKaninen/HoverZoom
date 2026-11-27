@@ -1,4 +1,23 @@
-# NEXT TASK (user, 2026-11-26): consistency review of the whole script
+# NEXT TASK (user, 2026-11-27): build the preload plan in docs/PRELOAD.md
+
+Start a new session with: **"Read docs/NEXT.md 'NEXT TASK' and build the preload plan in docs/PRELOAD.md."**
+
+**Handoff (2026-11-27, ~305k tokens, v0.436.0–v0.437.0, all pushed).** User asked: (1) why a page step in a gallery
+leaves an empty page while full-size pictures load — cause: with Load all on a forward step drops nothing, P: starts a
+landed gallery's originals at once, `gal`/`galo` share priority; (2) a better prediction log + an easy export — done
+v0.436.0 (`ready`, `q`, `more`, `list`, `halt`, `gsum`, grouped `sum`, header; manager menu *Export prediction log*,
+docs/PREDICT.md), v0.437.0 `save` event; (3) a list of every preload kind (L1–L25) and an order per moment (M1–M14),
+reviewed by the user line by line — **the plan is final enough to build; it is in docs/PRELOAD.md "Plan"**, with the
+user's answers (M6 vs M7 order intended; step back keeps pages ahead, settle from the log; slideshow keeps 10–20 HQ
+ahead; L17 capped at 2 pages; "Upgrade clips" = page on screen). **Last asked:** whether it all looks good — the user's
+last message was M13 + answers; I said yes and recorded it. Not answered: none open.
+**Build order proposed:** drop-and-re-queue on each moment + M6–M9 order (fixes the empty-page wait) first; then M4/M5,
+M13 buffer, clip stills (L24, test partial download first), L13 count split; then the shared next-page finder
+(OLINT recognition + HZ/FS direction + FS teaching) across three repos — its own session.
+
+---
+
+# PREVIOUS TASK (user, 2026-11-26): consistency review of the whole script
 
 Start a new session with: **"Read docs/NEXT.md 'NEXT TASK' and do the consistency review."**
 
