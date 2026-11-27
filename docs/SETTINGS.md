@@ -195,6 +195,7 @@ once — two frames disagreeing about whether the site was listed.
 - **Menu commands are registered only when `window.top === window.self`.**
 - **The menu, in order** (`refreshSiteMenu`, then `Hover Zoom settings`): Enable/Disable for this site; ☑ Draw where the
   slideshow stops (`autoClose: false`); ☑ Enable debug mode (`cfg.debug`, user 2026-11-17, closes the menu, 3 s toast; the panel's words since v0.426.0).
+  Fixed beside `Hover Zoom settings`: Hover Zoom activity window; Export prediction log (user v0.436.0, `predExport`, docs/PREDICT.md).
 - **One label per setting, everywhere it appears** (v0.426.0): the panel, the right-click menu (`galMenuShow`) and
   the manager's menu use the same words, and the gallery's buttons' names (Endless mode, Show all galleries).
 - **Every destructive button asks first** (`confirm()`): Reset to defaults, widget colours reset, the request log's

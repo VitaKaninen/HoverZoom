@@ -272,8 +272,10 @@ Test pages:
     - **Nothing moves while loading** (v0.435.0, `G16`): open a big gallery on a slow site and keep the pointer still
       over a thumbnail in the first rows. **Expect:** no thumbnail on screen ever shifts; rows appear whole, one
       after another (or, where the site gives sizes, every place at once and pictures fading into them).
-    - **Prediction log:** after a few galleries, Settings → Diagnostics → *Keep a prediction log* → Copy. **Expect:**
-      lines with `open`, `page`, `pv`, `close`, `sum`, and no address, site name or file name anywhere.
+    - **Prediction log:** after a few galleries and page steps, the manager's menu → *Export prediction log*.
+      **Expect:** a save dialog for `hover-zoom-predict-<date>_<time>.txt`; the file has lines with `open`, `page`,
+      `ready`, `pv`, `gsum`, `sum`, and no address, site name or file name anywhere. Export again at once: the
+      whole log (nothing new); after more browsing: only the new lines.
     - **Memory full:** on a gallery bigger than the memory cap (Settings → *Memory for an open gallery*; set it
       to 64 to try it), **expect** `memory keep: dropped …` and then `gallery originals: memory full`, and no more
       original requests until you page on.

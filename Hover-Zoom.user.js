@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.435.0
+// @version      0.436.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -12661,7 +12661,7 @@
     let sizeTrustMemo = null, sizeTrustT = 0;
     const sizeChecked = new Set();
     const PRED_KEY = 'hoverZoomPredict', PRED_MAX = 8000;     // the prediction log, across sites, anonymised
-    let predSaltMemo = null, predPage = null, predBuf = [], predSaveT = 0;
+    let predSaltMemo = null, predPage = null, predBuf = [], predSaveT = 0, predWait = null;
     let galShowPend = null;     // galShow's thumbnails still loading, handed to the set galBuild makes
     const GAL_GROW_TICK = 400;          // the reading frame scrolls a screen this often
     const GAL_GROW_IDLE_MS = 4000;      // at its bottom with nothing new this long, the page is read
@@ -14445,6 +14445,7 @@
         set.want = null;
         set.page = to;
         galPageWork(set, galLayout(set, set.open));
+        predWatch(set.href, to);
         return true;
     }
 
@@ -14455,6 +14456,7 @@
         const last = (set.pages ? set.pages.length : 1) - 1, to = (set.page || 0) + dir;
         if (to < 0) { galChainGo(-1, 'page'); return; }
         if (to > last) {
+            if (!galWhole(set)) { predNote('more', { g: predGal(set.href), p: to + 1, q: predQ() }); predWatch(set.href, to); }
             if (!galWhole(set)) galTourMore(set).then(function (grew) { if (galCur !== set) return; if (grew) galPageStep(dir); else { ahPageStep(set, 1); if (galLast || !galChainGo(1, 'page')) galNoMore(); } });
             else { ahPageStep(set, 1); if (galLast || !galChainGo(1, 'page')) galNoMore(); }
             return;
@@ -14468,7 +14470,7 @@
         const g = ahG;
         if (!g) return;
         ahT('act', { a: 'page', dir: dir, page: (set.page || 0) + 1 });
-        predNote('page', { g: predGal(set.href), dir: dir, p: (set.page || 0) + dir + 1, th: predTh(set.href, (set.page || 0) + dir) });     // the page stepped to, before the flip
+        predNote('page', { g: predGal(set.href), dir: dir, p: (set.page || 0) + dir + 1, th: predTh(set.href, (set.page || 0) + dir), q: predQ() });     // the page stepped to, before the flip
         if (dir > 0 && ahAll()) {
             g.fwd++;
             g.back = null;
@@ -14622,7 +14624,7 @@
     // The page row's ◀ ▶: a page, or with G: pressed (endless), a whole gallery, landing on its first page.
     function galRowStep(dir) {
         const c = galStepG && galEndless() ? galChain : null;
-        if (c) predNote('gstep', { dir: dir });
+        if (c) predNote('gstep', { dir: dir, q: predQ() });
         if (!c || !galCur) { twPageBtn(dir); return; }
         if (c.land || c.hrefs[c.at] !== galCur.href) return;
         if (dir > 0 && c.at === c.hrefs.length - 1) { galChainExtend(c); galChainFollow(c); }
@@ -15082,6 +15084,7 @@
     function galThumbSettled(u) {
         if (!u || galThumbDone.has(u)) return;
         galThumbDone.add(u);
+        if (predWait) predCheck();
         if (!galThumbT) galThumbT = setTimeout(function () {
             galThumbT = 0;
             galPillMarks(GAL_DOOR_MARK).forEach(galChipStyle);
@@ -15275,6 +15278,7 @@
         galBlur.classList.add('on');
         galCur = set;
         galStoreTick();
+        predCheck();
         if (!twGalOpen) { twGalOpen = true; twRefresh(); }
         setTimeout(function () { if (galCur === set) galVeil(false); }, GAL_FADE_MS);
         galTrace(href, 'shown: ' + pics.length + ' thumbnails');
@@ -15403,7 +15407,7 @@
         const whole = galGrown.has(href);
         if (whole) galCountKeep(href, list.length);
         delete all[href];       // re-added last: the order is the age
-        all[href] = { items: list.map(function (it) { const x = Object.assign({}, it); delete x.hqTried; delete x.el; if (x.hit) x.hit = { url: x.hit.url, w: x.hit.w, h: x.hit.h, video: !!x.hit.video }; return x; }), html: !!html, whole: whole, at: now, info: info };
+        all[href] = { items: list.map(function (it) { const x = Object.assign({}, it); delete x.hqTried; delete x.predOr; delete x.el; if (x.hit) x.hit = { url: x.hit.url, w: x.hit.w, h: x.hit.h, video: !!x.hit.video }; return x; }), html: !!html, whole: whole, at: now, info: info };
         if (!galKeptT) galKeptT = setTimeout(galKeptWrite, 1000);
     }
 
@@ -15478,6 +15482,7 @@
             galTrace(href, 'reading on: ' + why);
             ahGrowEnd(href, why === 'grown' || why === 'reported' ? '' : why);
             dlqGrowEnd(href, why, galGrown.has(href));
+            if ((galCur && galCur.href === href) || (galChain && galChain.hrefs.indexOf(href) >= 0)) predNote('list', { g: predGal(href), from: from, n: (galLists.get(href) || []).length, ms: Math.round(performance.now() - t0), end: galGrown.has(href) ? 1 : 0 });
             dbg('gallery read to its end: ' + why, { href: href, from: from, pictures: (galLists.get(href) || []).length, final: galGrown.has(href), ms: Math.round(performance.now() - t0), open: !!galCur && galCur.href === href });
             if (galCur && galCur.href === href) { galPageNote(galCur); if (galCur.waiting) galLayout(galCur, galCur.open); }     // read to its end: the last row is final
             galChipsCount(href);
@@ -15529,6 +15534,7 @@
             if (ended || sizing) return;
             ended = true;
             set.hqHorizon = why === 'memory full';
+            if (set.hqHorizon) predNote('halt', { why: 'memory', g: predGal(set.href), or: got });
             if (lg) lg.end(why, bytes);
             if (galGrown.has(set.href)) galKeep(set.href, galGrowWhy.get(set.href) === 'html');     // with the originals found, a return skips the guessing
             nextWarmReport();
@@ -15558,7 +15564,7 @@
                     galResolve(img, tok).then(function (hit) {
                         ahT('orig', { tag: 'galo', u: (img.__hzItem && img.__hzItem.thumb) || img.src, s: Math.round(t0), ms: Math.round(performance.now() - t0), ok: hit ? 1 : 0 }, job);
                         if (hit) { got++; if (!hit.video) { plKeepImage(hit, img.__hzItem); ahFiles.add(hit.url); } size(hit); nextWarmSeen(hit.url, performance.now() - t0); }
-                        if (hit && !tok.cancelled && img.__hzItem) img.__hzItem.hqTried = true;     // a miss is asked again by the next run
+                        if (hit && !tok.cancelled && img.__hzItem) img.__hzItem.hqTried = img.__hzItem.predOr = true;     // a miss is asked again by the next run
                         if (r) r.done({ status: hit ? 200 : 0 });
                     }, function () { if (r) r.done({ status: 0 }); }).then(function () { if (it) it.hqBusy = false; free(); galHqLive.delete(live); running--; next(); });
                 });
@@ -15582,7 +15588,7 @@
     }
 
     function galHide(why) {
-        if (galCur && !galLook) { predNote('close', { g: predGal(galCur.href), p: (galCur.page || 0) + 1 }); predSum('close'); }
+        if (galCur && !galLook) { predWatch(null); predNote('close', { g: predGal(galCur.href), p: (galCur.page || 0) + 1 }); predGsum(galCur.href); }
         setTimeout(galStoreTick, 0);     // after the state below is cleared: the readout goes
         galEditStop(false);
         galMenuHide();
@@ -16509,7 +16515,9 @@
         const hr = galHoleRect(pic || t);
         if (galOwns(active)) cancel();
         const sw = !!(galChain && galChain.land && galChain.land.href === href && galFly);     // the queue switching gallery
-        predNote('open', { g: predGal(href), sw: sw ? 1 : 0, land: sw && galChain.land.page ? 'last' : null, th: sw && galChain.land.page ? null : predTh(href, 0) });
+        if (sw && galCur) predGsum(galCur.href);
+        predNote('open', { g: predGal(href), sw: sw ? 1 : 0, land: sw && galChain.land.page ? 'last' : null, th: sw && galChain.land.page ? null : predTh(href, 0), q: predQ() });
+        predWatch(href, sw && galChain.land.page ? null : 0);
         if (!sw) { galChain = cfg.galleryEndless ? galChainFrom(href) : null; galLast = galStepG = false; }
         if (!sw && galChain && galChain.hrefs.length <= 3) galChainFollow(galChain);     // a short queue: the page loads more under the gallery at once
         galOn = true;
@@ -17865,7 +17873,7 @@
 
     // Paced starts: a random gap between starts and a cap in flight; the open gallery first, then counts, then the main page.
     function ahGate(gap, max) {
-        const g = { live: 0, at: 0, timer: 0, wait: [] };
+        const g = { live: 0, at: 0, timer: 0, wait: [], on: {} };
         g.pump = function () {
             clearTimeout(g.timer);
             if (document.visibilityState === 'hidden') return;
@@ -17882,9 +17890,10 @@
                 const w = g.wait.splice(k, 1)[0];
                 g.last = w.tag;
                 g.live++;
+                g.on[w.tag] = (g.on[w.tag] || 0) + 1;
                 g.at = now + gap[0] + Math.random() * (gap[1] - gap[0]);
                 let freed = false;
-                w.resolve(function () { if (freed) return; freed = true; g.live--; g.pump(); });
+                w.resolve(function () { if (freed) return; freed = true; g.live--; g.on[w.tag]--; g.pump(); });
             }
         };
         return g;
@@ -17915,7 +17924,7 @@
             const t0 = performance.now();
             return galResolve({ __hzItem: item, naturalWidth: 0, naturalHeight: 0, src: item.thumb, currentSrc: item.thumb }, tok).then(function (hit) {
                 ahT('orig', { tag: tag, u: item.thumb, s: Math.round(t0), ms: Math.round(performance.now() - t0), ok: hit ? 1 : 0 }, tok.job);
-                if (hit && !tok.cancelled) item.hqTried = true;     // as galHqAll: a run skips it
+                if (hit && !tok.cancelled) item.hqTried = item.predOr = true;     // as galHqAll: a run skips it
                 return hit;
             }).finally(function () { item.hqBusy = false; });
         }, tok).then(function (hit) { if (hit && !hit.video && hit.url !== item.thumb) { plKeepImage(hit, item); ahFiles.add(hit.url); } return hit; });
@@ -18201,7 +18210,7 @@
         const k = set.pics.findIndex(function (p) { return p.img === img; });
         if (k < 0) return;
         ahT('act', { a: tour ? 'slide' : 'preview', pic: k + 1, dir: dir });
-        { const it = set.pics[k].item; predNote(tour ? 'slide' : 'pv', { g: predGal(set.href), i: k + 1, pre: it && it.hqTried && it.hit ? 1 : 0 }); }
+        { const it = set.pics[k].item; predNote(tour ? 'slide' : 'pv', { g: predGal(set.href), i: k + 1, pre: it && it.hqTried && it.hit ? 1 : it && it.hqBusy ? 2 : 0, q: predQ() }); }
         if (tour && tour.gal === set) { const p = galPageOf(set, k); if (p > (set.far || 0)) { set.far = p; galFeed(set); } }     // the slideshow's page and those ahead get their thumbnails
         const was = g.origs;
         g.origs = true;
@@ -18291,7 +18300,8 @@
             if (!predPage) {
                 const doors = galDoorList();
                 predPage = { id: Math.random().toString(36).slice(2, 8), t0: performance.now() };
-                predBuf.push({ pg: predPage.id, e: 'page', site: predSite(), doors: doors.length, n: doors.map(function (d) { return predCount(d.h); }) });
+                predBuf.push({ pg: predPage.id, e: 'page', v: version(), tab: predTab(), site: predSite(), per: galPer(null),
+                    cfg: { la: cfg.galleryLoadAll ? 1 : 0, en: cfg.galleryEndless ? 1 : 0, mb: cfg.galleryKeepMB }, doors: doors.length, n: doors.map(function (d) { return predCount(d.h); }) });
             }
             const ev = { pg: predPage.id, t: Math.round((performance.now() - predPage.t0) / 100) / 10, e: e };
             for (const k in o || {}) if (o[k] != null) ev[k] = o[k];
@@ -18299,16 +18309,76 @@
             if (!predSaveT) predSaveT = setTimeout(predFlush, 3000);
         } catch (x) { /* a line lost, never the action */ }
     }
-    // What was loaded per gallery: thumbnails and originals, by picture number.
+    // A tab's id in the log: random, kept by the tab across reloads.
+    function predTab() {
+        try {
+            let t = sessionStorage.getItem('hzPredTab');
+            if (!t) { t = Math.random().toString(36).slice(2, 6); sessionStorage.setItem('hzPredTab', t); }
+            return t;
+        } catch (e) { return null; }
+    }
+    // What the paced loads hold right now: {tag: [waiting, in flight]}, page reads as p.tag; vis = the open gallery's own thumbnails loading.
+    function predQ() {
+        const q = {};
+        [[ahPics, ''], [ahPages, 'p.']].forEach(function (x) {
+            const g = x[0], w = {};
+            g.wait.forEach(function (o) { w[o.tag] = (w[o.tag] || 0) + 1; });
+            Object.keys(w).concat(Object.keys(g.on)).forEach(function (t) { const a = w[t] || 0, b = g.on[t] || 0; if (a || b) q[x[1] + t] = [a, b]; });
+        });
+        if (galCur && galCur.inflight) q.vis = galCur.inflight;
+        return q;
+    }
+    // From a step or an open: time until that page's thumbnails are all in (`ready`); a newer step first writes the old one as cut.
+    function predWatch(href, page) {
+        if (predWait && href && predWait.href === href && predWait.page === page) return;     // the same page asked again (a step after a read-on)
+        if (predWait) { const w = predWait, th = predTh(w.href, w.page); predWait = null; predNote('ready', { g: predGal(w.href), p: w.page + 1, cut: 1, ms: Math.round(performance.now() - w.t0), first: w.first, th: th }); }
+        if (!href || page == null || !predOn()) return;
+        predWait = { href: href, page: page, t0: performance.now(), first: null };
+        setTimeout(predCheck, 0);
+    }
+    function predCheck() {
+        const w = predWait;
+        if (!w) return;
+        const th = predTh(w.href, w.page);
+        if (!th || !th[1]) return;
+        const ms = Math.round(performance.now() - w.t0);
+        if (th[0] && w.first == null) w.first = ms;
+        if (th[0] < th[1]) return;
+        predWait = null;
+        predNote('ready', { g: predGal(w.href), p: w.page + 1, ms: ms, first: w.first, n: th[1] });
+    }
+    // One gallery's loaded pictures: th = thumbnails, or = originals ever loaded ahead, dr = those since dropped from memory.
+    function predGal1(list) {
+        const th = predRanges(list.length, function (k) { return !!list[k] && galThumbDone.has(list[k].thumb); });
+        const or = predRanges(list.length, function (k) { return !!list[k] && (!!list[k].predOr || (!!list[k].hqTried && !!list[k].hit)); });
+        const dr = predRanges(list.length, function (k) { return !!list[k] && !!list[k].predOr && !list[k].hqTried; });
+        return { n: list.length, th: th, or: or, dr: dr || null };
+    }
+    // Leaving a gallery (closed, or the queue moved on): its totals.
+    function predGsum(href) {
+        const list = galLists.get(href);
+        if (!predOn() || !Array.isArray(list) || !list.length) return;
+        predNote('gsum', Object.assign({ g: predGal(href) }, predGal1(list)));
+    }
+    // The whole page's totals, galleries with the same totals grouped (gs = their numbers).
     function predSum(why) {
         if (!predOn() || !predPage) return;
-        const g = [];
+        const groups = new Map();
         galDoorList().forEach(function (d, i) {
             const list = galLists.get(d.h);
             if (!Array.isArray(list) || !list.length) return;
-            const th = predRanges(list.length, function (k) { return !!list[k] && galThumbDone.has(list[k].thumb); });
-            const or = predRanges(list.length, function (k) { return !!list[k] && !!list[k].hqTried && !!list[k].hit; });
-            if (th || or) g.push({ g: i + 1, n: list.length, th: th, or: or });
+            const r = predGal1(list);
+            if (!r.th && !r.or) return;
+            const key = r.th + '|' + r.or + '|' + (r.dr || '');
+            if (!groups.has(key)) groups.set(key, { ix: new Set(), th: r.th, or: r.or, dr: r.dr });
+            groups.get(key).ix.add(i);
+        });
+        const g = [];
+        groups.forEach(function (v) {
+            const top = Math.max.apply(null, Array.from(v.ix)) + 1;
+            const o = { gs: predRanges(top, function (k) { return v.ix.has(k); }), th: v.th, or: v.or };
+            if (v.dr) o.dr = v.dr;
+            g.push(o);
         });
         predNote('sum', { why: why, g: g });
     }
@@ -18318,17 +18388,46 @@
         const st = predStore();
         st.ev = st.ev.concat(predBuf);
         predBuf = [];
-        if (st.ev.length > PRED_MAX) st.ev = st.ev.slice(-PRED_MAX);
+        if (st.ev.length > PRED_MAX) { const cut = st.ev.length - PRED_MAX; st.ev = st.ev.slice(cut); st.cut = Math.max(0, (st.cut || 0) - cut); }
         try { GM_setValue(PRED_KEY, JSON.stringify(st)); } catch (e) { /* storage unavailable */ }
+    }
+    function predHead(n, of) {
+        return '# Hover Zoom ' + version() + ' prediction log, ' + n + (of != null && of !== n ? ' of ' + of : '') + ' events. Fields: HoverZoom docs/PREDICT.md. Sites are salted hashes; g = gallery number on its page; ' +
+            'th = [thumbnails of that page already loaded, of]; pre = original loaded ahead (2 = loading); q = paced loads {tag: [waiting, in flight]}; ready = ms until a page\'s thumbnails were all in.\n';
     }
     function predText() {
         predFlush();
         const st = predStore();
-        return '# Hover Zoom ' + version() + ' prediction log, ' + st.ev.length + ' events. Sites are salted hashes; g = gallery number on its page; ' +
-            'th = [thumbnails of that page already loaded, of]; pre = its original was loaded ahead; sum = what was loaded per gallery (picture numbers).\n' +
-            st.ev.map(function (e) { return JSON.stringify(e); }).join('\n');
+        return predHead(st.ev.length) + st.ev.map(function (e) { return JSON.stringify(e); }).join('\n');
     }
-    function predClear() { predBuf = []; predPage = null; predSaltMemo = null; try { GM_setValue(PRED_KEY, ''); } catch (e) { /* storage unavailable */ } }
+    // The manager menu's export: what was logged since the last export (all of it when nothing is new), saved as a file.
+    function predExport() {
+        predSum('export');
+        predFlush();
+        const st = predStore(), from = (st.cut || 0) < st.ev.length ? st.cut || 0 : 0, ev = st.ev.slice(from);
+        if (!ev.length) { toast('The prediction log is empty' + (cfg.predictLog ? '' : ' (logging is off: Settings → Diagnostics)'), 3000); return; }
+        const d = new Date(), p2 = function (n) { return String(n).padStart(2, '0'); };
+        const name = 'hover-zoom-predict-' + d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate()) + '_' + p2(d.getHours()) + '-' + p2(d.getMinutes()) + '-' + p2(d.getSeconds()) + '.txt';
+        const obj = URL.createObjectURL(new Blob([predHead(ev.length, st.ev.length) + ev.map(function (e) { return JSON.stringify(e); }).join('\n') + '\n'], { type: 'text/plain' }));
+        let once = false;
+        const saved = function () {
+            if (once) return;
+            once = true;
+            const s2 = predStore();
+            s2.cut = s2.ev.length;
+            try { GM_setValue(PRED_KEY, JSON.stringify(s2)); } catch (e) { /* storage unavailable */ }
+            toast('Prediction log saved: ' + ev.length + ' events' + (from ? ' (new since the last export)' : ''), 3000);
+            setTimeout(function () { URL.revokeObjectURL(obj); }, 60000);
+        };
+        const viaLink = function () {
+            const a = document.createElement('a');
+            a.href = obj; a.download = name; a.style.display = 'none';
+            document.documentElement.appendChild(a); a.click(); a.remove();
+            saved();
+        };
+        try { GM_download({ url: obj, name: name, saveAs: true, onload: saved, onerror: function (r) { if (!(r && r.error === 'not_succeeded')) viaLink(); } }); } catch (e) { viaLink(); }
+    }
+    function predClear() { predBuf = []; predPage = null; predSaltMemo = null; predWait = null; try { GM_setValue(PRED_KEY, ''); } catch (e) { /* storage unavailable */ } }
 
     // The gallery preview: a hovered door's first page of thumbnails laid out around it, nothing active; leaving the door closes it.
     function galLookOpen(el, href) {
@@ -18355,6 +18454,7 @@
     function galPreHalt(why) {
         if (galPreStop) return;
         galPreStop = true;
+        predNote('halt', { why: why });
         dbg('gallery preload stopped: ' + why);
         if (galPreLog) { galPreLog.end(why); galPreLog = null; }
     }
@@ -20271,6 +20371,7 @@
     if (isTopFrame && typeof GM_registerMenuCommand === 'function') {
         GM_registerMenuCommand('Hover Zoom settings', showPanel);
         GM_registerMenuCommand('Hover Zoom activity window', actOpen);
+        GM_registerMenuCommand('Export prediction log', predExport);
         refreshSiteMenu();
     }
 
