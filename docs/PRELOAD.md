@@ -106,7 +106,11 @@ step a page or gallery they are skimming, and M6 does not return until the galle
 
 **L13 split (user 2026-11-27), not built:** the list read is one thing today — an HTML fetch of the gallery page gives
 each picture's thumbnail + link, and their number *is* the count; past what the HTML holds, only a hidden frame
-(the page loaded in full, scripts and images included; measured ~5–9 s each, one at a time) reads the rest. Full-size
+(the page loaded in full, scripts and images included; measured ~5–9 s each, one at a time) reads the rest. Cost (`galRender`
+grow mode): it downloads what a visit scrolled to the bottom would — page, scripts, ads, every thumbnail; only video,
+audio and embeds are stripped (`galNoMedia`). Time floor: page load + first report (settle 700 ms, cap 4 s) + one screen
+per 400 ms (`GAL_GROW_TICK`) + 4 s idle at the bottom (`GAL_GROW_IDLE_MS`) to know it ended. Blocking its images is not
+possible from a userscript (and lazy-loading pages only add more as images load). Full-size
 addresses are not part of it: each is found per picture when its HQ is wanted (`galResolve`). Wanted: the **count**
 first and cheap — a stated number ("240 photos") or the gallery's own pager, learned per site with the frame's final
 count as ground truth (shared rule §learning) — then the rest of the list only when thumbnails past it are needed.
