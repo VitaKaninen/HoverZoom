@@ -22,7 +22,10 @@ waits for the whole L17 walk; first-hover restart only under G:), M1/M4/M5 (v0.4
 sessionStorage); (2) M13 slideshow buffer (10 ahead, 20 when caught up; `galHqSlide` is the old order to replace);
 (3) L24 clip stills — first test whether `preload="metadata"` / a GIF range request gives a first frame; (4) L13
 split; (5) next-page finder across three repos, its own session. **Last asked:** two assumptions in PRELOAD.md
-"Built (v0.440.0)" (covers in L1; auto-L2 only on gallery pages) — not answered yet.
+"Built (v0.440.0)" (covers in L1; auto-L2 only on gallery pages) — answered yes 2026-11-27.
+**v0.441.0 (2026-11-27):** user asked for a ★ on the cover's cell and a "full size ready" dot per picture — built in
+gallery cells (GALLERY.md "Cell marks"). Open question to the user: dots on the results page's own pictures too
+(singles and covers)? Not built — it means drawing over every site's thumbnails. The "Next, in order" list above stands.
 
 ---
 
