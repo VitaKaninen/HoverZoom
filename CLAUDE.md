@@ -13,18 +13,9 @@ in `../CLAUDE.md` (version bumps, commit+push, no `innerHTML`, `#89b4fa` checkbo
 > current whenever window behaviour changes. It says in a line what each one *is*; the `docs/`
 > file it points at says *why*. Do not let the two drift.
 
-> **These notes are a record of reasons, not a veto.** They are written in a confident
-> voice — "do not regress this", "settled", "decided deliberately" — because a reason that is
-> not stated plainly is a reason nobody can weigh later. That voice is *not* a claim that the
-> decision is permanent. The user, 2026-09-04: *"we need to not treat what is written in the notes as law. We are
-> making this up as we go. Settled decisions from the past can be changed. If there is a good
-> reason behind it, then we need to address it head on, not just decide that we can't do that
-> because we previously decided against it."*
->
-> So when a note argues against what is being asked for: **say what the old reason was, say
-> whether the new request answers it, and then do the work.** Quoting the note as an objection
-> and stopping there is the failure mode. A reversed decision keeps its note, carrying the argument
-> in both directions.
+> **These notes are a record of reasons, not a veto** (user, 2026-09-04: settled decisions can be changed). When a
+> note argues against what is asked: **say the old reason, say whether the new request answers it, then do the
+> work.** A reversed decision keeps its note, carrying the argument both ways.
 
 ## Start here — read ONE row, not the table
 
