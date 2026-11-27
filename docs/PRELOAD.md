@@ -1,4 +1,4 @@
-# Preload kinds — IDs the user cites (`L1` … `L19`)
+# Preload kinds — IDs the user cites (`L1` … `L23`, moments `M1` … `M14`)
 
 User 2026-11-27: every kind of thing loaded ahead gets an ID; the user then states, per situation, the order they
 want, and the code is made to match. **Keep this list current when a load kind is added, removed or re-ordered.**
@@ -26,8 +26,12 @@ Queues (each kind below names its own). They do not know about each other; all s
 | L10 | The section the hover is in: its on-screen pictures' full size | after a preview (`hwFill`); scrolled-away ones dropped | PL |
 | L11 | Gallery preview: the hovered door's first page of thumbnails | door hovered 500 ms (`galLookOpen`) | direct |
 | **A gallery open (middle-click)** ||||
-| L12 | Thumbnails of the page on screen and of pages ahead (1 ahead on page 1, 5 once stepped on) | at once, in list order (`galFeed`) | direct |
+| L12 | Thumbnails of the page on screen | at once, in list order (`galFeed`) | direct |
+| L20 | Thumbnails of the next page | with L12 (`galFeed`, 1 page ahead on page 1) | direct |
+| L21 | Thumbnails of pages further ahead (up to 5 once stepped on) | with L12 (`galFeed`) | direct |
 | L13 | Frame read for the rest of this gallery's list | when its HTML lists fewer than it has (`galGrow`, `galTourMore` on a step past it) | frame |
+| L22 | Full size of the few pictures around the one just hovered | not separate now: part of L14's run from the hovered picture on | AH-pic `galo` |
+| L23 | Full size of the page on screen | not separate now: the start of L14's run | AH-pic `galo` |
 | L14 | This gallery's full size: Load all on = page on screen → end → 2 pages behind; off = from a preview through 2 pages on | Load all: at once (P:), after a preview (G:); a hover on an unloaded picture restarts it there | AH-pic `galo` |
 | L15 | Bigger thumbnail files for cells drawn large | page laid out (`galUpgrade`) | direct |
 | L16 | The clicked (corner) picture's full size | on open (`galFlyUpgrade`) | direct |
@@ -36,3 +40,27 @@ Queues (each kind below names its own). They do not know about each other; all s
 | L18 | Next gallery's first page full size | within 2 pages of this gallery's end, originals on | AH-pic `galn` |
 | **Slideshow** ||||
 | L19 | Page slideshow: every picture's full size ahead and behind, nearest first (behind counts double); clips buffered ahead | each step (`plFill`); in a gallery L14 does this instead | PL |
+
+## Order per moment — PROPOSED 2026-11-27, awaiting the user's adjustments, NOT in code yet
+
+Read as "first → last". Anything not listed is paused. A new moment drops what is still *waiting* and re-queues in
+its order; what is in flight lands. "around" in L22 = 2 behind, 4 ahead (a number to tune). Tab hidden: nothing.
+
+| ID | Moment | Order |
+|---|---|---|
+| M1 | Landed on a results page, nothing hovered | L1 → L3 → L4 round 1 → L5 round 1 → L4/L5 rounds 2–3 → L2 → L7 |
+| M2 | Hovering a single picture there | L9 → L10 → back to M1 |
+| M3 | Gallery preview on a door | L11 → L6 → M1 from this door on |
+| M4 | Scrolling the results page | nothing new; once still, M1 from the first door on screen |
+| M5 | At the bottom, going through the galleries | M1's rest → L8 |
+| M6 | Just opened a gallery, nothing hovered (P:) | L12 → L16 → L20 → L13 → L23 → L21 → L14 → L17 → L18 |
+| M7 | Stepped a page forward | L12 → L20 → L13 → L23 → L21 → L14 → L17 → L18 |
+| M8 | Hovered a picture in the gallery | L9 → L22 → L12 → L20 → L23 → L14 → L21 → L17 → L18 |
+| M9 | Stepped a page back | L12 → L23 (from the page's end back) → L20 → L14 → L17 |
+| M10 | G: pressed, stepping whole galleries | L12 → L16 → L17 (the next gallery first) → L20 → L13; full size waits for a hover (then M8) |
+| M11 | Endless landed on the next gallery | as M6 (P:) or M10 (G:); Last ticked: no L17/L18 |
+| M12 | Slideshow on a results page | L19 ahead (nearest first) → L19 behind |
+| M13 | Slideshow in a gallery | L22 ahead of the slideshow → L12/L20 of the page it reaches → L14 → L18 near the end → L17 |
+| M14 | Gallery closed | M1 from the first door on screen |
+
+Load all off: drop L23/L14 from M6/M7/M9/M11 (L22 still follows a hover). Endless off or Last: drop L17/L18.
