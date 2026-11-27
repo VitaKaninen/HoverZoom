@@ -53,8 +53,16 @@ L20" is not built (L17 waits for all thumbnails). Without Load all a hover now l
 drop):** M1, M4, M5 (L8 = the next page's lists + 3 rounds, no 20 % rule). User confirmed 2026-11-27: L1
 includes gallery covers' own full size (the cover is the gallery's best picture, looked for first); automatic L2
 only on pages with doors (others keep the interest rule), and M4's singles below the screen go first while
-scrolling ("1 screen ahead is fine"; built: 2). Cover and ready corners in gallery cells: GALLERY.md "Cell marks". Not live-tested: M5 (needs a page's 3 rounds to finish), the counts-before-rounds hold.
-**Not built:** M13 (the slideshow keeps the old order: `ahMoment` 'slide'), L24/L25 and "Upgrade clips", the L13
+scrolling ("1 screen ahead is fine"; built: 2). Cover and ready corners in gallery cells: GALLERY.md "Cell marks".
+Chrome, eporner 2026-11-27 (v0.447.0): 85 counts done before round 1; at the bottom the doors from the screen on
+finished their 3 rounds, then L8 (next page: 310 thumbnails). Doors scrolled past keep round 0 (M4 dropped them).
+**Built (v0.447.0), M13:** `galHqSlide` — tag `gals` (activity L19) = the next `AH_SLIDE` 10 in the step's direction
+(`ahG.dir`), `AH_SLIDE_CATCH` 20 while `ahG.caught` (set when a step shows a picture whose original was not in; cleared
+once those 20 are in); with Load all then `galp` its page from it that way, `galo` the rest that way + stand-ins +
+behind. `ahPri('slide')`: gals, gal (L17), galp, galo, galn; `ahHeld`: every other tag waits while a `gals` is waiting
+or loading; L17's walk holds `galo`. Thumbnail lines (L12/L20/L21) are direct, not in this queue. Chrome, eporner:
+caught up in a 112-picture gallery → exactly 20 `gals`, `gal` 201 / `galn` 60 waiting behind them.
+**Not built:** L24/L25 and "Upgrade clips", the L13
 split and L13's place, M10's "L17 first gallery before L20", L8's L1 (singles of a fetched page), L10's ±3-then-rest,
 next-page finding (its own session, three repos).
 

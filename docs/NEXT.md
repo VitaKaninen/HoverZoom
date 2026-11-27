@@ -57,6 +57,12 @@ served by one job per gallery (rounds, L17) flip ✓ → … as the next gallery
 **Next, in order:** M5 live check, M13, L24, L13 (from the list above). Nothing asked of the user is open (last
 question asked: none; the user's final messages were the ↗ tip, the cover border and the next-gallery thumbnails — all built).
 Start line: **"Read docs/NEXT.md 'NEXT TASK' and continue: M5 live check, then M13."**
+**v0.446.0–v0.447.0 (2026-11-27, pushed).** M5 + counts-before-rounds verified live; M13 built and verified
+(PRELOAD.md "Built (v0.447.0)"). User report: the first Endless switch filled thumbnails one by one — cause: L17 had not
+run (M6 puts it after L14) and the declared-sizes build showed each cell as it loaded; fixed with `.set.hold`
+(GALLERY.md "Not preloaded yet"). User noted revisited galleries are cached — test with fresh ones. Not built from M13:
+"without Load all, the page's clips load in full" (waits on L24/L25). **Next:** L24 (test partial download first), L13.
+Start line: **"Read docs/NEXT.md 'NEXT TASK' and continue: L24, then L13."**
 
 ---
 
