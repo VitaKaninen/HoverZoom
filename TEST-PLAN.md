@@ -345,6 +345,12 @@ Test pages:
      - If the slideshow showed pictures loaded ahead, you'll see
        `loading ahead: originals shown that the browser kept {kept, of}` (test 10.1).
 
+7.12b **Cover star and ready dots** (v0.441.0). Open a gallery from its cover.
+     - **Expect:** a small yellow ★ bottom-left on the picture the cover shows (any page it is on); a small green
+       dot bottom-right on each picture whose full size has loaded, growing as loading goes on. Hover a dotted
+       one: the full size shows at once, no ring.
+     - **Fail:** a star on a picture that is not the cover, or a dotted picture that still shows the loading ring.
+
 7.13 **A missed original is tried again** (v0.395.0). On a site where some originals fail (`found` lower
      than `pictures` in 7.2's `done` line), close the gallery and open it again, then hover.
      - **Expect:** the second run's `found` is equal or higher; the misses were tried again, not skipped

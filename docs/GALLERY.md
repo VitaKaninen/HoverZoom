@@ -428,6 +428,22 @@ moves** except on a resize, a hole move, or a declared size proving wrong.
 - Not fixed: the main page's loading ahead and the open gallery can ask for the same thumbnail at once (seen
   on d8, uncached; pre-existing).
 
+## Cell marks: ★ cover, ● ready (v0.441.0, user 2026-11-27)
+
+In the open gallery and the gallery preview (`galCellMarks`, painted 120 ms after any cell or keep change via
+`galCellMarksSoon`):
+- **★ bottom-left** (`.cvr`, `#f9e2af`) on the cell that is the door's own picture — the user looks for it first.
+  `set.cover` = `galCoverSrc(href)` read at `galBuild` (the flown picture, the previewed door, else the page's door
+  linking there; Endless from a fetched results page has none → no star). Matched by `galCoverItem` (same URL, `sameStem`,
+  `galSameFile`; shared with `galFlyUpgrade`), retried as cells join until found.
+- **● bottom-right** (`.rdy`, green `#a6e3a1`, 7 px) where the original is held in the memory keep (`plKeep` or
+  `heldBlobs` via `keepItem`) — the honest "a hover shows it at once". Recomputed from the keep every paint, so a
+  dropped original loses its dot. Not blue: the saved disc (top-left) is a blue circle. Clips get none (not kept).
+- `galFlyUpgrade` now stores the cover's original (`it.hit`, `plKeepImage`), so the cover's cell is dotted too.
+- No setting yet; the saved disc has `gallerySavedMarks` if the user wants one.
+- Verified in Chrome on eporner 2026-11-27: star on the right cell (5-picture gallery: picture 4; 144-picture: 1);
+  dots 12 → 144 over 23 s with Load all.
+
 ## Arrival check (v0.411.0, user 2026-11-26; INTERACTION.md `G15`)
 
 The page a door opens is the ground truth for the press that opened it. Hovers could correct a door verdict; arriving could not.
