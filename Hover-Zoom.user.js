@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.448.0
+// @version      0.449.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -2574,7 +2574,7 @@
     // One small ranged GET, with the status and headers kept. GM_xmlhttpRequest, not fetch: the
     // file is usually on a CDN that sends no CORS headers, and GM_xhr is not subject to the
     // page's CSP either.
-    function rangeGet(url, n, ms) {
+    function rangeGet(url, n, ms, from) {
         return new Promise(function (res) {
             if (typeof GM_xmlhttpRequest !== 'function') { res(null); return; }
             let done = false;
@@ -2584,7 +2584,7 @@
             try {
                 GM_xmlhttpRequest({
                     method: 'GET', url: url, responseType: 'arraybuffer', timeout: ms,
-                    headers: { Range: 'bytes=0-' + (n - 1) },
+                    headers: { Range: 'bytes=' + (from || 0) + '-' + ((from || 0) + n - 1) },
                     // Only the head, whatever the server made of the Range header.
                     onload: function (r) {
                         const b = r.response;
@@ -13945,6 +13945,8 @@
             '.svd{position:absolute;left:4px;top:4px;width:22px;height:22px;pointer-events:none}' +
             '.cvr,.rdy,.hqx{position:absolute;right:0;bottom:0;width:14px;height:14px;pointer-events:none;border-bottom-right-radius:6px;clip-path:polygon(100% 0,100% 100%,0 100%)}' +
             '.rdy{background:#89b4fa}.hqx{background:#f38ba8}' +
+            '.ply{position:absolute;left:50%;top:50%;width:30px;height:30px;margin:-15px 0 0 -15px;border-radius:50%;background:rgba(30,30,46,.6);pointer-events:none;opacity:.85}' +
+            '.ply::after{content:"";position:absolute;left:11px;top:8px;border-style:solid;border-width:7px 0 7px 12px;border-color:transparent transparent transparent #cdd6f4}' +
             '.cvr{position:absolute;inset:0;width:auto;height:auto;clip-path:none;border-radius:6px;box-shadow:inset 0 0 0 3px #89b4fa;background:none;pointer-events:none;z-index:1}' +
             '.strip[hidden]{display:none}' +
             '.strip{position:fixed;z-index:4;display:flex;flex-direction:column;justify-content:space-evenly;padding:0 4px;box-sizing:border-box;cursor:move;' +
@@ -15418,6 +15420,54 @@
         return n;
     }
 
+    // ---- L24: a GIF thumbnail shows its first frame only, read with a ranged GET; the whole file waits for a hover
+    const GIF_STILL_STEP = 65536, GIF_STILL_MAX = 1 << 21;
+    const gifStills = new Map();     // thumb url -> Promise<{url, anim}|null>
+    // Where a GIF's first image ends (its trailer goes there): -1 = not all read yet, -2 = not a GIF.
+    function gifFrameEnd(b) {
+        const len = b.length, blocks = function (p) { while (true) { if (p >= len) return -1; const n = b[p]; p++; if (!n) return p; p += n; } };
+        if (len < 13) return -1;
+        if (b[0] !== 0x47 || b[1] !== 0x49 || b[2] !== 0x46 || b[3] !== 0x38) return -2;
+        let p = 13;
+        if (b[10] & 0x80) p += 3 * (1 << ((b[10] & 7) + 1));
+        while (true) {
+            if (p >= len) return -1;
+            const c = b[p];
+            if (c === 0x21) { p = blocks(p + 2); if (p < 0) return -1; }
+            else if (c === 0x2C) {
+                if (p + 10 > len) return -1;
+                const f = b[p + 9];
+                p += 10;
+                if (f & 0x80) p += 3 * (1 << ((f & 7) + 1));
+                return blocks(p + 1);
+            } else return -2;
+        }
+    }
+    // A GIF's first frame as a blob address, and whether more frames follow; null = use the file itself.
+    function gifStill(url) {
+        if (gifStills.has(url)) return gifStills.get(url);
+        const pr = (async function () {
+            let b = new Uint8Array(0);
+            for (let n = GIF_STILL_STEP; n <= GIF_STILL_MAX; n *= 4) {
+                const r = await rangeGet(url, n - b.length, 8000, b.length);     // on from the last read's end
+                if (!r || !r.bytes || !(r.status === 206 || (r.status === 200 && !b.length))) return null;
+                const all = new Uint8Array(b.length + r.bytes.length);
+                all.set(b); all.set(r.bytes, b.length); b = all;
+                const e = gifFrameEnd(b), whole = r.status === 200 || b.length < n;
+                if (e === -2 || (e === -1 && whole)) return null;
+                if (e === -1 || (e === b.length && !whole)) continue;
+                const out = new Uint8Array(e + 1);
+                out.set(b.subarray(0, e));
+                out[e] = 0x3B;
+                return { url: URL.createObjectURL(new Blob([out], { type: 'image/gif' })), anim: e < b.length && b[e] !== 0x3B };
+            }
+            return null;
+        })().catch(function () { return null; });
+        gifStills.set(url, pr);
+        return pr;
+    }
+    function isGifUrl(u) { try { return /\.gif$/i.test(new URL(u, location.href).pathname); } catch (e) { return false; } }
+
     // The next galleries' thumbnails as loaded pictures (L17), handed to the cells when that gallery opens, so it paints at once.
     const galThumbKeep = new Map(), GAL_THUMB_KEEP = 600;
     function galImg(item, tag, job, early) {
@@ -15449,8 +15499,17 @@
                 }
                 resolve(nw && nh ? { img: img, item: item, nw: nw, asp: nw / nh } : null);
             };
-            img.onerror = function () { galThumbLive.delete(img); img.onload = img.onerror = null; galThumbSettled(item.thumb); ahT('thumb', { tag: tag || 'shown', u: item.thumb, s: Math.round(t0), ms: Math.round(performance.now() - t0), ok: 0 }, job); resolve(null); };
-            img.src = item.thumb;
+            img.onerror = function () {
+                if (img.__hzStill) { delete img.__hzStill; delete item.gifAnim; img.src = item.thumb; return; }     // the page refuses blob: — the file itself
+                galThumbLive.delete(img); img.onload = img.onerror = null; galThumbSettled(item.thumb); ahT('thumb', { tag: tag || 'shown', u: item.thumb, s: Math.round(t0), ms: Math.round(performance.now() - t0), ok: 0 }, job); resolve(null);
+            };
+            if (isGifUrl(item.thumb) && !blobRefused) {
+                gifStill(item.thumb).then(function (st) {
+                    if (!galThumbLive.has(img)) return;     // cut meanwhile
+                    if (st) { img.__hzStill = true; if (st.anim) { item.gifAnim = true; galCellMarksSoon(); } }
+                    img.src = st ? st.url : item.thumb;
+                });
+            } else img.src = item.thumb;
             const a = early ? galDeclAsp(item) : 0;
             if (a) early({ img: img, item: item, nw: item.dw, asp: a, early: true });     // placed now by the site's size; shown when it loads
         });
@@ -15717,6 +15776,7 @@
             mark(cell, 'hqx', bad);
             mark(cell, 'cvr', cover);     // a border inside the cell: no size change
             mark(cell, 'rdy', !bad && held.has(p.item));
+            mark(cell, 'ply', !!p.item && (!!p.item.gifAnim || !!(p.item.hit && p.item.hit.video)));     // L24: a clip or an animated GIF, shown still
         });
     }
 
@@ -16182,7 +16242,7 @@
                 act('bad', '✗ no full size found for the picture you hovered: ' + actPic(it.thumb) + ' · ' + actSecs(performance.now() - t1) + actDiag({ thumb: it.thumb, link: it.link, tries: it.hqWhy }));
                 return;
             }
-            if (it.hqFail) { it.hqFail = false; galCellMarksSoon(); }
+            if (it.hqFail || hit.video) { it.hqFail = false; galCellMarksSoon(); }
             showViewer(hit, pointer);
             ahSaw(img, 1);      // a hover counts once its preview shows, not for every cell the pointer crosses
             if (pinOnShow === img) { pinOnShow = null; place(); }
@@ -16218,7 +16278,7 @@
             if (tok.bg && netCutOf(tok)) return null;
             if (d && d.w > nw) return (item.hit = hitOf(list[i], d));
         }
-        const own = img.currentSrc || img.src;
+        const own = img.__hzStill ? item.thumb : img.currentSrc || img.src;     // a still's blob is not the picture
         if (tok.bg && netCutOf(tok)) return null;
         const d = own ? await probe(own, false, tok) : null;
         if (own) galTry(tok, 'the thumbnail itself', own, d);
@@ -16228,6 +16288,7 @@
     // A background original's outcome on its item: a real miss marks it (the red corner), a cut leaves it as it was.
     function galOrigNote(it, hit, own) {
         if (!it || own.cutNow) return;
+        if (hit && hit.video) galCellMarksSoon();     // its cell gets ▶
         const was = !!it.hqFail;
         it.hqFail = !hit;
         it.hqWhy = hit ? null : (own.tries || []).slice();

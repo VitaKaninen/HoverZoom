@@ -364,6 +364,8 @@ logs `retrying` ×3 — an artefact of the stub, not of the manager. The pane wo
   fires no scroll events — send `WheelEvent('wheel')` on window, `scrollBy`, then `document.dispatchEvent(new
   Event('scroll'))`. `read_console_messages` `pattern` is a plain substring (`a|b` matches nothing). Resource
   timing stops at 250 entries, so count requests from the debug lines instead.
+- `test-pages/door-gif.html`: 4 doors to `gallery-gif.html` (L24 GIF stills, ▶ marks); GM_xhr shimmed with fetch. Hover 3
+  doors to learn the door rule, then open with the chip's `mousedown` (TESTING "Driving the gallery").
 - `test-pages/door-whole.html`: 12 doors to `gallery-whole.html?w=N` (static, script inside, frames report); learns
   `hzHtmlWhole` (localStorage on fixtures). Clear `sessionStorage` (`hzNoFrame` from other fixtures) and `hzHtmlWhole` first.
 - `test-pages/door-search.html`: doors d1-d8 (d6 → `door-big.html`, 240 static; d7 → `door-grow.html`,

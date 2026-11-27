@@ -148,6 +148,19 @@ def main():
     save(make(160, 70, "strip", 5), "letterbox.jpg")
     make_letterbox_clip()
 
+    # GIF thumbnails for test-pages/gallery-gif.html (L24: a cell shows only the first frame).
+    for i in range(1, 5):
+        frames = []
+        for f in range(12):
+            im = make(400, 300, "GIF %d frame %d" % (i, f), i)
+            ImageDraw.Draw(im).rectangle([f * 30, 250, f * 30 + 40, 290], fill=(250, 220, 120))
+            frames.append(im.convert("P"))
+        path = os.path.join(ROOT, "gif", "anim-%d.gif" % i)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        frames[0].save(path, save_all=True, append_images=frames[1:], duration=120, loop=0)
+        print("  gif/anim-%d.gif" % i)
+    save(make(400, 300, "STILL GIF", 2).convert("P"), "gif", "still.gif")
+
     print("done")
 
 

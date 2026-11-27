@@ -37,6 +37,7 @@ Queues (each kind below names its own). They do not know about each other; all s
 | L14 | This gallery's full size after the page on screen: → end → 2 pages behind | Load all: after L23 (M6) or after L17 (M7–M9); G: waits for a hover | AH-pic `galo` |
 | L15 | Bigger thumbnail files for cells drawn large | page laid out (`galUpgrade`) | direct |
 | L16 | The clicked (corner) picture's full size | on open (`galFlyUpgrade`) | direct |
+| L24 | A GIF thumbnail's first frame only (ranged read) + ▶; ▶ also on a cell whose original is a clip | with its cell's thumbnail (`gifStill` in `galImg`), GALLERY.md "L24" | direct (GM_xhr) |
 | **Endless** ||||
 | L17 | Next galleries in the queue: page read + first 2 pages of thumbnails, 2 ahead → 5 once moving on; Last: none | every landing and page step (`ahGalAhead`) | AH-page `gal`, AH-pic `gal` |
 | L18 | Next gallery's first page full size | within 2 pages of this gallery's end, originals on | AH-pic `galn` |
@@ -62,13 +63,13 @@ once those 20 are in); with Load all then `galp` its page from it that way, `gal
 behind. `ahPri('slide')`: gals, gal (L17), galp, galo, galn; `ahHeld`: every other tag waits while a `gals` is waiting
 or loading; L17's walk holds `galo`. Thumbnail lines (L12/L20/L21) are direct, not in this queue. Chrome, eporner:
 caught up in a 112-picture gallery → exactly 20 `gals`, `gal` 201 / `galn` 60 waiting behind them.
-**Not built:** L24/L25 and "Upgrade clips", the L13
+**Built (v0.449.0), L24:** GIF thumbnails as first-frame stills + ▶ (GALLERY.md "L24"). Assumption, not confirmed by the
+user: a clip cell already has the site's still image as its thumbnail, so L24 for clips is only the ▶.
+**Not built:** L25 and "Upgrade clips" (a clip's original is still only probed for metadata until a hover), the L13
 split and L13's place, M10's "L17 first gallery before L20", L8's L1 (singles of a fetched page), L10's ±3-then-rest,
 next-page finding (its own session, three repos).
 
-New kinds in the plan (not in code): **L24** clip/GIF still + ▶ icon, from a partial download (a video's first frame via
-`preload="metadata"`; a GIF's first frame from a range request of its start — both unverified, test before building);
-**L25** the full clip. L10 = ±3 nearest first, then the rest of the section on screen. L8 = the next results page's
+New kind in the plan (not in code): **L25** the full clip. L10 = ±3 nearest first, then the rest of the section on screen. L8 = the next results page's
 M1 lines 1–6 (no 20 % rule, user). L20/L21 = the next page / the page after, relative to the page on screen; under
 Endless they run on into the next gallery's first pages when this gallery ends.
 

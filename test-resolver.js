@@ -1572,5 +1572,19 @@ const srcLf = src.split(String.fromCharCode(13)).join('');     // the checkout m
     eq('keep: full, one 2 behind (counts 4) does not make way for 5 ahead', room({ a: [11, 10], b: [12, 10], c: [13, 10], d: [8, 10] }, 15), false);
     eq('keep: another gallery\'s pictures always make way', room({ a: [11, 10], b: [12, 10], c: [13, 10], x: [null, 10] }, 30), true);
 }
+// ---- gifFrameEnd(): L24's cut after a GIF's first frame (a ranged read, then the trailer)
+{
+    const srcN = src.replace(/\r\n/g, '\n'), at = srcN.indexOf('    function gifFrameEnd(');
+    const gifFrameEnd = new Function(srcN.slice(at, srcN.indexOf('\n    }\n', at) + 7) + '\nreturn gifFrameEnd;')();
+    const hdr = [0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 2, 0, 2, 0, 0x80, 0, 0].concat([0, 0, 0, 255, 255, 255]);     // 2x2, 2-colour global table
+    const gce = [0x21, 0xF9, 4, 0, 10, 0, 0, 0];
+    const img = [0x2C, 0, 0, 0, 0, 2, 0, 2, 0, 0, 2, 2, 0x44, 0x01, 0];
+    const two = hdr.concat([0x21, 0xFF, 11], Array.from('NETSCAPE2.0').map(function (c) { return c.charCodeAt(0); }), [3, 1, 0, 0, 0], gce, img, gce, img, [0x3B]);
+    const end1 = hdr.length + 3 + 11 + 5 + gce.length + img.length;
+    eq('gif: the first frame ends after its image data', gifFrameEnd(new Uint8Array(two)), end1);
+    eq('gif: a read that stops inside frame 1 asks for more', gifFrameEnd(new Uint8Array(two.slice(0, end1 - 2))), -1);
+    eq('gif: not a GIF', gifFrameEnd(new Uint8Array([0xFF, 0xD8, 0xFF, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])), -2);
+    eq('gif: one frame then the trailer', gifFrameEnd(new Uint8Array(hdr.concat(img, [0x3B]))), hdr.length + img.length);
+}
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

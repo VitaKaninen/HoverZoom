@@ -444,6 +444,24 @@ sat centred on its dark ring; a star was replaced by a corner):
   dropped original loses it. Clips get none (not kept).
 - **Red** (`.hqx`, `#f38ba8`, under `galleryReadyMark`) where the original genuinely failed (`it.hqFail`, set by
   `galOrigNote` / a hover's miss; a cut never sets it), in place of blue. Its activity line carries the diagnosis.
+- **▶ in the centre** (`.ply`, always on, v0.449.0, L24): an animated GIF thumbnail shown as its first frame
+  (`item.gifAnim`), or a cell whose original turned out a clip (`item.hit.video`; appears when L22/L23/L14 or a hover
+  finds it — `galOrigNote` and the hover path repaint).
+
+## L24: GIF thumbnails as their first frame (v0.449.0)
+
+A cell whose thumbnail path ends `.gif` (`isGifUrl`) gets `gifStill(thumb)`: ranged GM_xhr reads (`rangeGet`'s
+`from`, 64 KB, then on to 256 KB, 1 MB, 2 MB, never re-reading), `gifFrameEnd` finds where frame 1's image data ends,
+a trailer byte is appended and the cell shows that blob (`img.__hzStill`). More frames after it = `gifAnim` (▶). The
+whole file is the original: a hover, L22, or Load all fetches it as before. Fallbacks to the file itself: no
+GM_xhr (plain test pages), a non-206 answer on a follow-up read, frame 1 past 2 MB, not a GIF, or the blob refused
+(`blobRefused`, or the img's `onerror` on the blob retries the file once).
+- **`galResolve` must not take a still's blob for "the thumbnail itself"** — it reads `item.thumb` when `__hzStill`.
+- Tested 2026-11-27: Chromium decodes a cut-off GIF as a partial frame (64 KB of a 312 KB frame drew 20 % of the
+  pixels), hence the cut at the frame's end. A video's first frame via `preload="metadata"` also works (Chromium
+  fetched ~3 s of a 60 s clip and fired `loadeddata`) — not used: gallery cells always have an image thumbnail,
+  and `probeVideo` already reads only metadata.
+- Fixture: `test-pages/door-gif.html` → `gallery-gif.html` (4 animated, 1 single-frame GIF, 3 jpg, 1 jpg → `post-clip.html`).
 - `galFlyUpgrade` stores the cover's original (`it.hit`, `plKeepImage`).
 - **The next gallery paints at once** (v0.445.0): L17's loaded thumbnails are kept as `<img>`s (`galThumbKeep`, 600,
   cleared on close) and handed to the new gallery's cells by `galImg`. Before, the cells refetched them (user saw the
