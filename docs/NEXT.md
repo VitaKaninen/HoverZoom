@@ -54,7 +54,9 @@ Verified in Chrome on eporner: moments M1→M3→M6→M7→M11→M8, cover borde
 instant. Window drawing checked on a scratch page. **Not live-tested:** the ⤓ pause/resume (Chrome's `prompt()`
 trap, TESTING.md), a real red corner (no failing site found), the page-step thumbnail cut. Known roughness: lines
 served by one job per gallery (rounds, L17) flip ✓ → … as the next gallery's job starts.
-**Next, in order:** M5 live check, M13, L24, L13 (from the list above). Nothing asked of the user is open.
+**Next, in order:** M5 live check, M13, L24, L13 (from the list above). Nothing asked of the user is open (last
+question asked: none; the user's final messages were the ↗ tip, the cover border and the next-gallery thumbnails — all built).
+Start line: **"Read docs/NEXT.md 'NEXT TASK' and continue: M5 live check, then M13."**
 
 ---
 
