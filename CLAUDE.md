@@ -35,6 +35,7 @@ point**; if a task genuinely spans two, read two.
 | rate limiting, a 429, the one-at-a-time list, or the request log shared with Forum Stumbler | [`docs/REQUEST-LOG.md`](docs/REQUEST-LOG.md) — the shared `shared/us-log.js`; never edit a synced copy; **log first, no new pacing logic without a log** |
 | galleries — the ▦ chip on a door floats the linked page's thumbnails (gallery mode retired v0.291.0) | [`docs/GALLERY.md`](docs/GALLERY.md); resuming it: [`docs/NEXT.md`](docs/NEXT.md) |
 | the activity window — the plain-words log of background loading, `act()` | [`docs/ACTIVITY.md`](docs/ACTIVITY.md) |
+| the prediction log — what the user did beside what was loaded ahead, anonymised, `predNote()` | [`docs/PREDICT.md`](docs/PREDICT.md) |
 | the zoom **percentage** — what it counts, and why it once moved with browser zoom | [`docs/ZOOM-UNITS.md`](docs/ZOOM-UNITS.md) |
 | adding or changing any control, box, menu entry or label — check its siblings | [`docs/CONSISTENCY.md`](docs/CONSISTENCY.md) — which good practice applies where |
 | the user cited an ID — `S05`, `E22`, `T17`, `P4` | [`INTERACTION.md`](INTERACTION.md) says what it is in one line; then `grep -rn "E22" docs/` for the argument |

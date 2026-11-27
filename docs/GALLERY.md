@@ -380,6 +380,34 @@ What loads ahead follows what the user does. Code: the `ah*` functions after `ga
   reading a count to its end).
 - Not verified (2026-11-26): the slideshow backward rule, endless off, LibreWolf, pornpics (refused by both
   browsers' safety lists — needs the user's run).
+- **Prediction log** (`predNote`, `predSum`; user v0.435.0): what the user did beside what was loaded — `docs/PREDICT.md`.
+
+## Stable layout (v0.435.0, user; INTERACTION.md `G16`)
+
+User: thumbnails sliding while they load chase the pointer and cause motion sickness. Rule: **a shown cell never
+moves** except on a resize, a hole move, or a declared size proving wrong.
+- **Order:** cells join in list order only. `galAppend` queues each item at `set.qIn`; `galQFlush` takes the run
+  from `set.qOut` while settled (a failure is null, passed over after one retry `GAL_RETRY_GAP_MS` later). `galShow`
+  builds from `galPrefix` (loaded up to the first still loading; `set.fed` = how far) and hands its in-flight
+  loads to the set (`galShowPend` → `set.pend`) so `galAppend` does not ask again. `galRest` only writes the
+  short note now (it used to rebuild with late arrivals inserted mid-list — that moved everything).
+- **Hidden open row:** `galRows` packs a row tight while it may still gain pictures (`spare` only once the next
+  shape is known), so the last row's last run (`galOpenRow`) on the last page gets `.cell.wait` (visibility
+  hidden) until `galWhole`. `galGrow`'s end relayouts when `set.waiting`.
+- **Scale lock:** fill mode (one page grown to the screen) rescales every row per arrival; it is allowed only
+  while `whole`, and `set.fill` is fixed at the first layout with a shown cell. A small gallery shown before it
+  was whole stays at the paged row height.
+- **Declared sizes:** `galItem` keeps the `<img>` `width`/`height` attributes (`dw`, `dh`). `galDeclAsp` uses them
+  while the site is trusted (`galSizeTrusted`: not `bad ≥ 3` and `bad > 20 %`); `galImg(…, early)` then hands
+  out a cell at once (`p.early`, no `ok` until it loads, `galEarlyDone`). `galShow` places the whole first two
+  pages at once when every item has one. Every loaded thumbnail with a declared size is checked once
+  (`galSizeCheck`, ±10 % `GAL_DECL_TOL`; `object-fit: cover` hides less) — free ground truth, so a distrusted site
+  can earn trust back. Counts halve past 100. Stored in GM `hoverZoomSizeTrust`, kept across Reset; `dbg` on a flip.
+  A wrong one corrects its cell's shape (that one move is the cost). A failed early cell stays an empty `.gone` slot.
+- Test: `door-search.html` d8 → `gallery-shapes.html` (60 pictures, 6 shapes, no sizes, 0–2.5 s late); d6 has
+  sizes. Measured 2026-11-26 (Browser pane): 0 moves on both; d8 fills a row at a time.
+- Not fixed: the main page's loading ahead and the open gallery can ask for the same thumbnail at once (seen
+  on d8, uncached; pre-existing).
 
 ## Arrival check (v0.411.0, user 2026-11-26; INTERACTION.md `G15`)
 

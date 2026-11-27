@@ -366,8 +366,9 @@ logs `retrying` ×3 — an artefact of the stub, not of the manager. The pane wo
   timing stops at 250 entries, so count requests from the debug lines instead.
 - `test-pages/door-whole.html`: 12 doors to `gallery-whole.html?w=N` (static, script inside, frames report); learns
   `hzHtmlWhole` (localStorage on fixtures). Clear `sessionStorage` (`hzNoFrame` from other fixtures) and `hzHtmlWhole` first.
-- `test-pages/door-search.html`: doors d1-d7 (d6 → `door-big.html`, 240 static; d7 → `door-grow.html`,
-  150 mounted 10 per scroll), leaves l1-l2. Seed a door rule in `hoverZoomSettings.doorAreas` to skip learning.
+- `test-pages/door-search.html`: doors d1-d8 (d6 → `door-big.html`, 240 static; d7 → `door-grow.html`,
+  150 mounted 10 per scroll; d8 → `gallery-shapes.html`, no declared sizes, `G16`), leaves l1-l2.
+  `/many/<name>.jpg` takes `?w=&h=` (size) and `?slow=` (seconds), cached 10 min — bump the fixture's names for a cold run. Seed a door rule in `hoverZoomSettings.doorAreas` to skip learning.
 - **Gallery pictures must be distinct files.** The slideshow's duplicate check compares bytes, so
   one file under many `?query` addresses folds into one entry in the frame's read. Use the test
   server's `/many/<name>.jpg` (a picture drawn from the name, needs PIL).

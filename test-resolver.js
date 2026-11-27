@@ -1343,6 +1343,25 @@ const galPH = function (min) {
     const last = rows(four3(683), hole, 999), lp = big.pages[big.pages.length - 1];
     eq('  a page past the end is the last', last.page, big.pages.length - 1);
     eq('  the last page places its own', last.out.filter(Boolean).length, lp[1] - lp[0]);
+    // Stable layout (v0.435.0): a later picture never moves a shown one.
+    const open = new Function('vpW', 'vpH', 'GAL_GAP', 'galMinH', 'galPagedH', 'GAL_PG_TOP', src.slice(a, b) + NL + 'return galOpenRow;')
+        (function () { return 1920; }, function () { return 1080; }, 12, function () { return 120; }, galPH(120), 30);
+    eq('gallery: fill off keeps 20 pictures at the paged row height', rows(four3(20), hole, 0, false).out[0].h, big.out[big.pages[0][0]].h);
+    eq('  fill on reports it', [!!small.fill, !!big.fill], [true, false]);
+    const shapes = [1.5, 0.7, 1.3, 1, 0.8, 1.6, 1.2, 0.75, 1.4, 1, 1.1, 0.9, 1.3, 0.6, 1.5, 1.2, 0.8, 1, 1.4, 0.7];
+    const p40 = rows(shapes.concat(shapes, shapes, shapes, shapes, shapes, shapes, shapes, shapes, shapes), hole, 0, false);
+    let stable = true;
+    for (let n = 30; n <= 120; n++) {
+        const A = rows(shapes.concat(shapes, shapes, shapes, shapes, shapes, shapes).slice(0, n), hole, 0, false), w = open(A.out, A.pages[A.pages.length - 1]);
+        A.out.forEach(function (r, k) {
+            if (!r || w.has(k)) return;
+            const q = p40.out[k];
+            if (q && (Math.abs(q.x - r.x) > 0.01 || Math.abs(q.y - r.y) > 0.01 || Math.abs(q.w - r.w) > 0.01)) stable = false;
+        });
+    }
+    eq('  every slot outside the open row is where it ends up', stable, true);
+    const one = rows(four3(3), hole, 0, false);
+    eq('  the open row is the last run', Array.from(open(one.out, one.pages[0])).sort(), [0, 1, 2]);
     eq('  no cell overlaps the hole', last.out.filter(Boolean).every(function (r) {
         return r.x + r.w <= hole.x || r.x >= hole.x + hole.w || r.y + r.h <= hole.y || r.y >= hole.y + hole.h; }), true);
     const touch = rows(four3(683), { x: 1700, y: 133, w: 200, h: 200 }, 0).out.filter(function (r) { return r && r.y < 20; });

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.434.0
+// @version      0.435.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -254,6 +254,7 @@
         galleryMiddle: false,       // a middle-click on a result opens its gallery (else the ▦ chip's click does)
         galleryEndless: true,       // at a gallery's end the next one on the page opens (☐ Endless on the clicked picture)
         galleryLoadAll: true,
+        predictLog: true,           // keep the anonymised log of gallery steps beside what was loaded ahead (Settings → Diagnostics)
         galleryKeepMB: 1024,        // memory for an open gallery's pictures: 2 pages behind the user and everything ahead
         keepMB: 512,                // memory for pictures loaded ahead elsewhere; the oldest go first       // an open gallery's originals load at once; off: only from a preview on (☐ Load all on the clicked picture)
         galleryEndlessViewed: false,    // endless also queues galleries already seen or visited
@@ -12655,7 +12656,13 @@
     const GAL_STRIP_GAP = 6;            // between the picture and the strip
     let galResizeAt = 0, galRefitTimer = 0;
     let galSt = null, galStripM = { m: 'in', side: 'b' };   // the strip, and where it is: in the picture's frame, docked to it, or out on its own
-    const GAL_APPEND_MS = 300;          // thumbnails that load late join the set in batches this far apart
+    const GAL_APPEND_MS = 60;           // thumbnails that load late join the set in batches this far apart, in list order
+    const SIZE_TRUST_KEY = 'hoverZoomSizeTrust', GAL_DECL_TOL = 0.1;     // {host: {ok, bad}}: the site's declared thumbnail sizes against the files
+    let sizeTrustMemo = null, sizeTrustT = 0;
+    const sizeChecked = new Set();
+    const PRED_KEY = 'hoverZoomPredict', PRED_MAX = 8000;     // the prediction log, across sites, anonymised
+    let predSaltMemo = null, predPage = null, predBuf = [], predSaveT = 0;
+    let galShowPend = null;     // galShow's thumbnails still loading, handed to the set galBuild makes
     const GAL_GROW_TICK = 400;          // the reading frame scrolls a screen this often
     const GAL_GROW_IDLE_MS = 4000;      // at its bottom with nothing new this long, the page is read
     const GAL_GROW_MAX_MS = 180000;     // longest a gallery's page is read on
@@ -13053,7 +13060,10 @@
                 .filter(function (u) { return u !== thumb && !isVideoUrl(u); }).slice(0, GAL_TRIES * 2);
         } catch (e) { /* no candidates is fine: the thumbnail stays */ }
         const links = galItemLinks(el, base);
-        return { thumb: thumb, ss: ss.filter(Boolean), cands: cands, base: base, links: links, link: links.length === 1 ? links[0] : '' };
+        const out = { thumb: thumb, ss: ss.filter(Boolean), cands: cands, base: base, links: links, link: links.length === 1 ? links[0] : '' };
+        const dw = parseInt(el.getAttribute('width') || '0', 10) || 0, dh = parseInt(el.getAttribute('height') || '0', 10) || 0;
+        if (dw > 0 && dh > 0) { out.dw = dw; out.dh = dh; }      // the size the site declares: a cell's place before its thumbnail loads
+        return out;
     }
 
     // The pages a gallery picture may open on its own page: its link, else its card's links.
@@ -13592,6 +13602,7 @@
             '.set.on{opacity:1}' +
             '.cell{position:absolute;left:0;top:0;display:flex;align-items:center;justify-content:center}' +
             '.set.live .cell{pointer-events:auto}' +
+            '.cell.wait,.cell.gone{visibility:hidden}' +
             '.short{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);max-width:calc(100vw - 32px);box-sizing:border-box;' +
             'padding:6px 12px;border-radius:8px;background:#1e1e2e;border:1px solid #f9e2af;color:#f9e2af;font:13px/1.3 system-ui,sans-serif;' +
             'pointer-events:none;box-shadow:0 4px 14px rgba(0,0,0,.6)}' +
@@ -13721,7 +13732,7 @@
 
     // Rows of one height spread over the viewport, split around the hole: the largest height that fits every shape,
     // or, when that is under GAL_MIN_H, pages of GAL_MIN_H rows. {out: slots by index for `page`, pages: [[from, to]], page}.
-    function galRows(asp, hole, page) {
+    function galRows(asp, hole, page, fill) {
         const G = GAL_GAP, W = vpW(), H = vpH(), bars = [].concat(hole);
         const free = function (y, h) {
             let segs = [[G, W - G]];
@@ -13766,13 +13777,13 @@
             return { out: out, all: i === asp.length, next: i };
         };
         const minH = Math.min(galMinH(), H - 2 * G);
-        if (place(minH).all) {
+        if (fill !== false && place(minH).all) {
             let lo = minH, hi = H - 2 * G, best = place(lo);
             for (let k = 0; k < 24; k++) {
                 const mid = (lo + hi) / 2, p = place(mid);
                 if (p.all) { best = p; lo = mid; } else hi = mid;
             }
-            return { out: best.out, pages: [[0, asp.length]], page: 0 };
+            return { out: best.out, pages: [[0, asp.length]], page: 0, fill: true };
         }
         const top = G, pages = [], ph = galPagedH(H).h;
         for (let s = 0; s < asp.length;) {
@@ -13782,6 +13793,17 @@
         }
         const k = Math.min(Math.max(0, page | 0), pages.length - 1);
         return { out: place(ph, pages[k][0], top).out, pages: pages, page: k };
+    }
+
+    // The last row's last run on page pg: the slots a picture still to come could respace. A Set of indexes.
+    function galOpenRow(L, pg) {
+        let k = pg[1] - 1;
+        while (k >= pg[0] && !L[k]) k--;
+        const out = new Set();
+        if (k < pg[0]) return out;
+        out.add(k);
+        for (let j = k - 1; j >= pg[0] && L[j] && Math.abs(L[j].y - L[k].y) < 0.5 && Math.abs(L[j].x + L[j].w + GAL_GAP - L[j + 1].x) < 1; j--) out.add(j);
+        return out;
     }
 
     // The shading: the page dark and blurred, except the corner where the clicked picture waits.
@@ -13813,12 +13835,15 @@
     // Lay the set out around one hole; returns the slots.
     function galLayout(set, hole) {
         galLaidAt = performance.now();
-        const R = galRows(set.asp, galBars(hole), set.want != null ? set.want : set.page || 0), L = R.out;
+        const whole = !!galLook || galWhole(set);
+        const R = galRows(set.asp, galBars(hole), set.want != null ? set.want : set.page || 0, set.fill != null ? set.fill : whole), L = R.out;
         set.pages = R.pages;
         set.page = R.page;
         if (set.want != null && (R.page >= set.want || galWhole(set) || (set.want >= 1e9 && galFedAll(set)))) set.want = null;     // the last page: every picture known so far, not the read's end (user: back into a gallery stalled)
         set.open = hole;
         galShade(set, hole);
+        const wait = whole || R.page < R.pages.length - 1 ? null : galOpenRow(L, R.pages[R.page]);     // a row a later picture could respace stays hidden
+        let shown = false;
         set.cells.forEach(function (cell, k) {
             const r = L[k];
             if (!r) { cell.style.display = 'none'; return; }
@@ -13826,7 +13851,12 @@
             cell.style.width = r.w + 'px';
             cell.style.height = r.h + 'px';
             cell.style.transform = 'translate(' + r.x + 'px,' + r.y + 'px)';
+            const w = !!wait && wait.has(k);
+            cell.classList.toggle('wait', w);
+            if (!w) shown = true;
         });
+        set.waiting = !!wait && wait.size > 0;
+        if (shown && set.fill == null) set.fill = !!R.fill;     // the row scale never changes once anything is on screen
         set.rows = galRowLines(L);
         if (!galLook) { galPageNote(set); galFeed(set); }
         return L;
@@ -14306,7 +14336,7 @@
             const g = e.target && e.target.closest ? e.target.closest('.sg') : null;
             if (!g) return;
             const gal = g.classList.contains('g');
-            if (gal !== galStepG) { galStepG = gal; if (galCur) galStripText(galCur); ahStepMode(); return; }
+            if (gal !== galStepG) { galStepG = gal; predNote('mode', { m: gal ? 'G' : 'P' }); if (galCur) galStripText(galCur); ahStepMode(); return; }
             twAsk(gal ? 'gal' : 'page', s.pgT);
         });
         ['mousedown', 'mouseup', 'click', 'auxclick', 'dblclick', 'contextmenu'].forEach(function (t) {
@@ -14438,6 +14468,7 @@
         const g = ahG;
         if (!g) return;
         ahT('act', { a: 'page', dir: dir, page: (set.page || 0) + 1 });
+        predNote('page', { g: predGal(set.href), dir: dir, p: (set.page || 0) + dir + 1, th: predTh(set.href, (set.page || 0) + dir) });     // the page stepped to, before the flip
         if (dir > 0 && ahAll()) {
             g.fwd++;
             g.back = null;
@@ -14591,6 +14622,7 @@
     // The page row's ◀ ▶: a page, or with G: pressed (endless), a whole gallery, landing on its first page.
     function galRowStep(dir) {
         const c = galStepG && galEndless() ? galChain : null;
+        if (c) predNote('gstep', { dir: dir });
         if (!c || !galCur) { twPageBtn(dir); return; }
         if (c.land || c.hrefs[c.at] !== galCur.href) return;
         if (dir > 0 && c.at === c.hrefs.length - 1) { galChainExtend(c); galChainFollow(c); }
@@ -14757,6 +14789,7 @@
     // Last on or off: endless stops at the end of the gallery on screen; forgotten when the gallery closes.
     function galLastSet(on) {
         galLast = on && !!cfg.galleryEndless;
+        predNote('set', { k: 'last', v: galLast ? 1 : 0 });
         dbg('endless: Last ' + (galLast ? 'on — stops after this gallery' : 'off'));
         if (ahG) { if (galLast) { ahG.run++; if (ahG.otok) ahG.otok.stop = true; ahDrop('galn'); } else ahGalAhead(); }     // Last: the next galleries never open, so none loads
         galEndlessPaint();
@@ -14765,6 +14798,7 @@
 
     // The ☐ Endless box was pressed.
     function galEndlessSet(on) {
+        predNote('set', { k: 'endless', v: on ? 1 : 0 });
         galLast = false;
         reloadSettings();
         cfg.galleryEndless = on;
@@ -14796,6 +14830,7 @@
         reloadSettings();
         cfg.galleryLoadAll = on;
         saveSettings();
+        predNote('set', { k: 'loadall', v: on ? 1 : 0 });
         refreshPanel();
         galEndlessPaint();
         const g = ahG, set = galCur;
@@ -14985,7 +15020,7 @@
     }
 
     // Load one thumbnail; resolves {img, item, asp} once it has a size, or null.
-    function galImg(item, tag, job) {
+    function galImg(item, tag, job, early) {
         return new Promise(function (resolve) {
             const img = document.createElement('img'), t0 = performance.now();
             img.decoding = 'async';
@@ -14995,11 +15030,52 @@
                 galThumbSettled(item.thumb);
                 ahT('thumb', { tag: tag || 'shown', u: item.thumb, s: Math.round(t0), ms: Math.round(performance.now() - t0), ok: 1 }, job);
                 const nw = img.naturalWidth, nh = img.naturalHeight;
+                if (nw && nh) galSizeCheck(item, nw / nh);
                 resolve(nw && nh ? { img: img, item: item, nw: nw, asp: nw / nh } : null);
             };
             img.onerror = function () { img.onload = img.onerror = null; galThumbSettled(item.thumb); ahT('thumb', { tag: tag || 'shown', u: item.thumb, s: Math.round(t0), ms: Math.round(performance.now() - t0), ok: 0 }, job); resolve(null); };
             img.src = item.thumb;
+            const a = early ? galDeclAsp(item) : 0;
+            if (a) early({ img: img, item: item, nw: item.dw, asp: a, early: true });     // placed now by the site's size; shown when it loads
         });
+    }
+
+    // ---- the sizes a site declares for its thumbnails: trusted per site until the loaded files keep disagreeing
+    function sizeTrust() {
+        if (!sizeTrustMemo) { try { sizeTrustMemo = JSON.parse(GM_getValue(SIZE_TRUST_KEY, '') || '{}') || {}; } catch (e) { sizeTrustMemo = {}; } }
+        return sizeTrustMemo;
+    }
+    function galSizeTrusted(host) {
+        const s = sizeTrust()[host];
+        return !s || !(s.bad >= 3 && s.bad > 0.2 * (s.ok + s.bad));
+    }
+    // The shape the site declares for an item, when its site is trusted; else 0.
+    function galDeclAsp(item) {
+        return item && item.dw > 0 && item.dh > 0 && galSizeTrusted(hostOf(item.base)) ? item.dw / item.dh : 0;
+    }
+    // A thumbnail loaded: did the site's declared size give its shape? Counted once per picture.
+    function galSizeCheck(item, asp) {
+        if (!(item.dw > 0 && item.dh > 0) || sizeChecked.has(item.thumb)) return;
+        sizeChecked.add(item.thumb);
+        const host = hostOf(item.base), m = sizeTrust(), s = m[host] || (m[host] = { ok: 0, bad: 0 }), was = galSizeTrusted(host);
+        if (Math.abs(Math.log(asp * item.dh / item.dw)) <= GAL_DECL_TOL) s.ok++; else s.bad++;
+        if (s.ok + s.bad > 100) { s.ok = Math.round(s.ok / 2); s.bad = Math.round(s.bad / 2); }
+        if (galSizeTrusted(host) !== was) dbg('gallery sizes: the site\'s declared sizes ' + (was ? 'no longer trusted' : 'trusted again'), { host: host, ok: s.ok, bad: s.bad });
+        if (!sizeTrustT) sizeTrustT = setTimeout(function () { sizeTrustT = 0; try { GM_setValue(SIZE_TRUST_KEY, JSON.stringify(m)); } catch (e) { /* storage unavailable */ } }, 2000);
+    }
+
+    // A cell placed by the site's size got its file (or none): shown, its shape corrected if the size was wrong.
+    function galEarlyDone(set, e, p) {
+        const cell = e.img.parentNode;
+        if (!p) { e.bad = true; if (cell) cell.classList.add('gone'); return; }
+        if (p.img !== e.img) e.img.src = p.img.src;
+        e.nw = p.nw;
+        e.img.classList.add('ok');
+        if (Math.abs(Math.log(p.asp / e.asp)) <= GAL_DECL_TOL || galCur !== set) return;
+        const k = set.pics.indexOf(e);
+        if (k < 0) return;
+        set.asp[k] = e.asp = p.asp;
+        galLayout(set, set.open);
     }
 
     // A thumbnail finished loading (or failed): chips whose first page is now in turn blue.
@@ -15056,50 +15132,54 @@
         const got = [], t0 = performance.now();
         galTrace(href, 'thumbnails: loading ' + list.length + ' (' + galHostMix(list.map(function (it) { return it.thumb; })) + ')');
         const job = actJob((galLook ? 'Gallery preview: thumbnails of its first page' : 'Open gallery: thumbnails of its first 2 pages') + ' — ' + actGal(href), list.length);
+        if (list.every(galDeclAsp)) {      // every size declared: placed at once, each shown as it loads
+            const early = [];
+            Promise.all(list.map(function (item, i) {
+                return galImg(item, null, job, function (e) { early[i] = e; }).then(function (p) { const set = galCur; if (set && set.href === href && early[i]) galEarlyDone(set, early[i], p); });
+            })).then(function () { actEnd(job); });
+            galTrace(href, 'thumbnails: placed by the sizes the site declares');
+            galBuild(href, early.filter(Boolean), list.length);
+            return;
+        }
+        const pend = new Map();
         const all = Promise.all(list.map(function (item, i) {
-            return galImg(item, null, job).then(function (v) { got[i] = v; if (!v) failed++; return v; });
+            const q = galImg(item, null, job).then(function (v) { got[i] = v; if (!v) failed++; return v; });
+            pend.set(item.thumb, q);
+            return q;
         }));
+        galShowPend = pend;      // the ones still loading when the set goes up join through galAppend without a second request
         all.then(function () { actEnd(job); });
         const cap = new Promise(function (r) { timer = setTimeout(r, GAL_WAIT_MS, null); });
         Promise.race([all, cap]).then(function (v) {
             clearTimeout(timer);
-            const pics = (v || got).filter(Boolean);
-            galTrace(href, 'thumbnails: ' + pics.length + ' loaded, ' + failed + ' failed, ' +
-                (list.length - pics.length - failed) + ' still loading after ' + Math.round(performance.now() - t0) + ' ms');
+            const pre = galPrefix(v || got);
+            galTrace(href, 'thumbnails: ' + (v || got).filter(Boolean).length + ' loaded, ' + failed + ' failed, ' +
+                (list.length - pre.fed) + ' not shown yet after ' + Math.round(performance.now() - t0) + ' ms');
             if (galWant !== href || (galCur && galCur.href === href)) return;
-            if (!pics.length) { galLate(href, list, all, got, t0); return; }
-            galBuild(href, pics);
-            if (pics.length < list.length) galRest(href, list, all, got, t0, pics.length);
+            if (!pre.pics.length) { galLate(href, list, all, got, t0); return; }
+            galBuild(href, pre.pics, pre.fed);
+            if (pre.fed < list.length) galRest(href, list, t0);
         });
     }
 
-    // Some shown, the rest not yet: wait for them (GAL_REST_MS), try the failed ones once more, then redraw with every one that came.
-    function galRest(href, list, all, got, t0, shown) {
+    // The loaded thumbnails in list order up to the first still loading (failed ones passed over): later ones join through galFeed, in order.
+    function galPrefix(got) {
+        const pics = [];
+        let i = 0;
+        for (; i < got.length && got[i] !== undefined; i++) if (got[i]) pics.push(got[i]);
+        return { pics: pics, fed: i };
+    }
+
+    // Some shown, the rest joining through galFeed (a failed one is tried once more there): after GAL_REST_MS, say if some never came.
+    function galRest(href, list, t0) {
         const set = galCur;
-        let t = 0;
-        Promise.race([all, new Promise(function (r) { t = setTimeout(r, GAL_REST_MS, null); })]).then(function (v) {
-            clearTimeout(t);
-            const have = list.map(function (it, i) { return (v || got)[i] || null; });
-            const bad = [], hung = [];
-            have.forEach(function (p, i) { if (!p) (v || got[i] === null ? bad : hung).push(i); });
-            galTrace(href, 'thumbnails after ' + Math.round(performance.now() - t0) + ' ms: ' + (list.length - bad.length - hung.length) +
-                ' loaded, ' + bad.length + ' failed, ' + hung.length + ' still loading');
-            const retry = bad.length ? new Promise(function (r) { setTimeout(r, GAL_RETRY_GAP_MS); }).then(function () {
-                usLog.enable(cfg.logRequests !== false);
-                const lg = usLog.start('gthumbs', { host: pageHost(), pace: version().replace(/\?/g, '') + ' retry once', slowed: noRush(pageHost()) });
-                return Promise.all(bad.map(function (i) {
-                    const r = lg && lg.req();
-                    return galImg(list[i]).then(function (p) { if (r) r.done({ status: p ? 200 : 0 }); if (p) have[i] = p; });
-                })).then(function () { if (lg) lg.end('done'); });
-            }) : Promise.resolve();
-            retry.then(function () {
-                const pics = have.filter(Boolean), missing = list.length - pics.length;
-                if (bad.length) galTrace(href, 'retry: ' + (list.length - missing - (list.length - bad.length - hung.length)) + ' of ' + bad.length + ' failed ones loaded');
-                if (galCur !== set || galWant !== href) return;
-                if (pics.length > shown && set.cells.length < pics.length) galBuild(href, pics);
-                if (missing) galShortNote(href, pics.length, list.length, hung.length, missing - hung.length);
-            });
-        });
+        setTimeout(function () {
+            if (galCur !== set || galWant !== href) return;
+            const keys = galKeys(set.pics.map(function (p) { return p.item; }));
+            const missing = list.filter(function (it) { return !galKeyHit(keys, it); }).length, hung = set.inflight || 0;
+            galTrace(href, 'thumbnails after ' + Math.round(performance.now() - t0) + ' ms: ' + (list.length - missing) + ' shown, ' + hung + ' still loading');
+            if (missing) galShortNote(href, list.length - missing, list.length, Math.min(hung, missing), Math.max(0, missing - hung));
+        }, GAL_REST_MS);
     }
 
     // Shown in the gallery only when, after waiting and one retry, some pictures still could not be drawn.
@@ -15120,13 +15200,14 @@
         let t = 0;
         Promise.race([all, new Promise(function (r) { t = setTimeout(r, GAL_LATE_MS, null); })]).then(function (v) {
             clearTimeout(t);
-            const pics = (v || got).filter(Boolean), ms = Math.round(performance.now() - t0);
-            galTrace(href, 'thumbnails after ' + ms + ' ms: ' + pics.length + ' loaded, ' +
-                (v ? (v.length - pics.length) + ' failed, all settled' : 'the rest still loading') + '; originals fetching: ' + galHqText());
+            const any = (v || got).filter(Boolean).length, pre = galPrefix(v || got), ms = Math.round(performance.now() - t0);
+            galTrace(href, 'thumbnails after ' + ms + ' ms: ' + any + ' loaded, ' +
+                (v ? (v.length - any) + ' failed, all settled' : 'the rest still loading') + '; originals fetching: ' + galHqText());
             if (galWant !== href || (galCur && galCur.href === href)) return;
-            if (!pics.length) { galHide('fail: no thumbnail loaded within ' + ms + ' ms'); return; }
-            galBuild(href, pics);
-            if (pics.length < list.length) galRest(href, list, all, got, t0, pics.length);
+            if (!any) { galHide('fail: no thumbnail loaded within ' + ms + ' ms'); return; }
+            const use = pre.pics.length ? pre : { pics: (v || got).filter(Boolean), fed: list.length };     // the first ones hung this long: passed over
+            galBuild(href, use.pics, use.fed);
+            if (use.fed < list.length) galRest(href, list, t0);
         });
     }
 
@@ -15134,7 +15215,7 @@
     function galCell(set, p, saved) {
         const cell = document.createElement('div');
         cell.className = 'cell';
-        p.img.classList.add('ok');
+        if (!p.early) p.img.classList.add('ok');
         p.img.__hzItem = p.item;
         cell.appendChild(p.img);
         if (cfg.gallerySavedMarks && saved.has(p.item.thumb)) cell.appendChild(galSavedIcon('svd'));
@@ -15158,14 +15239,15 @@
         set.el.appendChild(cell);
     }
 
-    function galBuild(href, pics) {
+    function galBuild(href, pics, fed) {
         const root = galLayer();
         if (!galHost.isConnected) galSlot(galHost);
         const page = galCur && galCur.href === href ? galCur.page : 0;
         if (ahG && !galLook && galCur && galCur.href !== href) { ahG.at = ahG.back = null; ahG.from = ahG.end = 0; ahG.saw = false; if (galStepG && galEndless()) ahG.origs = false; else if (cfg.galleryLoadAll) ahG.origs = true; }     // a queue switch
         if (galCur) galDrop(galCur);
         const set = { href: href, el: document.createElement('div'), shade: document.createElement('div'),
-            cells: [], asp: [], pics: [], page: page, fed: 0, far: page };
+            cells: [], asp: [], pics: [], page: page, fed: fed || 0, far: page, pend: galShowPend };
+        galShowPend = null;
         set.el.className = 'set';
         set.shade.className = 'shade';
         ['mousedown', 'mouseup', 'click', 'auxclick', 'dblclick'].forEach(function (t) {
@@ -15246,33 +15328,44 @@
     function galAppend(set, items) {
         const job = actJob('Open gallery: more thumbnails — keeping ' + galAhead((set.far || 0) + 1) + ' pages ahead of page ' + ((set.far || 0) + 1), items.length);
         let left = items.length;
-        let pending = [], timer = 0;
-        const flush = function () {
-            timer = 0;
-            if (galCur !== set) return;
-            const batch = pending.sort(function (a, b) { return a.k - b.k; });
-            pending = [];
-            const saved = galList(GAL_SAVED_KEY), keys = galKeys(set.pics.map(function (p) { return p.item; }));
-            const before = set.pages && set.pages[set.page] ? set.pages[set.page].join('-') : '';
-            let n = 0;
-            galLinksPick(set.pics.map(function (p) { return p.item; }).concat(batch.map(function (b) { return b.p.item; })));
-            batch.forEach(function (b) { if (!galKeyHit(keys, b.p.item)) { galCell(set, b.p, saved); n++; } });
-            if (!n) return;
-            galTrace(set.href, 'appended ' + n + ' (' + set.cells.length + ' in all)');
-            const L = galLayout(set, set.open);
-            if (set.pages[set.page].join('-') !== before || set.pv) galPageWork(set, L);     // new cells may be on the pages whose originals load
-        };
+        if (!set.q) { set.q = new Map(); set.qIn = set.qOut = 0; }
         set.inflight = (set.inflight || 0) + items.length;
-        items.forEach(function (it, k) {
-            galImg(it, null, job).then(function (p) {
+        items.forEach(function (it) {
+            const n = set.qIn++;
+            let early = null;
+            const was = set.pend && set.pend.get(it.thumb);
+            (was || galImg(it, null, job, function (e) { early = e; galQPut(set, n, e); })).then(function (p) {
+                if (p || early) return p;
+                return sleep(GAL_RETRY_GAP_MS).then(function () { return galCur === set ? galImg(it, null, job) : null; });     // a failed thumbnail is tried once more, its place held
+            }).then(function (p) {
                 if (!--left) actEnd(job);
                 set.inflight--;
                 if (galCur !== set) return;
-                if (!p) { galFeed(set); if (!set.inflight && set.want != null && !pending.length && !timer) galLayout(set, set.open); return; }     // the last one failed: a wanted page still settles
-                pending.push({ p: p, k: k });
-                if (!timer) timer = setTimeout(flush, GAL_APPEND_MS);
+                if (early) { galEarlyDone(set, early, p); if (!set.inflight && set.waiting) galLayout(set, set.open); return; }
+                galQPut(set, n, p);
             });
         });
+    }
+
+    // A thumbnail of the set settled (or failed, null) in queue place n: the run in list order joins at once.
+    function galQPut(set, n, p) {
+        set.q.set(n, p);
+        if (!set.qT) set.qT = setTimeout(function () { set.qT = 0; galQFlush(set); }, GAL_APPEND_MS);
+    }
+
+    function galQFlush(set) {
+        if (galCur !== set) return;
+        const batch = [];
+        while (set.q.has(set.qOut)) { const p = set.q.get(set.qOut); set.q.delete(set.qOut); set.qOut++; if (p) batch.push(p); }
+        const saved = galList(GAL_SAVED_KEY), keys = galKeys(set.pics.map(function (p) { return p.item; }));
+        const before = set.pages && set.pages[set.page] ? set.pages[set.page].join('-') : '';
+        let n = 0;
+        if (batch.length) galLinksPick(set.pics.map(function (p) { return p.item; }).concat(batch.map(function (b) { return b.item; })));
+        batch.forEach(function (b) { if (!galKeyHit(keys, b.item)) { galCell(set, b, saved); n++; } });
+        if (!n) { galFeed(set); if (!set.inflight && (set.want != null || set.waiting)) galLayout(set, set.open); return; }     // only failures: a wanted page, or the last row, still settles
+        galTrace(set.href, 'appended ' + n + ' (' + set.cells.length + ' in all)');
+        const L = galLayout(set, set.open);
+        if (set.pages[set.page].join('-') !== before || set.pv) galPageWork(set, L);     // new cells may be on the pages whose originals load
     }
 
     const GAL_COUNTS_KEY = 'hzGalCounts2';   // sessionStorage: {href: [count, at]}, galleries read to their end; far more than the kept lists
@@ -15386,7 +15479,7 @@
             ahGrowEnd(href, why === 'grown' || why === 'reported' ? '' : why);
             dlqGrowEnd(href, why, galGrown.has(href));
             dbg('gallery read to its end: ' + why, { href: href, from: from, pictures: (galLists.get(href) || []).length, final: galGrown.has(href), ms: Math.round(performance.now() - t0), open: !!galCur && galCur.href === href });
-            if (galCur && galCur.href === href) galPageNote(galCur);
+            if (galCur && galCur.href === href) { galPageNote(galCur); if (galCur.waiting) galLayout(galCur, galCur.open); }     // read to its end: the last row is final
             galChipsCount(href);
             galDlShow();
         }).then(function (v) { if (Array.isArray(v)) galMore(href, v); });
@@ -15489,6 +15582,7 @@
     }
 
     function galHide(why) {
+        if (galCur && !galLook) { predNote('close', { g: predGal(galCur.href), p: (galCur.page || 0) + 1 }); predSum('close'); }
         setTimeout(galStoreTick, 0);     // after the state below is cleared: the readout goes
         galEditStop(false);
         galMenuHide();
@@ -16415,6 +16509,7 @@
         const hr = galHoleRect(pic || t);
         if (galOwns(active)) cancel();
         const sw = !!(galChain && galChain.land && galChain.land.href === href && galFly);     // the queue switching gallery
+        predNote('open', { g: predGal(href), sw: sw ? 1 : 0, land: sw && galChain.land.page ? 'last' : null, th: sw && galChain.land.page ? null : predTh(href, 0) });
         if (!sw) { galChain = cfg.galleryEndless ? galChainFrom(href) : null; galLast = galStepG = false; }
         if (!sw && galChain && galChain.hrefs.length <= 3) galChainFollow(galChain);     // a short queue: the page loads more under the gallery at once
         galOn = true;
@@ -18106,6 +18201,7 @@
         const k = set.pics.findIndex(function (p) { return p.img === img; });
         if (k < 0) return;
         ahT('act', { a: tour ? 'slide' : 'preview', pic: k + 1, dir: dir });
+        { const it = set.pics[k].item; predNote(tour ? 'slide' : 'pv', { g: predGal(set.href), i: k + 1, pre: it && it.hqTried && it.hit ? 1 : 0 }); }
         if (tour && tour.gal === set) { const p = galPageOf(set, k); if (p > (set.far || 0)) { set.far = p; galFeed(set); } }     // the slideshow's page and those ahead get their thumbnails
         const was = g.origs;
         g.origs = true;
@@ -18139,6 +18235,101 @@
         ahWarm.n = ahWarm.kept = 0;
     }
 
+    // ---- prediction log: what the user did beside what was loaded ahead, anonymised (docs/PREDICT.md)
+    function predOn() { return !!cfg.predictLog && isTopFrame; }
+    function predStore() {
+        let st = null;
+        try { st = JSON.parse(GM_getValue(PRED_KEY, '') || 'null'); } catch (e) { st = null; }
+        if (!st || !Array.isArray(st.ev) || !st.salt) st = { salt: Math.random().toString(36).slice(2, 12), ev: [] };
+        return st;
+    }
+    function predSalt() {
+        if (!predSaltMemo) { const st = predStore(); predSaltMemo = st.salt; if (!st.ev.length) { try { GM_setValue(PRED_KEY, JSON.stringify(st)); } catch (e) { /* storage unavailable */ } } }
+        return predSaltMemo;
+    }
+    // A site's name in the log: a salted hash, never the hostname.
+    function predSite() {
+        let h = 2166136261;
+        const s = predSalt() + pageHost();
+        for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+        return 's' + (h >>> 0).toString(36);
+    }
+    // A gallery's number on the page (its door, in page order, 1-based), else 0.
+    function predGal(href) {
+        const i = galDoorList().findIndex(function (d) { return d.h === href; });
+        return i + 1;
+    }
+    function predCount(h) {
+        const l = galLists.get(h);
+        if (Array.isArray(l)) return l.length;
+        const c = galCountsAll()[h];
+        return c ? c[0] : null;
+    }
+    // Of a gallery page's thumbnails, how many were already loaded: [ready, of].
+    function predTh(href, page) {
+        const list = galLists.get(href);
+        if (!Array.isArray(list)) return null;
+        const per = Math.max(1, galPer(galCur && galCur.href === href ? galCur : null)), from = (page || 0) * per, to = Math.min(list.length, from + per);
+        let n = 0;
+        for (let i = from; i < to; i++) if (list[i] && galThumbDone.has(list[i].thumb)) n++;
+        return [n, Math.max(0, to - from)];
+    }
+    // Indexes where test(i) holds, as "1-30,41-45" (1-based).
+    function predRanges(n, test) {
+        const out = [];
+        let s = -1;
+        for (let i = 0; i <= n; i++) {
+            const on = i < n && test(i);
+            if (on && s < 0) s = i;
+            if (!on && s >= 0) { out.push(s + 1 === i ? String(i) : (s + 1) + '-' + i); s = -1; }
+        }
+        return out.join(',');
+    }
+    function predNote(e, o) {
+        if (!predOn()) return;
+        try {
+            if (!predPage) {
+                const doors = galDoorList();
+                predPage = { id: Math.random().toString(36).slice(2, 8), t0: performance.now() };
+                predBuf.push({ pg: predPage.id, e: 'page', site: predSite(), doors: doors.length, n: doors.map(function (d) { return predCount(d.h); }) });
+            }
+            const ev = { pg: predPage.id, t: Math.round((performance.now() - predPage.t0) / 100) / 10, e: e };
+            for (const k in o || {}) if (o[k] != null) ev[k] = o[k];
+            predBuf.push(ev);
+            if (!predSaveT) predSaveT = setTimeout(predFlush, 3000);
+        } catch (x) { /* a line lost, never the action */ }
+    }
+    // What was loaded per gallery: thumbnails and originals, by picture number.
+    function predSum(why) {
+        if (!predOn() || !predPage) return;
+        const g = [];
+        galDoorList().forEach(function (d, i) {
+            const list = galLists.get(d.h);
+            if (!Array.isArray(list) || !list.length) return;
+            const th = predRanges(list.length, function (k) { return !!list[k] && galThumbDone.has(list[k].thumb); });
+            const or = predRanges(list.length, function (k) { return !!list[k] && !!list[k].hqTried && !!list[k].hit; });
+            if (th || or) g.push({ g: i + 1, n: list.length, th: th, or: or });
+        });
+        predNote('sum', { why: why, g: g });
+    }
+    function predFlush() {
+        if (predSaveT) { clearTimeout(predSaveT); predSaveT = 0; }
+        if (!predBuf.length) return;
+        const st = predStore();
+        st.ev = st.ev.concat(predBuf);
+        predBuf = [];
+        if (st.ev.length > PRED_MAX) st.ev = st.ev.slice(-PRED_MAX);
+        try { GM_setValue(PRED_KEY, JSON.stringify(st)); } catch (e) { /* storage unavailable */ }
+    }
+    function predText() {
+        predFlush();
+        const st = predStore();
+        return '# Hover Zoom ' + version() + ' prediction log, ' + st.ev.length + ' events. Sites are salted hashes; g = gallery number on its page; ' +
+            'th = [thumbnails of that page already loaded, of]; pre = its original was loaded ahead; sum = what was loaded per gallery (picture numbers).\n' +
+            st.ev.map(function (e) { return JSON.stringify(e); }).join('\n');
+    }
+    function predClear() { predBuf = []; predPage = null; predSaltMemo = null; try { GM_setValue(PRED_KEY, ''); } catch (e) { /* storage unavailable */ } }
+
     // The gallery preview: a hovered door's first page of thumbnails laid out around it, nothing active; leaving the door closes it.
     function galLookOpen(el, href) {
         if (galPtOut || galCur || galWant || placed || tour || !isTopFrame) return;
@@ -18147,6 +18338,7 @@
         if (!hr.width || !hr.height || !holds(hr, galPt.x, galPt.y)) return;
         galLook = { el: el, href: href };
         ahLookLast = href;
+        predNote('look', { g: predGal(href), th: predTh(href, 0) });
         ahT('act', { a: 'look', h: href });
         galOn = true;
         galHole = { x: hr.left, y: hr.top, w: hr.width, h: hr.height };
@@ -18322,7 +18514,7 @@
     if (isTopFrame) {
         try { GAL_OLD_KEYS.forEach(function (k) { sessionStorage.removeItem(k); }); } catch (e) { /* storage refused */ }
         document.addEventListener('scroll', galScroll, { capture: true, passive: true });
-        window.addEventListener('pagehide', function () { if (galKeptT) galKeptWrite(); if (galPreLog) { galPreLog.end('cut'); galPreLog = null; } dlqHalt(); dlqPresence(false); });     // a save in flight never calls back after a bfcache freeze: its picture is redone
+        window.addEventListener('pagehide', function () { try { predSum('leave'); predFlush(); } catch (e) { /* the log is never in the way */ } if (galKeptT) galKeptWrite(); if (galPreLog) { galPreLog.end('cut'); galPreLog = null; } dlqHalt(); dlqPresence(false); });     // a save in flight never calls back after a bfcache freeze: its picture is redone
         setTimeout(function () { dlqTick(); setInterval(dlqTick, DLQ_TICK_MS); dlqFindHere(); }, 800);
         document.addEventListener('click', dlqNavNote, true);
         document.addEventListener('submit', function (e) {
@@ -19011,6 +19203,17 @@
                 copyText: function () { return usLog.text({ anon: true }); },
                 showText: function () { return usLog.text(); },
                 clear: function () { usLog.clear(); }
+            });
+        }
+
+        function predictLogRow() {
+            logRow({
+                copy: ['Copy', 'Copy the whole log: it holds no addresses or names'],
+                showTip: 'Show the log here', clearTip: 'Empty the prediction log',
+                confirm: 'Empty the prediction log?',
+                count: function () { predFlush(); const n = predStore().ev.length; return { text: n + ' logged', any: !!n }; },
+                copyText: predText, showText: predText,
+                clear: predClear
             });
         }
 
@@ -19934,6 +20137,10 @@
             'recognise, or a gallery that is really a photo or a results page), note the two addresses, what it thought and what ' +
             'it was. Fixed on the spot either way; the log is for fixing sites in bulk. Holds addresses of pages you visited.');
         missLogRow();
+        check('predictLog', 'Keep a prediction log',
+            'In galleries: what you open, page, preview and skip, beside what was loaded ahead for it, so the guesses can be ' +
+            'tuned. No addresses, names or pictures — a site is a random code, a gallery its number on the page.');
+        predictLogRow();
         const actBtn = document.createElement('button');
         actBtn.textContent = 'Open…';
         actBtn.addEventListener('click', actOpen);

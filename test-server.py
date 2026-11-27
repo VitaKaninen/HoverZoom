@@ -102,12 +102,18 @@ class SlowHandler(SimpleHTTPRequestHandler):
         import hashlib
         import io
         from PIL import Image, ImageDraw
+        import time
+        from urllib.parse import parse_qs
         name = urlparse(self.path).path
+        q = parse_qs(urlparse(self.path).query)     # ?w=&h= its size (default 200x150), ?slow= seconds before answering
+        w, h = int(q.get("w", ["200"])[0]), int(q.get("h", ["150"])[0])
+        if q.get("slow"):
+            time.sleep(min(float(q["slow"][0]), 20.0))
         seed = hashlib.md5(name.encode("utf-8")).digest()
-        im = Image.new("RGB", (200, 150), (seed[0], seed[1], seed[2]))
+        im = Image.new("RGB", (w, h), (seed[0], seed[1], seed[2]))
         d = ImageDraw.Draw(im)
         for i in range(6):
-            x, y = seed[3 + i] % 180, seed[9 + i] % 130
+            x, y = seed[3 + i] % max(1, w - 20), seed[9 + i] % max(1, h - 20)
             d.rectangle([x, y, x + 20 + seed[i] % 40, y + 20], fill=(seed[i + 4], seed[i + 2], seed[i]))
         d.text((8, 8), name.rsplit("/", 1)[-1], fill=(255, 255, 255))
         buf = io.BytesIO()
@@ -116,6 +122,7 @@ class SlowHandler(SimpleHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "image/jpeg")
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "max-age=600")     # cached like a real site's thumbnails
         self.end_headers()
         self.wfile.write(body)
 
