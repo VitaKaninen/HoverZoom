@@ -1479,6 +1479,7 @@ const galPH = function (min) {
     const pS = src.indexOf('    function ahPri'), pE = src.indexOf('    // A start slot');
     const ahPri = new Function(src.slice(pS, pE) + '\nreturn ahPri;')();
     eq('gate: open gallery before counts before the main page', [ahPri('gal'), ahPri('galo'), ahPri('galn'), ahPri('count'), ahPri('main')], [0, 0, 0.5, 1, 2]);
+    eq('gate: L13 (grow) ranks after every gallery line, in every moment', ['', 'open', 'fwd', 'slide'].map(function (m) { return ahPri('grow', m) > Math.max(ahPri('galn', m), ahPri('gal', m), ahPri('galo', m)); }), [true, true, true, true]);
     const gS = src.indexOf('    function ahGate'), gE = src.indexOf('    // A start slot');
     const ctx = { ahG: null, galCur: null }, testPlQueue = [], testPlL1 = { live: 0, at: 0 };
     const mkGate = new Function('document', 'performance', 'setTimeout', 'clearTimeout', 'ctx', 'tour', 'galLook', 'galShownAt', 'AH_THUMB_STALL_MS', 'galEarlyLeft', 'plQueue', 'plL1', 'galCnt', 'AH_PV_HOLD_MS',

@@ -67,7 +67,7 @@ caught up in a 112-picture gallery → exactly 20 `gals`, `gal` 201 / `galn` 60 
 user: a clip cell already has the site's still image as its thumbnail, so L24 for clips is only the ▶.
 **Built (v0.450.0), L13's place:** last in every gallery moment, jumping the queue as the plan says (table row). Until
 the read has ended (`galListRead`: grown, or stopped with a reason) `galWhole` is false and the page count shows "+".
-Trap: a gate's release pumps **both** gates (`ahPump`), or `grow` (AH-page) never sees AH-pic's originals finish.
+Trap: a gate's release pumps **both** gates (`onFree` = `ahPump`, set beside the two gates so `ahGate` stays testable alone), or `grow` (AH-page) never sees AH-pic's originals finish.
 Chrome-pane check, door-search: d6 (240 in HTML) read at 32.8 s right after its 240 originals with Load all, 0.1 s
 without; d7 (10 in HTML) "needed now" at once. The step-past jump is not live-tested.
 **Not built:** L25 and "Upgrade clips" (a clip's original is still only probed for metadata until a hover), the L13

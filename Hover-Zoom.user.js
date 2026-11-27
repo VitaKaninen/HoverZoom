@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.450.0
+// @version      0.451.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -12962,6 +12962,7 @@
     const AH_THUMBS_OFF = 3;            // endless off: galleries after the first whose thumbnails load before that share
     const AH_THUMBS_MAIN = 30;          // main page: thumbnails per gallery in the first pass (the preview loads the rest)
     const ahPics = ahGate(AH_PIC_GAP, GAL_HQ_PAR), ahPages = ahGate(AH_PAGE_GAP, 4);
+    ahPics.onFree = ahPages.onFree = function () { ahPump(); };     // both gates on any release: L13 in ahPages waits on ahPics
     let ahAnchor = null;                // the hovered door the main page loads from; null = the first on screen, read at each pick
     const ahRound = new Map(), ahNextDone = new Set(), ahGrowTried = new Set();     // main page: thumbnails, first originals, the next gallery's whole first page
     let ahGrowJob = null;     // the idle count's activity header: { href, job }
@@ -18539,7 +18540,7 @@
                 g.on[w.tag] = (g.on[w.tag] || 0) + 1;
                 g.at = now + gap[0] + Math.random() * (gap[1] - gap[0]);
                 let freed = false;
-                w.resolve(function () { if (freed) return; freed = true; g.live--; g.on[w.tag]--; ahPump(); if (hoverHold) hoverResumeCheck(); });     // both gates: L13 in ahPages waits on ahPics
+                w.resolve(function () { if (freed) return; freed = true; g.live--; g.on[w.tag]--; (g.onFree || g.pump)(); if (hoverHold) hoverResumeCheck(); });
             }
         };
         return g;
