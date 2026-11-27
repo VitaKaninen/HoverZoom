@@ -130,18 +130,12 @@ the time you would look one up the symptom has already been misdiagnosed. (The s
 
 ## Design invariants — do not regress these
 
-- **Nothing is cached that the DOM can invalidate.** (One exception, checked on arrival: the
-  slideshow's roll keeps pictures a recycling feed unmounted — [`docs/TOUR.md`](docs/TOUR.md) §1d.)
-  Everything resolves from a read taken at the
-  moment it is needed — hover time for a preview, press time for next/prev. Do not add a
-  MutationObserver or a pre-pass "for performance", and do not hold a reference to a page element
-  across an interaction; re-derive instead. Reading the document ahead of a hover is fine, and
-  `tourEntries()` does exactly that on every press — keeping the answer is what causes the bugs.
-  *(Not a ban on querying the document or reading ahead: what it guards is *keeping* the answer —
-  stale `src`, SPA navigation, images added after a scan, dead references. Where it bites: the
-  Google Images section of [`docs/RESOLVER.md`](docs/RESOLVER.md); `coveredMedia()` hit-tests at
-  hover time and caches nothing; `tourAt()` anchors on an element and a position, never an index,
-  so a virtualised feed deleting the node under you is survivable.)*
+- **Nothing is cached that the DOM can invalidate.** Resolve from a read taken when it is needed — hover time
+  for a preview, press time for next/prev. Reading ahead is fine (`tourEntries()` does it every press);
+  *keeping* the answer is the bug (stale `src`, SPA navigation, late images, dead references). No
+  MutationObserver or pre-pass "for performance"; no page-element reference held across an interaction.
+  `tourAt()` anchors on an element and a position, never an index. One exception, checked on arrival: the
+  slideshow's roll ([`docs/TOUR.md`](docs/TOUR.md) §1d). Where it bites: Google Images in [`docs/RESOLVER.md`](docs/RESOLVER.md).
 - **No format allowlist.** Extension never decides eligibility. The only gate is
   `bigEnough()`, measured by loading the candidate: by default (`sizeGate` off, v0.168.0) "would
   the window draw it larger than the page does", so every picture previews, enlarged up to
@@ -153,13 +147,9 @@ the time you would look one up the symptom has already been misdiagnosed. (The s
   [`docs/GATES.md`](docs/GATES.md)); that replaced "nothing singles out icons or avatars".
 - **Per-element probe state.** No shared lock, no `.one()`. `probeCache` is keyed by URL and
   every probe has both `onload` and `onerror`.
-- **Build UI with `createElement` + `textContent`.** Trusted Types CSP sites (YouTube, Google)
-  throw on `innerHTML` and abort the function mid-build with no visible error.
 - **`view` + `reflow()` + `layout()` own all viewer geometry.** `view` is the only state,
   `reflow()` derives frame size and clamps the pan offsets, `layout()` is the only thing that
-  writes to the DOM. Nothing else may set `box`/`img` styles or the two representations drift.
-  Since v0.18.0 the frame has two possible faces and `layout()` writes to whichever `mediaEl`
-  points at — the rule is unchanged, only what it writes *to* is.
+  writes to the DOM (to whichever face `mediaEl` points at). Nothing else may set `box`/`img` styles.
 
 ---
 
