@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.449.0
+// @version      0.450.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -14228,13 +14228,14 @@
         const base = galLists.get(set.href);
         if (!base || galCur !== set || galLook) return;
         let room = galWantN(set) - set.cells.length - (set.inflight || 0);
-        if (room <= 0 || set.fed >= base.length) return;
+        if (room <= 0) return;
         const keys = galKeys(set.pics.map(function (q) { return q.item; })), add = [];
         while (set.fed < base.length && add.length < room) {
             const it = base[set.fed++];
             if (!galKeyHit(keys, it)) add.push(it);
         }
         if (add.length) galAppend(set, add);
+        if (add.length < room) galGrowNeed(set, 'a page past the list read so far');     // L13 jumps the queue
     }
 
     // Every picture listed so far is in the set and loaded (the page may still be read for more).
@@ -14246,7 +14247,27 @@
     // Every picture the gallery's page holds is in the set (none still to read or load).
     function galWhole(set) {
         const base = galLists.get(set.href);
-        return galGrowing !== set.href && (!base || set.fed >= base.length) && !set.inflight;
+        return galGrowing !== set.href && (!base || (galListRead(set.href) && set.fed >= base.length)) && !set.inflight;
+    }
+    // The read past the HTML (L13) has ended, to the end or not; until then the list may be short.
+    function galListRead(href) { return galGrown.has(href) || galGrowWhy.has(href); }
+    // L13 last in its moment (PRELOAD.md M6-M9): queued behind every other line of this gallery; galGrowNeed starts it at once.
+    function galGrowLater(set) {
+        const href = set.href;
+        ahDrop('grow');
+        if (galGrowing === href || galGrown.has(href)) return;     // a read that stopped short is tried again on each open, as before
+        if ((galLists.get(href) || []).length < galWantN(set)) { galGrowNeed(set, 'the list is shorter than the pages wanted', true); return; }     // galBuild's own galFeed runs before galCur is set
+        ahRun(ahPages, 'grow', function () {
+            if (galCur === set && galGrowing !== href && !galGrown.has(href)) { galTrace(href, 'reading on: everything before it is done'); galGrow(href); }
+            return Promise.resolve();
+        });
+    }
+    // A line needs pictures past the list read so far: the read past the HTML starts now.
+    function galGrowNeed(set, why, again) {
+        if (!set || galGrowing === set.href || galGrown.has(set.href) || (!again && galListRead(set.href))) return;
+        ahDrop('grow');
+        galTrace(set.href, 'reading on: needed now (' + why + ')');
+        galGrow(set.href);
     }
 
     // What the rows keep clear of: the clicked picture with its attached strip, and a strip of its own.
@@ -14496,7 +14517,8 @@
         const s = galSt;
         if (!s || !set) return;
         if (galChain && galChain.land && galChain.land.href !== set.href && s.nums && s.nums.gal) { galPadFit(); return; }     // endless switching: the old numbers stay up, or the box narrows and the rows reshuffle (user)
-        const reading = galGrowing === set.href, base = galLists.get(set.href), n = Math.max(set.cells.length, base ? base.length : 0);
+        const reading = galGrowing === set.href || !galListRead(set.href),     // "+" until the read past the HTML has ended
+            base = galLists.get(set.href), n = Math.max(set.cells.length, base ? base.length : 0);
         galStripRows(set);
         const page = set.page || 0, at = set.pics.length ? galStartAt(set) : -1;
         const total = galPagesOf(set);
@@ -14741,6 +14763,7 @@
         if (galWhole(set) || galCur !== set) return false;
         const was = set.pics.length;
         set.far = Math.max(set.far || 0, set.pages ? set.pages.length : 1);
+        galGrowNeed(set, 'stepped past the list read so far');
         galFeed(set);
         for (let t = 0; t < 30 && galCur === set && set.pics.length === was && !galWhole(set); t++) await sleep(200);
         return set.pics.length > was;
@@ -15850,7 +15873,7 @@
         }, GAL_SEEN_MS);
         galPageWork(set, L);
         galCatchUp(set);
-        galGrow(href);
+        galGrowLater(set);
         galChainLanded(set);
         ahGalAhead();
     }
@@ -18516,13 +18539,14 @@
                 g.on[w.tag] = (g.on[w.tag] || 0) + 1;
                 g.at = now + gap[0] + Math.random() * (gap[1] - gap[0]);
                 let freed = false;
-                w.resolve(function () { if (freed) return; freed = true; g.live--; g.on[w.tag]--; g.pump(); if (hoverHold) hoverResumeCheck(); });
+                w.resolve(function () { if (freed) return; freed = true; g.live--; g.on[w.tag]--; ahPump(); if (hoverHold) hoverResumeCheck(); });     // both gates: L13 in ahPages waits on ahPics
             }
         };
         return g;
     }
     // A waiting load's rank (lower starts first) in moment m (PRELOAD.md "Plan"): galh L22, galp L23, galo L14, gal L17, galn L18.
     function ahPri(tag, m) {
+        if (tag === 'grow') return 9;     // L13: last
         if (!m) return tag === 'gal' || tag === 'galo' || tag === 'galp' || tag === 'galh' ? 0 : tag === 'galn' ? 0.5 : tag === 'count' ? 1 : 2;
         if (m === 'slide') { const q = { gals: 0, galh: 0, gal: 1, galp: 2, galo: 3, galn: 4 }[tag]; return q == null ? 5 : q; }     // M13
         const p = { gals: 0, galh: 0, galp: 1, galo: m === 'open' ? 2 : 3, gal: m === 'open' ? 3 : 2, galn: 4 }[tag];     // M6: this gallery before the next ones; M7-M9 the reverse
@@ -18554,6 +18578,7 @@
     function ahHeld(tag, m, busy) {
         if (hoverHold && !hoverHold.l9) return true;     // a hover's own original first, everywhere
         if (m && galPvWait && performance.now() - galPvWait.at < AH_PV_HOLD_MS) return true;      // M8 line 1: the rested hover's own original first
+        if (tag === 'grow') return !m || busy || ahGalBusy();     // L13 waits for every other line of the open gallery
         if (!m) return ((tag === 'count' || tag === 'main' || tag === 'next') && ahL1Busy()) || ((tag === 'main' || tag === 'next') && galCnt > 0);     // M1: L1, then L3, then the rounds
         if (tag === 'count' || tag === 'main' || tag === 'next') return true;
         if (m === 'slide' && tag !== 'gals' && (ahPics.wait.some(function (w) { return w.tag === 'gals'; }) || (ahPics.on.gals || 0) > 0)) return true;     // M13 line 1 first
@@ -18561,6 +18586,12 @@
         return busy && tag !== 'galh' && tag !== 'gals';
     }
     function ahPump() { ahPics.pump(); ahPages.pump(); }
+    // Any of the open gallery's lines still waiting or loading.
+    function ahGalBusy() {
+        return ['gals', 'galh', 'galp', 'galo', 'gal', 'galn'].some(function (t) {
+            return [ahPics, ahPages].some(function (g) { return (g.on[t] || 0) > 0 || g.wait.some(function (w) { return w.tag === t; }); });
+        });
+    }
 
     // A start slot: resolves to its release, or to null once its tag is dropped or its run (tok) stopped.
     function ahSlot(g, tag, tok) { return new Promise(function (resolve) { g.wait.push({ tag: tag, tok: tok, resolve: resolve }); g.pump(); }); }
@@ -18893,6 +18924,7 @@
         ahG = null;
         actMoment('M14');
         ahDrop('gal');
+        ahDrop('grow');
         ahDropOrigs();
         ahAnchor = null;
         ahPump();      // the counts paused while it was open

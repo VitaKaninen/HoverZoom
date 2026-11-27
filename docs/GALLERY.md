@@ -220,7 +220,7 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
     looked like it ended at page 17.
   - The fixture `door-big.html` uses `/many/bigN.jpg` (distinct paths): `galKeys` dedupes by URL
     *path*, so 240 `mural.jpg?bigN` were one picture to the feed.
-- **Reading on** (`galGrow`, after `galBuild` of a locked open): `galRender(href, onMore, onEnd)` names
+- **Reading on** (`galGrow`, queued by `galBuild` as L13, last — PRELOAD.md L13 row): `galRender(href, onMore, onEnd)` names
   the frame `…:<token>:grow`; the frame's `galProbeReport` reports as before, then `readOn()`:
   every `GAL_GROW_TICK` it posts only new items, scrolls `scrollingElement` 0.9 screen and
   dispatches a `scroll` event (a frame not painted, as in the Browser pane, sends none; pages that

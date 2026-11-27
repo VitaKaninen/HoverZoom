@@ -31,7 +31,7 @@ Queues (each kind below names its own). They do not know about each other; all s
 | L12 | Thumbnails of the page on screen | at once, in list order (`galFeed`) | direct |
 | L20 | Thumbnails of the next page | with L12 (`galFeed`, 1 page ahead on page 1) | direct |
 | L21 | Thumbnails of pages further ahead (up to 5 once stepped on) | with L12 (`galFeed`) | direct |
-| L13 | Frame read for the rest of this gallery's list | when its HTML lists fewer than it has (`galGrow`, `galTourMore` on a step past it) | frame |
+| L13 | Frame read for the rest of this gallery's list | last: `galGrowLater` queues tag `grow` in AH-page, held while any of the gallery's lines wait or load (`ahGalBusy`); jumps the queue (`galGrowNeed`) when the list is shorter than the pages wanted, a step goes past it (`galTourMore`), or ⤓ | frame |
 | L22 | Full size of the pictures around the one just hovered, ±3 nearest first | its preview shown (`ahSaw` after `showViewer`; cells the pointer only crosses never count, v0.443.0), any setting; the head of the run (`galHqAhead`) | AH-pic `galh` |
 | L23 | Full size of the page on screen (M9: from its end backward) | Load all: after the thumbnails, each open, step, landing | AH-pic `galp` |
 | L14 | This gallery's full size after the page on screen: → end → 2 pages behind | Load all: after L23 (M6) or after L17 (M7–M9); G: waits for a hover | AH-pic `galo` |
@@ -65,8 +65,13 @@ or loading; L17's walk holds `galo`. Thumbnail lines (L12/L20/L21) are direct, n
 caught up in a 112-picture gallery → exactly 20 `gals`, `gal` 201 / `galn` 60 waiting behind them.
 **Built (v0.449.0), L24:** GIF thumbnails as first-frame stills + ▶ (GALLERY.md "L24"). Assumption, not confirmed by the
 user: a clip cell already has the site's still image as its thumbnail, so L24 for clips is only the ▶.
+**Built (v0.450.0), L13's place:** last in every gallery moment, jumping the queue as the plan says (table row). Until
+the read has ended (`galListRead`: grown, or stopped with a reason) `galWhole` is false and the page count shows "+".
+Trap: a gate's release pumps **both** gates (`ahPump`), or `grow` (AH-page) never sees AH-pic's originals finish.
+Chrome-pane check, door-search: d6 (240 in HTML) read at 32.8 s right after its 240 originals with Load all, 0.1 s
+without; d7 (10 in HTML) "needed now" at once. The step-past jump is not live-tested.
 **Not built:** L25 and "Upgrade clips" (a clip's original is still only probed for metadata until a hover), the L13
-split and L13's place, M10's "L17 first gallery before L20", L8's L1 (singles of a fetched page), L10's ±3-then-rest,
+split (a cheap count first), M10's "L17 first gallery before L20", L8's L1 (singles of a fetched page), L10's ±3-then-rest,
 next-page finding (its own session, three repos).
 
 New kind in the plan (not in code): **L25** the full clip. L10 = ±3 nearest first, then the rest of the section on screen. L8 = the next results page's
@@ -154,7 +159,7 @@ step a page or gallery they are skimming, and M6 does not return until the galle
 "Upgrade clips" = the page on screen only; when Load all reaches the next page, its clips go first.
 **L17 is capped at the first 2 pages of each next gallery** (user: some have hundreds of thumbnails) — as now.
 
-**L13 split (user 2026-11-27), not built:** the list read is one thing today — an HTML fetch of the gallery page gives
+**L13 split (user 2026-11-27), not built** (its place is, v0.450.0): the list read is one thing today — an HTML fetch of the gallery page gives
 each picture's thumbnail + link, and their number *is* the count; past what the HTML holds, only a hidden frame
 (the page loaded in full, scripts and images included; measured ~5–9 s each, one at a time) reads the rest. Cost (`galRender`
 grow mode): it downloads what a visit scrolled to the bottom would — page, scripts, ads, every thumbnail; only video,
