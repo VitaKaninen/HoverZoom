@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.425.0
+// @version      0.426.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -569,7 +569,7 @@
         try {
             siteMenuId = GM_registerMenuCommand(siteMenuLabel(), toggleSite);
             linesMenuId = GM_registerMenuCommand((cfg.showPostEnd ? '☑' : '☐') + ' Draw where the slideshow stops', toggleLines, { autoClose: false });
-            debugMenuId = GM_registerMenuCommand((cfg.debug ? '☑' : '☐') + ' Debug log in the console', toggleDebug);
+            debugMenuId = GM_registerMenuCommand((cfg.debug ? '☑' : '☐') + ' Enable debug mode', toggleDebug);
         } catch (e) { /* nothing to fall back to; the panel still has the list */ }
     }
 
@@ -580,7 +580,7 @@
         saveSettings();
         refreshSiteMenu();
         refreshPanel();
-        toast('Debug log: ' + (cfg.debug ? 'on' : 'off'), 3000);
+        toast('Debug mode: ' + (cfg.debug ? 'on' : 'off'), 3000);
     }
 
     // The menu's copy of the panel's Diagnostics checkbox.
@@ -4091,6 +4091,8 @@
     function openZoomField() {
         if (!view || !zinEl || !zinEl.hidden) return;
         zinEl.value = String(Math.round(toShown(view.scale) * 100));
+        zinEl.__start = zinEl.value;
+        hideTip();
         zvalEl.hidden = true;
         zinEl.hidden = false;
         showBar();
@@ -4099,19 +4101,21 @@
     }
 
     // The window swallows presses (onBoxDown preventDefaults), so `blur` never fires on its own:
-    // a press outside the readout, or the pointer leaving, is what commits. See the panel's `change`.
+    // a press outside the readout, or the pointer leaving, is what commits. True when it closed the field.
     function commitZoomField(e) {
-        if (!zinEl || zinEl.hidden) return;
-        if (e && zoomWrapEl && zoomWrapEl.contains(e.target)) return;
+        if (!zinEl || zinEl.hidden) return false;
+        if (e && zoomWrapEl && e.composedPath && e.composedPath().indexOf(zoomWrapEl) >= 0) return false;
         closeZoomField(true);
+        return true;
     }
 
+    // apply: the typed level is used if it was changed, as the number boxes do.
     function closeZoomField(apply) {
         if (!zinEl || zinEl.hidden) return;
         const text = zinEl.value;
         zinEl.hidden = true;
         zvalEl.hidden = false;
-        if (apply && view) {
+        if (apply && view && text !== zinEl.__start) {
             const s = parseZoom(text);
             if (!isNaN(s)) zoomAnchored(s);     // clamped in there; the readout shows what stuck
         }
@@ -6244,6 +6248,13 @@
             t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT';
     }
 
+    // A text box of ours has the keyboard (a number box, the zoom level, the settings panel): nothing previews meanwhile.
+    function typingOurs() {
+        if (twTyping || (zinEl && !zinEl.hidden)) return true;
+        const a = panelHost && panelHost.shadowRoot && panelHost.shadowRoot.activeElement;
+        return !!a && (a.tagName === 'TEXTAREA' || (a.tagName === 'INPUT' && /^(text|number|search|url|)$/.test(a.type)));
+    }
+
     // "Never preview this image again", from the ⊘ in the status bar.
     function blockCurrent() {
         if (!view) return;
@@ -6288,8 +6299,13 @@
 
     function onBoxDown(e) {
         hideTip();
-        commitZoomField(e);
         tap = null;
+        if (commitZoomField(e)) {       // a press away from the zoom box only closes it, as for the number boxes
+            e.preventDefault();
+            e.stopPropagation();
+            swallowNextClick = true;
+            return;
+        }
         if (e.detail <= 1) tapPaused = false;
         if (isBoxControl(e.target)) return;
         closePops();                // a press anywhere else puts an open menu away
@@ -6426,8 +6442,8 @@
             // ← → [ ] step; ↑ ↓ turn the page (screens, or a gallery's pages); the keyboard never pans.
             case 'ArrowLeft': case '[': tourNav(-1, e.repeat, true); break;
             case 'ArrowRight': case ']': tourNav(1, e.repeat, true); break;
-            case 'ArrowUp': if (!e.repeat) twPage(-1); break;
-            case 'ArrowDown': if (!e.repeat) twPage(1); break;
+            case 'ArrowUp': if (!e.repeat) twPageBtn(-1); break;
+            case 'ArrowDown': if (!e.repeat) twPageBtn(1); break;
             case '+': case '=': zoomCentre(view.scale * KEY_ZOOM); break;
             case '-': case '_': zoomCentre(view.scale / KEY_ZOOM); break;
             case '0': zoomCentre(view.fitScale); break;
@@ -8044,7 +8060,7 @@
         if (placed || priming || hotQuiet) return;
         if (galLook && galLook.el !== e.target) galHide('look');     // the gallery preview is not a gallery: the page hovers on
         if (galCur || (galOn && galWant)) return;      // an open gallery: its cells preview on their own
-        if (drag || twBusy() || dlqFinding || twTyping) return;
+        if (drag || twBusy() || dlqFinding || typingOurs()) return;
         if (ours(e.target)) return;         // on our own overlay
         if (!siteEnabled() || CAPTCHA_HERE) return;
         if (mouseDown) return;
@@ -10164,7 +10180,7 @@
         const next = mkVBtn(ICON_NEXT, null, function () { if (!twHeld) twPress(1); });
         twHoldOn(prev, -1);
         twHoldOn(next, 1);
-        const wheel = mkVBtn(ICON_WHEEL, null, twWheelClick);
+        const wheel = mkVBtn(ICON_WHEEL, 'Start / stop the slideshow', twWheelClick);
         wheel.classList.add('wheel');
         const load = document.createElement('span');
         load.className = 'load';
@@ -10330,6 +10346,7 @@
             '.tp{display:none}',
             '.tp.on{display:flex}',
             '.pg{flex:1;padding:0 4px;text-align:center;font-variant-numeric:tabular-nums;color:var(--text);cursor:text}',
+            '.pg.no{color:#f38ba8}',
             '.count{flex:1;padding:0 4px;text-align:center;font-variant-numeric:tabular-nums;color:var(--text);cursor:text}',
             '.tw input.ask{width:4.5em;box-sizing:border-box;margin:0 2px;padding:1px 4px;font:inherit;text-align:center;color:var(--text);' +
                 'background:var(--btn);border:1px solid var(--accent);border-radius:4px;outline:none}',
@@ -10478,37 +10495,45 @@
         return twPg;
     }
 
-    // Page p shown: scrolled to its first picture; with a slideshow up, that picture opened.
-    function twShowPage(pg, p, dir) {
+    // Page p shown: scrolled to its first picture.
+    function twShowPage(pg, p) {
         const e = pg.list[pg.starts[p]];
         if (!e) return;
         window.scrollTo({ left: window.scrollX || 0, top: Math.max(0, e.y - TW_PAGE_TOP), behavior: 'instant' });
-        if (placed && view && tour) {
-            const list = tourEntries(), at = pg.starts[p];
-            if (at < list.length && at !== tour.index) { tourTurnOn(); tour.total = list.length; seamDir = 0; plVidLeft(); tourGo(list, at, dir, false); }
-        } else twRecount();
+        twRecount();
     }
 
-    // The page row's ◀ / ▶: any preview closes (pinned, slideshow, fullscreen), then the page turns from where the screen is.
+    // Every page step — the page row's ◀ / ▶, ↑ ↓, PageUp / PageDown, a typed page: any preview closes (pinned, slideshow, fullscreen), then the page turns.
     function twPageBtn(dir) {
+        if (!pagesToTurn()) return;         // a key on a one-page list: nothing closes for nothing
         if (placed) unplace(); else cancel();
         twPage(dir);
     }
 
-    // ◀ / ▶ on the page row and ↑ ↓: the next screen of whole pictures from the slideshow's list.
+    // There is more than one page (a gallery's, Endless counting; or this page's screens, row shown or not).
+    function pagesToTurn() {
+        if (galCur) return !galStripOne;
+        const pg = twPagesNow(true);
+        return !!pg && pg.starts.length > 1;
+    }
+
+    // The next screen of whole pictures from the slideshow's list, or a gallery's next page. Only through twPageBtn.
     function twPage(dir) {
         if (galCur) { galPageStep(dir); return; }
         const pg = twPagesNow(true);
         if (!pg || !pg.starts.length) return;
-        if (placed && view && tour) {
-            const now = Date.now();
-            if (!tour.fast && now - userStepAt < STEP_GAP_MS) return;
-            userStepAt = now;
-        }
-        const at = placed && view && tour && tour.index >= 0 ? pageOfIndex(pg.starts, tour.index) : twPageNow(pg);
-        const to = at + dir;
-        if (to < 0 || to >= pg.starts.length) { if (placed && view && tour) tourNav(dir, false, true); return; }
-        twShowPage(pg, to, dir);
+        const to = twPageNow(pg) + dir;
+        if (to < 0 || to >= pg.starts.length) { if (dir > 0) twNoMore(); return; }
+        twShowPage(pg, to);
+    }
+
+    // ▶ past the last page: "No more pages" in red for GAL_NOMORE_MS, as the gallery's page row.
+    let twNoMoreUntil = 0, twNoMoreT = 0;
+    function twNoMore() {
+        twNoMoreUntil = Date.now() + GAL_NOMORE_MS;
+        clearTimeout(twNoMoreT);
+        twNoMoreT = setTimeout(function () { twNoMoreUntil = 0; twSync(); }, GAL_NOMORE_MS);
+        twSync();
     }
 
     // Counter and buttons: the slideshow's position (`–` when its picture is not in the list), else the page's total.
@@ -10532,7 +10557,10 @@
         const vk = vpW() + 'x' + vpH();
         if (pg.worthAt !== vk) { pg.worthAt = vk; pg.worth = pagesWorth(pg, vpW(), vpH()); }     // the list is retaken on every count, so this is fresh
         tw.pageRow.classList.toggle('on', pg.worth);
-        tw.pgNum.textContent = 'Page ' + (np ? (on && tour.index >= 0 ? pageOfIndex(pg.starts, tour.index) : twPageNow(pg)) + 1 : 1) + ' / ' + Math.max(1, np);
+        const noMore = Date.now() < twNoMoreUntil;
+        tw.pgNum.classList.toggle('no', noMore);
+        if (noMore) tw.pgNum.textContent = 'No more pages';
+        else tw.pgNum.textContent = 'Page ' + (np ?(on && tour.index >= 0 ? pageOfIndex(pg.starts, tour.index) : twPageNow(pg)) + 1 : 1) + ' / ' + Math.max(1, np);
         twOpacity();
         if (tw.host.style.display !== 'none') tw.dock.sizeChanged();     // the counter's width
     }
@@ -10755,6 +10783,7 @@
         t.wrap.remove();
         t.holder.style.display = '';
         if (go && n >= 1) {
+            if (t.kind !== 'pic') { if (placed) unplace(); else cancel(); }     // another page or gallery: any preview closes, as the page row's ◀ ▶
             if (t.kind === 'gal') galChainJump(n - 1);
             else if (t.kind === 'pic' && galCur && galSt && t.holder === galSt.picT && galSt.nums && galSt.nums.gal) galChainPicJump(n - 1);
             else if (t.kind === 'pic') twGoTo(n - 1);
@@ -10856,7 +10885,7 @@
         } else if (tour) tourMoreOnce(true).then(function () { if (tour) { tourSync(); twSync(); } });
     }
 
-    // Page k: a gallery's page, or the k-th screen of this one; with a slideshow up, its first picture there.
+    // Page k (a typed one; any preview already closed): a gallery's page, or the k-th screen of this one.
     function twGoPage(k) {
         const g = galCur;
         if (g) {
@@ -10864,19 +10893,12 @@
             g.want = null;
             const last = (g.pages ? g.pages.length : 1) - 1, to = Math.max(0, Math.min(last, k));
             if (k > last && !galWhole(g)) { g.far = Math.max(g.far || 0, k); g.want = k; galFeed(g); }     // lands on k once it is laid out (galLayout clears want)
-            if (placed && view && tour && tour.gal === g) {
-                const list = tourEntries(), at = g.pages[to][0];
-                if (at < list.length && at !== tour.index) { tourTurnOn(); seamDir = 0; tourGo(list, at, at > tour.index ? 1 : -1, false); }
-                return;
-            }
-            if (to !== g.page) { if (galOwns(active) && !placed) cancel(); g.page = to; galPageWork(g, galLayout(g, g.open)); }
+            if (to !== g.page) { g.page = to; galPageWork(g, galLayout(g, g.open)); }
             return;
         }
         const pg = twPagesNow(true);
         if (!pg || !pg.starts.length) return;
-        const to = Math.max(0, Math.min(pg.starts.length - 1, k));
-        const at = placed && view && tour && tour.index >= 0 ? pageOfIndex(pg.starts, tour.index) : twPageNow(pg);
-        twShowPage(pg, to, to >= at ? 1 : -1);
+        twShowPage(pg, Math.max(0, Math.min(pg.starts.length - 1, k)));
     }
 
     // ◀ ▶ held: after TW_HOLD_DELAY_MS they repeat like a held arrow key, scrubbing.
@@ -14181,29 +14203,27 @@
         el.hidden = true;
         twPaint(el, 'dark');        // it sits on the gallery's dark veil, whatever the page
         const s = { el: el };
-        const row = function (cls, pk, tk, nk, prevTip, nextTip, act) {
+        const row = function (cls, pk, tk, nk, act) {
             const r = document.createElement('div');
             r.className = 'r ' + cls;
-            const btn = function (text, tip, dir) {
+            const btn = function (text, dir) {      // no tips on ◀ ▶ (user)
                 const b = document.createElement('span');
                 b.className = 'b';
                 b.textContent = text;
-                setTip(b, tip);
                 b.addEventListener('mousedown', function (e) {
                     e.preventDefault();
                     e.stopPropagation();
-                    if (e.button === 0 && b.classList.contains('faint') && act === galPageStep && dir > 0) { galNoMore(); return; }
+                    if (e.button === 0 && b.classList.contains('faint') && act === twPageBtn && dir > 0) { galNoMore(); return; }
                     if (e.button !== 0 || b.classList.contains('faint')) return;
-                    if (act === galPageStep && (active || view)) { if (placed) unplace(); else cancel(); }
                     act(dir);
                 });
                 if (act === galStep) twHoldOn(b, dir);
                 return b;
             };
-            s[pk] = btn('◀', prevTip, -1);
+            s[pk] = btn('◀', -1);
             s[tk] = document.createElement('span');
             s[tk].className = 't';
-            s[nk] = btn('▶', nextTip, 1);
+            s[nk] = btn('▶', 1);
             r.appendChild(s[pk]); r.appendChild(s[tk]);
             if (cls === 'pg') {     // ✕ beside ▶ once ▶ found no more pages (user)
                 const x = s.gx = document.createElement('span');
@@ -14217,8 +14237,8 @@
             r.appendChild(s[nk]);
             el.appendChild(r);
         };
-        row('pg', 'pgP', 'pgT', 'pgN', 'Previous page · ↑', 'Next page · ↓', galPageStep);
-        row('pn', 'picP', 'picT', 'picN', 'Previous picture · ← · hold to repeat', 'Next picture · → · hold to repeat', galStep);
+        row('pg', 'pgP', 'pgT', 'pgN', twPageBtn);
+        row('pn', 'picP', 'picT', 'picN', galStep);
         s.picT.addEventListener('click', function () { twAsk('pic', s.picT); });
         s.pgT.addEventListener('click', function (e) { twAsk(galStripHalf(s.pgT, e.clientX) && s.nums && s.nums.gal ? 'gal' : 'page', s.pgT); });
         ['mousedown', 'mouseup', 'click', 'auxclick', 'dblclick', 'contextmenu'].forEach(function (t) {
@@ -14336,7 +14356,7 @@
         return true;
     }
 
-    // The widget's page row, ↑ ↓ and PageUp / PageDown in a gallery: the next page; with a slideshow up, its first picture. Past the last, more are loaded.
+    // A gallery's next page, from twPageBtn (any preview already closed). Past the last, more are loaded.
     function galPageStep(dir) {
         const set = galCur;
         if (!set) return;
@@ -14345,11 +14365,6 @@
         if (to > last) {
             if (!galWhole(set)) galTourMore(set).then(function (grew) { if (galCur !== set) return; if (grew) galPageStep(dir); else { ahPageStep(set, 1); if (!galChainGo(1, 'page')) galNoMore(); } });
             else { ahPageStep(set, 1); if (!galChainGo(1, 'page')) galNoMore(); }
-            return;
-        }
-        if (placed && view && tour && tour.gal === set) {
-            const list = tourEntries(), k = set.pages[to][0];
-            if (k < list.length) { tourTurnOn(); seamDir = 0; tourGo(list, k, dir, false); }
             return;
         }
         ahPageStep(set, dir);
@@ -14779,12 +14794,12 @@
             ['↗', 'open the gallery\'s page in a new tab'],
             ['R  P  D', 'memory: RAM held, full-size pictures preloaded for the next steps (estimate), disk this site stores · spelled out while the picture is hovered'],
             ['Right-click', 'settings (Load all is there), and open the gallery\'s page in a new tab'],
-            ['Strip', 'drag it by its background to take it off the picture'],
-            ['Page row ◀ ▶', 'a page of thumbnails back or on · also ↑ ↓, PageUp / PageDown, the wheel away from the preview'],
-            ['Picture row ◀ ▶', 'the slideshow, one picture back or on · also ← →, the wheel over the strip · hold to repeat'],
+            ['Widget', 'drag it by its background to take it off the picture'],
+            ['Page row ◀ ▶', 'a page of thumbnails back or on, closing any preview · also ↑ ↓, PageUp / PageDown'],
+            ['Picture row ◀ ▶', 'the slideshow, one picture back or on · also ← →, the wheel over the widget or the picture · hold to repeat'],
             ['Numbers', 'click one to type where to go: the page number or the gallery number on the page row, a picture on the picture row · Enter or a click away goes there if you changed it; Esc, or a click away with nothing changed, does nothing · + = still being read'],
-            ['☐ Endless', 'at the end of this gallery the next one on the page opens, and back from its first page goes to the one before · galleries already seen or visited are left out unless ☐ All is on, judged once when queued · a step past a gallery\'s end stops there once, the next goes on (right-click to turn that off) · the last gallery\'s last picture stops for good'],
-            ['☐ All', 'endless shows ALL galleries, including the ones you already viewed or visited'],
+            ['Endless mode', 'at the end of this gallery the next one on the page opens, and back from its first page goes to the one before · galleries already seen or visited are left out unless Show all galleries is on, judged once when queued · a step past a gallery\'s end stops there once, the next goes on (right-click to turn that off) · the last gallery\'s last picture stops for good'],
+            ['Show all galleries', 'endless shows ALL galleries, including the ones you already viewed or visited'],
             ['P:11/18', 'endless: page 11 of 18, counting every queued gallery — one not read yet counts as one page'],
             ['G:10/16', 'endless, page row: gallery 10 of the 16 queued'],
             ['G:10/20', 'endless, picture row: picture 10 of this gallery\'s 20'],
@@ -15435,7 +15450,7 @@
 
     // Hovering a thumbnail: the ordinary preview of its best original, after the hover delay.
     function galPv(img) {
-        if (placed || !img.__hzItem || twTyping) return;
+        if (placed || !img.__hzItem || typingOurs()) return;
         ahSaw(img, 1);
         cancel();
         if (img.__hzItem.hit && !img.__hzItem.hit.video) preDecode(img.__hzItem.hit.url);
@@ -15716,7 +15731,7 @@
             if (dlqLeft(st)) return;
             const failed = dlqFailed(st).length;
             if (!failed) dlqDrop(j.id);
-            toast('Saved ' + (st.match(/2/g) || []).length + ' of ' + st.length + (failed ? ', ' + failed + ' failed: the download strip lists them' : '') + (j.note ? ' · ' + j.note : ''), 5000);
+            toast('Saved ' + (st.match(/2/g) || []).length + ' of ' + st.length + (failed ? ', ' + failed + ' failed: the download bar lists them' : '') + (j.note ? ' · ' + j.note : ''), 5000);
         });
         dlqTick();
     }
@@ -15981,7 +15996,7 @@
             const saved = (st.match(/2/g) || []).length, failed = dlqFailed(st).length;
             if (!failed) dlqDrop(job.id);
             galMarkAll();
-            toast('Saved ' + saved + ' of ' + st.length + (failed ? ', ' + failed + ' failed: the download strip lists them' : '') + (job.note ? ' · ' + job.note : ''), 5000);
+            toast('Saved ' + saved + ' of ' + st.length + (failed ? ', ' + failed + ' failed: the download bar lists them' : '') + (job.note ? ' · ' + job.note : ''), 5000);
             dlqTick();
         });
     }
@@ -16749,7 +16764,7 @@
         sep();
         label('The widget');
         item('→ or ← with nothing open starts the slideshow', !!cfg.tourKeyStart, flip('tourKeyStart'));
-        item('Fade out away from the pointer (fullscreen and galleries)', !!cfg.tourFade, flip('tourFade'));
+        item('Fade the widgets away from the pointer', !!cfg.tourFade, flip('tourFade'));
         if (galCur || galMarksHere()) {
             sep();
             label('Galleries');
@@ -16757,28 +16772,18 @@
             item('Tick results whose gallery was seen', !!cfg.galleryTicks, flip('galleryTicks'));
             item('Mark results something was saved from', !!cfg.gallerySavedMarks, flip('gallerySavedMarks'));
             item('Middle-click opens a gallery', !!cfg.galleryMiddle, flip('galleryMiddle'));
-            item('Endless: next gallery at the end of this one', !!cfg.galleryEndless, function () { galEndlessSet(!cfg.galleryEndless); galMenuShow(x, y); });
-            item('Endless: include galleries already viewed (All)', !!cfg.galleryEndlessViewed, function () { galEndlessViewedSet(!cfg.galleryEndlessViewed); galMenuShow(x, y); });
-            item('Endless: stop once at each gallery\'s end', !!cfg.galleryEndlessStop, flip('galleryEndlessStop'));
+            item('Endless mode', !!cfg.galleryEndless, function () { galEndlessSet(!cfg.galleryEndless); galMenuShow(x, y); });
+            item('Show all galleries: include ones already viewed', !!cfg.galleryEndlessViewed, function () { galEndlessViewedSet(!cfg.galleryEndlessViewed); galMenuShow(x, y); });
+            item('Endless mode: stop once at each gallery\'s end', !!cfg.galleryEndlessStop, flip('galleryEndlessStop'));
             item('Load all of a gallery\'s originals when it opens', !!cfg.galleryLoadAll, function () { galLoadAllSet(!cfg.galleryLoadAll); galMenuShow(x, y); });
         }
         sep();
         item('All settings…', '⚙', function () { galMenuHide(); showPanel(); });
         if (galFly) { const gh = galFly.href; item('Open the gallery\'s page in a new tab', '↗', function () { galMenuHide(); openOriginal(gh); }); }
         if (galCur) item('Close the gallery', '✕', function () { galMenuHide(); galHide('menu'); });
-        if (galFly) {
-            sep();
-            label('Using the gallery');
-            ['Click the picture: close · drag it: move · drag a corner: resize (Ctrl: no snapping)',
-                'Drag the strip by its background to take it off the picture',
-                '◀ ▶ or ← →, or the wheel over the strip: picture · ↑ ↓: page · click a number to type one',
-                '⤓ saves every picture not saved yet, once the page is read (greyed until then) · ⛶ slideshow fullscreen, from the picture in the preview (else the first on this page) · ✕ close'].forEach(function (t) {
-                const d = document.createElement('div');
-                d.className = 'lb hp';
-                d.textContent = t;
-                m.appendChild(d);
-            });
-        }
+        if (galFly) item('What the buttons and numbers mean', 'ⓘ', function () {      // the ⓘ box is the one home of the gallery's help
+            galInfoShow({ getBoundingClientRect: function () { return { left: x, top: y, right: x, bottom: y }; } });
+        });
         if (galTopHost.nextSibling) document.documentElement.appendChild(galTopHost);     // last in the tree: over the raised picture, which shares its z
         m.hidden = false;
         const b = m.getBoundingClientRect();
@@ -16834,7 +16839,7 @@
             });
             pw.appendChild(bt);
         };
-        pair('bt ask', 'Join the strip to the picture?', 'Join them: the strip goes inside the picture\'s frame', 'Keep them apart', galJoin);
+        pair('bt ask', 'Join the widget to the picture?', 'Join them: the widget goes inside the picture\'s frame', 'Keep them apart', galJoin);
         galToolsBuild(pw, href);
         galEndlessBuild(pw, href);
         el.addEventListener('mousedown', function (e) {
@@ -18291,7 +18296,7 @@
             if (pg) {
                 e.preventDefault();
                 e.stopImmediatePropagation();
-                galPageStep(pg);
+                twPageBtn(pg);
             } else if (step && !e.repeat && !(view && box && box.classList.contains('on'))) {     // a hover preview: the document's listener pins it and steps from it
                 e.preventDefault();
                 e.stopImmediatePropagation();
@@ -18704,6 +18709,7 @@
             clear.textContent = 'Clear';
             setTip(clear, 'Forget these counts; a rule still failing will be listed again');
             clear.addEventListener('click', function () {
+                if (!confirm('Forget these failure counts?')) return;
                 const m = ruleHealth();
                 list.forEach(function (b) { delete m[b.rule + '|' + b.host]; });
                 saveRuleHealth(m);
@@ -18834,6 +18840,7 @@
                 b.style.flex = 'none';
                 setTip(b, 'Preview these thumbnails again on this site, and start learning afresh');
                 b.addEventListener('click', function () {
+                    if (!confirm('Forget what was learned about gallery links on ' + host + '?')) return;
                     reloadSettings();
                     const all = Object.assign({}, cfg.doorAreas);
                     delete all[host];
@@ -18893,7 +18900,7 @@
                 try { navigator.clipboard.writeText(text).then(done, fallback); } catch (e) { fallback(); }
             });
             showBtn.addEventListener('click', function () { if (ta.hidden) shown(usLog.text()); else hidden(); });
-            clearBtn.addEventListener('click', function () { usLog.clear(); hidden(); refresh(); });
+            clearBtn.addEventListener('click', function () { if (!confirm('Empty the request log?')) return; usLog.clear(); hidden(); refresh(); });
             refresh();
         }
 
@@ -19502,7 +19509,7 @@
             rs.className = 'danger';
             rs.textContent = 'Reset to default colours';
             setTip(rs, 'Both sets, dark and light pages');
-            rs.addEventListener('click', function () { cfg.widgetColors = {}; saveSettings(); draw(); });
+            rs.addEventListener('click', function () { if (!confirm('Reset the widget colours to the defaults?')) return; cfg.widgetColors = {}; saveSettings(); draw(); });
             const done = document.createElement('button');
             done.className = 'primary';
             done.textContent = 'Done';
@@ -19617,7 +19624,7 @@
         }
         pos.el.addEventListener('change', syncPos);
         syncPos();
-        check('keepClearWidget', 'Never cover the ◀ ▶ widget',
+        check('keepClearWidget', 'Never cover the widget',
             "The preview is always nudged aside when there is room; this shrinks it when there is none.");
         check('keepClearStatus', 'Keep the browser link bar uncovered',
             "Leaves the strip along the bottom free, where the browser shows a link's address over the page.");
@@ -19669,7 +19676,7 @@
         section('The slideshow');
         check('tourButtons', 'Show the ◀ ▶ widget',
             '▶ starts at the first picture. Drag to move; Ctrl skips snapping.');
-        check('tourFade', 'Fade the widgets', 'In fullscreen and in a gallery, both widgets fade as the pointer moves away and are gone 75 px from their edges. On a page they never fade.');
+        check('tourFade', 'Fade the widgets away from the pointer', 'In fullscreen and in a gallery, both widgets fade as the pointer moves away and are gone 75 px from their edges. On a page they never fade.');
         check('tourKeyStart', '→ or ← with nothing open starts the slideshow',
             'Like ▶ and ◀ on the widget, unless the page uses the arrows.');
         num('tourMinDisplayed', 'Leave out pictures smaller than',
@@ -19885,17 +19892,17 @@
         section('Galleries');
         check('galleryMiddle', 'Middle-click opens a gallery',
             'Off: middle-click opens the link in a new tab as usual, and clicking the gallery button on a result opens its gallery.');
-        check('galleryEndless', 'Endless galleries',
-            'At the end of a gallery the next one on the page opens, and back from its first page goes to the one before. Also the Endless button on the clicked picture.');
+        check('galleryEndless', 'Endless mode',
+            'At the end of a gallery the next one on the page opens, and back from its first page goes to the one before. Also the Endless mode button on the clicked picture.');
         check('galleryLoadAll', 'Load all of a gallery\'s originals when it opens',
             'Off (saves data): originals load only from a preview (hover or slideshow) on, and a page step without one stops them. Also in the gallery\'s right-click menu.');
         num('galleryKeepMB', 'Memory for an open gallery (MB)',
             'Its pictures 2 pages behind you and everything ahead; nothing behind kept past 5 minutes. Over this, pictures behind go first, then the farthest ahead. (default: 1024)', 64, 16384, 64);
         num('keepMB', 'Memory for pictures loaded ahead elsewhere (MB)',
             'The oldest go first. (default: 512)', 32, 16384, 32);
-        check('galleryEndlessViewed', 'Endless: include galleries already viewed',
-            'Off: galleries already seen or visited are left out of the queue, judged once when each joins it. Also the All button on the clicked picture.');
-        check('galleryEndlessStop', 'Endless: stop once at each gallery\'s end',
+        check('galleryEndlessViewed', 'Show all galleries: include ones already viewed',
+            'Off: galleries already seen or visited are left out of the queue, judged once when each joins it. Also the Show all galleries button on the clicked picture.');
+        check('galleryEndlessStop', 'Endless mode: stop once at each gallery\'s end',
             'A slideshow step past a gallery\'s last picture stops there with a note; the next step opens the next gallery. Off: it crosses straight on. The slideshow playing by itself never stops.');
         check('doorScan', 'Find galleries without a hover',
             'Reads up to 3 linked pages of each grid of linked thumbnails, one at a time, so gallery links are known before you hover one. Off: three hovers teach it.');
@@ -19922,6 +19929,7 @@
         reset.textContent = 'Reset to defaults';
         setTip(reset, 'Every option to its default; lists kept');
         reset.addEventListener('click', function () {
+            if (!confirm('Reset every option to its default? Lists are kept.')) return;
             const kept = {};
             RESET_KEEPS.forEach(function (k) { kept[k] = cfg[k]; });
             cfg = Object.assign({}, DEFAULTS, kept);

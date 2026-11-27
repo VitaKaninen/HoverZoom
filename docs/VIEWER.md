@@ -334,7 +334,9 @@ number uncommitted, and Enter was the only way out. Reported 2026-09-05.
 `onBoxDown` (any press whose target is outside `zoomWrapEl` — so the readout and the field itself
 are exempt, everything else commits) and `onMove` when the pointer is no longer in
 `pointInPreview()`. It returns immediately when the field is hidden, so putting it on the move path
-costs a hidden-flag test per mousemove.
+costs a hidden-flag test per mousemove. **As the number boxes (`twAsk`, v0.426.0):** the level is used only if it
+was changed (`zinEl.__start`; re-applying an unchanged rounded % moved the zoom a hair), and the press that closes
+it does nothing else — no pan, move or tap (`onBoxDown` eats it and its click).
 
 **The pointer-leaves rule has a consequence worth knowing:** move the mouse off the window *before*
 typing and the field has already committed the unchanged value and closed. That is the trade the
@@ -937,7 +939,8 @@ of them wait — except a help tip given its own `delay` (the widget's, `TW_HELP
   popover box; `width:max-content` because a hidden Browser pane gives it a 0-wide containing block.
 - **Above the element by default, below only when there is no room**, clamped to the viewport; a tip
   below sits under the pointer and over whatever widget is docked beneath.
-- **Tips stay terse**, and ◀ ▶ have none — asked by the user 2026-09-23.
+- **Tips stay terse**, and ◀ ▶ have none on either widget — asked by the user 2026-09-23, reconfirmed v0.426.0 (the
+  gallery's had gained some in v0.424.0). ⇅ has one ("Start / stop the slideshow"); its icon does not say it.
 - **`hideTip()` is called from `hideViewer()` and the top of `onBoxDown`.** A capture listener on
   `.box` calls `stopPropagation()`, so a `mousedown` on a non-control child never reaches that
   child's own listener — the tip's self-teardown cannot be relied on there.

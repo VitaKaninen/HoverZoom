@@ -194,7 +194,12 @@ once — two frames disagreeing about whether the site was listed.
 
 - **Menu commands are registered only when `window.top === window.self`.**
 - **The menu, in order** (`refreshSiteMenu`, then `Hover Zoom settings`): Enable/Disable for this site; ☑ Draw where the
-  slideshow stops (`autoClose: false`); ☑ Debug log in the console (`cfg.debug`, user 2026-11-17, closes the menu, 3 s toast).
+  slideshow stops (`autoClose: false`); ☑ Enable debug mode (`cfg.debug`, user 2026-11-17, closes the menu, 3 s toast; the panel's words since v0.426.0).
+- **One label per setting, everywhere it appears** (v0.426.0): the panel, the right-click menu (`galMenuShow`) and
+  the manager's menu use the same words, and the gallery's buttons' names (Endless mode, Show all galleries).
+- **Every destructive button asks first** (`confirm()`): Reset to defaults, widget colours reset, the request log's
+  and miss log's Clear, the rule-health Clear, a host's learned-gallery Forget. Not the activity window's Clear (a
+  view of this session, nothing stored) or a list row's ✕ (Undo changes brings it back).
 - **`pageHost()` is what the site list matches**, not `location.hostname`: the top frame's host
   where it can be read (`ancestorOrigins`, then a same-origin `window.top.location`, then
   `document.referrer`), so a disabled site is disabled inside its frames too.

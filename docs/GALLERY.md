@@ -188,8 +188,8 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   page's. A gallery rebuilt for the same href rebinds `tour.gal` (`tourEntries`). Idle start =
   `galStartAt` (`set.at` if on the page on screen, else the page's first); `set.at` is set only by a
   step or a pin, **never by a hover** (reaching the strip crosses cells). Pages: the strip's page row
-  is `galFlip`; ↑ ↓, PageUp/PageDown and the wheel off the preview are `galPageStep` (with a slideshow
-  up it goes to that page's first picture; past the last it loads more). The wheel never scrolls the
+  is `galFlip`; its ◀ ▶, ↑ ↓ and PageUp/PageDown go through `twPageBtn` (any preview closes first, v0.426.0)
+  to `galPageStep` (past the last it loads more). The wheel never scrolls the
   page behind (`galWheel`, eats it always; a pinned preview closes): a scroll closed the gallery,
   which then also stopped the reading (v0.295.0).
 - **Closing does not stop the reading** (user, v0.297.0): a reopen has the later pages; a hover
@@ -447,8 +447,9 @@ The page a door opens is the ground truth for the press that opened it. Hovers c
   left the card — the document handler's middle branch only `preventDefault`s presses on our layer;
   the `.fly` listener closes and sets `galMidAt` so `galMidEat` eats the auxclick). Left closes on
   release without a 4 px move (`galEditDown`), since a drag moves it.
-- **No tooltips on the picture, its corners, its ⤓ ⛶ ✕ or the strip** (user, v0.339.0: "constantly popping
-  up"). Their text is a "Using the gallery" section at the foot of the menu (`.lb.hp`). Don't add `setTip` back there.
+- **Tooltips:** short ones on the picture's buttons (⤓ ↗ ✕ ⛶ ⓘ, Endless mode, Show all galleries; user v0.423.0
+  reversed v0.339.0's none), none on the picture, its corners or ◀ ▶ (user v0.426.0, as the page widget). The full
+  help is the ⓘ box (`galInfoShow`), its one home; the right-click menu opens it ("What the buttons and numbers mean").
 - **The menu stays over the raised picture**: `galTopHost` is in `<html>` after `<body>`, so it is over everything
   in `<body>`; `galMenuShow` also moves it last in `<html>` before showing (v0.339.0: the menu was under the
   picture and the strip while the pointer was on them).

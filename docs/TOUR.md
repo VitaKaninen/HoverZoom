@@ -44,8 +44,10 @@ fight that. They are deleted. Do not put nav controls back on the frame.
 - **The page row** (`◀ Page n / N ▶`, v0.321.0, user): a page is a screen of WHOLE pictures from the counter's own
   list (`widgetEntries`, or the running slideshow's) — it starts at a picture's top (`TW_PAGE_TOP` above it) and takes
   each next picture that fits whole below (`pageSplit`, pure, asserted). Never the document's height: footer and
-  reply pictures past the post end are not pages. ▶ scrolls the next page's first picture to the top; a click closes any preview first (pinned, slideshow, fullscreen — user v0.421.0: "they are done there"), ↑ ↓ under a pinned one open
-  that page's first picture instead. **Shown only on a wall of pictures** (user 2026-11-26, v0.406.0: "restrictive"; Google Images / imgur yes,
+  reply pictures past the post end are not pages. ▶ scrolls the next page's first picture to the top; every page step — the row's ◀ ▶, ↑ ↓,
+  PageUp / PageDown, a typed page — closes any preview first (pinned, slideshow, fullscreen — user v0.421.0: "they are
+  done there"; keys and typed pages user v0.426.0), all through `twPageBtn`; on a one-page list a key does nothing
+  (`pagesToTurn`). ▶ with no page after: "No more pages" in red for 2 s (`twNoMore`, as the gallery's `galNoMore`). **Shown only on a wall of pictures** (user 2026-11-26, v0.406.0: "restrictive"; Google Images / imgur yes,
   forums and wikis never): `pagesWorth(pg, vw, vh)`, pure, asserted — `TW_WALL_PAGES` (3)+ pages, and at least half of
   them each ≥ `TW_WALL_COVER` (50 %) of the window covered by pictures, two pictures side by side, and no gap over
   `TW_WALL_GAP` (80 px) between picture rows. Measured per screen (cover / largest gap), 1610×927: Google Images
@@ -98,8 +100,9 @@ fight that. They are deleted. Do not put nav controls back on the frame.
   `tapPaused`. A hover preview, and a pinned one outside galleries and fullscreen, zoom as always.
 - **Typed numbers** (`twAsk(kind, holder)`, v0.317.0, user; Forum Stumbler's counter box; the gallery widget too):
   click the picture or page number: "Page: [n] (n/N)" (Gallery: / Image: likewise; "Jump to" dropped v0.425.0, user), prefilled with where you
-  are, the type shrinking to fit. While it is up nothing previews (`onOver`, `galPv` check `twTyping`; a hover
-  preview closes as it opens). Enter goes; a press away (window-capture mousedown —
+  are, the type shrinking to fit. While it is up nothing previews (`onOver`, `galPv` check `typingOurs()`, which also
+  covers the zoom box and a focused settings text box; a hover preview closes as it opens). A typed page or gallery
+  closes any preview first, as the page row's ◀ ▶; a typed picture moves the slideshow. Enter goes; a press away (window-capture mousedown —
   widget presses are preventDefault'ed, so blur alone never came; v0.319.0) goes only if the number changed, and
   that press and its click are eaten either way (`twAskEatUntil`, user v0.423.0: it used to act on the page); Esc cancels. A window-capture keydown registered before every
   other key listener of ours gives the box the keyboard. Past what is loaded → the last loaded, and

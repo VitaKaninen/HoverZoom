@@ -384,6 +384,26 @@ Turn Endless back on afterwards.
     without bound. Pictures behind you are also dropped after 5 minutes. Page back 5 pages: the dropped ones load
     again (the 5-before rule), not from memory.
 
+## 9b. Same control, same behaviour (v0.426.0)
+
+9b.1 **Every page step closes the preview.** In a gallery of 2+ pages, start the slideshow (fullscreen too), then
+     press ↓ (or PageDown). **Expect:** the preview closes and the next page shows. Again with a typed page number
+     (click P, type 3, Enter). On a page with the widget's page row, the same with ↓ and ▶. A typed *picture*
+     number still moves the slideshow instead.
+9b.2 **No more pages, on a page too.** Scroll a page with the widget's page row to its end; press its ▶.
+     **Expect:** "No more pages" in red for 2 s, then the page number again.
+9b.3 **Zoom box acts like the number boxes.** Pin a preview, click its zoom %, then click the picture without
+     typing. **Expect:** the box closes; the picture does not move, zoom or play. Type 150 and click the picture:
+     150 %.
+9b.4 **No previews while typing in Settings.** Click into a number box in Settings, then move over a thumbnail.
+     **Expect:** no preview until you click elsewhere.
+9b.5 **One label per setting.** Right-click the widget: the entries read as in Settings (Never cover the widget,
+     Fade the widgets away from the pointer, Endless mode, Show all galleries…). The manager's menu reads
+     ☑ Enable debug mode. The gallery's menu ends with "ⓘ What the buttons and numbers mean", which opens the ⓘ box.
+9b.6 **◀ ▶ have no tooltips** on either widget; ⇅ says "Start / stop the slideshow".
+9b.7 **Destructive buttons ask.** Settings → Reset to defaults, the request log's Clear, a learned-gallery Forget:
+     each asks first; Cancel leaves everything as it was.
+
 ## 10. Did the files loaded ahead survive in the cache?
 
 10.1 After a slideshow run over pictures loaded ahead (7.8), close the gallery.
