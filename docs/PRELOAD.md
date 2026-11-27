@@ -30,7 +30,7 @@ Queues (each kind below names its own). They do not know about each other; all s
 | L20 | Thumbnails of the next page | with L12 (`galFeed`, 1 page ahead on page 1) | direct |
 | L21 | Thumbnails of pages further ahead (up to 5 once stepped on) | with L12 (`galFeed`) | direct |
 | L13 | Frame read for the rest of this gallery's list | when its HTML lists fewer than it has (`galGrow`, `galTourMore` on a step past it) | frame |
-| L22 | Full size of the few pictures around the one just hovered | not separate now: part of L14's run from the hovered picture on | AH-pic `galo` |
+| L22 | Full size of the pictures around the one just hovered, ±3 nearest first | not separate now: part of L14's run from the hovered picture on | AH-pic `galo` |
 | L23 | Full size of the page on screen | not separate now: the start of L14's run | AH-pic `galo` |
 | L14 | This gallery's full size: Load all on = page on screen → end → 2 pages behind; off = from a preview through 2 pages on | Load all: at once (P:), after a preview (G:); a hover on an unloaded picture restarts it there | AH-pic `galo` |
 | L15 | Bigger thumbnail files for cells drawn large | page laid out (`galUpgrade`) | direct |
@@ -44,7 +44,14 @@ Queues (each kind below names its own). They do not know about each other; all s
 ## Order per moment — PROPOSED 2026-11-27, awaiting the user's adjustments, NOT in code yet
 
 Read as "first → last". Anything not listed is paused. A new moment drops what is still *waiting* and re-queues in
-its order; what is in flight lands. "around" in L22 = 2 behind, 4 ahead (a number to tune). Tab hidden: nothing.
+its order; what is in flight lands (cancelling wastes its bytes). Dropping loses nothing: the next moment re-derives
+what is unloaded from the page (nothing is cached), so a drop behaves as a pause. The latest action always wins;
+hovers (M2, M3, M8) and scrolling (M4) are temporary — when they end, the moment underneath resumes from where the
+pointer/screen now is. "Around" (L10 in M2, L22) = nearest first, before and after alike (user: before is as likely
+as after; goes 2–3 either way): ±1, ±2, ±3, then (L10 only) the rest of the section on screen. Tab hidden: nothing.
+Now (code): L10 queues every on-screen picture in the hovered picture's section in page order, not nearest first;
+interruption is a mix — a gallery open or a scroll drops the main page's waiting jobs, a forward page step with Load
+all on drops nothing, a gallery preview drops nothing.
 
 | ID | Moment | Order |
 |---|---|---|
