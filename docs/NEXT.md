@@ -63,6 +63,15 @@ run (M6 puts it after L14) and the declared-sizes build showed each cell as it l
 (GALLERY.md "Not preloaded yet"). User noted revisited galleries are cached — test with fresh ones. Not built from M13:
 "without Load all, the page's clips load in full" (waits on L24/L25). **Next:** L24 (test partial download first), L13.
 Start line: **"Read docs/NEXT.md 'NEXT TASK' and continue: L24, then L13."**
+**v0.448.0–v0.451.0 (2026-11-27, pushed).** User asked: L24, then L13; mid-way, "the activity log no longer scrolls
+down as new lines appear" — fixed v0.448.0 (ACTIVITY.md "Follows the bottom"). L24 built v0.449.0 (GALLERY.md "L24":
+GIF thumbnails as first-frame stills via ranged reads, ▶ on animated GIFs and on cells whose original is a clip;
+verified in the pane on `test-pages/door-gif.html`). L13's place built v0.450.0–v0.451.0 (PRELOAD.md "Built
+(v0.450.0)"; verified on door-search d6/d7). **Assumption to confirm with the user** (PRELOAD.md): a clip cell already
+has the site's still as its thumbnail, so L24 for clips = only the ▶. **Next:** the L13 split's cheap count (stated
+number / pager, learned per site, frame count as ground truth — PRELOAD.md "L13 split"); then L25 + "Upgrade clips".
+Nothing asked of the user is open.
+Start line: **"Read docs/NEXT.md 'NEXT TASK' and continue: the L13 split's cheap count."**
 
 ---
 
