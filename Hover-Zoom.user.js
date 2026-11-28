@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.454.0
+// @version      0.455.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -325,6 +325,7 @@
         linkAreas: {},              // host -> {rules, samples, idleDays}: thumbnails whose linked page never holds the original
         doorAreas: {},              // host -> {rules, samples, idleDays}: thumbnails that lead to other pages, not a bigger copy (P17)
         countAreas: {},             // gallery host -> {rules, samples, idleDays}: where its gallery pages state their picture count (L13 split)
+        badgeAreas: {},             // results-page host -> {rules, samples, idleDays}: where a door's card carries its gallery's picture count
         pagerAreas: {},             // gallery host -> {rules, samples, idleDays}: where its gallery pages put a pager whose last page gives the count
         doorScan: true,             // read a few linked pages of every grid of linked thumbnails, so doors are known before a hover
         doorScanned: {},            // host -> {chain|path: {day, v}}: scanned grids that formed no door rule
@@ -7759,7 +7760,7 @@
 
     function vdRecord(chain, path, elapsed) { vdApply(vdLearn, chain, path, elapsed); }
 
-    const AREA_STORES = ['avatarAreas', 'ownPlayerAreas', 'linkAreas', 'doorAreas', 'videoDelays', 'countAreas', 'pagerAreas'];
+    const AREA_STORES = ['avatarAreas', 'ownPlayerAreas', 'linkAreas', 'doorAreas', 'videoDelays', 'countAreas', 'pagerAreas', 'badgeAreas'];
 
     // The learned rule in cfg[key] covering this chain on this site, or null.
     function areaRule(key, chain, path) {
@@ -13510,6 +13511,7 @@
         galGrown.add(href);
         galGrowWhy.delete(href);
         galKeep(href, false);
+        galCountTruth(href, galLists.get(href).length);
         galChipsCount(href);
     }
 
@@ -13543,7 +13545,7 @@
         return n >= 2 && n < 10000 ? n : null;
     }
     // A badge on a door's card: a bare number (an icon or a picture word around it allowed), or null.
-    const COUNT_BADGE = /^[^\d\w]{0,3}(\d{1,3}(?:[,.  ]\d{3})+|\d{1,6})\s*(?:photos?|pictures?|pics?|images?|imgs?|p)?$/i;
+    const COUNT_BADGE = /^[^\d\w]{0,3}(\d{1,3}(?:[,.  ]\d{3})+|\d{1,6})\s*(?:photos?|pictures?|pics?|images?|imgs?)?$/i;
     function countBadge(text) {
         const t = String(text || '').replace(/\s+/g, ' ').trim();
         if (!t || t.length > 14) return null;
@@ -13620,6 +13622,8 @@
         let cands;
         try { cands = galCountCands(doc, href, n0); } catch (e) { dbg('gallery count: reading the page\'s numbers failed', { href: href, error: String(e) }); return; }
         galCands.set(href, { cands: cands, n0: n0 });
+        const s0 = galStated.get(href), b0 = galBadges.get(href);
+        if (s0 && s0.badge && s0.n < n0) { galStated.delete(href); if (b0) areaApply('badgeAreas', vdForget, s0.badge, b0.path, href); }     // free check: the page already holds more
         if (galCands.size > GAL_CACHE) galCands.delete(galCands.keys().next().value);
         const c = galCountRuled(href, cands);
         if (!c) return;
@@ -13630,6 +13634,43 @@
         if (galStated.size > GAL_CACHE * 4) galStated.delete(galStated.keys().next().value);
         dbg('gallery count from a learned place', { href: href, kind: c.k, pictures: s.n, exact: s.exact, html: n0, check: galCountDraw(href) });
         galChipsCount(href);
+    }
+    // A door's card on this page: bare numbers on it (eporner's corner count, nsfw.xxx's image count) are its gallery's count candidates.
+    const galBadges = new Map();        // href -> {cands, path}: read once per door, at its chip
+    function galBadgeCands(img) {
+        let card = img;
+        for (let up = 0; up < 4 && card.parentElement && !/^(BODY|HTML)$/.test(card.parentElement.tagName) && card.parentElement.querySelectorAll('img').length <= 2; up++) card = card.parentElement;
+        const out = [], seen = new Set();
+        card.querySelectorAll('*').forEach(function (el) {
+            if (out.length >= 8 || el.children.length > 2 || /^(SCRIPT|STYLE|IMG|SVG)$/i.test(el.tagName)) return;
+            const n = countBadge(el.textContent);
+            if (n == null || Array.from(el.children).some(function (ch) { return countBadge(ch.textContent) === n; })) return;     // the deepest element says it
+            const chain = domChain(el);
+            if (seen.has(chain + '|' + n)) return;
+            seen.add(chain + '|' + n);
+            out.push({ k: 'badge', chain: chain, n: n });
+        });
+        return out;
+    }
+    function galBadgeRuled(cands, path) {
+        const e = (cfg.badgeAreas || {})[pageHost()];
+        if (!e || !e.rules) return null;
+        const hits = cands.filter(function (c) { return vdRuleFor(e, c.chain, path); });
+        return hits.length && new Set(hits.map(function (c) { return c.n; })).size === 1 ? hits[0] : null;
+    }
+    function galBadgeNote(img, href) {
+        if (galBadges.has(href) || !isTopFrame) return;
+        let cands = [];
+        try { cands = galBadgeCands(img); } catch (e) { cands = []; }
+        const path = pagePath();
+        galBadges.set(href, { cands: cands, path: path });
+        if (galBadges.size > GAL_CACHE * 4) galBadges.delete(galBadges.keys().next().value);
+        const c = galBadgeRuled(cands, path);
+        if (!c || galStated.has(href)) return;
+        areaApply('badgeAreas', areaTouch, c.chain, path, href);
+        galStated.set(href, { n: c.n, exact: true, badge: c.chain });
+        dbg('gallery count from a learned badge', { href: href, pictures: c.n, check: galCountDraw(href) });
+        setTimeout(function () { galChipsCount(href); }, 0);
     }
     // An exact count from a learned place, taken for this gallery now (not one drawn for the check).
     function galStatedN(href) { const s = galStated.get(href); return s && s.exact && !galCountDraw(href) ? s.n : 0; }
@@ -13647,12 +13688,20 @@
     function galCountTruth(href, N) {
         const got = galCands.get(href);
         dbg('gallery count: the read to its end checks the page\'s numbers', { href: href, pictures: N, candidates: got ? got.cands.map(function (c) { return c.k + ' ' + (c.k === 'stated' ? c.n : c.lo + '-' + c.hi); }) : 'page not read in this tab' });
-        if (!got || !N) return;
-        const ruled = galCountRuled(href, got.cands);
-        got.cands.forEach(function (c) {
+        if (!N) return;
+        const ruled = got ? galCountRuled(href, got.cands) : null;
+        (got ? got.cands : []).forEach(function (c) {
             if (countVerdict(c, N)) countApply(galCountKey(c), areaLearn, href, c.chain);
             else if (c === ruled) countApply(galCountKey(c), c.k === 'stated' && c.n === got.n0 ? areaDrop : vdForget, href, c.chain);     // it would have ended the list at the HTML: dropped at once
         });
+        const b = galBadges.get(href);
+        if (b) {
+            const br = galBadgeRuled(b.cands, b.path), n0 = got ? got.n0 : 0;
+            b.cands.forEach(function (c) {
+                if (c.n === N) areaApply('badgeAreas', areaLearn, c.chain, b.path, href);
+                else if (c === br) areaApply('badgeAreas', c.n === n0 ? areaDrop : vdForget, c.chain, b.path, href);
+            });
+        }
         const s = galStated.get(href);
         if (s && (s.exact ? s.n !== N : N < s.n)) galStated.delete(href);
     }
@@ -13992,7 +14041,7 @@
             if (Array.isArray(v)) {
                 galLists.set(href, v);
                 if (galLists.size > GAL_CACHE) galLists.delete(galLists.keys().next().value);
-                if (galNoFrame(href) && !weak && !galGrown.has(href)) { galGrown.add(href); galGrowWhy.set(href, 'html'); galKeep(href, true); }    // no frame here: the HTML is all
+                if (galNoFrame(href) && !weak && !galGrown.has(href)) { galGrown.add(href); galGrowWhy.set(href, 'html'); galKeep(href, true); galCountTruth(href, v.length); }    // no frame here: the HTML is all
                 galStatedTake(href);
                 galChipsCount(href);
             }
@@ -16213,7 +16262,7 @@
     // While a gallery is open its page is read on in a frame that scrolls it, so pictures it mounts late join the set.
     function galGrow(href) {
         if (galGrowing === href || galGrown.has(href)) return;
-        if (galNoFrame(href) && galLists.has(href)) { galGrown.add(href); galGrowWhy.set(href, 'html'); galKeep(href, true); galChipsCount(href); galDlShow(); return; }
+        if (galNoFrame(href) && galLists.has(href)) { galGrown.add(href); galGrowWhy.set(href, 'html'); galKeep(href, true); galCountTruth(href, galLists.get(href).length); galChipsCount(href); galDlShow(); return; }
         galGrowing = href;
         galGrowWhy.delete(href);
         galTrace(href, 'reading on: start');
@@ -18005,6 +18054,7 @@
 
     // Closed: the ▦ chip; open: a yellow ✕. Left out of the pill when chips show only under the pointer and this one is not.
     function galChipStyle(m) {
+        if (m.__hzImg && m.__hzHref && !galBadges.has(m.__hzHref)) galBadgeNote(m.__hzImg, m.__hzHref);
         const open = galChipOpen(m.__hzHref), shown = open || cfg.galleryChips || galChipHot === m.__hzImg;
         const n = galCountText(m.__hzHref);
         if (m.__hzOpen !== open || m.__hzN !== n || !m.firstChild) {
@@ -19700,7 +19750,7 @@
     let panelOpened = null;     // Undo's snapshot — see openPanel(); MUST outlive a re-render
 
     // What the user entered per site, not knobs: `Reset to defaults` leaves these alone.
-    const RESET_KEEPS = ['siteList', 'blockList', 'referrerSites', 'siteAudio', 'videoDelays', 'avatarAreas', 'ownPlayerAreas', 'linkAreas', 'doorAreas', 'countAreas', 'pagerAreas', 'doorScanned', 'areasAgedOn', 'taughtRules'];
+    const RESET_KEEPS = ['siteList', 'blockList', 'referrerSites', 'siteAudio', 'videoDelays', 'avatarAreas', 'ownPlayerAreas', 'linkAreas', 'doorAreas', 'countAreas', 'pagerAreas', 'badgeAreas', 'doorScanned', 'areasAgedOn', 'taughtRules'];
 
     // Open/closed, the fold, scroll and position for this TAB — sessionStorage is per tab and
     // per origin, so it follows a same-site link or a refresh and dies with the tab.

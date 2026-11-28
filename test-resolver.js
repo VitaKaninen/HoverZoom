@@ -1590,7 +1590,7 @@ const srcLf = src.split(String.fromCharCode(13)).join('');     // the checkout m
 // ---- cheap count (L13 split): stated labels, pager links, verdicts; learned through the shared area rules
 {
     const srcN = src.replace(/\r\n/g, '\n'), a = srcN.indexOf('    const COUNT_AFTER'), b = srcN.indexOf('    // ---- cheap count: the page');
-    const cc = new Function('URL', srcN.slice(a, b) + '\nreturn {countStated, pagerNum, pagerRange, countVerdict};')(URL);
+    const cc = new Function('URL', srcN.slice(a, b) + '\nreturn {countStated, countBadge, pagerNum, pagerRange, countVerdict};')(URL);
     eq('count: "240 photos"', cc.countStated('240 photos'), 240);
     eq('count: "Pictures: 1,234"', cc.countStated('Pictures: 1,234'), 1234);
     eq('count: "(36 pics)" in a title', cc.countStated('Kate on the beach (36 pics) - Site'), 36);
@@ -1598,6 +1598,14 @@ const srcLf = src.split(String.fromCharCode(13)).join('');     // the checkout m
     eq('count: views are not pictures', cc.countStated('1,234 views'), null);
     eq('count: prose is not a label', cc.countStated('This gallery has 240 photos that were taken on a long trip along the coast last year'), null);
     eq('count: zero is nothing', cc.countStated('0 photos'), null);
+    eq('badge: eporner "48"', cc.countBadge('48'), 48);
+    eq('badge: an icon then a number', cc.countBadge('📷 189'), 189);
+    eq('badge: "24 photos"', cc.countBadge('24 photos'), 24);
+    eq('badge: "1,234"', cc.countBadge('1,234'), 1234);
+    eq('badge: a duration is not a count', cc.countBadge('16:16'), null);
+    eq('badge: a rating is not a count', cc.countBadge('96%'), null);
+    eq('badge: a title is not a badge', cc.countBadge('Top 10 beaches'), null);
+    eq('badge: "720p" is a resolution, not a count', cc.countBadge('720p'), null);
     const G = 'https://e.com/gallery/kate-36/';
     eq('pager: ?page=4', cc.pagerNum(G, '/gallery/kate-36/?page=4'), 4);
     eq('pager: /gallery/x/3', cc.pagerNum(G, 'https://e.com/gallery/kate-36/3/'), 3);

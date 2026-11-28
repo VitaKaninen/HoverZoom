@@ -1,19 +1,19 @@
 <!doctype html>
 <meta charset="utf-8">
 <title>Door areas, counted galleries</title>
-<!-- 6 doors to gallery-count.html (50 pictures in its HTML, "80 photos" stated, 80 after reading on; frames report). L13 split: after three reads to the end the stated count is learned (countAreas), and the next door shows 80 with no frame read; opening it reads past the HTML only when its pages are wanted. Clear localStorage to reset. -->
+<!-- 6 doors to gallery-count.html (50 pictures in its HTML, "80 photos" stated, 80 after reading on; frames report). L13 split: after three reads to the end the stated count is learned (countAreas), and the next door shows 80 with no frame read; opening it reads past the HTML only when its pages are wanted. Each card also carries an "80" badge (badgeAreas). Clear localStorage to reset. -->
 <style>
   body { font: 14px system-ui, sans-serif; background: #1e1e2e; color: #cdd6f4; padding: 20px; }
   .results, .finals { display: flex; flex-wrap: wrap; gap: 40px; margin-bottom: 40px; }
   img { width: 160px; height: 120px; display: block; }
 </style>
 <div class="results">
-  <div class="result"><a id="d1" href="gallery-count.html?c=1"><img src="/test-images/mural.jpg?c1"></a></div>
-  <div class="result"><a id="d2" href="gallery-count.html?c=2"><img src="/test-images/mural.jpg?c2"></a></div>
-  <div class="result"><a id="d3" href="gallery-count.html?c=3"><img src="/test-images/mural.jpg?c3"></a></div>
-  <div class="result"><a id="d4" href="gallery-count.html?c=4"><img src="/test-images/mural.jpg?c4"></a></div>
-  <div class="result"><a id="d5" href="gallery-count.html?c=5"><img src="/test-images/mural.jpg?c5"></a></div>
-  <div class="result"><a id="d6" href="gallery-count.html?c=6"><img src="/test-images/mural.jpg?c6"></a></div>
+  <div class="result"><a id="d1" href="gallery-count.html?c=1"><img src="/test-images/mural.jpg?c1"><span class="cnt">80</span></a></div>
+  <div class="result"><a id="d2" href="gallery-count.html?c=2"><img src="/test-images/mural.jpg?c2"><span class="cnt">80</span></a></div>
+  <div class="result"><a id="d3" href="gallery-count.html?c=3"><img src="/test-images/mural.jpg?c3"><span class="cnt">80</span></a></div>
+  <div class="result"><a id="d4" href="gallery-count.html?c=4"><img src="/test-images/mural.jpg?c4"><span class="cnt">80</span></a></div>
+  <div class="result"><a id="d5" href="gallery-count.html?c=5"><img src="/test-images/mural.jpg?c5"><span class="cnt">80</span></a></div>
+  <div class="result"><a id="d6" href="gallery-count.html?c=6"><img src="/test-images/mural.jpg?c6"><span class="cnt">80</span></a></div>
 </div>
 <script>
   if (!localStorage.getItem('hoverZoomSettings'))

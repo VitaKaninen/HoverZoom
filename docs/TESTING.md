@@ -367,7 +367,7 @@ logs `retrying` ×3 — an artefact of the stub, not of the manager. The pane wo
 - **`node test-resolver.js | tail -1` printing `Node.js vNN` means it crashed mid-run**, not passed — read the stack.
 - `test-pages/door-gif.html`: 4 doors to `gallery-gif.html` (L24 GIF stills, ▶ marks); GM_xhr shimmed with fetch. Hover 3
   doors to learn the door rule, then open with the chip's `mousedown` (TESTING "Driving the gallery").
-- `test-pages/door-count.html`: 6 doors to `gallery-count.html?c=N` (HTML 50, states "80 photos", mounts to 80 on
+- `test-pages/door-count.html`: 6 doors (each card has an `80` badge) to `gallery-count.html?c=N` (HTML 50, states "80 photos", mounts to 80 on
   scroll; frames report). Load all off to see the L13 skip (on, the list is wanted for the originals). Opening each
   gallery reads it to its end (the idle L7 read did not start on this page); 3 → `countAreas: learned`; a fresh tab
   (clear sessionStorage) then shows `80` on every chip with no frame.

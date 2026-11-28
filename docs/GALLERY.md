@@ -54,6 +54,15 @@ is ignored. Before v0.291.0 = the mode's code, if it is ever wanted back.
   keep the rule honest. Debug: `gallery count from a learned place`, `gallery count: the read to its end checks the
   page's numbers` (says `page not read in this tab` when no candidates were kept — seen once on the fixture, cause
   not found). Fixture `door-count.html` (TESTING.md).
+  **Badges first** (user v0.455.0: "the first place I would look"): a door's own card on the results page — eporner
+  `div.mbphoto2_galleryico "48"` beside the link, nsfw.xxx `div.user--image-count > span "683"` inside it. Read once per
+  door at its chip (`galChipStyle` → `galBadgeNote`): the card = up from the door picture while the ancestor holds ≤ 2
+  images (≤ 4 levels); candidates = deepest elements whose whole text is a bare number (`countBadge`: an icon before,
+  a picture word after allowed; `16:16`, `96%`, `720p` refused). Store `badgeAreas` keyed by the RESULTS page's host and
+  path (`areaApply`), id = the gallery href. Same truth (`galCountTruth`) and strikes; a badge below the HTML's count is
+  struck on the HTML read. Ground truth also comes from lists final from their HTML (frames refused, `galNoFrame`, or
+  `galWholeTake`) — eporner refuses frames, so without this it could never learn. Exact match only: nsfw.xxx's count
+  may never equal what the frame reads (video cards, other users' posts), so it may not learn there — unverified.
 - **Grey chip until its first round is in** (user, v0.388.0; round 1 since v0.418.0): `[data-hz-door].wait` (icon `#a6adc8`, blue `#89b4fa`
   once ready). `galThumbsReady(href)` = the first `AH_THUMBS_STEP` (10, or `galPer(null)` if fewer) items of `galLists` all in `galThumbDone` (thumbnail
   URLs settled, load or error, recorded in `galImg`), so a broken thumbnail cannot keep it grey. `galThumbSettled`

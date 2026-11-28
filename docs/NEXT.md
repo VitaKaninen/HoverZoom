@@ -83,6 +83,10 @@ read started by the page step past the HTML). Not live-tested on a real site (TE
 start the activity window on a landed page so I can test it and they send the log — use that for 7.12e/7.12d.
 **Next:** L25 + "Upgrade clips".
 Start line: **"Read docs/NEXT.md 'NEXT TASK' and continue: L25 and Upgrade clips."**
+**v0.454.0–v0.455.0 (2026-11-27, pushed).** User: the corner picture used to have another blue — it was Dark Reader's
+rendering of #89b4fa (read live in the user's Chrome: `#063685`); now pinned for the frame and cell marks (GALLERY.md
+"Cell marks"). Count badges on door cards (GALLERY.md "Badges first"; eporner/nsfw.xxx markup read live), verified on
+`door-count.html`. Not live-verified: the new blue under Dark Reader after the manager updates; badge learning on eporner.
 
 ---
 
