@@ -18,6 +18,15 @@ const BLOCKS = [
             'Nexus-Check/Nexus-Check.user.js',
         ],
     },
+    {
+        name: 'us-next',
+        src: 'us-next.js',
+        targets: [
+            'Forum-Stumbler/Forum-Stumbler.user.js',
+            'HoverZoom/Hover-Zoom.user.js',
+            'Open-Links-in-New-Tab/Open-Links-in-New-Tab.user.js',
+        ],
+    },
 ];
 
 const check = process.argv.includes('--check');

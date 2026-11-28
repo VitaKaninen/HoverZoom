@@ -80,7 +80,7 @@ first 2 screens (assumption: no layout on a fetched page, so this page's count s
 G: pressed `galWantN` adds no page ahead until `ahG.first` = the next gallery (set by `ahGalAhead` when its first
 gallery's L17 is done, then `galFeed`); `galShow` builds one page, not two. Checked: `hwOrder` in node; live
 in the pane, not isolable (L1 had already loaded the on-screen pictures); L8 and M10 not live-tested (TEST-PLAN 7.12j–l).
-**Not built:** next-page finding (its own session, three repos).
+**Built (v0.460.0):** next-page finding, shared with FS and OLINT — [`NEXT-PAGE.md`](NEXT-PAGE.md).
 
 New kind in the plan (not in code): **L25** the full clip. L10 = ±3 nearest first, then the rest of the section on screen. L8 = the next results page's
 M1 lines 1–6 (no 20 % rule, user). L20/L21 = the next page / the page after, relative to the page on screen; under
@@ -187,9 +187,4 @@ addresses are not part of it: each is found per picture when its HQ is wanted (`
 first and cheap — a stated number ("240 photos") or the gallery's own pager, learned per site with the frame's final
 count as ground truth (shared rule §learning) — then the rest of the list only when thumbnails past it are needed.
 
-**Next-page finding (all three scripts, user 2026-11-27):** the best parts of each, one shared copy (as us-dock/us-log).
-Open Links in New Tab (`nextPageReason`) recognises *that* a link is a pager control — rel, icon-only arrows by
-aria-label/title/class, pagination containers, a word list, URL shapes (`?page=`, `/page/N`, `page-N`, sort-word/N,
-a trailing number labelled N or N+1). It does not pick *which* is next. HZ `nextPageIn` and FS `detectNextRecord` pick
-direction (rel="next" → the number after the current page → a lone forward word); FS adds a user-taught pager and a
-learned rule. Its own piece of work, across three repos.
+**Next-page finding (all three scripts, user 2026-11-27):** built v0.460.0 as the shared `us-next` block — [`NEXT-PAGE.md`](NEXT-PAGE.md).

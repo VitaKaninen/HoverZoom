@@ -762,13 +762,13 @@ eq('no size header at all is zero, so the floor applies',
     sizeFromHeaders('content-type: image/png' + CRLF, 200), 0);
 
 // ---- the cross-page walk. A wrong answer here is silent: the tour simply walks into the wrong
-// pages. nextPageIn() reads only anchors, so it slices out and runs against plain objects with
-// no DOM at all. See TOUR.md §10.
-const npStart = src.indexOf('    const NEXT_WORDS');
+// pages. nextPageIn() (the shared us-next block; its own suite is shared/test-next.js) reads only
+// anchors, so it slices out and runs against plain objects. See TOUR.md §10.
+const npStart = src.indexOf('    // ==== us-next begin ====');
 const npEnd = src.indexOf('    // DOMParser gives');
 if (npStart < 0 || npEnd < 0) { console.error('nextPageIn markers not found'); process.exit(1); }
 const nextPage = new Function('location', 'looksLikeImage', 'isVideoUrl',
-    src.slice(npStart, npEnd) + NL + 'return {nextPageIn, pageNumOf};')(
+    src.slice(npStart, npEnd) + NL + 'return {nextPageIn, pageNumOf: usNext.pageNumOf};')(
     { href: 'https://ex.com/g/pager-2.html', origin: 'https://ex.com' },
     looksLikeImage, isVideoUrl);
 const { nextPageIn, pageNumOf } = nextPage;

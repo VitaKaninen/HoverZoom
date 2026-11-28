@@ -192,6 +192,11 @@ Test pages:
       `gallery count`-style list reads, then its rounds; no 20 % rule (nothing needs opening first).
     - Then go to the next page: its galleries open at once (lists read ahead).
 
+4.7 **The right next page** (v0.460.0, shared finder, `docs/NEXT-PAGE.md`). On a site whose pager elides pages
+    (`1 … 5 6 [7] 8 9 … 42`) go to a middle page, then 4.6.
+    - **Expect:** the `next page:` line loads page 8 (debug log names the URL). On a page with no pager (or two
+      different "Next" links) nothing loads ahead rather than a wrong page.
+
 4.5 **Cut work is redone.** A gallery whose loading 4.2 cut short (its line says `cut: true`) gets loaded
     again later when you scroll back to it.
     - **Fail:** a gallery that stays grey forever after a fast scroll.
