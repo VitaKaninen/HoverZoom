@@ -7,6 +7,13 @@ Keep this file to what is still open; delete an item the moment it is done or an
 
 None open. The preload plan (PRELOAD.md "Plan") is built through v0.460.0.
 
+**Handoff (session of 2026-11-27):** the user asked for (1) the shared next-page finder → built v0.460.0/v0.461.0
+(`docs/NEXT-PAGE.md`; FS 0.92.0, OLINT 1.49.0); (2) TEST-PLAN 4.7 → the finder was checked live on eporner and two
+gaps were fixed; the activity-line half is not run yet (needs the installed script at ≥ v0.461.0); (3) Collected data
+rows in Settings with on/off, Copy/Show/Export/Clear, Export all / Clear all, plus a manager menu Export all → built
+v0.462.0 (SETTINGS.md "Collected data"), tested on the test page only. No question to the user is open. Unexplained:
+one FS release run had a single test failure (near `page-walk`'s learned-address cases) that 25 reruns never repeated.
+
 ## Waiting on the user (ask only if they bring it up)
 
 - L8 takes as many of the fetched page's pictures as this page shows in its first 2 screens (v0.459.0) — right number?
