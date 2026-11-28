@@ -445,6 +445,11 @@ moves** except on a resize, a hole move, or a declared size proving wrong.
 
 ## Cell marks: cover and ready corners (v0.441.0–v0.442.0, user 2026-11-27)
 
+**Their blue, and the corner picture's frame (`.fly`, `.strip.own`), is `#063685`** (user v0.454.0): Dark Reader's
+rendering of `#89b4fa`, which the user had been seeing in Chrome and asked for back. Set as `--hzm`/`--hzmg` on the three
+gallery hosts (`galMarkVars`) with `--darkreader-{bg,text,border}--hzm` beside them, so Dark Reader's copy of the sheet
+draws it unchanged (SETTINGS.md "Dark Reader and the widgets"). A literal colour in that sheet would be converted again.
+
 In the open gallery and the gallery preview (`galCellMarks`, painted 120 ms after any cell or keep change via
 `galCellMarksSoon`). One 14 px corner triangle, bottom-right, clipped to the cell's 6 px rounding (user: a dot never
 sat centred on its dark ring; a star was replaced by a corner):
@@ -454,7 +459,7 @@ sat centred on its dark ring; a star was replaced by a corner):
   `galBuild`: the corner picture's page door (`galFly.pic`; Endless always opens from a door on the live page, so it
   has one), else its first src (`galFly.src0`), the previewed door, else the page's door linking there. Matched by
   `galCoverItem` (same URL, `sameStem`, `galSameFile`), retried as cells join; `galFlyUpgrade` also sets it.
-- **Blue** (`.rdy`, `#89b4fa`, setting `galleryReadyMark`) where the original is held in the memory keep (`plKeep` or
+- **Blue** (`.rdy`, `var(--hzm)`, setting `galleryReadyMark`) where the original is held in the memory keep (`plKeep` or
   `heldBlobs` via `keepItem`) — the honest "a hover shows it at once". Recomputed from the keep every paint, so a
   dropped original loses it. Clips get none (not kept).
 - **Red** (`.hqx`, `#f38ba8`, under `galleryReadyMark`) where the original genuinely failed (`it.hqFail`, set by

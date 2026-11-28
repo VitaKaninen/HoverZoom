@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.453.0
+// @version      0.454.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -13542,6 +13542,16 @@
         }
         return n >= 2 && n < 10000 ? n : null;
     }
+    // A badge on a door's card: a bare number (an icon or a picture word around it allowed), or null.
+    const COUNT_BADGE = /^[^\d\w]{0,3}(\d{1,3}(?:[,.  ]\d{3})+|\d{1,6})\s*(?:photos?|pictures?|pics?|images?|imgs?|p)?$/i;
+    function countBadge(text) {
+        const t = String(text || '').replace(/\s+/g, ' ').trim();
+        if (!t || t.length > 14) return null;
+        const m = COUNT_BADGE.exec(t);
+        if (!m) return null;
+        const n = parseInt(m[1].replace(/\D/g, ''), 10);
+        return n > 0 && n < 100000 ? n : null;
+    }
     // A pager's last page at `per` pictures a page: the counts it allows.
     function pagerRange(last, per) { return { lo: (last - 1) * per + 1, hi: last * per }; }
     // Does a candidate agree with the count a read to the end found?
@@ -14073,6 +14083,14 @@
         if (host) host.style.visibility = on ? 'hidden' : '';
     }
 
+    // The corner picture's frame and the cell marks: Dark Reader's own rendering of #89b4fa, pinned so it does not convert it again.
+    function galMarkVars(el) {
+        [['hzm', '#063685'], ['hzmg', 'rgba(6,54,133,.55)']].forEach(function (v) {
+            el.style.setProperty('--' + v[0], v[1]);
+            ['bg', 'text', 'border'].forEach(function (t) { el.style.setProperty('--darkreader-' + t + '--' + v[0], v[1]); });     // Dark Reader's copy of the sheet reads these
+        });
+    }
+
     function galLayer() {
         if (galRoot) return galRoot;
         galHost = document.createElement('div');
@@ -14090,10 +14108,10 @@
             'pointer-events:none;box-shadow:0 4px 14px rgba(0,0,0,.6)}' +
             '.svd{position:absolute;left:4px;top:4px;width:22px;height:22px;pointer-events:none}' +
             '.cvr,.rdy,.hqx{position:absolute;right:0;bottom:0;width:14px;height:14px;pointer-events:none;border-bottom-right-radius:6px;clip-path:polygon(100% 0,100% 100%,0 100%)}' +
-            '.rdy{background:#89b4fa}.hqx{background:#f38ba8}' +
+            '.rdy{background:var(--hzm)}.hqx{background:#f38ba8}' +
             '.ply{position:absolute;left:50%;top:50%;width:30px;height:30px;margin:-15px 0 0 -15px;border-radius:50%;background:rgba(30,30,46,.6);pointer-events:none;opacity:.85}' +
             '.ply::after{content:"";position:absolute;left:11px;top:8px;border-style:solid;border-width:7px 0 7px 12px;border-color:transparent transparent transparent #cdd6f4}' +
-            '.cvr{position:absolute;inset:0;width:auto;height:auto;clip-path:none;border-radius:6px;box-shadow:inset 0 0 0 3px #89b4fa;background:none;pointer-events:none;z-index:1}' +
+            '.cvr{position:absolute;inset:0;width:auto;height:auto;clip-path:none;border-radius:6px;box-shadow:inset 0 0 0 3px var(--hzm);background:none;pointer-events:none;z-index:1}' +
             '.strip[hidden]{display:none}' +
             '.strip{position:fixed;z-index:4;display:flex;flex-direction:column;justify-content:space-evenly;padding:0 4px;box-sizing:border-box;cursor:move;' +
             'background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);' +
@@ -14118,7 +14136,7 @@
             '.strip .dl .bar{display:flex;height:4px;border-radius:2px;overflow:hidden;background:#45475a}.strip .dl .bar[hidden]{display:none}.strip .dl .bar i{flex:none;height:100%}' +
             '.strip .dl .bar i.pd{background:#89b4fa}.strip .dl .bar i.pf{background:#f38ba8}' +
             '.strip.out .dl{min-width:200px}' +
-            '.strip.own{border:3px solid #89b4fa;box-shadow:0 0 14px 2px rgba(137,180,250,.55),0 8px 22px rgba(0,0,0,.6)}' +
+            '.strip.own{border:3px solid var(--hzm);box-shadow:0 0 14px 2px var(--hzmg),0 8px 22px rgba(0,0,0,.6)}' +
             '.strip.edit:not(.in){outline:2px dashed #f9e2af;outline-offset:3px}' +
             '.fly .strip{position:relative;z-index:auto;flex:none;width:auto;border:0;border-radius:0;box-shadow:none}' +
             '.fly.edit.joined{outline:none}' +
@@ -14134,8 +14152,8 @@
             '.veil.on{opacity:1}' +
             '.blur{position:fixed;inset:0;backdrop-filter:blur(0) grayscale(0);transition:backdrop-filter ' + GAL_FADE_MS + 'ms ease}' +
             '.blur.on{backdrop-filter:blur(6px) grayscale(.6)}' +
-            '.fly{position:fixed;z-index:3;box-sizing:border-box;border:3px solid #89b4fa;border-radius:8px;overflow:hidden;background:#1e1e2e;' +
-            'box-shadow:0 0 14px 2px rgba(137,180,250,.55),0 8px 22px rgba(0,0,0,.6);transform-origin:0 0;cursor:pointer;pointer-events:auto}' +
+            '.fly{position:fixed;z-index:3;box-sizing:border-box;border:3px solid var(--hzm);border-radius:8px;overflow:hidden;background:#1e1e2e;' +
+            'box-shadow:0 0 14px 2px var(--hzmg),0 8px 22px rgba(0,0,0,.6);transform-origin:0 0;cursor:pointer;pointer-events:auto}' +
             '.fly{display:flex;flex-direction:column}' +
             '.fly.on{transition:transform ' + GAL_FLY_MS + 'ms ease,opacity ' + GAL_FLY_MS + 'ms ease}' +
             '.fly .pic{position:relative;flex:1 1 0;min-height:0}' +
@@ -14208,6 +14226,7 @@
         galFlyHost.style.cssText = 'all:initial;position:fixed;inset:0;pointer-events:none;z-index:2147483647';
         galFlyRootEl = galFlyHost.attachShadow({ mode: 'open' });
         galFlyRootEl.appendChild(st.cloneNode(true));
+        [galHost, galTopHost, galFlyHost].forEach(galMarkVars);
         // Outside the fading .set: an ancestor below opacity 1 is a backdrop root, so the blur would show nothing mid-fade.
         galBlur = document.createElement('div');
         galBlur.className = 'blur';
