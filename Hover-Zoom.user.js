@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.463.0
+// @version      0.464.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -254,6 +254,7 @@
         galleryMiddle: false,       // a middle-click on a result opens its gallery (else the ▦ chip's click does)
         galleryEndless: true,       // at a gallery's end the next one on the page opens (☐ Endless on the clicked picture)
         galleryLoadAll: true,
+        galleryPattern: true,       // learn which gallery positions this site's previews land on (last 20 galleries) and load those first
         predictLog: true,           // keep the anonymised log of gallery steps beside what was loaded ahead (Settings → Diagnostics)
         galleryKeepMB: 1024,        // memory for an open gallery's pictures: 2 pages behind the user and everything ahead
         keepMB: 512,                // memory for pictures loaded ahead elsewhere; the oldest go first       // an open gallery's originals load at once; off: only from a preview on (☐ Load all on the clicked picture)
@@ -736,9 +737,9 @@
         L7: 'Full list of long galleries (slow)', L8: 'Next results page', L9: 'HQ of hovered img', L10: 'HQ ±3 around it, then rest on screen',
         L11: 'Hovered gallery\'s p1 thumbs', L12: 'Thumbs, page on screen', L13: 'Rest of gallery list (slow)', L14: 'HQ, rest of gallery',
         L16: 'HQ of clicked picture (corner)', L17: 'Next galleries\' thumbs p1–2', L18: 'Next gallery\'s p1 HQ', L19: 'Slideshow HQ',
-        L20: 'Thumbs, next page', L21: 'Thumbs, page after that', L22: 'HQ ±3 around hovered gallery img', L23: 'HQ, page on screen', UC: 'Upgrade clips on the page on screen', L25: 'Full clips',
+        L20: 'Thumbs, next page', L21: 'Thumbs, page after that', L22: 'HQ ±3 around hovered gallery img', L23: 'HQ, page on screen', UC: 'Upgrade clips on the page on screen', L25: 'Full clips', L26: 'HQ of the places you usually look (learned)',
     };
-    const ACT_GAL = 'L12 L16 L20 UC:A L21 L23:A L14:A L25:A L17:E L18:EA L13', ACT_STEP = 'L12 L20 UC:A L21 L23:A L17:E L14:A L18:EA L13', ACT_PAGE = 'L1 L3 L4r1 L5r1 r2 r3 L2 L7';
+    const ACT_GAL = 'L12 L16 L20 UC:A L26:P L21 L23:A L14:A L25:A L17:E L18:EA L13', ACT_STEP = 'L12 L20 UC:A L26:P L21 L23:A L17:E L14:A L18:EA L13', ACT_PAGE = 'L1 L3 L4r1 L5r1 r2 r3 L2 L7';
     const ACT_M = {
         M1: ['Landed on a results page', ACT_PAGE], M2: ['You hovered a picture', 'L9 L10'], M3: ['Gallery preview — you hovered a gallery', 'L11 L6'],
         M4: ['You scrolled the results page', 'L1 L3 L4r1'], M5: ['Reached the bottom of the results page', 'L8'],
@@ -747,7 +748,7 @@
         M13: ['Slideshow in a gallery', 'L19 L12 L20 L21 L17:E L23:A L14:A L25:A L18:EA L13'], M14: ['You closed the gallery — the results page again', ACT_PAGE],
     };
     const ACT_NB = {}, ACT_NT = { L10: 1, L13: 1 };       // not built; built but with no job to watch
-    const ACT_TAG = { gals: 'L19', galh: 'L22', galc: 'UC', galp: 'L23', galo: 'L14', galv: 'L25', galn: 'L18' };
+    const ACT_TAG = { gals: 'L19', galh: 'L22', galk: 'L26', galc: 'UC', galp: 'L23', galo: 'L14', galv: 'L25', galn: 'L18' };
     let actMs = [];             // the moments in force, the last on top (a results-page hover's sits over the page's)
 
     // A new moment: the ones in force end (a temporary one, M2/M3, ends only the temporary one under it); their running lines it shares carry over.
@@ -765,8 +766,8 @@
         return m;
     }
     function actMomentNew(id, def, temp) {
-        let A = false, E = false;
-        try { A = ahAll(); E = galEndless() && !galLast; } catch (e) { /* booting: not declared yet */ }
+        let A = false, E = false, P = false;
+        try { A = ahAll(); E = galEndless() && !galLast; P = !!cfg.galleryPattern && hpPick((hpStore()[pageHost()] || []).filter(function (x) { return x && x.k; })).length > 0; } catch (e) { /* booting: not declared yet */ }
         const m = { id: ++actJobN, mid: id, t: actNow(), t0: performance.now(), text: id + ' – ' + def[0], temp: !!temp, state: 'run', note: '', bad: 0, ms: null, lines: [] };
         def[1].split(' ').forEach(function (w) {
             const k = w.split(':')[0], f = w.split(':')[1] || '';
@@ -774,6 +775,7 @@
             if (ACT_NB[k]) { ln.st = 'skip'; ln.why = 'not built yet'; }
             else if (f.indexOf('A') >= 0 && !A) { ln.st = 'skip'; ln.why = 'Load all is off'; }
             else if (f.indexOf('E') >= 0 && !E) { ln.st = 'skip'; ln.why = 'Endless is off, or Last'; }
+            else if (f.indexOf('P') >= 0 && !P) { ln.st = 'skip'; ln.why = 'no pattern learned on this site yet'; }
             else if (ACT_NT[k]) { ln.st = 'nt'; ln.why = 'runs, but not tracked here'; }
             m.lines.push(ln);
         });
@@ -13508,7 +13510,7 @@
         let many = 0;
         try { doorImgs(document).forEach(function (im) { if (domChain(im) === key) many++; }); } catch (e) { many = 0; }
         const aj = actJob('Finding galleries: are pictures like this one (' + many + ' on the page) links to galleries? Reading one linked page', 1);
-        const said = function (h, k) { actKid(aj, !!k, 'read ' + actTitle(h, null) + ' → ' + (k === 'gallery' ? 'a gallery' : k === 'results' ? 'more results (not a gallery)' : 'could not tell')); };
+        const said = function (h, k) { actKid(aj, !!k, 'read “' + actTitle(h, null) + '” → ' + (k === 'gallery' ? 'a gallery' : k === 'results' ? 'more results (not a gallery)' : 'could not tell')); };
         const p = galKindRead(href).then(async function (k) {
             said(href, k);
             if (k) galDoorKinds.set(href, k);
@@ -14728,6 +14730,7 @@
         set.waiting = !!wait && wait.size > 0;
         if (shown && set.fill == null) set.fill = !!R.fill;     // the row scale never changes once anything is on screen
         set.rows = galRowLines(L);
+        set.hpL = L;
         if (!galLook) { galPageNote(set); galFeed(set); }
         return L;
     }
@@ -15332,8 +15335,9 @@
         const list = galLists.get(set.href), stand = all && Array.isArray(list) ? list.slice(set.pics.length).map(function (it) {
             return { __hzItem: it, naturalWidth: 0, naturalHeight: 0, src: it.thumb, currentSrc: it.thumb };     // not built yet: a stand-in, as ahOrig
         }) : [];
+        const pat = hpFor(set, list);
         const tags = new Map(), out = [];
-        [[near, 'galh'], [page, 'galp'], [after, 'galo'], [stand, 'galo'], [behind, 'galo']].forEach(function (L) {
+        [[near, 'galh'], [pat, 'galk'], [page, 'galp'], [after, 'galo'], [stand, 'galo'], [behind, 'galo']].forEach(function (L) {
             L[0].forEach(function (q) { const img = q && (q.img || q); if (img && !tags.has(img)) { tags.set(img, L[1]); out.push(img); } });
         });
         g.from = a;
@@ -15342,6 +15346,147 @@
         set.hqCut = false;
         galHqAll(set, out, tags);
         if (all) ahGalAhead();
+    }
+
+    // ---- hover patterns: the places in a gallery this site's previews keep landing on (last HP_KEEP galleries) load first. docs/GALLERY.md "Hover patterns".
+    const HP_KEY = 'hoverZoomHoverPattern', HP_KEEP = 20, HP_MIN = 5, HP_SHARE = 0.5, HP_END = 10, HP_MAX = 6, HP_SITES = 50, HP_ROWS = 6, HP_COLS = 8;
+    const hpSeen = new Map();       // gallery href -> {h: positions previewed, k: their page keys}, this visit
+    let hpMemo = null;
+    function hpStore() {
+        if (!hpMemo) { try { hpMemo = JSON.parse(GM_getValue(HP_KEY, '') || '{}') || {}; } catch (e) { hpMemo = {}; } }
+        return hpMemo;
+    }
+    // Place keys of position i in an n-picture gallery: sJ J from the start; when whole, eJ J from the end and mid.
+    function hpPos(i, n, whole) {
+        const o = [];
+        if (i < HP_END) o.push('s' + i);
+        if (whole && n) {
+            const e = n - 1 - i;
+            if (e >= 0 && e < HP_END) o.push('e' + e);
+            if (Math.abs(i - (n - 1) / 2) <= Math.max(0.5, n * 0.03)) o.push('mid');
+        }
+        return o;
+    }
+    // A shape: L landscape, P portrait, S about square, from width / height.
+    function hpShape(r) { return !(r > 0) ? '' : r > 1.15 ? 'L' : r < 0.87 ? 'P' : 'S'; }
+    // Shape keys of position i (asp = width / height per position): fX the gallery's first of shape X; on the page [a, b), gX its first, wide / tall its widest / tallest.
+    function hpShapeKeys(i, a, b, asp) {
+        const o = [], X = asp && hpShape(asp[i]);
+        if (!X) return o;
+        let k = 0;
+        while (k < i && hpShape(asp[k]) !== X) k++;
+        if (k === i) o.push('f' + X);
+        if (i < a || i >= b) return o;
+        let g = a, hi = a, lo = a;
+        while (g < i && hpShape(asp[g]) !== X) g++;
+        if (g === i) o.push('g' + X);
+        for (let j = a; j < b; j++) { if ((asp[j] || 0) > (asp[hi] || 0)) hi = j; if ((asp[j] || 1e9) < (asp[lo] || 1e9)) lo = j; }
+        if (b - a >= 3 && hi === i) o.push('wide');
+        if (b - a >= 3 && lo === i) o.push('tall');
+        return o;
+    }
+    // Place keys of position i on the page [a, b) laid out as L: pJ / qJ from the page's start / end, rcR.C row and column, reR end of row R, lrC in the last row; then its shape keys.
+    function hpPage(i, a, b, L, asp) {
+        const o = hpShapeKeys(i, a, b, asp);
+        if (i < a || i >= b) return o;
+        if (i - a < HP_END) o.push('p' + (i - a));
+        if (b - 1 - i < HP_END) o.push('q' + (b - 1 - i));
+        const r = L && L[i];
+        if (!r) return o;
+        const ys = [], y = Math.round(r.y), row = [];
+        for (let k = a; k < b; k++) {
+            const c = L[k];
+            if (!c) continue;
+            const cy = Math.round(c.y);
+            if (ys.indexOf(cy) < 0) ys.push(cy);
+            if (cy === y) row.push(c.x);
+        }
+        ys.sort(function (p, q) { return p - q; });
+        row.sort(function (p, q) { return p - q; });
+        const R = ys.indexOf(y), C = row.indexOf(r.x);
+        if (R < HP_ROWS && C < HP_COLS) o.push('rc' + R + '.' + C);
+        if (R < HP_ROWS && C === row.length - 1) o.push('re' + R);
+        if (R === ys.length - 1 && C < HP_COLS) o.push('lr' + C);
+        return o;
+    }
+    // The place keys HP_SHARE of the recent visits share (at least HP_MIN of them), most shared first.
+    function hpPick(visits) {
+        const v = (visits || []).filter(function (x) { return x && ((x.h && x.h.length) || (x.k && x.k.length)); }).slice(-HP_KEEP);
+        if (v.length < HP_MIN) return [];
+        const c = new Map();
+        let luck = 0;       // visits a key would reach by chance: previews / pictures seen, x3 for a key met once per page
+        v.forEach(function (x) {
+            const ks = new Set(x.k || []), h = x.h || [];
+            h.forEach(function (i) { hpPos(i, x.n, !!x.n).forEach(function (k) { ks.add(k); }); });
+            ks.forEach(function (k) { c.set(k, (c.get(k) || 0) + 1); });
+            luck += Math.min(1, 3 * h.length / Math.max(1, x.n || (Math.max.apply(null, h.concat([0])) + 1)));
+        });
+        return Array.from(c.entries()).filter(function (e) { return e[1] >= v.length * HP_SHARE && e[1] >= 2 * luck; })
+            .sort(function (p, q) { return q[1] - p[1]; }).map(function (e) { return e[0]; });
+    }
+    // Keys to positions in this gallery: whole-gallery keys from n, page keys on the page [a, b) laid out as L; at most HP_MAX.
+    function hpResolve(keys, n, whole, a, b, L, asp) {
+        const out = [], add = function (i) { if (i >= 0 && i < n && out.indexOf(i) < 0 && out.length < HP_MAX) out.push(i); };
+        keys.forEach(function (key) {
+            const j = parseInt(key.replace(/^[a-z]+/, ''), 10);
+            if (key[0] === 's') add(j);
+            else if (key[0] === 'e') { if (whole) add(n - 1 - j); }
+            else if (key === 'mid') { if (whole) add(Math.round((n - 1) / 2)); }
+            else if (/^f[LPS]$/.test(key)) { for (let i = 0; i < (asp ? asp.length : 0); i++) if (hpShapeKeys(i, -1, -1, asp).indexOf(key) >= 0) { add(i); break; } }
+            else for (let i = a; i < b; i++) if (hpPage(i, a, b, L, asp).indexOf(key) >= 0) add(i);
+        });
+        return out;
+    }
+    // A key in words, for the settings row.
+    function hpWords(key) {
+        const ord = function (n) { const t = n % 100 > 10 && n % 100 < 14 ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' }[n % 10] || 'th'); return n + t; };
+        const fixed = { mid: 'the middle one', wide: 'the widest on each page', tall: 'the tallest on each page',
+            fL: 'the first landscape one', fP: 'the first portrait one', fS: 'the first square one',
+            gL: 'the first landscape one on each page', gP: 'the first portrait one on each page', gS: 'the first square one on each page' };
+        if (fixed[key]) return fixed[key];
+        const m = /^([a-z]+)(\d+)(?:\.(\d+))?$/.exec(key);
+        if (!m) return key;
+        const j = +m[2], c = +m[3] || 0;
+        return ({ s: 'the ' + ord(j + 1), e: j ? 'the ' + ord(j + 1) + ' from the end' : 'the last',
+            p: 'the ' + ord(j + 1) + ' on each page', q: j ? 'the ' + ord(j + 1) + ' from the end of each page' : 'the last on each page',
+            rc: 'row ' + (j + 1) + ', column ' + (c + 1) + ' of each page', re: 'the end of row ' + (j + 1),
+            lr: 'the ' + ord(j + 1) + ' in the last row' })[m[1]] || key;
+    }
+    // A gallery preview (not a slideshow step) at position k: its position, and its page keys while the page is laid out.
+    function hpNote(set, k) {
+        if (!cfg.galleryPattern || !isTopFrame) return;
+        if (!hpSeen.has(set.href)) hpSeen.set(set.href, { h: new Set(), k: new Set() });
+        const s = hpSeen.get(set.href), P = (set.pages && set.pages[set.page]) || [0, set.pics.length];
+        s.h.add(k);
+        hpPage(k, P[0], Math.min(P[1], set.pics.length), set.hpL, set.asp).forEach(function (x) { s.k.add(x); });
+    }
+    // Leaving a gallery: its previewed places join the site's record (n = 0 while its list is not whole).
+    function hpCommit(set) {
+        const s = set && hpSeen.get(set.href);
+        if (!s) return;
+        hpSeen.delete(set.href);
+        if (!cfg.galleryPattern || !s.h.size) return;
+        const list = galLists.get(set.href), n = Array.isArray(list) && galWhole(set) ? list.length : 0;
+        hpMemo = null;
+        const st = hpStore(), host = pageHost(), rec = { n: n, h: Array.from(s.h).sort(function (a, b) { return a - b; }), k: Array.from(s.k) };
+        const v = (st[host] || []).filter(function (x) { return x && x.k; }).concat([rec]).slice(-HP_KEEP);
+        delete st[host];
+        st[host] = v;
+        const hosts = Object.keys(st);
+        if (hosts.length > HP_SITES) hosts.slice(0, hosts.length - HP_SITES).forEach(function (k) { delete st[k]; });     // oldest sites first
+        try { GM_setValue(HP_KEY, JSON.stringify(st)); } catch (e) { /* storage unavailable */ }
+        dbg('hover pattern: gallery recorded', { rec: rec, galleries: v.length, pattern: hpPick(v) });
+    }
+    // The open gallery's pattern pictures, built cells or stand-ins; none with G: pressed before a preview (M10).
+    function hpFor(set, list) {
+        if (!cfg.galleryPattern || (galStepG && galEndless() && !(ahG && ahG.saw)) || !Array.isArray(list)) return [];
+        const P = (set.pages && set.pages[set.page]) || [0, set.pics.length];
+        const ix = set.hpIx = hpResolve(hpPick((hpStore()[pageHost()] || []).filter(function (x) { return x && x.k; })), list.length, galWhole(set), P[0], Math.min(P[1], set.pics.length), set.hpL, set.asp);
+        return ix.map(function (i) {
+            if (set.pics[i]) return set.pics[i];
+            const it = list[i];
+            return it ? { __hzItem: it, naturalWidth: 0, naturalHeight: 0, src: it.thumb, currentSrc: it.thumb } : null;
+        });
     }
 
     // M13, the slideshow's originals: the next AH_SLIDE in its direction (AH_SLIDE_CATCH once it caught up), then with Load all its page, the rest that way, what is behind.
@@ -15546,7 +15691,7 @@
                 g.warm.add(h);
                 dbg('loading ahead: thumbnails of gallery ' + (i + 1) + ' of the queue', { href: h, ahead: n });
                 const tl = list.slice(0, 2 * per), job = actJob('Next galleries: thumbnails of the first 2 pages of ' + actGal(h) + ' (keeping ' + n + ' galleries ready)', tl.length, 'L17');
-                await Promise.all(tl.map(function (it) { return ahImg(it, 'gal', job); }));
+                await Promise.all(tl.map(function (it, k) { return ahImg(it, 'gal', job, i === c.at + 1 && k < per ? 'gal1' : null); }));
                 actEnd(job, live() ? 'done' : 'stopped');
                 if (!live()) return;
             }
@@ -16371,7 +16516,7 @@
         const root = galLayer();
         if (!galHost.isConnected) galSlot(galHost);
         const page = galCur && galCur.href === href ? galCur.page : 0;
-        if (ahG && !galLook && galCur && galCur.href !== href) { actMoment('M11'); ahG.at = ahG.back = ahG.near = ahG.cur = null; ahG.from = ahG.end = 0; ahG.saw = ahG.slide = ahG.caught = false; ahG.m = 'open'; }     // a queue switch: M11, as M6
+        if (ahG && !galLook && galCur && galCur.href !== href) { actMoment('M11'); ahG.at = ahG.back = ahG.near = ahG.cur = null; ahG.from = ahG.end = 0; ahG.saw = ahG.slide = ahG.caught = false; ahG.m = 'open'; ahG.sw = true; }     // a queue switch: M11, as M6 but L17's next gallery p1 first
         if (galCur) galDrop(galCur);
         const set = { href: href, el: document.createElement('div'), shade: document.createElement('div'),
             cells: [], asp: [], pics: [], page: page, fed: fed || 0, far: page, pend: galShowPend, cover: galCoverSrc(href) };
@@ -16660,7 +16805,9 @@
             (cfg.galleryLoadAll ? ' (Load all)' : ' (from the picture you previewed)'), imgs.length);
         imgs.forEach(function (img) { galBytesHosts(img.__hzItem); });
         usLog.enable(cfg.logRequests !== false);
-        const lg = usLog.start('origs', { host: pageHost(), pace: version().replace(/\?/g, '') + ' ' + AH_PIC_GAP.join('-') + 'ms, ' + GAL_HQ_PAR + ' max', slowed: noRush(pageHost()) });
+        const tagN = {};
+        imgs.forEach(function (img) { const t = tagOf(img); tagN[t] = (tagN[t] || 0) + 1; });
+        const lg = usLog.start('origs', { host: pageHost(), pace: version().replace(/\?/g, '') + ' ' + AH_PIC_GAP.join('-') + 'ms, ' + GAL_HQ_PAR + ' max, ' + Object.keys(tagN).map(function (t) { return t + ' ' + tagN[t]; }).join(' '), slowed: noRush(pageHost()) });
         const tok = set.hqTok = { cancelled: false, fresh: false };
         clips.forEach(function (img) { galClipQueue(set, img, tagOf(img), job); });
         const cutWhy = function () { return set.hqTok !== tok ? 'restarted' : 'cut'; };     // a newer run replaced this one
@@ -16669,7 +16816,7 @@
             if (ended || sizing) return;
             ended = true;
             set.hqHorizon = why === 'memory full';
-            if (set.hqHorizon) predNote('halt', { why: 'memory', g: predGal(set.href), or: got });
+            if (set.hqHorizon && !set.predHalt) { set.predHalt = true; predNote('halt', { why: 'memory', g: predGal(set.href), or: got }); }
             if (lg) lg.end(why, bytes);
             if (galGrown.has(set.href)) galKeep(set.href, galGrowWhy.get(set.href) === 'html');     // with the originals found, a return skips the guessing
             nextWarmReport();
@@ -16731,7 +16878,7 @@
     }
 
     function galHide(why) {
-        if (galCur && !galLook) { predWatch(null); predNote('close', { g: predGal(galCur.href), p: (galCur.page || 0) + 1 }); predGsum(galCur.href); }
+        if (galCur && !galLook) { predWatch(null); predNote('close', { g: predGal(galCur.href), p: (galCur.page || 0) + 1 }); predGsum(galCur.href); hpCommit(galCur); }
         setTimeout(galStoreTick, 0);     // after the state below is cleared: the readout goes
         galEditStop(false);
         galMenuHide();
@@ -17861,8 +18008,8 @@
         const hr = galHoleRect(pic || t);
         if (galOwns(active)) cancel();
         const sw = !!(galChain && galChain.land && galChain.land.href === href && galFly);     // the queue switching gallery
-        if (sw && galCur) predGsum(galCur.href);
-        predNote('open', { g: predGal(href), sw: sw ? 1 : 0, land: sw && galChain.land.page ? 'last' : null, th: sw && galChain.land.page ? null : predTh(href, 0), q: predQ() });
+        if (sw && galCur) { predGsum(galCur.href); hpCommit(galCur); }
+        predNote('open', { g: predGal(href), sw: sw ? 1 : 0, ls: sw ? (galLists.has(href) ? 1 : 0) : null, land: sw && galChain.land.page ? 'last' : null, th: sw && galChain.land.page ? null : predTh(href, 0), q: predQ() });
         predWatch(href, sw && galChain.land.page ? null : 0);
         if (!sw) { galChain = cfg.galleryEndless ? galChainFrom(href) : null; galLast = galStepG = false; }
         if (!sw && galChain && galChain.hrefs.length <= 3) galChainFollow(galChain);     // a short queue: the page loads more under the gallery at once
@@ -19222,16 +19369,16 @@
             clearTimeout(g.timer);
             if (document.visibilityState === 'hidden') return;
             g.wait = g.wait.filter(function (w) { if (!w.tok || !(w.tok.stop || w.tok.cancelled)) return true; w.resolve(null); return false; });     // a stopped run's waiters leave the line
-            const m = ahMoment(), busy = ahThumbsBusy();
-            const ok = function (w) { return !ahHeld(w.tag, m, busy); };
+            const m = ahMoment(), busy = ahThumbsBusy(), sw = !!(ahG && ahG.sw);
+            const ok = function (w) { return !ahHeld(w.tag, m, busy); }, rank = function (t) { return ahPri(t, m, sw); };
             while (g.wait.length && g.live < max) {
                 const now = performance.now();
                 let k = -1;
-                g.wait.forEach(function (w, i) { if (ok(w) && (k < 0 || ahPri(w.tag, m) < ahPri(g.wait[k].tag, m))) k = i; });
+                g.wait.forEach(function (w, i) { if (ok(w) && (k < 0 || rank(w.tag) < rank(g.wait[k].tag))) k = i; });
                 if (k < 0) { if (busy || (!m && ahL1Busy())) g.timer = setTimeout(g.pump, AH_THUMB_STALL_MS); return; }     // all paused: a thumbnail settling, the gallery closing or a stall pumps again
                 if (now < g.at) { g.timer = setTimeout(g.pump, g.at - now); return; }
                 if (g.wait[k].tag === g.last) {     // equal priority takes turns: originals alongside the queue's thumbnails
-                    const p = ahPri(g.wait[k].tag, m), o = g.wait.findIndex(function (w) { return w.tag !== g.last && ok(w) && ahPri(w.tag, m) === p; });
+                    const p = rank(g.wait[k].tag), o = g.wait.findIndex(function (w) { return w.tag !== g.last && ok(w) && rank(w.tag) === p; });
                     if (o >= 0) k = o;
                 }
                 const w = g.wait.splice(k, 1)[0];
@@ -19245,9 +19392,11 @@
         };
         return g;
     }
-    // A waiting load's rank (lower starts first) in moment m (PRELOAD.md "Plan"): galh L22, galp L23, galo L14, gal L17, galn L18.
-    function ahPri(tag, m) {
+    // A waiting load's rank (lower starts first) in moment m (PRELOAD.md "Plan"): galh L22, galp L23, galo L14, gal L17, galn L18; gal1 = L17's next gallery, page 1. sw: arrived by Endless (M11).
+    function ahPri(tag, m, sw) {
         if (tag === 'grow') return 9;     // L13: last
+        if (tag === 'gal1') return !m ? 0 : m === 'slide' ? 1 : m === 'open' && !sw ? 3 : 0.8;
+        if (tag === 'galk') return !m ? 0 : 0.7;      // L26: the learned hover positions, after L22 and Upgrade clips
         if (!m) return tag === 'gal' || tag === 'galo' || tag === 'galp' || tag === 'galh' || tag === 'galc' || tag === 'galv' ? 0 : tag === 'galn' ? 0.5 : tag === 'count' ? 1 : 2;
         if (m === 'slide') { const q = { gals: 0, galh: 0, gal: 1, galp: 2, galc: 2, galo: 3, galv: 3, galn: 4 }[tag]; return q == null ? 5 : q; }     // M13
         const p = { gals: 0, galh: 0, galc: 0.5, galp: 1, galo: m === 'open' ? 2 : 3, galv: m === 'open' ? 2 : 3, gal: m === 'open' ? 3 : 2, galn: 4 }[tag];     // M6: this gallery before the next ones; M7-M9 the reverse; galc = Upgrade clips
@@ -19289,7 +19438,7 @@
     function ahPump() { ahPics.pump(); ahPages.pump(); }
     // Any of the open gallery's lines still waiting or loading.
     function ahGalBusy() {
-        return ['gals', 'galh', 'galc', 'galp', 'galo', 'galv', 'gal', 'galn'].some(function (t) {
+        return ['gals', 'galh', 'galk', 'galc', 'galp', 'galo', 'galv', 'gal1', 'gal', 'galn'].some(function (t) {
             return [ahPics, ahPages].some(function (g) { return (g.on[t] || 0) > 0 || g.wait.some(function (w) { return w.tag === t; }); });
         });
     }
@@ -19303,13 +19452,13 @@
         });
     }
     // The open gallery's originals still waiting, every line (L22, L23, L14, L18).
-    function ahDropOrigs() { ['gals', 'galh', 'galp', 'galo', 'galn'].forEach(ahDrop); }
+    function ahDropOrigs() { ['gals', 'galh', 'galk', 'galp', 'galo', 'galn'].forEach(ahDrop); }
     async function ahRun(g, tag, fn, tok) {
         const free = await ahSlot(g, tag, tok);
         if (!free) return null;
         try { return await fn(); } finally { free(); }
     }
-    function ahImg(item, tag, job) { return ahRun(ahPics, tag, function () { return galImg(item, tag, job); }); }
+    function ahImg(item, tag, job, slot) { return ahRun(ahPics, slot || tag, function () { return galImg(item, tag, job); }); }
     // An item's original, loaded through the hover's own probe, so a preview finds it.
     function ahOrig(item, tag, tok) {
         if (item.hqTried && item.hit) return Promise.resolve(item.hit);     // found already: no slot, no line
@@ -19616,7 +19765,7 @@
         actMoment('M6');
         ahT('act', { a: 'open' });
         ahDrop('main');
-        ahG = { fwd: 0, m: 'open', saw: false, slide: false, at: null, back: null, near: null, from: 0, end: 0, run: 0, walk: 0, warm: null };
+        ahG = { fwd: 0, m: 'open', sw: false, saw: false, slide: false, at: null, back: null, near: null, from: 0, end: 0, run: 0, walk: 0, warm: null };
     }
 
     // The gallery closed: what it queued is dropped, and the main page starts again from the first door on screen.
@@ -19626,6 +19775,7 @@
         ahG = null;
         actMoment('M14');
         ahDrop('gal');
+        ahDrop('gal1');
         ahDrop('grow');
         ahDropOrigs();
         ahAnchor = null;
@@ -19640,7 +19790,8 @@
         const k = set.pics.findIndex(function (p) { return p.img === img; });
         if (k < 0) return;
         ahT('act', { a: tour ? 'slide' : 'preview', pic: k + 1, dir: dir });
-        { const it = set.pics[k].item; predNote(tour ? 'slide' : 'pv', { g: predGal(set.href), i: k + 1, pre: it && it.hqTried && it.hit ? 1 : it && it.hqBusy ? 2 : 0, q: predQ() }); }
+        if (!tour) hpNote(set, k);
+        { const it = set.pics[k].item; predNote(tour ? 'slide' : 'pv', { g: predGal(set.href), i: k + 1, pat: set.hpIx && set.hpIx.indexOf(k) >= 0 ? 1 : null, pre: it && it.hqTried && it.hit ? 1 : it && it.hqBusy ? 2 : 0, q: predQ() }); }
         if (tour && tour.gal === set) { const p = galPageOf(set, k); if (p > (set.far || 0)) { set.far = p; galFeed(set); } }     // the slideshow's page and those ahead get their thumbnails
         const fresh = !g.saw;
         g.saw = true;
@@ -19744,7 +19895,7 @@
             if (!predPage) {
                 const doors = galDoorList();
                 predPage = { id: Math.random().toString(36).slice(2, 8), t0: performance.now() };
-                predBuf.push({ pg: predPage.id, e: 'page', v: version(), tab: predTab(), site: predSite(), per: galPer(null),
+                predBuf.push({ pg: predPage.id, e: 'page', v: version(), at: predClock(), tab: predTab(), site: predSite(), per: galPer(null),
                     cfg: { la: cfg.galleryLoadAll ? 1 : 0, en: cfg.galleryEndless ? 1 : 0, mb: cfg.galleryKeepMB }, doors: doors.length, n: doors.map(function (d) { return predCount(d.h); }) });
             }
             const ev = { pg: predPage.id, t: Math.round((performance.now() - predPage.t0) / 100) / 10, e: e };
@@ -19753,6 +19904,8 @@
             if (!predSaveT) predSaveT = setTimeout(predFlush, 3000);
         } catch (x) { /* a line lost, never the action */ }
     }
+    // Local date and time to the minute, to line the log up with the request log.
+    function predClock() { const d = new Date(), z = function (n) { return (n < 10 ? '0' : '') + n; }; return d.getFullYear() + '-' + z(d.getMonth() + 1) + '-' + z(d.getDate()) + ' ' + z(d.getHours()) + ':' + z(d.getMinutes()); }
     // A tab's id in the log: random, kept by the tab across reloads.
     function predTab() {
         try {
@@ -19855,16 +20008,16 @@
                   const n = actBuf.reduce(function (a, b) { return a + 1 + (b.mom ? b.mom.lines.length : b.job ? b.job.kids.length : 0); }, 0);
                   return n ? n + ' lines' : '';
               },
-              text: actText, clear: actClear },
+              text: actText, clear: actClear, anon: 'uthf' },
             { id: 'requests', name: 'Request log', key: 'logRequests', onToggle: function (on) { usLog.enable(on); },
               tip: 'Sites refusing pictures for being asked too fast. Hostnames only; Copy and Export replace them with site1, site2…',
               count: function () { const s = usLog.stats(); return s.rows ? s.rows + ' logged' + (s.limits ? ' · ' + s.limits + ' refused' : '') : ''; },
-              text: function () { return usLog.text({ anon: true }); }, show: function () { return usLog.text(); },
+              text: function () { return usLog.text({ anon: true }); }, show: function () { return usLog.text(); }, anon: 'h',
               clear: function () { usLog.clear(); } },
             { id: 'predict', name: 'Prediction log', key: 'predictLog',
               tip: 'In galleries: what you open, page and skip, beside what was loaded ahead. No addresses or names.',
               count: function () { predFlush(); const n = predStore().ev.length; return n ? n + ' logged' : ''; },
-              text: predText, clear: predClear },
+              text: predText, clear: predClear, anon: '' },
             { id: 'misses', name: 'Gallery links judged wrong', key: 'missLog',
               tip: 'Thumbnail links taken for the wrong kind of page, found out on arrival. Holds addresses.',
               count: function () {
@@ -19872,11 +20025,11 @@
                   const ok = Object.keys(log.hosts || {}).reduce(function (a, h) { return a + (log.hosts[h].ok || 0); }, 0);
                   return n || ok ? n + ' wrong' + (ok ? ' · ' + ok + ' right' : '') : '';
               },
-              text: missLogText, clear: function () { GM_setValue(MISS_LOG_KEY, ''); } },
+              text: missLogText, clear: function () { GM_setValue(MISS_LOG_KEY, ''); }, anon: 'uh' },
             { id: 'rules', name: 'Built-in rules that keep missing', key: 'ruleHealth',
               tip: 'Site rules whose full-size guess keeps coming back “not found”. Off: nothing is counted or skipped.',
               count: function () { const n = brokenRules().length; return n ? n + ' missing' : ''; },
-              text: brokenRulesText, clear: brokenRulesClear },
+              text: brokenRulesText, clear: brokenRulesClear, anon: 'h' },
         ];
     }
 
@@ -19901,17 +20054,30 @@
 
     function dataExportOne(l) { saveTextFile('hover-zoom-' + l.id + '-' + dataStamp() + '.txt', l.text()); }
 
-    // Every log in one file, a header over each.
-    function dataExportAll() {
+    // Without names: u addresses -> siteN/…, t “titles” -> “title N”, f file names -> file N.ext, h hostnames -> siteN; ctx keeps one numbering across a file.
+    function dataAnon(text, kinds, ctx) {
+        const id = function (m, k, pre) { const M = ctx[m] || (ctx[m] = new Map()); if (!M.has(k)) M.set(k, pre + (M.size + 1)); return M.get(k); };
+        const host = function (h) { return id('h', h.toLowerCase().replace(/^www\./, ''), 'site'); };
+        let t = String(text);
+        if (kinds.indexOf('u') >= 0) t = t.replace(/\bhttps?:\/\/([^\/\s"'<>?#]+)[^\s"'<>]*/gi, function (u, h) { return host(h) + '/…'; });
+        if (kinds.indexOf('t') >= 0) t = t.replace(/“([^”\n]*)”/g, function (q, x) { return '“' + id('t', x, 'title ') + '”'; }).replace(/\bread (?!“)(.+?) → /g, function (q, x) { return 'read “' + id('t', x, 'title ') + '” → '; });
+        if (kinds.indexOf('f') >= 0) t = t.replace(/[^\s\/"'“”(),]+\.(jpe?g|png|gif|webp|avif|bmp|mp4|webm|m4v|mov)(?![\w-])/gi, function (f, ext) { return id('f', f, 'file ') + '.' + ext.toLowerCase(); });
+        if (kinds.indexOf('h') >= 0) t = t.replace(/(?<![\w.-])(?:[a-z0-9-]+\.)+(?:com|net|org|xxx|info|biz|app|dev|io|co|me|tv|cc|to|pics|porn|sex|tube|xyz|top|club|site|online|live|pro|vip|[a-z]{2})(?![\w-])/g, host);
+        return t;
+    }
+
+    // Every log in one file, a header over each; anon: names stripped as it is written (dataAnon), the stored logs untouched.
+    function dataExportAll(anon) {
+        anon = anon === true;
         reloadSettings();
         if (predOn()) predSum('export');
-        const out = ['Hover Zoom ' + version() + ' — all collected data, ' + dataStamp().replace('_', ' ')];
+        const ctx = {}, out = ['Hover Zoom ' + version() + ' — all collected data' + (anon ? ', anonymised' : ', with names') + ', ' + dataStamp().replace('_', ' ')];
         dataLogs().forEach(function (l) {
             const c = l.count();
             out.push('', '===== ' + l.name + ' (' + (c || 'empty') + (cfg[l.key] === false ? ', logging off' : '') + ') =====');
-            if (c) out.push(l.text());
+            if (c) out.push(anon ? dataAnon((l.show || l.text)(), l.anon || '', ctx) : (l.show || l.text)());
         });
-        saveTextFile('hover-zoom-data-' + dataStamp() + '.txt', out.join('\n'), function () { toast('Collected data saved', 3000); });
+        saveTextFile('hover-zoom-data-' + (anon ? 'anon-' : '') + dataStamp() + '.txt', out.join('\n'), function () { toast('Collected data saved' + (anon ? ', anonymised' : ''), 3000); });
     }
 
     function dataClearAll() {
@@ -20184,7 +20350,7 @@
     if (isTopFrame) {
         try { GAL_OLD_KEYS.forEach(function (k) { sessionStorage.removeItem(k); }); } catch (e) { /* storage refused */ }
         document.addEventListener('scroll', galScroll, { capture: true, passive: true });
-        window.addEventListener('pagehide', function () { try { predSum('leave'); predFlush(); } catch (e) { /* the log is never in the way */ } if (galKeptT) galKeptWrite(); if (galPreLog) { galPreLog.end('cut'); galPreLog = null; } dlqHalt(); dlqPresence(false); });     // a save in flight never calls back after a bfcache freeze: its picture is redone
+        window.addEventListener('pagehide', function () { try { predSum('leave'); predFlush(); } catch (e) { /* the log is never in the way */ } try { if (galCur && !galLook) hpCommit(galCur); } catch (e) { /* none */ } if (galKeptT) galKeptWrite(); if (galPreLog) { galPreLog.end('cut'); galPreLog = null; } dlqHalt(); dlqPresence(false); });     // a save in flight never calls back after a bfcache freeze: its picture is redone
         setTimeout(function () { dlqTick(); setInterval(dlqTick, DLQ_TICK_MS); dlqFindHere(); }, 800);
         document.addEventListener('click', dlqNavNote, true);
         document.addEventListener('submit', function (e) {
@@ -20709,8 +20875,13 @@
             const ex = document.createElement('button');
             ex.type = 'button';
             ex.textContent = 'Export all';
-            setTip(ex, 'Every log above in one .txt file');
-            ex.addEventListener('click', dataExportAll);
+            setTip(ex, 'Every log above in one .txt file, names and addresses included');
+            ex.addEventListener('click', function () { dataExportAll(false); });
+            const exA = document.createElement('button');
+            exA.type = 'button';
+            exA.textContent = 'Export all, anonymised';
+            setTip(exA, 'The same file with sites, addresses, titles and file names replaced by site1, title 1, file 1… as it is written');
+            exA.addEventListener('click', function () { dataExportAll(true); });
             const cl = document.createElement('button');
             cl.type = 'button';
             cl.className = 'danger';
@@ -20718,6 +20889,7 @@
             setTip(cl, 'Empty every log above');
             cl.addEventListener('click', function () { if (dataClearAll()) refreshers.forEach(function (f) { f(); }); });
             all.appendChild(ex);
+            all.appendChild(exA);
             all.appendChild(cl);
             mount.appendChild(all);
         }
@@ -20818,6 +20990,37 @@
             r.appendChild(control);
             mount.appendChild(r);
             return r;
+        }
+
+        // This site's learned gallery hover places, with a way to forget them. GALLERY.md "Hover patterns".
+        function hpRow() {
+            const host = pageHost(), v = (hpStore()[host] || []).filter(function (x) { return x && x.k && x.h && x.h.length; }), keys = hpPick(v);
+            const text = document.createElement('span');
+            text.className = 'hint';
+            text.textContent = !v.length ? 'Nothing recorded on ' + (host || 'this site') + ' yet.'
+                : v.length < HP_MIN ? 'On ' + host + ': ' + v.length + ' of ' + HP_MIN + ' galleries with a preview recorded; no pattern yet.'
+                : 'On ' + host + ', from your last ' + v.length + ' galleries: ' + (keys.length ? 'loads first ' + keys.slice(0, 8).map(hpWords).join(', ') : 'no place shared by half of them');
+            const r = document.createElement('div');
+            r.className = 'row';
+            r.appendChild(text);
+            if (v.length) {
+                const b = document.createElement('button');
+                b.type = 'button';
+                b.textContent = 'Forget';
+                b.style.flex = 'none';
+                setTip(b, 'Forget the places recorded on this site');
+                b.addEventListener('click', function () {
+                    if (!confirm('Forget which gallery pictures you look at on ' + host + '?')) return;
+                    hpMemo = null;
+                    const st = hpStore();
+                    delete st[host];
+                    try { GM_setValue(HP_KEY, JSON.stringify(st)); } catch (e) { /* storage unavailable */ }
+                    b.remove();
+                    text.textContent = 'Forgotten on ' + host + '.';
+                });
+                r.appendChild(b);
+            }
+            mount.appendChild(r);
         }
 
         // This site's learned door areas, with a way to forget them. See P17.
@@ -21779,6 +21982,9 @@
             'At the end of a gallery the next one on the page opens, and back from its first page goes to the one before. Also the Endless mode button on the clicked picture.');
         check('galleryLoadAll', 'Load all of a gallery\'s originals when it opens',
             'Off (saves data): originals load only from a preview (hover or slideshow) on, and a page step without one stops them. Also in the gallery\'s right-click menu.');
+        check('galleryPattern', 'Learn which pictures you look at in a gallery',
+            'Remembers where in a gallery you preview over your last 20 galleries on each site: counted from the start or the end, the middle, the place on the page, its row and column, the end of a row, the last row. Any place half or more of them share loads its original first in every gallery there, up to 6 pictures, also with Load all off.');
+        hpRow();
         num('galleryKeepMB', 'Memory for an open gallery (MB)',
             'Its pictures 2 pages behind you and everything ahead; nothing behind kept past 5 minutes. Over this, pictures behind go first, then the farthest ahead. (default: 1024)', 64, 16384, 64);
         num('keepMB', 'Memory for pictures loaded ahead elsewhere (MB)',
@@ -21881,7 +22087,8 @@
     if (isTopFrame && typeof GM_registerMenuCommand === 'function') {
         GM_registerMenuCommand('Hover Zoom settings', showPanel);
         GM_registerMenuCommand('Hover Zoom activity window', actOpen);
-        GM_registerMenuCommand('Export all collected data', dataExportAll);
+        GM_registerMenuCommand('Export all collected data', function () { dataExportAll(false); });
+        GM_registerMenuCommand('Export all collected data, anonymised', function () { dataExportAll(true); });
         refreshSiteMenu();
     }
 

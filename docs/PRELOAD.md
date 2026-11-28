@@ -1,5 +1,8 @@
 # Preload kinds — IDs the user cites (`L1` … `L25`, moments `M1` … `M14`)
 
+**The user's own copy is [`LOADING-REFERENCE.md`](LOADING-REFERENCE.md) (asked for 2026-11-28): change it in the same
+commit as any ID or order here.**
+
 User 2026-11-27: every kind of thing loaded ahead gets an ID; the user then states, per situation, the order they
 want, and the code is made to match. **Keep this list current when a load kind is added, removed or re-ordered.**
 Code names, constants and reasons live in `GALLERY.md` "Loading ahead" and `RESOLVER.md`; this file is the index.
@@ -8,7 +11,7 @@ Queues (each kind below names its own). They do not know about each other; all s
 - **PL**: the page preloader (`plQueue`/`plPump`), `PL_WORKERS` 6 at once, `PL_GAP_MS` 120 between starts, nearest first.
 - **AH-pic / AH-page**: the gallery gates (`ahPics` 6 at once, 50–200 ms apart; `ahPages` 4, 300–800 ms). Order
   (`ahPri(tag, ahMoment())`): no gallery = `count` → `main`; a gallery open (M6–M9) = `galh` → `galp` → `galo`/`gal`
-  (M6 `galo` first) → `galn`, `count`/`main` paused, all but `galh` held while its thumbnails arrive; a slideshow
+  (M6 `galo` first) → `galn`, with `galk` (L26) before `galp` and `gal1` (L17a) before `galp` except in a click-open M6, `count`/`main` paused, all but `galh` held while its thumbnails arrive; a slideshow
   (M13 not built) = the old order, `gal`+`galo` equal taking turns → `galn` → `count` → `main`. Reasons: GALLERY.md.
 - **direct**: no queue, the browser's own connection limit only.
 
@@ -36,11 +39,13 @@ Queues (each kind below names its own). They do not know about each other; all s
 | L23 | Full size of the page on screen (M9: from its end backward) | Load all: after the thumbnails, each open, step, landing | AH-pic `galp` |
 | L14 | This gallery's full size after the page on screen: → end → 2 pages behind | Load all: after L23 (M6) or after L17 (M7–M9); G: waits for a hover | AH-pic `galo` |
 | L15 | Bigger thumbnail files for cells drawn large | page laid out (`galUpgrade`) | direct |
+| L26 | Full size of the places this site's previews keep landing on (1st, last, 5th…), learned over the last 20 galleries | each open/step/hover pass (`hpFor` in `galHqAhead`), any Load all, not with G: before a hover; GALLERY.md "Hover patterns" | AH-pic `galk` |
 | L16 | The clicked (corner) picture's full size | on open (`galFlyUpgrade`) | direct |
 | UC / L25 | Full clips: the page on screen's (`galc`) / the rest of the gallery's (`galv`) | UC with Load all, ahead of L23; L25 in M6/M11, M13 (GALLERY.md "Full clips") | AH-pic |
 | L24 | A GIF thumbnail's first frame only (ranged read) + ▶; ▶ also on a cell whose original is a clip | with its cell's thumbnail (`gifStill` in `galImg`), GALLERY.md "L24" | direct (GM_xhr) |
 | **Endless** ||||
 | L17 | Next galleries in the queue: page read + first 2 pages of thumbnails, 2 ahead → 5 once moving on; Last: none | every landing and page step (`ahGalAhead`) | AH-page `gal`, AH-pic `gal` |
+| L17a | L17's first next gallery, its first page of thumbnails (tag `gal1`) | ahead of L23 in M7–M9, M8 and M11; in a click-open M6 it keeps L17's place (v0.464.0, prediction log 2026-11-28: 76 % of all thumbnail waiting was the Endless switch) | AH-pic `gal1` |
 | L18 | Next gallery's first page full size | within 2 pages of this gallery's end, originals on | AH-pic `galn` |
 | **Slideshow** ||||
 | L19 | Page slideshow: every picture's full size ahead and behind, nearest first (behind counts double); clips buffered ahead | each step (`plFill`); in a gallery L14 does this instead | PL |
@@ -139,7 +144,7 @@ results page · L9 HQ of hovered img · L10 HQ ±3 around it, then rest on scree
 Thumbs, page on screen · L13 Rest of gallery list (slow) · L14 HQ, rest of gallery · L15 Bigger thumbs for big cells ·
 L16 HQ of clicked picture (corner) · L17 Next galleries' thumbs p1–2 · L18 Next gallery's p1 HQ · L19 Slideshow HQ ·
 L20 Thumbs, next page · L21 Thumbs, page after that · L22 HQ ±3 around hovered gallery img · L23 HQ, page on screen ·
-L24 Clip/GIF stills, labelled · L25 Full clips
+L24 Clip/GIF stills, labelled · L25 Full clips · L26 HQ of the places you usually look (learned) · L17a (no checklist line; runs inside L17's job)
 
 **M1 – Landed on a results page:** 1 L1 · 2 L3 · 3 L4 r1 · 4 L5 r1 · 5 L4/L5 r2 · 6 L4/L5 r3 · 7 L2 · 8 L7 (cut by M5)
 **M2 – Hovering a single picture:** 1 L9 · 2 L10 · 3 back to M1
@@ -151,19 +156,19 @@ page only near the screen (`data-src` etc. are read; a picture with no address y
 **M5 – Reached the bottom of the results page:** 1 M1 lines 1–7 if unfinished · 2 L8 (next page's M1 1–6); M1 line 8
 dropped (user confirmed). Galleries scrolled past were already dropped by M4.
 **M6 – Just opened a gallery (P:), nothing hovered:** 1 L12 (clips L24) · 2 L16 · 3 L20 · 4 Upgrade clips on the page on
-screen [Load all] · 5 L21 · 6 L23 [Load all] · 7 L14 + L25 [Load all] · 8 L17 [Endless] · 9 L18 [Endless, Load all] · 10 L13
-**M7 – Stepped a page forward:** 1 L12 · 2 L20 · 3 Upgrade clips on the page on screen [Load all] · 4 L21 · 5 L23 [Load
+screen [Load all] · 4a L26 · 5 L21 · 6 L23 [Load all] · 7 L14 + L25 [Load all] · 8 L17 [Endless] · 9 L18 [Endless, Load all] · 10 L13
+**M7 – Stepped a page forward:** 1 L12 · 2 L20 · 3 Upgrade clips on the page on screen [Load all] · 4 L21 · 4a L26 · 4b L17a [Endless] · 5 L23 [Load
 all] · 6 L17 [Endless] · 7 L14 [Load all] · 8 L18 [Endless, Load all] · 9 L13
 **M8 – Hovered a picture in the gallery:** 1 L9 (a clip: in full) · 2 L22 (clips among them stay L24 unless [Load all]) ·
-3 L12 · 4 L20 · 5 Upgrade clips on the page on screen [Load all] · 6 L21 · 7 L23 [Load all] · 8 L17 [Endless] · 9 L14
+3 L12 · 4 L20 · 5 Upgrade clips on the page on screen [Load all] · 6 L21 · 6a L26 · 6b L17a [Endless] · 7 L23 [Load all] · 8 L17 [Endless] · 9 L14
 [Load all] · 10 L18 [Endless, Load all] · 11 L13
-**M9 – Stepped a page back:** 1 L12 · 2 L20 · 3 Upgrade clips on the page on screen [Load all] · 4 L21 · 5 L23 from the
+**M9 – Stepped a page back:** 1 L12 · 2 L20 · 3 Upgrade clips on the page on screen [Load all] · 4 L21 · 4a L26 · 4b L17a [Endless] · 5 L23 from the
 page's end backward [Load all] · 6 L17 [Endless] · 7 L14 [Load all] · 8 L18 [Endless, Load all] · 9 L13. User's reason (2026-11-27): a step
 back is temporary — to save or re-hover one picture — then forward again, so pages ahead stay. Settle from the log:
 `page` dir -1 then further back vs forward, `pv`/`save` on the back page (`save` added v0.437.0).
 **M10 – G: pressed, stepping whole galleries:** 1 L12 (clips L24) · 2 L16 · 3 L17 first gallery [Endless] · 4 L20 · 5 L17
 the rest [Endless] · 6 L13 · no HQ or full clips until a hover (then M8)
-**M11 – Endless landed on the next gallery:** as M6 (P:) or M10 (G:)
+**M11 – Endless landed on the next gallery:** as M6 (P:) or M10 (G:), except L17a (the new next gallery's first page) goes right after L26, before L23 (`ahG.sw`)
 **M12 – Slideshow on a results page:** 1 L19 ahead, nearest first · 2 L19 behind
 **M13 – Slideshow in a gallery** (user's): 1 HQ of the next 10 in its direction, kept 10 ahead (a clip: in full, any
 setting); if the slideshow catches up with the loaded ones, 20 ahead before anything below resumes · 2 L12 of the page

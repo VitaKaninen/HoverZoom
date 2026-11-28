@@ -16,8 +16,8 @@ one FS release run had a single test failure (near `page-walk`'s learned-address
 
 ## Waiting on the user (ask only if they bring it up)
 
-- Prediction-log analysis 2026-11-28 (PREDICT.md "Findings"): proposed (A) next gallery's p1 thumbnails ahead of
-  L23/L14 under Endless, (B) the hover's wait in `pv`; (C) hold L23 until a first hover only after B measures it.
+- Colour as a hover-pattern key (GALLERY.md "Hover patterns"): needs each thumbnail fetched again as bytes; offered
+  2026-11-28, not answered.
 
 - L8 takes as many of the fetched page's pictures as this page shows in its first 2 screens (v0.459.0) — right number?
 - L24: a clip cell already shows the site's still, so L24 for clips is only the label (PRELOAD.md "Built (v0.449.0)").
@@ -27,6 +27,9 @@ one FS release run had a single test failure (near `page-walk`'s learned-address
   (`E21` vs `growBox`). Waits on a yes.
 
 ## Not live-tested (TEST-PLAN ids; run on a real site when the area is touched)
+
+- v0.464.0: 4.8 (L17a on Endless arrival), 4.9 (L26 learned places; checked: unit tests, Settings row on the test
+  page), 4.10 (anonymised export; checked against the 2026-11-28 export file in node).
 
 - 7.12d–l: activity checklist, hover-cuts-only-what-it-must, cheap count, full clips, shade corners, leaving a hover
   keeps its download, L10 order, L8 singles, M10 (G: next gallery before page 2).

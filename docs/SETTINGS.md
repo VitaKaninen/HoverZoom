@@ -927,5 +927,13 @@ Export all (one `hover-zoom-data-<stamp>.txt`, a `=====` header per log) and Cle
   boot), `logRequests` (`usLog.enable`), `predictLog`, `missLog`, `ruleHealth` (new; off = `ruleOutcome` counts
   nothing and `ruleSkipped` skips nothing).
 - Request log: Copy and Export carry `usLog.text({anon: true})`, Show the real hostnames (REQUEST-LOG.md).
+- **Export all, two ways (user, v0.464.0):** with names (as stored), or anonymised — `dataAnon(text, kinds, ctx)` rewrites
+  each log as the file is written, never the stored logs; one `ctx` numbering across the file, so site3 is one site
+  everywhere. Kinds per log (`anon` in `dataLogs()`): `u` addresses → `siteN/…`, `t` “titles” (and an unquoted
+  `read X → `) → `title N`, `f` picture/clip file names → `file N.ext`, `h` hostnames → `siteN`. Activity `uthf`, Request
+  log `h` over the raw text (not its own siteN, which would clash), Prediction log none (anonymous by rule), gallery-link
+  misses `uh` (DOM chains stay: structure, no names), rules `h` (rule names in quotes stay). The host pattern needs a
+  lowercase TLD and no `-`/word char after it, or `img.to-photo` in a chain reads as a host. New log text that names a
+  gallery must quote its title “…” or the anonymised export leaks it. Manager menu has both.
 - Rules Clear forgets only the listed rules: a rule's past hits are what keep it from ever being skipped.
 - Export all writes the prediction log's page `sum` first (`predSum('export')`), as the retired menu export did.

@@ -197,6 +197,21 @@ Test pages:
     - **Expect:** the `next page:` line loads page 8 (debug log names the URL). On a page with no pager (or two
       different "Next" links) nothing loads ahead rather than a wrong page.
 
+4.8 **The next gallery is ready when Endless gets there** (v0.464.0, L17a). Load all and Endless on. Open a gallery,
+    step through its pages without hovering, and let Endless move on.
+    - **Expect:** the next gallery's first page is there at once (activity: L17's job for the next gallery starts before
+      "Open gallery: full-size pictures"). In the prediction log the `ready` after an `open` with `sw: 1` is under ~100 ms.
+    - A click-open (not Endless) keeps the old order: this gallery's full size first.
+
+4.9 **Learned places load first** (v0.464.0, L26). On one site, open 5+ galleries and in each preview the first and
+    the last picture, then close it. Settings → Galleries: the row under "Learn which pictures…" names them.
+    - **Expect:** the next gallery opened loads those two originals first (activity line L26 done before L23); a
+      preview of them is instant. Forget clears the row.
+
+4.10 **Anonymised export** (v0.464.0). Manager menu → Export all collected data, anonymised.
+    - **Expect:** no site name, address, gallery title or file name anywhere in the file; `site1`, `title 1`, `file 1`
+      instead, the same site keeping one number in every section. The plain Export all still has the names.
+
 4.5 **Cut work is redone.** A gallery whose loading 4.2 cut short (its line says `cut: true`) gets loaded
     again later when you scroll back to it.
     - **Fail:** a gallery that stays grey forever after a fast scroll.

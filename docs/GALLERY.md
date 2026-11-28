@@ -528,6 +528,30 @@ GM_xhr (plain test pages), a non-206 answer on a follow-up read, frame 1 past 2 
 - Verified in Chrome on eporner 2026-11-27: cover on the right cell (5-picture gallery: picture 4; Endless into the
   next gallery: its picture 15 = its door's src); ready 12 → 144 over 23 s with Load all; both menu toggles.
 
+## Hover patterns, L26 (v0.464.0, user 2026-11-28)
+
+User's ask: watch the last 10–20 galleries; if previews keep landing on the same places (first and last, first and
+5th…), load those first. "The more ways to find a pattern, the better." Not for the user's own browsing (they hunt
+specific shots that cannot be predicted); for other people. Earlier rejection (shared computer; behaviour differs by
+site) is answered by per-site records and a rolling window. Setting `galleryPattern` (default on).
+
+- Record (`hpNote` from `ahSaw`, not slideshow steps): per gallery visit the 0-based positions `h` and the page-time
+  keys `k`; committed on close / Endless switch / pagehide (`hpCommit`) as `{n, h, k}` (n = list length when
+  `galWhole`, else 0). GM `hoverZoomHoverPattern` `{host: [last 20 visits with a preview]}`, ≤ 50 hosts.
+- Keys (one visit counts a key once): `sJ`/`eJ` J from the gallery's start / end (J < 10; e and `mid` only when n is
+  known, computed at pick time from `h`); `pJ`/`qJ` from the page's start / end; `rcR.C` row and column on the page
+  (rows = distinct rounded `y` of the page's layout `set.hpL`, columns by `x`); `reR` end of row R; `lrC` in the last
+  row; shape from `set.asp` (L > 1.15, P < 0.87, else S): `fX` gallery's first of shape X, `gX` page's first, `wide` /
+  `tall` page's widest / tallest (pages of ≥ 3).
+- Pick (`hpPick`, pure): ≥ 5 visits; a key in ≥ half of them AND ≥ 2× what chance gives (`luck` = Σ min(1, 3·previews /
+  pictures seen)) — without the second test a visit that previews half the gallery makes every place a pattern.
+- Apply (`hpFor` → `galHqAhead`, tag `galk`, rank 0.7: after L22/Upgrade clips, before L17a/L23): `hpResolve` maps keys
+  to ≤ 6 positions — gallery keys from n, page keys on the page on screen. Runs with Load all off too (a few pictures);
+  not with G: before a preview (M10's rule). `pv` logs `pat: 1` on a hover of a picked place.
+- Settings row (`hpRow`) names the places in words (`hpWords`) with Forget. Colour is not a key: a cross-origin
+  thumbnail taints a canvas, so reading pixels needs each thumbnail fetched again as bytes (GM_xhr) — offered to the
+  user, not built.
+
 ## Arrival check (v0.411.0, user 2026-11-26; INTERACTION.md `G15`)
 
 The page a door opens is the ground truth for the press that opened it. Hovers could correct a door verdict; arriving could not.

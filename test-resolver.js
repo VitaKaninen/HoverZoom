@@ -1504,6 +1504,10 @@ const galPH = function (min) {
     const all5 = ['count', 'galn', 'galo', 'gal', 'galp', 'galh'];
     eq('gate M7/M9: L22, L23, L17, L14, L18; counts paused', run('fwd', { inflight: 0 }, all5).seen, ['galh', 'galp', 'gal', 'galo', 'galn']);
     eq('gate M6: this gallery (L14) before the next ones (L17)', run('open', { inflight: 0 }, all5).seen, ['galh', 'galp', 'galo', 'gal', 'galn']);
+    eq('gate M7: L17\'s next gallery p1 (gal1) before L23 (v0.464.0)', run('fwd', { inflight: 0 }, ['gal', 'galp', 'gal1', 'galh']).seen, ['galh', 'gal1', 'galp', 'gal']);
+    eq('gate M6 click-open: gal1 keeps L17\'s place', run('open', { inflight: 0 }, ['gal1', 'galo', 'galp']).seen, ['galp', 'galo', 'gal1']);
+    const swRun = function (tags) { ctx.ahG = { m: 'open', sw: true }; ctx.galCur = { inflight: 0 }; const g = ahGate([0, 0], 1), seen = []; tags.forEach(function (t) { g.wait.push({ tag: t, resolve: function (free) { seen.push(t); if (free) free(); } }); }); g.pump(); return seen; };
+    eq('gate M11 Endless arrival: gal1 before L23 and L14', swRun(['galo', 'galp', 'gal1', 'gal']), ['gal1', 'galp', 'galo', 'gal']);
     const held = run('fwd', { inflight: 4, thumbAt: 1e9 }, all5);
     eq('gate: thumbnails arriving hold all but L22', held.seen, ['galh']);
     held.g.wait.length && (ctx.galCur.inflight = 0, held.g.pump());
@@ -1627,6 +1631,47 @@ const srcLf = src.split(String.fromCharCode(13)).join('');     // the checkout m
     for (let i = 0; i < vd.VDELAY_FORGET; i++) s = vd.vdForget(s.entry, CH, '/gallery/d');
     eq('count area: three disagreements in a row drop it', s.change, 'forgot the site');
     eq('count area: a disagreement that lost pictures drops it at once', vd.areaDrop(e.entry, CH, '/gallery/d').change, 'forgot the site');
+}
+{   // hover patterns (v0.464.0): places previewed in half the last 20 galleries load first.
+    const hS = src.indexOf('    const HP_KEY'), hE = src.indexOf('    // A key in words');
+    const hp = new Function('GM_getValue', src.slice(hS, hE) + '\nreturn { hpPick: hpPick, hpResolve: hpResolve, hpPage: hpPage };')(function () { return ''; });
+    const V = function (n, h, k) { return { n: n, h: h, k: k || [] }; };
+    const pick = function (vs, n, whole) { return hp.hpResolve(hp.hpPick(vs), n, whole, 0, 0, null); };
+    eq('pattern: under 5 galleries, nothing', pick([V(30, [0]), V(30, [0]), V(30, [0]), V(30, [0])], 40, true), []);
+    eq('pattern: first and last in every gallery', pick([V(30, [0, 29]), V(50, [0, 49]), V(12, [0, 11]), V(40, [0, 39]), V(20, [0, 19])], 60, true), [0, 59]);
+    eq('pattern: last unknown while the list is not whole', pick([V(30, [0, 29]), V(50, [0, 49]), V(12, [0, 11]), V(40, [0, 39]), V(20, [0, 19])], 60, false), [0]);
+    eq('pattern: 5th in 3 of 5 counts, 20th from the start does not', pick([V(30, [4, 20]), V(50, [4]), V(60, [4, 25]), V(40, [8]), V(70, [2])], 80, true), [4]);
+    eq('pattern: the middle, whatever the length', pick([V(31, [15]), V(51, [25]), V(41, [20]), V(61, [30]), V(21, [10])], 101, true), [50]);
+    eq('pattern: no-hover visits are left out', pick([V(30, []), V(30, []), V(30, [1]), V(30, [1]), V(30, [1]), V(30, [1]), V(30, [1])], 40, true), [1]);
+    const many = []; for (let i = 0; i < 30; i++) many.push(V(30, i < 10 ? [3] : [6]));
+    eq('pattern: only the last 20 galleries count', pick(many, 40, true), [6]);
+    // a page of 3 rows: 4, 4, 2 cells (indices 10-19), laid out left to right
+    const L = []; [[10, 0, 0], [11, 1, 0], [12, 2, 0], [13, 3, 0], [14, 0, 1], [15, 1, 1], [16, 2, 1], [17, 3, 1], [18, 0, 2], [19, 1, 2]].forEach(function (c) { L[c[0]] = { x: c[1] * 100, y: c[2] * 100 }; });
+    eq('page keys: row 2 col 1, end of row 2', hp.hpPage(17, 10, 20, L), ['p7', 'q2', 'rc1.3', 're1']);
+    eq('page keys: last cell is last on page, end of last row', hp.hpPage(19, 10, 20, L), ['p9', 'q0', 'rc2.1', 're2', 'lr1']);
+    const ends = [V(80, [3, 13], ['re0', 're1']), V(90, [5], ['re0']), V(70, [7], ['re0', 'p3']), V(60, [2], ['re0']), V(50, [9], ['re0'])];
+    eq('pattern: the end of the first row on the page on screen', hp.hpResolve(hp.hpPick(ends), 100, true, 10, 20, L), [13]);
+    const asp = [0.7, 0.7, 1.5, 0.7, 1, 0.7, 0.7, 0.7, 0.7, 0.7, 0.7, 0.7, 1.4, 0.7, 2.2, 0.7, 0.5, 0.7, 0.7, 0.7];
+    eq('shape keys: the gallery\'s first landscape', hp.hpPage(2, 10, 20, null, asp), ['fL']);
+    eq('shape keys: first landscape on the page', hp.hpPage(12, 10, 20, null, asp), ['gL', 'p2', 'q7']);
+    eq('shape keys: widest and tallest on the page', [hp.hpPage(14, 10, 20, null, asp), hp.hpPage(16, 10, 20, null, asp)], [['wide', 'p4', 'q5'], ['tall', 'p6', 'q3']]);
+    const firstWide = [V(40, [6], ['gL']), V(40, [3], ['gL']), V(40, [9], ['gL']), V(40, [1], ['gL']), V(40, [8], ['gL'])];
+    eq('pattern: the first landscape on each page, found on this page', hp.hpResolve(hp.hpPick(firstWide), 20, true, 10, 20, null, asp), [12]);
+    const busy = []; for (let i = 0; i < 6; i++) busy.push(V(20, [0, 2, 4, 6, 8, 10, 12, 14, 16, 18]));
+    eq('pattern: a visit that previews half the gallery proves nothing', pick(busy, 20, true), []);
+    const gS = src.indexOf('    function hpWords'), gE = src.indexOf('    // A gallery preview (not a slideshow step)');
+    const hpWords = new Function(src.slice(gS, gE) + '\nreturn hpWords;')();
+    eq('pattern words', ['s0', 'e0', 'e2', 'q0', 'rc1.3', 're0', 'gL', 'mid'].map(hpWords), ['the 1st', 'the last', 'the 3rd from the end', 'the last on each page', 'row 2, column 4 of each page', 'the end of row 1', 'the first landscape one on each page', 'the middle one']);
+}
+{   // anonymised export (v0.464.0): names replaced as the file is written, one numbering across it.
+    const aS = src.indexOf('    function dataAnon'), aE = src.indexOf('    // Every log in one file');
+    const dataAnon = new Function(src.slice(aS, aE) + '\nreturn dataAnon;')();
+    const ctx = {};
+    eq('anon: titles, files, addresses', dataAnon('gallery 3 “Some Title” — pic-01_big.jpg from https://www.site.com/gallery/x?y=1', 'uthf', ctx), 'gallery 3 “title 1” — file 1.jpg from site1/…');
+    eq('anon: same host, same number across logs; www dropped', dataAnon('  site.com: 2 / 1  cdn2.other.xxx', 'h', ctx), '  site1: 2 / 1  site2');
+    eq('anon: a DOM chain and a version are not hosts', dataAnon('img.to-photo>a.gallery-photo>div  v0.464.0  docs/PREDICT.md', 'h', ctx), 'img.to-photo>a.gallery-photo>div  v0.464.0  docs/PREDICT.md');
+    eq('anon: an unquoted read line', dataAnon('ok  read The Name 5 → a gallery', 't', ctx), 'ok  read “title 2” → a gallery');
+    eq('anon: rule names survive a hosts-only pass', dataAnon('“booru thumbnail” on cdn.nsfw.xxx', 'h', ctx), '“booru thumbnail” on site3');
 }
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);
