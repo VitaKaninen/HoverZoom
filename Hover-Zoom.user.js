@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.462.0
+// @version      0.463.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -17193,7 +17193,6 @@
         saveFolderAsk();
         jobs.forEach(function (j) { if (j.href === href) dlqDrop(j.id); });     // one kept for its failures: they are in this one
         const info = pageInfos.get(href.split('#')[0]) || {};
-        dbg('download queue: title at press ' + JSON.stringify({ href: href, info: info, n: pageInfos.size }));
         const job = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), href: href, origin: origin,
             made: Date.now(), items: list.slice(), read: 'queued', again: again, title: info.title || '', site: info.site || '', growing: growing,
             note: why === 'html' ? 'read from the page\'s HTML; pictures it adds as it scrolls may be missing'
@@ -17459,7 +17458,6 @@
     function dlqDownload(job) {
         const run = dlqRun, tok = { cancelled: false, fresh: false };
         if (job.title && !pageInfos.has(job.href.split('#')[0])) keepPageInfo(job.href, job.title, job.site);     // or a page that never read it names it by host
-        dbg('download queue: names ' + JSON.stringify({ job: job.title, site: job.site, have: pageInfos.get(job.href.split('#')[0]) || null, folder: saveFolderFor(job.href) }));
         let st = dlqStates(job).replace(/1/g, '0');        // in flight when its tab went: not known to have landed, so again
         const errs = dlqErrs(job.id);
         const save = function (withErrs) {

@@ -35,11 +35,6 @@ one FS release run had a single test failure (near `page-walk`'s learned-address
 - Real middle press before the preview (`E79`, synthetic only); a middle press on a results-page door never saves
   (`active` is null) — known gap.
 
-## Cleanup owed
-
-- `download queue: title at press {…}` and `download queue: names {…}` debug lines (v0.346.0, for a misfile that has
-  not recurred since): delete them.
-
 ## Shelved (do not propose unless asked)
 
 - Keep pictures on disk across reloads: cause was LibreWolf's disabled disk cache, fixed in about:config; user wants no
