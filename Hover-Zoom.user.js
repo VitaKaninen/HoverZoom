@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.464.0
+// @version      0.465.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -16967,20 +16967,21 @@
                 if (hit.video) galClipHover(img);
                 else { plKeepImage(hit, it0); ahFiles.add(hit.url); }     // as the background runs: the thumbnail itself too (a GIF's still then plays)
             }
-            if (myToken.cancelled || active !== img) return;
+            if (myToken.cancelled || active !== img) { predMiss(img, 'left', t1); return; }
             hideSpinner();
             dbg('gallery preview found', { ms: Math.round(performance.now() - t1), remembered: known, size: hit ? hit.w + 'x' + hit.h : null });
             const it = img.__hzItem;
             if (!hit) {
                 it.hqFail = true; it.hqWhy = (myToken.tries || []).slice();
                 galCellMarksSoon();
+                predMiss(img, 'none', t1);
                 act('bad', '✗ no full size found for the picture you hovered: ' + actPic(it.thumb) + ' · ' + actSecs(performance.now() - t1) + actDiag({ thumb: it.thumb, link: it.link, tries: it.hqWhy }));
                 return;
             }
             if (it.hqFail || hit.video) { it.hqFail = false; galCellMarksSoon(); }
             if (hit.url === it.thumb) it.hqTried = true;      // no bigger file: the next hover of it stops nothing (a real original sets it.hit)
             showViewer(hit, pointer);
-            ahSaw(img, 1);      // a hover counts once its preview shows, not for every cell the pointer crosses
+            ahSaw(img, 1, Math.round(performance.now() - t1));      // a hover counts once its preview shows, not for every cell the pointer crosses
             if (pinOnShow === img) { pinOnShow = null; place(); }
             if (saveOnShow === img && view && view.url) { saveOnShow = null; midSaveUrl(view.url); }
         }, cfg.hoverDelay);
@@ -19784,14 +19785,14 @@
     }
 
     // A preview of a gallery picture (hover or slideshow step): originals on from it (a slideshow: M13, in its direction).
-    function ahSaw(img, dir) {
+    function ahSaw(img, dir, ms) {
         const g = ahG, set = galCur;
         if (!g || !set || galLook || !img) return;
         const k = set.pics.findIndex(function (p) { return p.img === img; });
         if (k < 0) return;
         ahT('act', { a: tour ? 'slide' : 'preview', pic: k + 1, dir: dir });
         if (!tour) hpNote(set, k);
-        { const it = set.pics[k].item; predNote(tour ? 'slide' : 'pv', { g: predGal(set.href), i: k + 1, pat: set.hpIx && set.hpIx.indexOf(k) >= 0 ? 1 : null, pre: it && it.hqTried && it.hit ? 1 : it && it.hqBusy ? 2 : 0, q: predQ() }); }
+        { const it = set.pics[k].item; predNote(tour ? 'slide' : 'pv', { g: predGal(set.href), i: k + 1, ms: ms != null ? ms : null, pat: set.hpIx && set.hpIx.indexOf(k) >= 0 ? 1 : null, pre: it && it.hqTried && it.hit ? 1 : it && it.hqBusy ? 2 : 0, q: predQ() }); }
         if (tour && tour.gal === set) { const p = galPageOf(set, k); if (p > (set.far || 0)) { set.far = p; galFeed(set); } }     // the slideshow's page and those ahead get their thumbnails
         const fresh = !g.saw;
         g.saw = true;
@@ -19903,6 +19904,12 @@
             predBuf.push(ev);
             if (!predSaveT) predSaveT = setTimeout(predFlush, 3000);
         } catch (x) { /* a line lost, never the action */ }
+    }
+    // A rested gallery hover that never showed: why 'left' (the pointer went first) or 'none' (no full size); ms since it rested.
+    function predMiss(img, why, t1) {
+        const set = galCur, k = set ? set.pics.findIndex(function (q) { return q.img === img; }) : -1;
+        if (k < 0) return;
+        predNote('miss', { g: predGal(set.href), i: k + 1, why: why, ms: Math.round(performance.now() - t1), q: predQ() });
     }
     // Local date and time to the minute, to line the log up with the request log.
     function predClock() { const d = new Date(), z = function (n) { return (n < 10 ? '0' : '') + n; }; return d.getFullYear() + '-' + z(d.getMonth() + 1) + '-' + z(d.getDate()) + ' ' + z(d.getHours()) + ':' + z(d.getMinutes()); }
