@@ -195,11 +195,12 @@ once — two frames disagreeing about whether the site was listed.
 - **Menu commands are registered only when `window.top === window.self`.**
 - **The menu, in order** (`refreshSiteMenu`, then `Hover Zoom settings`): Enable/Disable for this site; ☑ Draw where the
   slideshow stops (`autoClose: false`); ☑ Enable debug mode (`cfg.debug`, user 2026-11-17, closes the menu, 3 s toast; the panel's words since v0.426.0).
-  Fixed beside `Hover Zoom settings`: Hover Zoom activity window; Export prediction log (user v0.436.0, `predExport`, docs/PREDICT.md).
+  Fixed beside `Hover Zoom settings`: Hover Zoom activity window; Export all collected data (user v0.462.0, `dataExportAll`;
+  replaced v0.436.0's Export prediction log, which existed to get that log to Claude — export all does that too).
 - **One label per setting, everywhere it appears** (v0.426.0): the panel, the right-click menu (`galMenuShow`) and
   the manager's menu use the same words, and the gallery's buttons' names (Endless mode, Show all galleries).
-- **Every destructive button asks first** (`confirm()`): Reset to defaults, widget colours reset, the request log's
-  and miss log's Clear, the rule-health Clear, a host's learned-gallery Forget. Not the activity window's Clear (a
+- **Every destructive button asks first** (`confirm()`): Reset to defaults, widget colours reset, every Collected data
+  Clear and Clear all, a host's learned-gallery Forget. Not the activity window's Clear (a
   view of this session, nothing stored) or a list row's ✕ (Undo changes brings it back).
 - **`pageHost()` is what the site list matches**, not `location.hostname`: the top frame's host
   where it can be read (`ancestorOrigins`, then a same-origin `window.top.location`, then
@@ -912,3 +913,19 @@ and *fades out over*, read as one setting split across two rows.
 
 Measured at delay 250 / duration 2000: on the preview, shown with a computed transition of 2 s;
 120 ms after leaving, still at full opacity; 420 ms after leaving, fading, still 2 s.
+
+## Collected data (user, v0.462.0)
+
+Diagnostics holds one block, `dataRows()`, built from `dataLogs()` (module level, so the manager menu's
+`dataExportAll` reads the same list). Order: Activity, Request log, Prediction log, Gallery links judged wrong,
+Built-in rules that keep missing. Each row: name (tooltip = what it holds), count or `empty`, Copy / Show / Export /
+Clear (greyed when empty; Activity adds Open…), then its ☑ on the right like every other setting row. Under them:
+Export all (one `hover-zoom-data-<stamp>.txt`, a `=====` header per log) and Clear all. Adding a log = one entry in
+`dataLogs()`: `{id, name, key, tip, count() → '' when empty, text(), show()?, clear(), open()?, onToggle()?}`.
+
+- Switches: `actLog` (new; `actOff()` gates `actKeep`/`actSend` — try/catch because `act()` runs before `cfg` at
+  boot), `logRequests` (`usLog.enable`), `predictLog`, `missLog`, `ruleHealth` (new; off = `ruleOutcome` counts
+  nothing and `ruleSkipped` skips nothing).
+- Request log: Copy and Export carry `usLog.text({anon: true})`, Show the real hostnames (REQUEST-LOG.md).
+- Rules Clear forgets only the listed rules: a rule's past hits are what keep it from ever being skipped.
+- Export all writes the prediction log's page `sum` first (`predSum('export')`), as the retired menu export did.

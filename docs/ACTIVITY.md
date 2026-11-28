@@ -34,6 +34,8 @@ reads it for **what changes and how long each piece takes**, not file names. Cod
 - **Fallback**, when the injected code does not mark `<html data-hz-act="live">` (a CSP that refuses both ways):
   `actPopup(w, false)` runs in the page's script and returns `receive`, which `actSend` calls directly; a `warn`
   line says a reload needs a reopen. A reopen rebuilds the bar and clones the list (drops dead listeners).
+- **Off switch** (`actLog`, user v0.462.0): Settings → Diagnostics → Collected data. Off, `actKeep`/`actSend` drop
+  everything; nothing is buffered or sent. The buffer as text: `actText()` (SETTINGS.md "Collected data").
 - **Window**: `actOpen()` — `window.open('', 'hzActivity', 'popup=yes,…')`, from the manager menu and Settings →
   Diagnostics. A blocked pop-up (a menu command carries no user activation in Chrome) arms `actArmed`: the next
   press on the page opens it (`actPress`). No automatic `window.open` on a page change: it raises the window.

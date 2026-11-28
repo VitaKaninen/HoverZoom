@@ -11,9 +11,8 @@ of (random salt + host), the salt stored with the log; a gallery is its door's n
 - Setting `predictLog` (default on, Settings → Diagnostics, Copy / Show / Clear). GM key `hoverZoomPredict`
   `{salt, ev, cut}`, one log for all sites and tabs, last `PRED_MAX` 8000 events. Written every 3 s and on
   `pagehide` (`predFlush` re-reads first, so tabs append, not overwrite). Top frame only.
-- **Export** (user v0.436.0: how the log reaches Claude): manager menu → *Export prediction log* (`predExport`).
-  Writes the page's `sum` first, then saves the events after `cut` (the last export's end; all of them when
-  nothing is new) as `hover-zoom-predict-<date>_<time>.txt` via `GM_download` `saveAs: true` (anchor fallback).
+- **Export** (how the log reaches Claude): manager menu → *Export all collected data*, or the row's Export
+  (SETTINGS.md "Collected data"). Export all writes the page's `sum` first. `cut` is no longer read.
   A userscript cannot pick the folder: the save dialog does, and the browser reopens it where it was last. The
   user posts the file into the chat. `cut` shifts down when `PRED_MAX` trims the front.
 - Events (`pg` = page-load id, `t` = seconds since its first event):
