@@ -408,6 +408,20 @@ Test pages:
 7.12h **The shade's corners** (v0.456.0). Open a gallery on a bright page. **Expect:** around all four rounded corners
      of the corner picture the page is dark and blurred like everywhere else. **Fail:** a bright or sharp wedge at a corner.
 
+7.12j **A hover loads its neighbours first** (v0.459.0, L10). On a page of single pictures, scroll a few screens down
+     (past what loaded on arrival) and hover one in the middle of a row. **Expect:** the pictures beside it turn up in
+     full first, nearest first, then the rest of the section on screen; hovering a neighbour shows it at once.
+     **Fail:** they fill in from the top of the section down.
+
+7.12k **The next results page's own pictures** (v0.459.0, L8). On a results page with galleries and single pictures,
+     scroll to the bottom and wait. **Expect:** in the activity window, under M5, `Next page: full size of the N pictures
+     near its top` comes before the next page's gallery rounds; on the next page those pictures preview at once.
+
+7.12l **G: loads the next gallery before this one's next page** (v0.459.0, M10). Endless on, open a gallery, press G:,
+     step to the next gallery. **Expect:** `Open gallery: thumbnails of its first page` (not "first 2 pages"), then
+     `Next galleries: thumbnails …` for the gallery after it, and only then `more thumbnails` for this gallery's page 2.
+     **Fail:** page 2's thumbnails never load, or load before the next gallery's.
+
 7.13 **A missed original is tried again** (v0.395.0). On a site where some originals fail (`found` lower
      than `pictures` in 7.2's `done` line), close the gallery and open it again, then hover.
      - **Expect:** the second run's `found` is equal or higher; the misses were tried again, not skipped

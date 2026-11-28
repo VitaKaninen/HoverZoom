@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.458.0
+// @version      0.459.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -12838,12 +12838,13 @@
 
     const HW_SCROLL_MS = 200;
 
-    let hwScope = null, hwTimer = 0;
+    let hwScope = null, hwTimer = 0, hwAt = null;
 
     // Pick the hovered picture's section (the tour's own start rule) and warm what is visible in it.
     function hwStart(el) {
         if (!cfg.hoverPreload || tour || !el || !el.isConnected) return;
         pgHovered = window.scrollY || 0;
+        hwAt = el;
         if (!(hwScope && hwScope.isConnected && hwScope.contains(el))) {
             const pics = tourPics(idleFloor());
             const levels = tourLevels(el, pics);
@@ -12868,16 +12869,34 @@
         const gone = plQueue.filter(function (j) { return !(!j.hover || j.page || want.has(j.el)); });
         plQueue = plQueue.filter(function (j) { return !j.hover || j.page || want.has(j.el); });
         gone.forEach(plActLeft);
+        const kept = new Map();
+        plQueue = plQueue.filter(function (j) {
+            if (j.hover && !j.page && want.has(j.el)) { kept.set(j.el, j); return false; }
+            return true;
+        });
         let added = 0;
-        pics.forEach(function (p) {
+        const mine = [];
+        hwOrder(pics).forEach(function (p) {
+            if (kept.has(p)) { mine.push(kept.get(p)); return; }
             if (plHas(p) || plQueue.some(function (j) { return j.el === p; })) return;
             const u = pictureUrl(p);
             if (!u || blocked(u)) return;
-            plQueue.push({ el: p, dist: PL_VIDEO_AHEAD + 1, gen: plGen, hover: true });
+            mine.push({ el: p, dist: PL_VIDEO_AHEAD + 1, gen: plGen, hover: true });
             added++;
         });
+        const at = plQueue.findIndex(function (j) { return j.page; });
+        plQueue.splice(at < 0 ? plQueue.length : at, 0, ...mine);     // M2: L10 ahead of the page's own lines
         if (added) dbg('warming ' + added + ' more in the section', { queued: plQueue.length });
         plPump();
+    }
+
+    // L10's order: outward from the hovered picture in page order (±3 first, then the rest), after it before before it.
+    function hwOrder(pics) {
+        const i = hwAt ? pics.findIndex(function (p) { return p === hwAt || p.contains(hwAt) || hwAt.contains(p); }) : -1;
+        if (i < 0) return pics;
+        return pics.map(function (p, k) { return { p: p, d: Math.abs(k - i) * 2 - (k > i ? 1 : 0) }; })
+            .sort(function (a, b) { return a.d - b.d; })
+            .map(function (x) { return x.p; });
     }
 
     // ---- loading the page ahead of the user
@@ -14448,7 +14467,15 @@
     // How many pictures the set should hold: through the furthest page reached plus the pages ahead.
     function galWantN(set) {
         const far = set.far = Math.max(set.far || 0, set.page || 0), at = far + 1;
-        return (at + galAhead(at)) * galPer(set);
+        return (at + (galL17First(set) ? 0 : galAhead(at))) * galPer(set);
+    }
+
+    // M10: with G: pressed, L20 waits until L17 has the first next gallery's thumbnails.
+    function galL17First(set) {
+        const c = galEndless() ? galChain : null;
+        if (!galStepG || galLast || galPreStop || !cfg.galleryPreload || !ahG || !c || c.hrefs[c.at] !== set.href) return false;
+        const h = c.hrefs[c.at + 1];
+        return !!h && ahG.first !== h;
     }
 
     // Pages of thumbnails kept loaded ahead of page `at` (1-based): 1 on the first page, GAL_AHEAD_ON once the user goes on, then as many as the page's number.
@@ -15226,8 +15253,10 @@
         const P = galCur.pages || [], near = (galCur.page || 0) + 2 >= P.length - 1;
         if (!g.warm) g.warm = new Set();
         g.walk = run;      // M7-M9: L14 waits for the whole walk, its page reads included (ahHeld)
+        const firstIn = function (i) { if (i === c.at + 1 && g.first !== c.hrefs[i]) { g.first = c.hrefs[i]; if (galCur) galFeed(galCur); } };     // M10: L20 after it
         try {
             for (let i = c.at + 1; i <= Math.min(c.hrefs.length - 1, c.at + n); i++) {
+                if (i > c.at + 1) firstIn(i - 1);
                 const h = c.hrefs[i];
                 if (!galLists.has(h) && !galCache.has(h) && !galNoFrame(h)) await galCountLoad(h, 'gal');
                 if (!live()) return;
@@ -15246,6 +15275,7 @@
                 if (!live()) return;
             }
         } finally { if (g.walk === run) { g.walk = 0; ahPump(); } }
+        if (live()) firstIn(c.at + 1);
         const h1 = c.hrefs[c.at + 1], list1 = h1 && galLists.get(h1);
         if (!ahAll() || !near || !Array.isArray(list1)) return;
         const todo = list1.slice(0, per).filter(function (it) { return it && !(it.hqTried && it.hit); });
@@ -15885,13 +15915,14 @@
             galHide('fail: no pictures found on the linked page');
             return;
         }
-        const pages = galLook ? 1 : 2;
+        const g1 = !galLook && galStepG && galEndless() && !galLast && cfg.galleryPreload && !galPreStop;     // M10: page 2 after L17's first gallery (galL17First)
+        const pages = galLook || g1 ? 1 : 2;
         if (list.length > pages * galPer(null)) list = list.slice(0, pages * galPer(null));     // the first two pages (the preview: one); galFeed brings the rest as they are wanted
         let timer = 0, failed = 0;
         const got = [], t0 = performance.now();
         galTrace(href, 'thumbnails: loading ' + list.length + ' (' + galHostMix(list.map(function (it) { return it.thumb; })) + ')');
-        const job = actJob((galLook ? 'Gallery preview: thumbnails of its first page' : 'Open gallery: thumbnails of its first 2 pages') + ' — ' + actGal(href), list.length, galLook ? 'L11' : 'L12');
-        if (!galLook) job.also = ['L20'];     // its second page is the next page's thumbnails
+        const job = actJob((galLook ? 'Gallery preview: thumbnails of its first page' : g1 ? 'Open gallery: thumbnails of its first page' : 'Open gallery: thumbnails of its first 2 pages') + ' — ' + actGal(href), list.length, galLook ? 'L11' : 'L12');
+        if (!galLook && !g1) job.also = ['L20'];     // its second page is the next page's thumbnails
         if (list.every(galDeclAsp)) {      // every size declared: placed at once, each shown as it loads
             const early = [], left = { n: list.length, at: performance.now() };
             if (!galLook) galEarlyLeft.set(href, left);     // before galBuild: its layout queues the originals that wait for these
@@ -19691,6 +19722,8 @@
         let path = '/';
         try { path = '/' + new URL(href).pathname.split('/').filter(Boolean).join('/'); } catch (e) { /* keep / */ }
         let doors = doc && !refused ? nextDoors(doc, path) : [];
+        const tok = { cancelled: false, fresh: false };
+        if (doc && !refused && !galPreStop) bytes += await nextSingles(doc, href, store, tok);
         if (!cfg.galleryEndless) doors = doors.slice(0, 1 + AH_THUMBS_OFF);     // endless off: as this page's own rounds before AH_SHARE
         const lists = [];
         for (const d of doors) {        // L3: every door's list
@@ -19702,7 +19735,7 @@
             lists.push(list);
             save();
         }
-        const per = Math.max(1, galPer(null)), tok = { cancelled: false, fresh: false }, rounds = Math.ceil(AH_THUMBS_MAIN / AH_THUMBS_STEP);
+        const per = Math.max(1, galPer(null)), rounds = Math.ceil(AH_THUMBS_MAIN / AH_THUMBS_STEP);
         for (let r = 0; r < rounds && !galPreStop; r++) {
             if (r === 0) { const tp = actMs[actMs.length - 1]; if (!tp || tp.mid !== 'M5') actMoment('M5'); }
             const aj = actJob('Next page: round ' + (r + 1) + ' — thumbnails ' + (r * AH_THUMBS_STEP + 1) + '–' + ((r + 1) * AH_THUMBS_STEP) + ' of ' + lists.length + ' galleries, then one full-size picture each', 0);
@@ -19727,6 +19760,30 @@
         dbg('next page: loaded ahead', { page: store.page, galleries: lists.length, originals: store.files.length, bytes: humanBytes(bytes) });
         if (lg) lg.end(galPreStop ? 'limited' : 'done', bytes);
         nextBusy = false;
+    }
+
+    // L8's L1: the fetched page's pictures that this page shows in its first 2 screens (as many), full size, covers included.
+    async function nextSingles(doc, href, store, tok) {
+        const h = vpH(), y0 = window.scrollY || 0;
+        const n = h > 0 ? idlePics(idleFloor()).filter(function (p) { const r = p.getBoundingClientRect(); return r.width && r.top + y0 < h * 2; }).length : 0;
+        const items = n ? galPick(doc, href).slice(0, n) : [];
+        if (!items.length) return 0;
+        const tp = actMs[actMs.length - 1];
+        if (!tp || tp.mid !== 'M5') actMoment('M5');
+        const aj = actJob('Next page: full size of the ' + items.length + ' pictures near its top', items.length);
+        let bytes = 0;
+        for (const item of items) {
+            await nextWait();
+            if (galPreStop) break;
+            const hit = await ahRun(ahPics, 'next', function () { return galResolve({ __hzItem: item, naturalWidth: 0, naturalHeight: 0, src: item.thumb, currentSrc: item.thumb }, netJob(tok, item, 'next')); });
+            const ok = !!hit && !hit.video && hit.url !== item.thumb;
+            actKid(aj, ok, (ok ? '✓ full size ' : '✗ no full size found ') + actFile(ok ? hit.url : item.thumb || ''));
+            if (!ok) continue;
+            store.files.push(hit.url);
+            bytes += await galBytes(hit.url);
+        }
+        actEnd(aj, galPreStop ? 'stopped' : 'done');
+        return bytes;
     }
 
     // Arrival: the lists the last page read are this page's galleries already; its files are measured as they are asked for.

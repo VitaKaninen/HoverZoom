@@ -22,10 +22,10 @@ Queues (each kind below names its own). They do not know about each other; all s
 | L5 | Gallery full size, one per door per round (3) | inside L4's rounds | AH-pic `main` |
 | L6 | The door after a gallery preview: its whole first page of thumbnails | after L4/L5 (`ahLookLast`) | AH-pic `main` |
 | L7 | Frame read of a gallery past what its HTML lists | last, once per door (`ahIdleGrow`) | frame |
-| L8 | Next results page: its first 3 unseen galleries — list, thumbnails, all full size (≤ 3 clips each) | at the bottom, idle, ≥ 20 % of this page's galleries opened (`nextCheck`) | direct (6 at once) |
+| L8 | Next results page: its pictures near the top in full (`nextSingles`), then its galleries' lists and 3 rounds | at the bottom, idle (`nextCheck`) | AH-pic `next` |
 | **On a hover (asked for, not ahead)** ||||
 | L9 | The hovered picture's full size | the pointer rests `hoverDelay`; in a gallery every AH line waits for it (`galPvWait`, ≤ `AH_PV_HOLD_MS` 8 s) | direct |
-| L10 | The section the hover is in: its on-screen pictures' full size | after a preview (`hwFill`); scrolled-away ones dropped | PL |
+| L10 | The section the hover is in: its on-screen pictures' full size, outward from the hovered one (`hwOrder`) | after a preview (`hwFill`), ahead of L1/L2; scrolled-away ones dropped | PL |
 | L11 | Gallery preview: the hovered door's first page of thumbnails | door hovered 500 ms (`galLookOpen`) | direct |
 | **A gallery open (middle-click)** ||||
 | L12 | Thumbnails of the page on screen | at once, in list order (`galFeed`) | direct |
@@ -50,7 +50,7 @@ Queues (each kind below names its own). They do not know about each other; all s
 **Built (v0.438.0–v0.439.0; verified in Chrome on eporner: M6, M7, M8, M11):** M6–M9 and M11 as in the lines below, except: the clip lines (L24/L25, "Upgrade clips") and
 L13's place (still its own frame queue, started as before); L16/L20/L21 are direct (the browser's order, so L16 may
 overlap L12, and L22 overlaps L12 in M8). M10 = M6/M7 order with no HQ until a hover; its "L17 first gallery before
-L20" is not built (L17 waits for all thumbnails). Without Load all a hover now loads L22 only (was 2 pages on).
+L20" built v0.459.0 (below). Without Load all a hover now loads L22 only (was 2 pages on).
 **Built (v0.440.0; Chrome on eporner: M1 order L1 → L3, round-1 thumbnails across doors; M4 scroll window and
 drop):** M1, M4, M5 (L8 = the next page's lists + 3 rounds, no 20 % rule). User confirmed 2026-11-27: L1
 includes gallery covers' own full size (the cover is the gallery's best picture, looked for first); automatic L2
@@ -73,8 +73,14 @@ Chrome-pane check, door-search: d6 (240 in HTML) read at 32.8 s right after its 
 without; d7 (10 in HTML) "needed now" at once. The step-past jump is not live-tested.
 **Built (v0.456.0), L25 + "Upgrade clips":** GALLERY.md "Full clips" (tags `galc`, `galv`; verified in the pane on
 `door-gif.html`: both clip cells loaded in full as `galc`, blue corner). Not live-tested on a real site.
-**Not built:** M10's "L17 first gallery before L20", L8's L1 (singles of a fetched page), L10's ±3-then-rest,
-next-page finding (its own session, three repos).
+**Built (v0.459.0):** L10 order — `hwOrder`: outward from the hovered picture in page order (after before before),
+spliced ahead of the first `page` job (M2 line 2 before M1). L8's L1 — `nextSingles`: before the lists, the fetched
+page's first N `galPick` items (covers included) via `galResolve`, tag `next`; N = this page's pictures within its
+first 2 screens (assumption: no layout on a fetched page, so this page's count stands in). M10 — `galL17First`: with
+G: pressed `galWantN` adds no page ahead until `ahG.first` = the next gallery (set by `ahGalAhead` when its first
+gallery's L17 is done, then `galFeed`); `galShow` builds one page, not two. Checked: `hwOrder` in node; live
+in the pane, not isolable (L1 had already loaded the on-screen pictures); L8 and M10 not live-tested (TEST-PLAN 7.12j–l).
+**Not built:** next-page finding (its own session, three repos).
 
 New kind in the plan (not in code): **L25** the full clip. L10 = ±3 nearest first, then the rest of the section on screen. L8 = the next results page's
 M1 lines 1–6 (no 20 % rule, user). L20/L21 = the next page / the page after, relative to the page on screen; under

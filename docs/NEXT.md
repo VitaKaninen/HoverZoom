@@ -105,6 +105,10 @@ built (GALLERY.md "Full clips": hover keeps loading, ±3 clips next with Load al
 **v0.458.0 (2026-11-27).** User restated the L24 goal (GALLERY.md "Full clips" last bullet): still first, the real
 thing playing in place once loaded; animated GIFs now do. A hover's download no longer stops when the pointer leaves
 (PRELOAD.md, before "A cancelled load"). Verified in the pane on door-gif (slow cell, hovered GIF); not on a real site.
+**v0.459.0 (2026-11-27).** The plan's last three lines built (PRELOAD.md "Built (v0.459.0)"): L10 outward order,
+L8's singles, M10's L17 before L20. Not live-tested beyond `hwOrder` in node (TEST-PLAN 7.12j–l). Assumption for
+the user to confirm: L8 takes as many pictures as this page shows in its first 2 screens. **Next:** only the shared
+next-page finder remains (its own session, three repos).
 Start line: **"Read docs/NEXT.md 'NEXT TASK' and continue."**
 
 ---
