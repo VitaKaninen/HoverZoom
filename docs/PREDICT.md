@@ -50,3 +50,8 @@ of (random salt + host), the salt stored with the log; a gallery is its door's n
 - M9 (a step back is temporary): 10 back steps → 6 forward, 3 back, 1 open. Supports it; small n.
 - Proposed to the user (not built): L17's first gallery p1 ahead of L23/L14 under Endless (as `galL17First` in M10);
   add the hover's wait to `pv`.
+- Log gaps hit in this analysis (proposed, not built): `pv` has no wait ms; `i` is gallery-wide and page sizes
+  vary, so position on the page cannot be derived (add `pi`); `q` at a press is read after its cuts (read it before);
+  `open` sw:1 gives no L17 state for that gallery (none / list read / thumbs n); request-log `origs` rows carry no
+  tag, so bytes per line (L23 vs L17) are unknown; no wall-clock on `page`, so it cannot be joined to the request
+  log; the memory `halt` repeats on every hover (log once per gallery).
