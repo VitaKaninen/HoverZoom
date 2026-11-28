@@ -4,8 +4,9 @@ Purpose: compare what the user does in galleries with what loading ahead (GALLER
 ready, so the guesses are tuned from evidence. **It is not learning**: nothing in it changes behaviour. Behaviour
 learning is a separate feature, L26 (GALLERY.md "Hover patterns"), which the user asked for 2026-11-28 after first
 rejecting it (shared computer; behaviour differs by site) — per site and a rolling 20 galleries answer both.
-The user (2026-11-28): most of this logging comes out if the script is published; a hover-wait field would not help
-them (they hover for specific shots, unpredictable), so it was not added.
+The user (2026-11-28): most of this logging comes out if the script is published; logging *where* they hover tells
+nothing (they hunt specific shots; gallery content is random). That was about positions, not the hover's wait —
+the wait field was left out on a misreading, not on the user's word.
 
 **Anonymous by rule (user):** no hostnames, URLs, titles or picture addresses — ever. A site is `s` + FNV-1a
 of (random salt + host), the salt stored with the log; a gallery is its door's number on its page
@@ -54,7 +55,7 @@ of (random salt + host), the salt stored with the log; a gallery is its door's n
 - Proposed to the user (not built): L17's first gallery p1 ahead of L23/L14 under Endless (as `galL17First` in M10);
   add the hover's wait to `pv`.
 - Built v0.464.0 from the gaps below: `at`, `ls`, `pat`, the halt once, request-log `origs` pace names its tags (`galp 12 galo 40`).
-  Not built: hover wait (user: no use to them), position on the page, `q` before cuts (not confirmed wrong).
+  Not built: hover wait (left out on a misreading; open), position on the page, `q` before cuts (not confirmed wrong).
 - Log gaps hit in this analysis: `pv` has no wait ms; `i` is gallery-wide and page sizes
   vary, so position on the page cannot be derived (add `pi`); `q` at a press is read after its cuts (read it before);
   `open` sw:1 gives no L17 state for that gallery (none / list read / thumbs n); request-log `origs` rows carry no
