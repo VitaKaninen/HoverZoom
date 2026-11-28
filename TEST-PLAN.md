@@ -400,6 +400,11 @@ Test pages:
      Load all off: hover a clip, move away without hovering anything else — it finishes loading and plays in its
      cell. **Fail:** a clip cell stays a still with no blue corner, or the line says `not built yet`.
 
+7.12i **Leaving a hover early keeps its download** (v0.458.0). Load all off, open a gallery, rest on a picture
+     until the spinner shows, move away before it appears. **Expect:** a moment later the cell turns blue, and hovering
+     it again shows it at once. An animated GIF hovered that way starts playing in its cell. **Fail:** the cell stays
+     plain, or the next hover downloads it again.
+
 7.12h **The shade's corners** (v0.456.0). Open a gallery on a bright page. **Expect:** around all four rounded corners
      of the corner picture the page is dark and blurred like everywhere else. **Fail:** a bright or sharp wedge at a corner.
 

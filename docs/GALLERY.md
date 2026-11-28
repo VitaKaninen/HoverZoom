@@ -496,7 +496,10 @@ done ones off the page on screen go (`galClipTrim`). Fixture: `gallery-gif.html`
   stops it. With Load all the hover's ±3 clips ride L22's own line (`galClipTag` → `galh`), so they come next.
 - **A clip in full plays in its cell** (`galClipCell`, from `galCellMarks`; user v0.457.0): the kept `<video>` itself is
   moved over the still (`video.cv`, muted, looping, `pointer-events:none` so the cell's `<img>` keeps the hover).
-  Animated GIFs held in full still show their first frame (not asked).
+- **An animated GIF plays in its cell once its full file is held** (`galGifPlay`, from `galCellMarks`, user v0.458.0):
+  the still (L24) is only there until then, so the user sees what is coming. The user's goal for L24 and clips: never
+  a black empty cell — a still (first frame, or the site's thumbnail) first, then the real thing playing in place once
+  loaded (Load all: ahead; otherwise after a hover).
 
 ## L24: GIF thumbnails as their first frame (v0.449.0)
 

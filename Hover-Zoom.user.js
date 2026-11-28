@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.457.0
+// @version      0.458.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -2569,6 +2569,8 @@
         return n;
     }
     // The hover's own original is in (or failed): its gallery's ±3 next, then everything resumes.
+    // A hover's own lookup: the hover's token with its own `cancelled`, so the pointer leaving stops the preview but not the download.
+    function hoverRun(tok) { const rt = Object.create(tok); rt.cancelled = false; return rt; }
     function hoverDone() { if (hoverHold) { hoverHold.l9 = true; hoverResumeCheck(); } }
     function hoverResumeCheck() {
         if (!hoverHold || !hoverHold.l9) return;
@@ -8487,10 +8489,12 @@
             resolving = true;
             if (!holding) showSpinner();
             if (!plGet(el)) { actMoment('M2', true); actLineSet('L9', 'run'); hoverFirst('a hover came first'); }     // M2: its own original before anything loading ahead
-            let got = false;
+            const hh = hoverHold, rt = hoverRun(myToken);     // rt: the lookup goes on when the pointer leaves (user 2026-11-27)
+            let got = false, last = null;
             try {
-                await resolve(el, displayed, myToken,
+                await resolve(el, displayed, rt,
                     function (hit) {
+                        last = hit;
                         if (myToken.cancelled || active !== el || playerArrived(el)) return;
                         if (small === 'avatar' && !avSeen && avatarBig(hit, displayed)) {
                             avSeen = true;
@@ -8502,7 +8506,10 @@
                         paint(hit);
                     });
                 myToken.done = true;
-                if (myToken === token) { hoverDone(); actLineSet('L9', 'done'); actMomentPop('M2'); }
+                if (rt.small) myToken.small = rt.small;
+                if (rt.failure) myToken.failure = rt.failure;
+                if (last && !last.video && (myToken.cancelled || active !== el)) plKeepImage(last, null);     // left before it showed: kept for the next hover
+                if (hh ? hoverHold === hh : myToken === token) { hoverDone(); actLineSet('L9', 'done'); actMomentPop('M2'); }
                 if (avArea && !myToken.cancelled && !avSeen) areaApply('avatarAreas', vdForget, chain, path);
                 if (holding) return;            // the wait's timer paints, or shows the failure
                 if (!got && !myToken.cancelled && active === el && myToken.small && cfg.bigChip) bigChipShow(el, myToken.small);
@@ -16010,12 +16017,11 @@
             set.coverTried = set.pics.length;
             set.coverItem = galCoverItem(set.pics.map(function (p) { return p.item; }), set.cover);
         }
-        const held = new Set();
-        if (cfg.galleryReadyMark) {
-            plKeep.forEach(function (k) { const it = keepItem.get(k.url); if (it) held.add(it); });
-            heldBlobs.forEach(function (h, u) { const it = keepItem.get(u); if (it) held.add(it); });
-            galClips.forEach(function (e) { if (e.done) held.add(e.it); });     // a clip buffered in full
-        }
+        const kept = new Set();
+        plKeep.forEach(function (k) { const it = keepItem.get(k.url); if (it) kept.add(it); });
+        heldBlobs.forEach(function (h, u) { const it = keepItem.get(u); if (it) kept.add(it); });
+        galClips.forEach(function (e) { if (e.done) kept.add(e.it); });     // a clip buffered in full
+        const held = cfg.galleryReadyMark ? kept : new Set();
         const mark = function (cell, cls, on) {
             const m = cell.querySelector('.' + cls);
             if (on && !m) { const d = document.createElement('span'); d.className = cls; cell.appendChild(d); }
@@ -16030,7 +16036,8 @@
             mark(cell, 'cvr', cover);     // a border inside the cell: no size change
             mark(cell, 'rdy', !bad && held.has(p.item));
             const cv = p.item ? galClipCell(cell, p.img, p.item) : false;
-            const kind = cv || !p.item ? '' : p.item.hit && p.item.hit.video ? 'clip' : p.item.gifAnim ? 'GIF' : '';     // L24: shown still
+            if (p.item && p.img.__hzStill && kept.has(p.item)) galGifPlay(p.img, p.item);
+            const kind = cv || !p.item ? '' : p.item.hit && p.item.hit.video ? 'clip' : p.item.gifAnim && p.img.__hzStill ? 'GIF' : '';     // L24: shown still
             mark(cell, 'ply', !!kind);
             const pl = kind && cell.querySelector('.ply');
             if (pl && pl.textContent !== kind) pl.textContent = kind;
@@ -16495,9 +16502,17 @@
                 galPvWait = { img: img, at: t1 };
                 if (hoverFirst('a hover came first') && galCur) galCur.hqCut = true;
             }
-            const hit = await galResolve(img, myToken);
+            const hh = hoverHold, rt = hoverRun(myToken);     // rt: the lookup goes on when the pointer leaves (user 2026-11-27)
+            const hit = await galResolve(img, rt);
+            myToken.tries = rt.tries;
             if (galPvWait && galPvWait.img === img) { galPvWait = null; ahPump(); }
-            if (myToken === token) hoverDone();
+            if (hh ? hoverHold === hh : myToken === token) hoverDone();
+            const it0 = img.__hzItem;
+            if (hit && it0) {     // kept whether or not the pointer stayed: its cell turns blue, a clip loads on in full
+                it0.hqTried = true;
+                if (hit.video) galClipHover(img);
+                else { plKeepImage(hit, it0); ahFiles.add(hit.url); }     // as the background runs: the thumbnail itself too (a GIF's still then plays)
+            }
             if (myToken.cancelled || active !== img) return;
             hideSpinner();
             dbg('gallery preview found', { ms: Math.round(performance.now() - t1), remembered: known, size: hit ? hit.w + 'x' + hit.h : null });
@@ -16511,7 +16526,6 @@
             if (it.hqFail || hit.video) { it.hqFail = false; galCellMarksSoon(); }
             if (hit.url === it.thumb) it.hqTried = true;      // no bigger file: the next hover of it stops nothing (a real original sets it.hit)
             showViewer(hit, pointer);
-            if (hit.video) galClipHover(img);
             ahSaw(img, 1);      // a hover counts once its preview shows, not for every cell the pointer crosses
             if (pinOnShow === img) { pinOnShow = null; place(); }
             if (saveOnShow === img && view && view.url) { saveOnShow = null; midSaveUrl(view.url); }
@@ -16682,6 +16696,12 @@
         }
         if (e.v.paused) e.v.play().catch(function () { /* autoplay refused: the still stays visible under it */ });
         return true;
+    }
+
+    // An animated GIF shown as its first frame whose full file is held: the cell plays it (L24's still was only until then).
+    function galGifPlay(img, it) {
+        delete img.__hzStill;
+        img.src = it.hit && isGifUrl(it.hit.url) ? it.hit.url : it.thumb;     // the still's blob stays: gifStills shares it
     }
 
     // A hovered gallery clip goes on loading in full after the pointer leaves, until another picture's hover stops it (user 2026-11-27).

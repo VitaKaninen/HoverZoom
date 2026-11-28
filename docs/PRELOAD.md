@@ -92,6 +92,11 @@ Endless they run on into the next gallery's first pages when this gallery ends.
 hit, the thumbnail itself included) cuts nothing; a gallery hover whose ±3 are in opens no M8 (`ahSaw` `idle`); a
 gallery preview whose first page of thumbnails is in (`galLookReady`) cuts nothing. A thumbnail-only picture once
 looked like "unknown" on every hover and stopped everything.
+**A hovered picture's own download never stops because the pointer left** (user, 2026-11-27, v0.458.0): `hoverRun`
+gives the lookup its own `cancelled`, so leaving stops only the preview; what it finds is kept (`plKeepImage`; a
+gallery cell turns blue, a GIF plays, a clip goes on in full). Only leaving the page stops it. A hovered **clip**
+is stopped by the next rested hover (user's words for clips); a picture is not. The hover's pause on everything else
+lifts when that hover's own original is in (`hoverHold === hh`), not 16 s later as before when the pointer had left.
 A cancelled load is not a failure: it is never cached as a miss, never marked tried, and a later run asks again.
 **Pause, not drop (user, 2026-11-27):** where we may come back, a cut is a pause — every queue re-derives what is
 unloaded, so a cut picture is asked again first when its moment resumes; only leaving for good flushes. A real

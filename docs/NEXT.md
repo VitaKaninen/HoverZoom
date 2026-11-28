@@ -102,6 +102,9 @@ corners (7.12h). The user said they are ready to test the activity window (7.12d
 right; fixed L20 never ticked (the first-2-pages job serves it) and L1 left • with nothing to load. User's clip asks
 built (GALLERY.md "Full clips": hover keeps loading, ±3 clips next with Load all, a clip in full plays in its cell; the
 ▶ is now a `GIF`/`clip` label). Verified in the pane on door-gif; not on a real site (TEST-PLAN 7.12g).
+**v0.458.0 (2026-11-27).** User restated the L24 goal (GALLERY.md "Full clips" last bullet): still first, the real
+thing playing in place once loaded; animated GIFs now do. A hover's download no longer stops when the pointer leaves
+(PRELOAD.md, before "A cancelled load"). Verified in the pane on door-gif (slow cell, hovered GIF); not on a real site.
 Start line: **"Read docs/NEXT.md 'NEXT TASK' and continue."**
 
 ---
