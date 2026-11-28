@@ -87,6 +87,13 @@ Start line: **"Read docs/NEXT.md 'NEXT TASK' and continue: L25 and Upgrade clips
 rendering of #89b4fa (read live in the user's Chrome: `#063685`); now pinned for the frame and cell marks (GALLERY.md
 "Cell marks"). Count badges on door cards (GALLERY.md "Badges first"; eporner/nsfw.xxx markup read live), verified on
 `door-count.html`. Not live-verified: the new blue under Dark Reader after the manager updates; badge learning on eporner.
+**Handoff (2026-11-27, ~334k tokens, v0.452.0–v0.455.0, all pushed).** User asked, in order: (1) hovers must stop
+other work only when needed — v0.452.0; (2) the L13 cheap count — v0.453.0; (3) count badges on door cards
+(eporner, nsfw.xxx) — v0.455.0; (4) the old blue of the corner picture's border — Dark Reader's `#063685`, pinned
+v0.454.0; (5) then L25 + "Upgrade clips" — **not started**. User offered: they start the activity window once I
+land on a page in Chrome, I do the hovers, they send the log (TEST-PLAN 7.12e/7.12d). **Last asked:** "ready to test
+the activity window?" — not answered yet; ask again only if they bring it up, else go on with L25.
+Start line: **"Read docs/NEXT.md 'NEXT TASK' and continue: L25 and Upgrade clips."**
 
 ---
 
