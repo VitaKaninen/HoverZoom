@@ -94,6 +94,11 @@ v0.454.0; (5) then L25 + "Upgrade clips" — **not started**. User offered: they
 land on a page in Chrome, I do the hovers, they send the log (TEST-PLAN 7.12e/7.12d). **Last asked:** "ready to test
 the activity window?" — not answered yet; ask again only if they bring it up, else go on with L25.
 Start line: **"Read docs/NEXT.md 'NEXT TASK' and continue: L25 and Upgrade clips."**
+**v0.456.0 (2026-11-27, pushed).** L25 + "Upgrade clips" built (GALLERY.md "Full clips"), verified in the pane on
+door-gif.html. User report mid-way: the shade's hole was square under the frame's rounded corners (unshaded wedges)
+— now rounded (`galClip`), verified in the pane. Not live-tested on a real site: full clips (TEST-PLAN 7.12g), the
+corners (7.12h). The user said they are ready to test the activity window (7.12d/7.12e) — do it with them next.
+Start line: **"Read docs/NEXT.md 'NEXT TASK' and test the activity window with the user."**
 
 ---
 

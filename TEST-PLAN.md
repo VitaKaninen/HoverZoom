@@ -394,6 +394,14 @@ Test pages:
      full count and pages at once; with Load all off it reads past its page only when you step past what it holds.
      **Fail:** chips stay `N+`, or a gallery stops short of its stated count.
 
+7.12g **Clips load in full** (v0.456.0). Load all on; open a gallery with clips (▶ cells). **Expect:** in the activity
+     window `Upgrade clips on the page on screen` runs before `HQ, page on screen` and shows `✓ clip loaded in full`;
+     each clip cell gets the blue corner; hovering one plays at once without buffering. Step a page: that page's clips
+     go first. **Fail:** a clip cell never turns blue, or the line stays `not built yet`.
+
+7.12h **The shade's corners** (v0.456.0). Open a gallery on a bright page. **Expect:** around all four rounded corners
+     of the corner picture the page is dark and blurred like everywhere else. **Fail:** a bright or sharp wedge at a corner.
+
 7.13 **A missed original is tried again** (v0.395.0). On a site where some originals fail (`found` lower
      than `pictures` in 7.2's `done` line), close the gallery and open it again, then hover.
      - **Expect:** the second run's `found` is equal or higher; the misses were tried again, not skipped

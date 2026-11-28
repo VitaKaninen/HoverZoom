@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.455.0
+// @version      0.456.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -732,18 +732,18 @@
         L7: 'Full list of long galleries (slow)', L8: 'Next results page', L9: 'HQ of hovered img', L10: 'HQ ±3 around it, then rest on screen',
         L11: 'Hovered gallery\'s p1 thumbs', L12: 'Thumbs, page on screen', L13: 'Rest of gallery list (slow)', L14: 'HQ, rest of gallery',
         L16: 'HQ of clicked picture (corner)', L17: 'Next galleries\' thumbs p1–2', L18: 'Next gallery\'s p1 HQ', L19: 'Slideshow HQ',
-        L20: 'Thumbs, next page', L21: 'Thumbs, page after that', L22: 'HQ ±3 around hovered gallery img', L23: 'HQ, page on screen', UC: 'Upgrade clips on the page on screen',
+        L20: 'Thumbs, next page', L21: 'Thumbs, page after that', L22: 'HQ ±3 around hovered gallery img', L23: 'HQ, page on screen', UC: 'Upgrade clips on the page on screen', L25: 'Full clips',
     };
-    const ACT_GAL = 'L12 L16 L20 UC:A L21 L23:A L14:A L17:E L18:EA L13', ACT_STEP = 'L12 L20 UC:A L21 L23:A L17:E L14:A L18:EA L13', ACT_PAGE = 'L1 L3 L4r1 L5r1 r2 r3 L2 L7';
+    const ACT_GAL = 'L12 L16 L20 UC:A L21 L23:A L14:A L25:A L17:E L18:EA L13', ACT_STEP = 'L12 L20 UC:A L21 L23:A L17:E L14:A L18:EA L13', ACT_PAGE = 'L1 L3 L4r1 L5r1 r2 r3 L2 L7';
     const ACT_M = {
         M1: ['Landed on a results page', ACT_PAGE], M2: ['You hovered a picture', 'L9 L10'], M3: ['Gallery preview — you hovered a gallery', 'L11 L6'],
         M4: ['You scrolled the results page', 'L1 L3 L4r1'], M5: ['Reached the bottom of the results page', 'L8'],
         M6: ['You opened a gallery', ACT_GAL], M7: ['You went forward a page', ACT_STEP], M8: ['You hovered a picture in the gallery', 'L9 L22 ' + ACT_STEP],
         M9: ['You went back a page', ACT_STEP], M11: ['Endless landed on the next gallery', ACT_GAL], M12: ['Slideshow on a results page', 'L19'],
-        M13: ['Slideshow in a gallery', 'L19 L12 L20 L21 L17:E L23:A L14:A L18:EA L13'], M14: ['You closed the gallery — the results page again', ACT_PAGE],
+        M13: ['Slideshow in a gallery', 'L19 L12 L20 L21 L17:E L23:A L14:A L25:A L18:EA L13'], M14: ['You closed the gallery — the results page again', ACT_PAGE],
     };
-    const ACT_NB = { UC: 1 }, ACT_NT = { L10: 1, L13: 1 };       // not built; built but with no job to watch
-    const ACT_TAG = { gals: 'L19', galh: 'L22', galp: 'L23', galo: 'L14', galn: 'L18' };
+    const ACT_NB = {}, ACT_NT = { L10: 1, L13: 1 };       // not built; built but with no job to watch
+    const ACT_TAG = { gals: 'L19', galh: 'L22', galc: 'UC', galp: 'L23', galo: 'L14', galv: 'L25', galn: 'L18' };
     let actMs = [];             // the moments in force, the last on top (a results-page hover's sits over the page's)
 
     // A new moment: the ones in force end (a temporary one, M2/M3, ends only the temporary one under it); their running lines it shares carry over.
@@ -1210,7 +1210,7 @@
 
     function actSecs(ms) { return ms >= 1000 ? (ms / 1000).toFixed(1) + ' s' : Math.round(ms) + ' ms'; }
 
-    const ACT_WHY = { main: 'for the page', gal: 'for the next galleries', galo: 'for the open gallery', galn: 'for the next gallery', count: 'to count it', shown: 'for the open gallery' };
+    const ACT_WHY = { main: 'for the page', gal: 'for the next galleries', galo: 'for the open gallery', galc: 'a clip on the page on screen', galv: 'a clip of the open gallery', gals: 'for the slideshow', galn: 'for the next gallery', count: 'to count it', shown: 'for the open gallery' };
 
     // A loading-ahead trace event as a line: under its job when it has one, else on its own with the reason.
     function actTrace(ev, o, job) {
@@ -1224,6 +1224,15 @@
             if (o.cut) actKid(job, 'cut', '⏸ stopped mid-way (' + o.cut + '), loads again later: ' + actPic(o.u) + ' · ' + actSecs(o.ms) + why);
             else if (o.ok && o.only) actKid(job, 'warn', '⚠ only the thumbnail found, nothing bigger: ' + actPic(o.u) + ' · ' + actSecs(o.ms) + why + actDiag(o));
             else actKid(job, !!o.ok, (o.ok ? '✓ full size ' : '✗ no full size found ') + actPic(o.u) + ' · ' + actSecs(o.ms) + why + (o.ok ? '' : actDiag(o)));
+        }
+        else if (ev === 'clip') {
+            if (!o.cut) actTagEv(o.tag, job);
+            const s = function (x) { return (x || 0) + ' s'; }, t = actPic(o.u) + ' · ' + actSecs(o.ms) + why;
+            if (o.cut) actKid(job, 'cut', '⏸ clip stopped mid-way (' + o.cut + '), loads again later: ' + t);
+            else if (o.ok && o.part) actKid(job, 'warn', '⚠ clip partly buffered: the browser stopped at ' + s(o.got) + ' of ' + s(o.dur) + ': ' + t);
+            else if (o.ok) actKid(job, true, '✓ clip loaded in full (' + s(o.dur) + '): ' + t);
+            else if (o.slow) actKid(job, 'warn', '⚠ clip still loading (' + s(o.got) + ' of ' + s(o.dur) + '), goes on in the background: ' + t);
+            else actKid(job, false, '✗ clip failed to load: ' + t + actDiag({ thumb: o.u }));
         }
         else if (ev === 'page') actKid(job, o.ok, (o.ok ? '✓ read the page of ' : '✗ could not read the page of ') + actGal(o.h) + (o.ok ? ': ' + o.n + ' pictures' : o.st ? ': status ' + o.st : '') + ' · ' + actSecs(o.ms) + why + (o.ok ? '' : actDiag({ page: o.h, st: o.st })));
         else if (ev === 'act') {
@@ -12944,6 +12953,7 @@
 
     const GAL_WAIT_MS = 2500;           // longest wait for thumbnails before laying out without the rest
     const GAL_GAP = 12;                 // px between cells and at the edges
+    const GAL_FLY_RADIUS = 8;       // the corner picture's frame rounding; the shade's hole follows it
     const GAL_FADE_MS = 200;
     const GAL_UPGRADE = 1.3;            // drawn this much larger than the thumbnail's file -> fetch the next size
     const GAL_CACHE = 300;              // fetched pages kept by URL
@@ -14201,7 +14211,7 @@
             '.veil.on{opacity:1}' +
             '.blur{position:fixed;inset:0;backdrop-filter:blur(0) grayscale(0);transition:backdrop-filter ' + GAL_FADE_MS + 'ms ease}' +
             '.blur.on{backdrop-filter:blur(6px) grayscale(.6)}' +
-            '.fly{position:fixed;z-index:3;box-sizing:border-box;border:3px solid var(--hzm);border-radius:8px;overflow:hidden;background:#1e1e2e;' +
+            '.fly{position:fixed;z-index:3;box-sizing:border-box;border:3px solid var(--hzm);border-radius:' + GAL_FLY_RADIUS + 'px;overflow:hidden;background:#1e1e2e;' +
             'box-shadow:0 0 14px 2px var(--hzmg),0 8px 22px rgba(0,0,0,.6);transform-origin:0 0;cursor:pointer;pointer-events:auto}' +
             '.fly{display:flex;flex-direction:column}' +
             '.fly.on{transition:transform ' + GAL_FLY_MS + 'ms ease,opacity ' + GAL_FLY_MS + 'ms ease}' +
@@ -14368,12 +14378,13 @@
         if (galBlur) galBlur.style.clipPath = set.shade.style.clipPath;
     }
 
-    // The whole window less one box, as a clip-path.
+    // The whole window less one box with the frame's rounded corners (GAL_FLY_RADIUS), as a clip-path: the corners outside the curve are shaded too.
     function galClip(o) {
-        const W = vpW(), H = vpH();
-        const box = [[o.x, o.y], [o.x + o.w, o.y], [o.x + o.w, o.y + o.h], [o.x, o.y + o.h]];
-        const pts = function (a) { return a.map(function (p) { return p[0] + 'px ' + p[1] + 'px'; }).join(','); };
-        return 'polygon(evenodd,' + pts([[0, 0], [W, 0], [W, H], [0, H], [0, 0]]) + ',' + pts(box.concat([box[0]])) + ')';
+        const W = vpW(), H = vpH(), n = function (v) { return Math.round(v * 100) / 100; };
+        const l = n(o.x), t = n(o.y), r = n(o.x + o.w), b = n(o.y + o.h), k = n(Math.max(0, Math.min(GAL_FLY_RADIUS, o.w / 2, o.h / 2)));
+        const arc = function (x, y) { return 'A' + k + ' ' + k + ' 0 0 1 ' + n(x) + ' ' + n(y); };
+        return "path(evenodd,'M0 0H" + n(W) + 'V' + n(H) + 'H0Z' +
+            'M' + n(l + k) + ' ' + t + 'H' + n(r - k) + arc(r, t + k) + 'V' + n(b - k) + arc(r - k, b) + 'H' + n(l + k) + arc(l, b - k) + 'V' + n(t + k) + arc(l + k, t) + "Z')";
     }
 
     let galVeilEl = null;
@@ -15032,6 +15043,7 @@
         for (let i = at + d; i >= 0 && i < N && ahead.length < (g.caught ? AH_SLIDE_CATCH : AH_SLIDE); i += d) ahead.push(set.pics[i]);
         if (g.caught && ahead.every(loaded)) g.caught = false;
         let page = [], rest = [], stand = [], behind = [];
+        if (!all) { const a = P[pg][0], b = Math.min(P[pg][1], N); page = set.pics.slice(a, b).filter(function (q) { return q.item && q.item.hit && q.item.hit.video; }); }     // M13 without Load all: the page's known clips in full
         if (all) {
             const a = P[pg][0], b = Math.min(P[pg][1], N);
             page = d > 0 ? set.pics.slice(at, b) : set.pics.slice(a, at + 1).reverse();
@@ -15047,7 +15059,7 @@
         g.end = all ? N : Math.min(N, at + 1 + (d > 0 ? ahead.length : 0));
         if (set.hqTok) set.hqTok.stop = true;      // the old run starts nothing more; what it has in flight still lands
         const tags = new Map(), out = [];
-        [[ahead, 'gals'], [page, 'galp'], [rest, 'galo'], [stand, 'galo'], [behind, 'galo']].forEach(function (L) {
+        [[ahead, 'gals'], [page, all ? 'galp' : 'galc'], [rest, 'galo'], [stand, 'galo'], [behind, 'galo']].forEach(function (L) {
             L[0].forEach(function (q) { const img = q && (q.img || q); if (img && !tags.has(img)) { tags.set(img, L[1]); out.push(img); } });
         });
         galHqAll(set, out, tags);
@@ -16000,6 +16012,7 @@
         if (cfg.galleryReadyMark) {
             plKeep.forEach(function (k) { const it = keepItem.get(k.url); if (it) held.add(it); });
             heldBlobs.forEach(function (h, u) { const it = keepItem.get(u); if (it) held.add(it); });
+            galClips.forEach(function (e) { if (e.done) held.add(e.it); });     // a clip buffered in full
         }
         const mark = function (cell, cls, on) {
             const m = cell.querySelector('.' + cls);
@@ -16316,14 +16329,20 @@
 
     // Every cell's original, GAL_HQ_PAR at a time, through the hover's own probe, so a hover finds it loaded. tags: img -> its line (default galo).
     function galHqAll(set, imgs, tags) {
+        const tagOf = function (img) { return (tags && tags.get(img)) || 'galo'; };
+        const clips = imgs.filter(function (img) { const it = img.__hzItem; return it && it.hqTried && it.hit && it.hit.video && !it.clipFull && !it.clipWait; });
         imgs = imgs.filter(function (img) { return !(img.__hzItem && (img.__hzItem.hqTried || img.__hzItem.hqBusy)); });
-        if (!imgs.length) return;
+        if (!imgs.length) {
+            if (clips.length) { set.hqTok = { cancelled: false, fresh: false }; clips.forEach(function (img) { galClipQueue(set, img, tagOf(img), null); }); }     // known clips: their full loads only
+            return;
+        }
         const job = actJob('Open gallery: full-size pictures, starting with ' + actPic((imgs[0].__hzItem && imgs[0].__hzItem.thumb) || imgs[0].src) +
             (cfg.galleryLoadAll ? ' (Load all)' : ' (from the picture you previewed)'), imgs.length);
         imgs.forEach(function (img) { galBytesHosts(img.__hzItem); });
         usLog.enable(cfg.logRequests !== false);
         const lg = usLog.start('origs', { host: pageHost(), pace: version().replace(/\?/g, '') + ' ' + AH_PIC_GAP.join('-') + 'ms, ' + GAL_HQ_PAR + ' max', slowed: noRush(pageHost()) });
         const tok = set.hqTok = { cancelled: false, fresh: false };
+        clips.forEach(function (img) { galClipQueue(set, img, tagOf(img), job); });
         const cutWhy = function () { return set.hqTok !== tok ? 'restarted' : 'cut'; };     // a newer run replaced this one
         let i = 0, running = 0, ended = false, got = 0, bytes = 0, sizing = 0, full = false;
         const end = function (why) {
@@ -16363,6 +16382,7 @@
                         ahT('orig', galOrigEv(tag, (img.__hzItem && img.__hzItem.thumb) || img.src, t0, hit, own, it), job);
                         if (hit) { got++; if (!hit.video) { plKeepImage(hit, img.__hzItem); ahFiles.add(hit.url); } size(hit); nextWarmSeen(hit.url, performance.now() - t0); }
                         if (hit && !tok.cancelled && img.__hzItem) img.__hzItem.hqTried = img.__hzItem.predOr = true;     // a miss is asked again by the next run
+                        if (hit && hit.video && !own.cutNow) galClipQueue(set, img, tag, job);
                         if (r) r.done({ status: hit ? 200 : 0 });
                     }, function () { if (r) r.done({ status: 0 }); }).then(function () { if (it) it.hqBusy = false; free(); galHqLive.delete(live); running--; next(); });
                 });
@@ -16383,6 +16403,7 @@
     function galDrop(set, closed) {
         if (set.hqTok) set.hqTok.cancelled = true;
         const its = new Set(set.pics.map(function (p) { return p.item; }));
+        galClipsDrop(function (e) { return closed || its.has(e.it); });
         galCutNote('leaving the gallery', netCutWhere(function (o) { return its.has(o.it) || (closed && (o.tag === 'gal' || o.tag === 'galn')); }, 'you left the gallery') +
             galThumbCut(function (r) { return r.tag !== 'main' && (its.has(r.item) || (closed && r.tag === 'gal')); }, 'you left the gallery'));     // the results page's rounds keep theirs
         set.el.classList.remove('on');
@@ -16546,6 +16567,108 @@
     // A background lookup's tries, for the activity window's diagnosis of a miss.
     function galTry(tok, how, u, d) {
         if (tok && tok.tries && tok.tries.length < 14) tok.tries.push(how + ': ' + u + ' → ' + (d ? d.w + '×' + d.h + (d.video ? ' clip' : '') : failureText(u)) + (tok.cutNow ? ' (stopped mid-way)' : ''));
+    }
+
+    // ---- "Upgrade clips" (tag galc, the page on screen) and L25 (galv, past it): a gallery clip loaded in full ahead. PRELOAD.md, GALLERY.md "Full clips".
+    const GAL_CLIP_KEEP = 12;       // full clips kept; past it L25 queues no more and the page's own push out the oldest elsewhere
+    const GAL_CLIP_MS = 60000;      // a clip still loading by then frees its slot and goes on loading
+    const GAL_CLIP_SUSPEND_MS = 1500;
+    const galClips = new Map();     // url -> {v, it, done, part}
+
+    // The full-clip line a found clip joins now: gals (the slideshow's next, any setting), galc on the page on screen, galv past it (M6/M11, M13), '' none.
+    function galClipTag(set, img, tag) {
+        if (galCur !== set || tag === 'galn' || tag === 'gal') return '';
+        if (tag === 'gals') return 'gals';
+        const slide = !!(tour && tour.gal === set);
+        if (!ahAll() && !(slide && tag === 'galc')) return '';
+        const P = set.pages && set.pages.length ? set.pages[Math.min(set.page || 0, set.pages.length - 1)] : [0, set.pics.length];
+        const k = set.pics.findIndex(function (p) { return p.img === img; });
+        if (k >= P[0] && k < P[1]) return 'galc';
+        const m = ahMoment();
+        return (m === 'open' || m === 'slide') && galClips.size < GAL_CLIP_KEEP ? 'galv' : '';
+    }
+
+    // A clip of the open gallery whose original is known: its full load waits for a slot in its line.
+    function galClipQueue(set, img, tag, job) {
+        const it = img && img.__hzItem, url = it && it.hit && it.hit.video && it.hit.url, tok = set.hqTok;
+        if (!url || !tok || it.clipFull || galClips.has(url)) return;
+        const ct = galClipTag(set, img, tag);
+        if (!ct) return;
+        it.clipWait = true;
+        ahSlot(ahPics, ct, tok).then(function (free) {
+            it.clipWait = false;
+            if (!free) return;
+            if (tok.cancelled || galCur !== set || it.clipFull || galClips.has(url)) { free(); return; }
+            const own = netJob(tok, it, ct), t0 = performance.now();
+            galClipLoad(url, it, own).then(function (r) {
+                ahT('clip', { tag: ct, u: it.thumb, s: Math.round(t0), ms: Math.round(performance.now() - t0), ok: r.ok ? 1 : 0, part: r.part ? 1 : 0, slow: r.slow ? 1 : 0,
+                    got: r.got, dur: r.dur, cut: r.cut ? own.cutWhy || 'it was let go' : '' }, job);
+                free();
+            });
+        });
+    }
+
+    // One clip buffered in full by a muted <video preload=auto> kept alive (the viewer's player of the same address shares its buffer); a cut stops it mid-way.
+    function galClipLoad(url, it, own) {
+        return new Promise(function (resolve) {
+            const v = document.createElement('video');
+            v.preload = 'auto';
+            v.muted = true;
+            const key = 'clip:' + url, live = { abort: null, owners: new Set([own]) }, e = { v: v, it: it, done: false, part: false, at: Date.now() };
+            galClips.set(url, e);
+            netLive.set(key, live);
+            let over = false, timer = 0, sus = 0;
+            const got = function () { const b = v.buffered; return b && b.length ? b.end(b.length - 1) : 0; };
+            const full = function () { return v.duration > 0 && got() >= v.duration - 0.25; };
+            const end = function (ok, why) {
+                if (over) return;
+                over = true;
+                clearTimeout(timer); clearTimeout(sus);
+                if (netLive.get(key) === live) netLive.delete(key);
+                netCut.delete(key);
+                if (ok) { e.done = true; e.part = why === 'part'; it.clipFull = true; galClipTrim(); galCellMarksSoon(); }
+                else if (why !== 'slow') galClipStop(url);
+                resolve({ ok: ok, part: why === 'part', slow: why === 'slow', cut: why === 'cut', got: Math.round(got() * 10) / 10, dur: Math.round((v.duration || 0) * 10) / 10 });
+            };
+            const check = function () {
+                if (!full()) return;
+                if (over) { if (galClips.get(url) === e && !e.done) { e.done = true; it.clipFull = true; galCellMarksSoon(); } return; }     // a slow one finished after its slot was freed
+                end(true);
+            };
+            v.onprogress = v.oncanplaythrough = v.onloadeddata = check;
+            v.onsuspend = function () {      // the browser stopped fetching: in full, or as much as it will buffer unplayed
+                clearTimeout(sus);
+                const at = got();
+                sus = setTimeout(function () { if (full()) check(); else if (got() === at && at > 0 && !over) end(true, 'part'); }, GAL_CLIP_SUSPEND_MS);
+            };
+            v.onerror = function () { end(false, 'error'); };
+            live.abort = e.end = function () { end(false, 'cut'); };
+            timer = setTimeout(function () { end(false, 'slow'); }, GAL_CLIP_MS);
+            v.src = url;
+        });
+    }
+
+    // A kept clip stops loading and is let go; its cell loses the ready mark and a later run loads it again.
+    function galClipStop(url) {
+        const e = galClips.get(url);
+        if (!e) return;
+        galClips.delete(url);
+        e.end();     // still loading: its slot is freed
+        e.it.clipFull = false;
+        e.v.onprogress = e.v.oncanplaythrough = e.v.onloadeddata = e.v.onsuspend = e.v.onerror = null;
+        e.v.removeAttribute('src');
+        e.v.load();
+        galCellMarksSoon();
+    }
+    function galClipsDrop(match) { Array.from(galClips.keys()).forEach(function (u) { if (match(galClips.get(u))) galClipStop(u); }); }
+
+    // Over GAL_CLIP_KEEP: the oldest loaded ones off the page on screen go first.
+    function galClipTrim() {
+        if (galClips.size <= GAL_CLIP_KEEP) return;
+        const set = galCur, P = set && set.pages && set.pages.length ? set.pages[Math.min(set.page || 0, set.pages.length - 1)] : null;
+        const here = new Set(set && P ? set.pics.slice(P[0], P[1]).map(function (p) { return p.item; }) : []);
+        const old = Array.from(galClips.entries()).filter(function (x) { return x[1].done && !here.has(x[1].it); }).sort(function (a, b) { return a[1].at - b[1].at; });
+        while (galClips.size > GAL_CLIP_KEEP && old.length) galClipStop(old.shift()[0]);
     }
 
     // The page a gallery picture links to: what it declares (same shape) or a copy of the same name, the biggest one larger than the thumbnail.
@@ -18765,9 +18888,9 @@
     // A waiting load's rank (lower starts first) in moment m (PRELOAD.md "Plan"): galh L22, galp L23, galo L14, gal L17, galn L18.
     function ahPri(tag, m) {
         if (tag === 'grow') return 9;     // L13: last
-        if (!m) return tag === 'gal' || tag === 'galo' || tag === 'galp' || tag === 'galh' ? 0 : tag === 'galn' ? 0.5 : tag === 'count' ? 1 : 2;
-        if (m === 'slide') { const q = { gals: 0, galh: 0, gal: 1, galp: 2, galo: 3, galn: 4 }[tag]; return q == null ? 5 : q; }     // M13
-        const p = { gals: 0, galh: 0, galp: 1, galo: m === 'open' ? 2 : 3, gal: m === 'open' ? 3 : 2, galn: 4 }[tag];     // M6: this gallery before the next ones; M7-M9 the reverse
+        if (!m) return tag === 'gal' || tag === 'galo' || tag === 'galp' || tag === 'galh' || tag === 'galc' || tag === 'galv' ? 0 : tag === 'galn' ? 0.5 : tag === 'count' ? 1 : 2;
+        if (m === 'slide') { const q = { gals: 0, galh: 0, gal: 1, galp: 2, galc: 2, galo: 3, galv: 3, galn: 4 }[tag]; return q == null ? 5 : q; }     // M13
+        const p = { gals: 0, galh: 0, galc: 0.5, galp: 1, galo: m === 'open' ? 2 : 3, galv: m === 'open' ? 2 : 3, gal: m === 'open' ? 3 : 2, galn: 4 }[tag];     // M6: this gallery before the next ones; M7-M9 the reverse; galc = Upgrade clips
         return p == null ? 5 : p;
     }
 
@@ -18800,13 +18923,13 @@
         if (!m) return ((tag === 'count' || tag === 'main' || tag === 'next') && ahL1Busy()) || ((tag === 'main' || tag === 'next') && galCnt > 0);     // M1: L1, then L3, then the rounds
         if (tag === 'count' || tag === 'main' || tag === 'next') return true;
         if (m === 'slide' && tag !== 'gals' && (ahPics.wait.some(function (w) { return w.tag === 'gals'; }) || (ahPics.on.gals || 0) > 0)) return true;     // M13 line 1 first
-        if (tag === 'galo' && ahG && ahG.walk && m !== 'open') return true;     // M7-M9, M13: L17's walk first
+        if ((tag === 'galo' || tag === 'galv') && ahG && ahG.walk && m !== 'open') return true;     // M7-M9, M13: L17's walk first
         return busy && tag !== 'galh' && tag !== 'gals';
     }
     function ahPump() { ahPics.pump(); ahPages.pump(); }
     // Any of the open gallery's lines still waiting or loading.
     function ahGalBusy() {
-        return ['gals', 'galh', 'galp', 'galo', 'gal', 'galn'].some(function (t) {
+        return ['gals', 'galh', 'galc', 'galp', 'galo', 'galv', 'gal', 'galn'].some(function (t) {
             return [ahPics, ahPages].some(function (g) { return (g.on[t] || 0) > 0 || g.wait.some(function (w) { return w.tag === t; }); });
         });
     }

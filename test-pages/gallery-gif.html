@@ -1,7 +1,7 @@
 <!doctype html>
 <meta charset="utf-8">
 <title>GIF gallery</title>
-<!-- L24 fixture: GIF thumbnails (4 animated, 1 single-frame) beside jpg ones, and one jpg whose linked page holds a clip (its cell gets ▶ once found); door-gif.html links it. -->
+<!-- L24 fixture: GIF thumbnails (4 animated, 1 single-frame) beside jpg ones, and two jpg whose linked pages hold a clip (▶ once found; with Load all both load in full: Upgrade clips); door-gif.html links it. -->
 <style>body{margin:0;background:#1e1e2e} .grid img{width:200px;height:150px;margin:6px}</style>
 <div class="grid">
   <div class="tile"><a href="/test-images/gif/anim-1.gif"><img src="/test-images/gif/anim-1.gif"></a></div>
@@ -13,6 +13,7 @@
   <div class="tile"><a href="/test-images/gif/anim-4.gif"><img src="/test-images/gif/anim-4.gif"></a></div>
   <div class="tile"><a href="/many/gifg-3.jpg"><img src="/many/gifg-3.jpg"></a></div>
   <div class="tile"><a href="post-clip.html"><img src="/test-images/letterbox.jpg"></a></div>
+  <div class="tile"><a href="post-video.html"><img src="/test-images/photo-200x150.jpg?clip"></a></div>
 </div>
 <script>
   var GM_getValue = function (key, dflt) {

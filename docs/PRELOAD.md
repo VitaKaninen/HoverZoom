@@ -37,6 +37,7 @@ Queues (each kind below names its own). They do not know about each other; all s
 | L14 | This gallery's full size after the page on screen: → end → 2 pages behind | Load all: after L23 (M6) or after L17 (M7–M9); G: waits for a hover | AH-pic `galo` |
 | L15 | Bigger thumbnail files for cells drawn large | page laid out (`galUpgrade`) | direct |
 | L16 | The clicked (corner) picture's full size | on open (`galFlyUpgrade`) | direct |
+| UC / L25 | Full clips: the page on screen's (`galc`) / the rest of the gallery's (`galv`) | UC with Load all, ahead of L23; L25 in M6/M11, M13 (GALLERY.md "Full clips") | AH-pic |
 | L24 | A GIF thumbnail's first frame only (ranged read) + ▶; ▶ also on a cell whose original is a clip | with its cell's thumbnail (`gifStill` in `galImg`), GALLERY.md "L24" | direct (GM_xhr) |
 | **Endless** ||||
 | L17 | Next galleries in the queue: page read + first 2 pages of thumbnails, 2 ahead → 5 once moving on; Last: none | every landing and page step (`ahGalAhead`) | AH-page `gal`, AH-pic `gal` |
@@ -70,7 +71,9 @@ the read has ended (`galListRead`: grown, or stopped with a reason) `galWhole` i
 Trap: a gate's release pumps **both** gates (`onFree` = `ahPump`, set beside the two gates so `ahGate` stays testable alone), or `grow` (AH-page) never sees AH-pic's originals finish.
 Chrome-pane check, door-search: d6 (240 in HTML) read at 32.8 s right after its 240 originals with Load all, 0.1 s
 without; d7 (10 in HTML) "needed now" at once. The step-past jump is not live-tested.
-**Not built:** L25 and "Upgrade clips" (a clip's original is still only probed for metadata until a hover), M10's "L17 first gallery before L20", L8's L1 (singles of a fetched page), L10's ±3-then-rest,
+**Built (v0.456.0), L25 + "Upgrade clips":** GALLERY.md "Full clips" (tags `galc`, `galv`; verified in the pane on
+`door-gif.html`: both clip cells loaded in full as `galc`, blue corner). Not live-tested on a real site.
+**Not built:** M10's "L17 first gallery before L20", L8's L1 (singles of a fetched page), L10's ±3-then-rest,
 next-page finding (its own session, three repos).
 
 New kind in the plan (not in code): **L25** the full clip. L10 = ±3 nearest first, then the rest of the section on screen. L8 = the next results page's

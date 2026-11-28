@@ -470,12 +470,27 @@ sat centred on its dark ring; a star was replaced by a corner):
   `galCoverItem` (same URL, `sameStem`, `galSameFile`), retried as cells join; `galFlyUpgrade` also sets it.
 - **Blue** (`.rdy`, `var(--hzm)`, setting `galleryReadyMark`) where the original is held in the memory keep (`plKeep` or
   `heldBlobs` via `keepItem`) — the honest "a hover shows it at once". Recomputed from the keep every paint, so a
-  dropped original loses it. Clips get none (not kept).
+  dropped original loses it. A clip gets it once buffered in full (`galClips` done, v0.456.0).
 - **Red** (`.hqx`, `#f38ba8`, under `galleryReadyMark`) where the original genuinely failed (`it.hqFail`, set by
   `galOrigNote` / a hover's miss; a cut never sets it), in place of blue. Its activity line carries the diagnosis.
 - **▶ in the centre** (`.ply`, always on, v0.449.0, L24): an animated GIF thumbnail shown as its first frame
   (`item.gifAnim`), or a cell whose original turned out a clip (`item.hit.video`; appears when L22/L23/L14 or a hover
   finds it — `galOrigNote` and the hover path repaint).
+
+## Full clips: "Upgrade clips" and L25 (v0.456.0)
+
+A found clip (`hit.video`) is loaded in full by `galClipQueue` → `galClipLoad`: a muted `<video preload=auto>` kept
+alive in `galClips` (Chromium's player of the same address in this document shares its buffer — unverified per
+browser; the slideshow's `plWarmVideo` relies on the same). Lines (`galClipTag`): `galc` = the page on screen
+("Upgrade clips", Load all; rank 0.5, ahead of L23), `galv` = L25, past the page, only in M6/M11 and M13 and while
+fewer than `GAL_CLIP_KEEP` 12 are kept; `gals` = the slideshow's next 10, any setting; without Load all a slideshow
+upgrades the page's *known* clips only (unknown cells are not resolved for it). L22 clips stay metadata-only unless
+Load all (plan M8). A clip is known only after its original is resolved, so a found clip re-queues in its own line;
+known clips (`hqTried`) are queued by `galHqAll` before its filter drops them. Done = buffered to the end; the
+browser suspending short of it (`GAL_CLIP_SUSPEND_MS`) = "partly buffered" (⚠, kept); `GAL_CLIP_MS` 60 s frees the
+slot and the load goes on. Cuts: an entry in `netLive` under `clip:<url>`, so hovers, page steps and `galDrop` stop
+it like any original (`galClipStop`); closing flushes all, an Endless switch the left gallery's. Over 12, the oldest
+done ones off the page on screen go (`galClipTrim`). Fixture: `gallery-gif.html` (2 clip cells; door-gif.html).
 
 ## L24: GIF thumbnails as their first frame (v0.449.0)
 
@@ -872,8 +887,9 @@ The page a door opens is the ground truth for the press that opened it. Hovers c
 - Test: the Browser pane's background tab fires **no** scroll events (`scrollBy` moves the page,
   listeners get nothing) — dispatch `new Event('scroll')` on `document` by hand.
 - Backdrop (user, v0.247.0 — so the page's picture can't be taken for a thumbnail): `.shade`
-  darkens the page `rgba(0,0,0,.8)` with the hole cut out (`clip-path: polygon(evenodd, viewport,
-  hole)`, `galShade`); the hole is the corner where `.fly` sits. **The dark starts with the flight**
+  darkens the page `rgba(0,0,0,.8)` with the hole cut out (`clip-path: path(evenodd, viewport,
+  hole)`, `galClip`/`galShade`); the hole is the corner where `.fly` sits, rounded by the frame's own
+  `GAL_FLY_RADIUS` (v0.456.0: a square hole left the four wedges outside the curve unshaded and unblurred). **The dark starts with the flight**
   (user, v0.296.0): `galVeil(true)` in `galMiddle` puts the same shade (`.veil`, outside any set,
   `pointer-events:none` so a press while loading still closes and goes through) and the blur up at
   once; `galBuild` drops it `GAL_FADE_MS` after its set fades in, `galHide` always.
