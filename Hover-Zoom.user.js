@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Hover Zoom
 // @namespace   https://github.com/VitaKaninen
-// @version      0.456.0
+// @version      0.457.0
 // @author      VitaKaninen
 // @description Zoom any image on hover. No format allowlist, no size caps, no per-site plugins — resolves the full-size URL on demand. Drag the preview to keep it around, click it to pin it, then wheel or +/− to zoom in past the window edge and drag or arrow keys to pan.
 // @match       *://*/*
@@ -833,6 +833,7 @@
             const at = actLineFor(j.L);
             if (at) { const ln = at[0].lines[at[1]]; ln.live = Math.max(0, (ln.live || 0) - 1); if (ok) actLineSet(j.L, 'done'); }
         }
+        if (j.also && ok) j.also.forEach(function (k) { actLineSet(k, 'done'); });
         if (j.tags && ok) j.tags.forEach(function (t) { if (ACT_TAG[t]) actLineSet(ACT_TAG[t], 'done'); });
     }
     // A loading-ahead picture of a tagged line (L22, L23, L14, L18) landed: its line runs, and is done once none of that tag waits or loads.
@@ -1210,7 +1211,7 @@
 
     function actSecs(ms) { return ms >= 1000 ? (ms / 1000).toFixed(1) + ' s' : Math.round(ms) + ' ms'; }
 
-    const ACT_WHY = { main: 'for the page', gal: 'for the next galleries', galo: 'for the open gallery', galc: 'a clip on the page on screen', galv: 'a clip of the open gallery', gals: 'for the slideshow', galn: 'for the next gallery', count: 'to count it', shown: 'for the open gallery' };
+    const ACT_WHY = { main: 'for the page', gal: 'for the next galleries', galo: 'for the open gallery', galc: 'a clip on the page on screen', hov: 'the clip you hovered', galv: 'a clip of the open gallery', gals: 'for the slideshow', galn: 'for the next gallery', count: 'to count it', shown: 'for the open gallery' };
 
     // A loading-ahead trace event as a line: under its job when it has one, else on its own with the reason.
     function actTrace(ev, o, job) {
@@ -12939,7 +12940,7 @@
             dbg('loading ' + added + ' more ahead', { queued: plQueue.length + added });
             const aj = actJob('Page: full size of the pictures ' + (level >= 3 ? 'on the page' : 'on and near the screen'), added, level >= 3 ? 'L2' : 'L1');
             fresh.forEach(function (j) { j.aj = aj; plQueue.push(j); });
-        }
+        } else if (!plQueue.some(function (j) { return j.page; }) && !(plL1.live > 0)) actLineSet(level >= 3 ? 'L2' : 'L1', 'done');     // nothing left to load: the line is done, not waiting
         plPump();
     }
 
@@ -14168,8 +14169,8 @@
             '.svd{position:absolute;left:4px;top:4px;width:22px;height:22px;pointer-events:none}' +
             '.cvr,.rdy,.hqx{position:absolute;right:0;bottom:0;width:14px;height:14px;pointer-events:none;border-bottom-right-radius:6px;clip-path:polygon(100% 0,100% 100%,0 100%)}' +
             '.rdy{background:var(--hzm)}.hqx{background:#f38ba8}' +
-            '.ply{position:absolute;left:50%;top:50%;width:30px;height:30px;margin:-15px 0 0 -15px;border-radius:50%;background:rgba(30,30,46,.6);pointer-events:none;opacity:.85}' +
-            '.ply::after{content:"";position:absolute;left:11px;top:8px;border-style:solid;border-width:7px 0 7px 12px;border-color:transparent transparent transparent #cdd6f4}' +
+            '.cell video.cv{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:6px;pointer-events:none}' +
+            '.ply{position:absolute;right:4px;top:4px;padding:0 5px;border-radius:4px;background:rgba(30,30,46,.78);color:#cdd6f4;font:600 10px/15px system-ui,sans-serif;letter-spacing:.3px;pointer-events:none}' +     // a label, not a button (user)
             '.cvr{position:absolute;inset:0;width:auto;height:auto;clip-path:none;border-radius:6px;box-shadow:inset 0 0 0 3px var(--hzm);background:none;pointer-events:none;z-index:1}' +
             '.strip[hidden]{display:none}' +
             '.strip{position:fixed;z-index:4;display:flex;flex-direction:column;justify-content:space-evenly;padding:0 4px;box-sizing:border-box;cursor:move;' +
@@ -15883,6 +15884,7 @@
         const got = [], t0 = performance.now();
         galTrace(href, 'thumbnails: loading ' + list.length + ' (' + galHostMix(list.map(function (it) { return it.thumb; })) + ')');
         const job = actJob((galLook ? 'Gallery preview: thumbnails of its first page' : 'Open gallery: thumbnails of its first 2 pages') + ' — ' + actGal(href), list.length, galLook ? 'L11' : 'L12');
+        if (!galLook) job.also = ['L20'];     // its second page is the next page's thumbnails
         if (list.every(galDeclAsp)) {      // every size declared: placed at once, each shown as it loads
             const early = [], left = { n: list.length, at: performance.now() };
             if (!galLook) galEarlyLeft.set(href, left);     // before galBuild: its layout queues the originals that wait for these
@@ -16027,7 +16029,11 @@
             mark(cell, 'hqx', bad);
             mark(cell, 'cvr', cover);     // a border inside the cell: no size change
             mark(cell, 'rdy', !bad && held.has(p.item));
-            mark(cell, 'ply', !!p.item && (!!p.item.gifAnim || !!(p.item.hit && p.item.hit.video)));     // L24: a clip or an animated GIF, shown still
+            const cv = p.item ? galClipCell(cell, p.img, p.item) : false;
+            const kind = cv || !p.item ? '' : p.item.hit && p.item.hit.video ? 'clip' : p.item.gifAnim ? 'GIF' : '';     // L24: shown still
+            mark(cell, 'ply', !!kind);
+            const pl = kind && cell.querySelector('.ply');
+            if (pl && pl.textContent !== kind) pl.textContent = kind;
         });
     }
 
@@ -16505,6 +16511,7 @@
             if (it.hqFail || hit.video) { it.hqFail = false; galCellMarksSoon(); }
             if (hit.url === it.thumb) it.hqTried = true;      // no bigger file: the next hover of it stops nothing (a real original sets it.hit)
             showViewer(hit, pointer);
+            if (hit.video) galClipHover(img);
             ahSaw(img, 1);      // a hover counts once its preview shows, not for every cell the pointer crosses
             if (pinOnShow === img) { pinOnShow = null; place(); }
             if (saveOnShow === img && view && view.url) { saveOnShow = null; midSaveUrl(view.url); }
@@ -16579,6 +16586,7 @@
     function galClipTag(set, img, tag) {
         if (galCur !== set || tag === 'galn' || tag === 'gal') return '';
         if (tag === 'gals') return 'gals';
+        if (tag === 'galh') return ahAll() ? 'galh' : '';     // M8: the hovered picture's neighbours' clips next, Load all only
         const slide = !!(tour && tour.gal === set);
         if (!ahAll() && !(slide && tag === 'galc')) return '';
         const P = set.pages && set.pages.length ? set.pages[Math.min(set.page || 0, set.pages.length - 1)] : [0, set.pics.length];
@@ -16656,10 +16664,37 @@
         e.end();     // still loading: its slot is freed
         e.it.clipFull = false;
         e.v.onprogress = e.v.oncanplaythrough = e.v.onloadeddata = e.v.onsuspend = e.v.onerror = null;
+        e.v.remove();
         e.v.removeAttribute('src');
         e.v.load();
         galCellMarksSoon();
     }
+    // A clip buffered in full plays muted and looping in its own cell, over the still (user 2026-11-27); true when it does.
+    function galClipCell(cell, img, it) {
+        const url = it.hit && it.hit.video && it.hit.url, e = url && galClips.get(url);
+        if (!e || !e.done) return false;
+        if (e.v.parentNode !== cell) {
+            e.v.className = 'cv';
+            e.v.loop = true;
+            e.v.muted = true;
+            e.v.playsInline = true;
+            img.after(e.v);
+        }
+        if (e.v.paused) e.v.play().catch(function () { /* autoplay refused: the still stays visible under it */ });
+        return true;
+    }
+
+    // A hovered gallery clip goes on loading in full after the pointer leaves, until another picture's hover stops it (user 2026-11-27).
+    function galClipHover(img) {
+        const set = galCur, it = img && img.__hzItem, url = it && it.hit && it.hit.video && it.hit.url;
+        if (!set || !url || it.clipFull || galClips.has(url)) return;
+        const own = netJob(set.hqTok || { cancelled: false }, it, 'hov'), t0 = performance.now();
+        galClipLoad(url, it, own).then(function (r) {
+            ahT('clip', { tag: 'hov', u: it.thumb, s: Math.round(t0), ms: Math.round(performance.now() - t0), ok: r.ok ? 1 : 0, part: r.part ? 1 : 0, slow: r.slow ? 1 : 0,
+                got: r.got, dur: r.dur, cut: r.cut ? own.cutWhy || 'it was let go' : '' }, null);
+        });
+    }
+
     function galClipsDrop(match) { Array.from(galClips.keys()).forEach(function (u) { if (match(galClips.get(u))) galClipStop(u); }); }
 
     // Over GAL_CLIP_KEEP: the oldest loaded ones off the page on screen go first.

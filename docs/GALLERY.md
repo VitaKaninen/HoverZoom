@@ -473,9 +473,9 @@ sat centred on its dark ring; a star was replaced by a corner):
   dropped original loses it. A clip gets it once buffered in full (`galClips` done, v0.456.0).
 - **Red** (`.hqx`, `#f38ba8`, under `galleryReadyMark`) where the original genuinely failed (`it.hqFail`, set by
   `galOrigNote` / a hover's miss; a cut never sets it), in place of blue. Its activity line carries the diagnosis.
-- **▶ in the centre** (`.ply`, always on, v0.449.0, L24): an animated GIF thumbnail shown as its first frame
-  (`item.gifAnim`), or a cell whose original turned out a clip (`item.hit.video`; appears when L22/L23/L14 or a hover
-  finds it — `galOrigNote` and the hover path repaint).
+- **A `GIF` / `clip` label top-right** (`.ply`, always on, L24; a centred ▶ until v0.457.0 — user: it looked like a
+  button to click): an animated GIF thumbnail shown as its first frame (`item.gifAnim`), or a cell whose original turned
+  out a clip (`item.hit.video`; appears when L22/L23/L14 or a hover finds it). Gone once the clip plays in the cell.
 
 ## Full clips: "Upgrade clips" and L25 (v0.456.0)
 
@@ -491,6 +491,12 @@ browser suspending short of it (`GAL_CLIP_SUSPEND_MS`) = "partly buffered" (⚠,
 slot and the load goes on. Cuts: an entry in `netLive` under `clip:<url>`, so hovers, page steps and `galDrop` stop
 it like any original (`galClipStop`); closing flushes all, an Endless switch the left gallery's. Over 12, the oldest
 done ones off the page on screen go (`galClipTrim`). Fixture: `gallery-gif.html` (2 clip cells; door-gif.html).
+- **A hovered clip goes on loading after the pointer leaves** (`galClipHover`, tag `hov`, any setting; user v0.457.0):
+  a background owner outside the gates, so only another picture's rested hover (`hoverFirst`), a page step or a close
+  stops it. With Load all the hover's ±3 clips ride L22's own line (`galClipTag` → `galh`), so they come next.
+- **A clip in full plays in its cell** (`galClipCell`, from `galCellMarks`; user v0.457.0): the kept `<video>` itself is
+  moved over the still (`video.cv`, muted, looping, `pointer-events:none` so the cell's `<img>` keeps the hover).
+  Animated GIFs held in full still show their first frame (not asked).
 
 ## L24: GIF thumbnails as their first frame (v0.449.0)
 

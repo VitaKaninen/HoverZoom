@@ -98,7 +98,11 @@ Start line: **"Read docs/NEXT.md 'NEXT TASK' and continue: L25 and Upgrade clips
 door-gif.html. User report mid-way: the shade's hole was square under the frame's rounded corners (unshaded wedges)
 — now rounded (`galClip`), verified in the pane. Not live-tested on a real site: full clips (TEST-PLAN 7.12g), the
 corners (7.12h). The user said they are ready to test the activity window (7.12d/7.12e) — do it with them next.
-Start line: **"Read docs/NEXT.md 'NEXT TASK' and test the activity window with the user."**
+**v0.457.0 (2026-11-27).** Activity test done (user's export of my eporner run): one block per moment and ↓ carry-over
+right; fixed L20 never ticked (the first-2-pages job serves it) and L1 left • with nothing to load. User's clip asks
+built (GALLERY.md "Full clips": hover keeps loading, ±3 clips next with Load all, a clip in full plays in its cell; the
+▶ is now a `GIF`/`clip` label). Verified in the pane on door-gif; not on a real site (TEST-PLAN 7.12g).
+Start line: **"Read docs/NEXT.md 'NEXT TASK' and continue."**
 
 ---
 

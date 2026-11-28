@@ -394,10 +394,11 @@ Test pages:
      full count and pages at once; with Load all off it reads past its page only when you step past what it holds.
      **Fail:** chips stay `N+`, or a gallery stops short of its stated count.
 
-7.12g **Clips load in full** (v0.456.0). Load all on; open a gallery with clips (▶ cells). **Expect:** in the activity
-     window `Upgrade clips on the page on screen` runs before `HQ, page on screen` and shows `✓ clip loaded in full`;
-     each clip cell gets the blue corner; hovering one plays at once without buffering. Step a page: that page's clips
-     go first. **Fail:** a clip cell never turns blue, or the line stays `not built yet`.
+7.12g **Clips load in full** (v0.457.0). Load all on; open a gallery with clips (cells labelled `clip`). **Expect:** in
+     the activity window `Upgrade clips on the page on screen` runs before `HQ, page on screen` and shows `✓ clip loaded
+     in full`; each clip then plays muted and looping in its own cell, with the blue corner; hovering one plays at once.
+     Load all off: hover a clip, move away without hovering anything else — it finishes loading and plays in its
+     cell. **Fail:** a clip cell stays a still with no blue corner, or the line says `not built yet`.
 
 7.12h **The shade's corners** (v0.456.0). Open a gallery on a bright page. **Expect:** around all four rounded corners
      of the corner picture the page is dark and blurred like everywhere else. **Fail:** a bright or sharp wedge at a corner.

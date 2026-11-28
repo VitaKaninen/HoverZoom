@@ -128,7 +128,7 @@ results page · L9 HQ of hovered img · L10 HQ ±3 around it, then rest on scree
 Thumbs, page on screen · L13 Rest of gallery list (slow) · L14 HQ, rest of gallery · L15 Bigger thumbs for big cells ·
 L16 HQ of clicked picture (corner) · L17 Next galleries' thumbs p1–2 · L18 Next gallery's p1 HQ · L19 Slideshow HQ ·
 L20 Thumbs, next page · L21 Thumbs, page after that · L22 HQ ±3 around hovered gallery img · L23 HQ, page on screen ·
-L24 Clip/GIF stills with ▶ · L25 Full clips
+L24 Clip/GIF stills, labelled · L25 Full clips
 
 **M1 – Landed on a results page:** 1 L1 · 2 L3 · 3 L4 r1 · 4 L5 r1 · 5 L4/L5 r2 · 6 L4/L5 r3 · 7 L2 · 8 L7 (cut by M5)
 **M2 – Hovering a single picture:** 1 L9 · 2 L10 · 3 back to M1
