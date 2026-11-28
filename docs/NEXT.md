@@ -14,6 +14,12 @@ rows in Settings with on/off, Copy/Show/Export/Clear, Export all / Clear all, pl
 v0.462.0 (SETTINGS.md "Collected data"), tested on the test page only. No question to the user is open. Unexplained:
 one FS release run had a single test failure (near `page-walk`'s learned-address cases) that 25 reruns never repeated.
 
+**Handoff (session of 2026-11-28):** the user asked for (1) the cleanup item → done v0.463.0; (2) TEST-PLAN 4.7 in
+Chrome → passed; (3) an analysis of their 2026-11-28 export → PREDICT.md "Findings"; (4) fix A, hover-pattern
+learning "in as many ways as possible" (place, page, row/column, shape), helpful logging, two export modes, and a
+reference card → all built v0.464.0 (PRELOAD.md L17a/L26, GALLERY.md "Hover patterns", SETTINGS.md export,
+LOADING-REFERENCE.md). Last offer: colour as a pattern key (costs a re-fetch per thumbnail) — not answered.
+
 ## Waiting on the user (ask only if they bring it up)
 
 - Colour as a hover-pattern key (GALLERY.md "Hover patterns"): needs each thumbnail fetched again as bytes; offered
