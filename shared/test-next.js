@@ -85,6 +85,11 @@ const pager = (base, ns, extra) => doc(h('div', { class: 'pagination' },
 eq(url(N.find(pager('/forum/list', [1, 2, 4, 5]), B + '?page=3')), 'https://ex.com/forum/list?page=4', 'URL says page 3');
 eq(url(N.find(pager('/forum/list', [1, 5, 6, 8, 9, 42]), 'https://ex.com/forum/list?x=7')),
     'https://ex.com/forum/list?page=8', 'windowed pager: the narrow hole is here');
+eq(url(N.find(doc(h('div', { class: 'numlist2' }, ...[4, 5, 6, 8, 9, 10].map(n => a('/cat/all/' + n + '/', String(n))))), 'https://ex.com/cat/all/7/')),
+    'https://ex.com/cat/all/8/', 'a window that does not show page 1 (eporner)');
+eq(url(N.find(doc(h('div', { class: 'numlist2' }, ...[4, 5, 6, 8, 9, 10].map(n => a('/cat/all/' + n + '/', String(n), n % 2 ? { class: 'extrapages' + n } : {})))), 'https://ex.com/cat/all/7/')),
+    'https://ex.com/cat/all/8/', 'per-link classes do not split the pager (eporner)');
+eq(url(N.find(doc(h('div', {}, a('/t/9811', '7'), a('/t/1204', '8'))), B)), null, 'two numbers above 2 with no run are not a pager');
 eq(url(N.find(pager('/forum/list', [2, 3, 4]), B)), 'https://ex.com/forum/list?page=2', 'page 1 links from 2');
 eq(url(N.find(pager('/forum/list', [1, 2, 3]), B + '?page=4')), null, 'last page: nothing after it');
 {

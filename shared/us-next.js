@@ -48,13 +48,13 @@ const usNext = (function () {
         return { a, url, urlObj: u, text: (a.textContent || '').trim() };
     }
 
-    // Coarse cluster fingerprint: tag + first 2 classes, 4 levels up.
+    // Coarse cluster fingerprint: the link's own tag (its classes vary per link), then tag + first 2 classes, 3 levels up.
     function groupSig(a) {
         const parts = [];
         let el = a;
         for (let i = 0; i < 4 && el && el.tagName; i++) {
             let sig = el.tagName.toLowerCase();
-            const cls = ((el.getAttribute && el.getAttribute('class')) || '')
+            const cls = (i && el.getAttribute && el.getAttribute('class') || '')
                 .trim().split(/\s+/).slice(0, 2).map(c => c.replace(/\d+/g, '#')).join('.');
             if (cls) sig += '.' + cls;
             parts.push(sig);
@@ -132,12 +132,13 @@ const usNext = (function () {
         let best = null;
         for (const items of groups.values()) {
             const nums = Array.from(new Set(items.map(r => parseInt(r.text, 10)))).sort((a, b) => a - b);
-            if (nums.length < 2 || nums[0] > 2) continue;
+            if (nums.length < 2) continue;
             let run = 1, longest = 1;
             for (let i = 1; i < nums.length; i++) {
                 run = (nums[i] === nums[i - 1] + 1) ? run + 1 : 1;
                 if (run > longest) longest = run;
             }
+            if (nums[0] > 2 && longest < 3) continue;               // a window with no page 1 (4 5 6 [7] 8 9) needs a run of 3
             if (longest < 2 && nums.join() !== '1,3') continue;     // 1,3: page 2 of 3
             if (!pagerShapeOk(items, base)) continue;
             if (!best || longest > best.run) best = { items, run: longest };

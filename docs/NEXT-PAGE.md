@@ -34,6 +34,8 @@ the first; it now refuses like HZ did.
 
 Exceptions inside the pager rung, each for a real shape: numbers exactly `1,3` pass the run check
 (page 2 of 3); a group whose URLs carry no digit (`/gallery/two/`) skips the shape check.
+A window that does not show page 1 (`4 5 6 [7] 8 9`, eporner) needs a run of 3. `groupSig` takes the link's
+own tag without classes: eporner marks pager links `extrapages1`/`extrapages2`, which split the group.
 
 Options: `o.norm(url, base)` (FS passes its `norm`: no trailing slash, collapsed slashes; default
 strips the hash), `o.skip(url)` (HZ refuses pictures and clips).

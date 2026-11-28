@@ -22,8 +22,8 @@ None open. The preload plan (PRELOAD.md "Plan") is built through v0.460.0.
   keeps its download, L10 order, L8 singles, M10 (G: next gallery before page 2).
 - ⤓ pause/resume on a hover (Chrome's `prompt()` trap, TESTING.md); a real red failure corner; the page-step
   thumbnail cut; L13's step-past jump; badge learning on eporner; Dark Reader's pinned blue after a manager update.
-- Next-page finding (v0.460.0, `NEXT-PAGE.md`): unit-tested and run on `pager-1..4`; not yet on a live site in
-  any of HZ, FS or OLINT.
+- Next-page finding: the finder itself checked on eporner `/cat/all/1,2,7/` (v0.461.0); TEST-PLAN 4.7's full flow
+  (the activity line naming page 8) and FS/OLINT on a live site not yet run.
 - LibreWolf in general (frames never load there; the user's main browser).
 - Real middle press before the preview (`E79`, synthetic only); a middle press on a results-page door never saves
   (`active` is null) — known gap.
