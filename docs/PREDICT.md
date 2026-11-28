@@ -34,4 +34,19 @@ of (random salt + host), the salt stored with the log; a gallery is its door's n
 - `ready` hooks: `predWatch` from `galFlip`, `galMiddle`, the read-on step; `predCheck` from `galThumbSettled`
   and `galShow`. A repeat watch of the same page keeps the first press's time.
 - Reading it: per `open`/`page`, `ready.ms` is the wait the user saw; `q` at the press says what was ahead of it.
-  `pre` per `pv`; `gsum`/`sum` for traffic the user never reached.
+  `pre` per `pv`; `gsum`/`sum` for traffic the user never reached. A `q` taken at a press shows 0 in flight often
+  because the press itself just cut them — not a stall.
+
+## Findings, export 2026-11-28 (v0.448–v0.463, one site, Load all + Endless on, 2245 events)
+
+- Thumbnail waits: page steps 221, median 33 ms (217 ready at press). Endless arrivals 155, median 617 ms, 63 > 1 s,
+  179 s total = 76 % of all thumbnail waiting. Arrival with the next gallery's p1 already in: median 50 ms; with none
+  in (74 of 155): median 1.7 s. Next gallery = this + 1 in 144/155, so the guess is right, it is just not loaded.
+- Cause: L17 (`gal`) is waiting in 791/794 logged `q`s, in flight in 206; behind `galp` (L23) by the M7 order, and
+  M11 = M6 puts it after L14 (the whole gallery's originals). Median stay before Endless moves on: 16 s.
+- Hovers: 14 % `pre=0`; first hover on a gallery page 44/96 miss vs 45/538 later; `galp` in flight in 85/89 misses;
+  first hover median 7.1 s after landing. `pv` has no wait time, so the miss cost is unmeasured.
+- 130/219 gallery visits had no hover; 9094 originals loaded ahead, 592 distinct pictures hovered.
+- M9 (a step back is temporary): 10 back steps → 6 forward, 3 back, 1 open. Supports it; small n.
+- Proposed to the user (not built): L17's first gallery p1 ahead of L23/L14 under Endless (as `galL17First` in M10);
+  add the hover's wait to `pv`.

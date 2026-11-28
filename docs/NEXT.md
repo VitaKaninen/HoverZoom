@@ -16,6 +16,9 @@ one FS release run had a single test failure (near `page-walk`'s learned-address
 
 ## Waiting on the user (ask only if they bring it up)
 
+- Prediction-log analysis 2026-11-28 (PREDICT.md "Findings"): proposed (A) next gallery's p1 thumbnails ahead of
+  L23/L14 under Endless, (B) the hover's wait in `pv`; (C) hold L23 until a first hover only after B measures it.
+
 - L8 takes as many of the fetched page's pictures as this page shows in its first 2 screens (v0.459.0) — right number?
 - L24: a clip cell already shows the site's still, so L24 for clips is only the label (PRELOAD.md "Built (v0.449.0)").
 - Flickr album lists: covers are background `div`s with text on them, refused by `backgroundGate`; a look-through
