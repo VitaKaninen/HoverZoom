@@ -29,8 +29,9 @@ one FS release run had a single test failure (near `page-walk`'s learned-address
   keeps its download, L10 order, L8 singles, M10 (G: next gallery before page 2).
 - ⤓ pause/resume on a hover (Chrome's `prompt()` trap, TESTING.md); a real red failure corner; the page-step
   thumbnail cut; L13's step-past jump; badge learning on eporner; Dark Reader's pinned blue after a manager update.
-- Next-page finding: the finder itself checked on eporner `/cat/all/1,2,7/` (v0.461.0); TEST-PLAN 4.7's full flow
-  (the activity line naming page 8) and FS/OLINT on a live site not yet run.
+- Next-page finding: TEST-PLAN 4.7 passed live in Chrome 2026-11-27 (eporner `/cat/all/7/`, bottom → M5 fetched only
+  `/cat/all/8/`; installed version not read). FS/OLINT on a live site not yet run. v0.462.0's Export all real save
+  dialog under Tampermonkey not yet run.
 - LibreWolf in general (frames never load there; the user's main browser).
 - Real middle press before the preview (`E79`, synthetic only); a middle press on a results-page door never saves
   (`active` is null) — known gap.
